@@ -4,7 +4,7 @@ import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../types";
 import type { Role } from "../types";
-import { createUserAccount, deleteUserAccount, updateUserAccount } from "../lib/pb";
+import { updateUserAccount } from "../lib/pb";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -228,83 +228,99 @@ function UserDetail({
   );
 }
 
-// ─── New User modal ───────────────────────────────────────────────────────────
+// ─── Add Member modal (pick existing user → assign role) ─────────────────────
 
-function NewUserModal({
+function AddMemberModal({
   projectId,
   currentUserId,
+  existingMemberIds,
   pb,
   onDone,
   onClose,
+  onLog,
 }: {
   projectId: string;
   currentUserId: string;
+  existingMemberIds: Set<string>;
   pb: PocketBase;
   onDone: () => void;
   onClose: () => void;
+  onLog: (action: string, label: string) => void;
 }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("coder");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [allUsers, setAllUsers]   = useState<{ id: string; name: string; email: string }[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [role, setRole]           = useState<Role>("coder");
+  const [loading, setLoading]     = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+
+  useEffect(() => {
+    pb.collection("users")
+      .getFullList({ sort: "name" })
+      .then((records) =>
+        setAllUsers(
+          records
+            .filter((r) => !existingMemberIds.has(r.id))
+            .map((r) => ({ id: r.id, name: r.name || r.email, email: r.email })),
+        ),
+      )
+      .catch(() => setError("Failed to load users."))
+      .finally(() => setLoadingUsers(false));
+  }, [pb, existingMemberIds]);
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault();
+    if (!selectedId) return;
     setLoading(true);
     setError(null);
     try {
-      const userId = await createUserAccount({ name, email, password, passwordConfirm: password });
       await pb.collection("project_members").create({
-        project: projectId,
-        user: userId,
+        project:    projectId,
+        user:       selectedId,
         role,
         created_by: currentUserId,
       });
+      const added = allUsers.find((u) => u.id === selectedId);
+      if (added) onLog("member.add", `Added "${added.name}" as ${role}`);
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create user.");
+      setError(e instanceof Error ? e.message : "Failed to add member.");
     } finally {
       setLoading(false);
     }
   }
 
+  const available = allUsers.filter((u) => u.id !== currentUserId);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New User</h2>
+        <h2>Add Member</h2>
         <form className="form" onSubmit={handleSubmit}>
           <label className="form-label">
-            Name
-            <input
-              className="form-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              autoFocus
-            />
-          </label>
-          <label className="form-label">
-            Email
-            <input
-              className="form-input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </label>
-          <label className="form-label">
-            Password
-            <input
-              className="form-input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={8}
-            />
+            User
+            {loadingUsers ? (
+              <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Loading users…</p>
+            ) : available.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+                All registered users are already in this project.
+              </p>
+            ) : (
+              <select
+                className="form-input"
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value)}
+                required
+                autoFocus
+              >
+                <option value="">— select a user —</option>
+                {available.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.email})
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
           <label className="form-label">
             Role
@@ -321,11 +337,13 @@ function NewUserModal({
           </label>
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn--primary" disabled={loading}>
-              {loading ? "Creating…" : "Create User"}
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button
+              type="submit"
+              className="btn btn--primary"
+              disabled={loading || !selectedId || available.length === 0}
+            >
+              {loading ? "Adding…" : "Add to Project"}
             </button>
           </div>
         </form>
@@ -449,7 +467,7 @@ const COLS: { key: SortCol; label: string; width: string }[] = [
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function UsersView() {
-  const { activeProject, pb, canEdit } = useStore();
+  const { activeProject, pb, canEdit, logAction } = useStore();
   const { user: currentUser } = useAuth();
 
   const [rows, setRows] = useState<MemberRow[]>([]);
@@ -470,7 +488,7 @@ export function UsersView() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [selectedRow, setSelectedRow] = useState<MemberRow | null>(null);
-  const [newUserOpen, setNewUserOpen] = useState(false);
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [editRow, setEditRow] = useState<MemberRow | null>(null);
 
   // ── Load members ─────────────────────────────────────────────────────────────
@@ -497,7 +515,7 @@ export function UsersView() {
             role: r.role as Role,
             createdByName: cb?.name || cb?.email || "—",
             createdAt: u?.created || r.created,
-            lastLogin: "—",
+            lastLogin: r.last_active ? fmtDate(r.last_active) : "Never",
           };
         }),
       );
@@ -555,18 +573,16 @@ export function UsersView() {
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
-  async function handleDelete() {
+  async function handleRemoveFromProject() {
     if (!confirmDelete || !pb) return;
     setDeleteLoading(true);
     try {
       await pb.collection("project_members").delete(confirmDelete.memberId);
-      await deleteUserAccount(confirmDelete.userId);
-      setRows((prev) =>
-        prev.filter((r) => r.memberId !== confirmDelete.memberId),
-      );
+      if (activeProject) await logAction(activeProject.id, "member.remove", `Removed "${confirmDelete.name}" from project`);
+      setRows((prev) => prev.filter((r) => r.memberId !== confirmDelete.memberId));
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete user.");
+      setError(e instanceof Error ? e.message : "Failed to remove user.");
       setConfirmDelete(null);
     } finally {
       setDeleteLoading(false);
@@ -597,9 +613,9 @@ export function UsersView() {
         {canEdit && (
           <button
             className="btn btn--primary"
-            onClick={() => setNewUserOpen(true)}
+            onClick={() => setAddMemberOpen(true)}
           >
-            + New User
+            + Add Member
           </button>
         )}
       </header>
@@ -719,15 +735,13 @@ export function UsersView() {
           onClick={() => !deleteLoading && setConfirmDelete(null)}
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete User</h2>
+            <h2>Remove from Project</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete{" "}
-              <strong>{confirmDelete.name}</strong>?
+              Remove <strong>{confirmDelete.name}</strong> from this project?
             </p>
             <p className="modal-warning-text">
-              All data associated with this user — including their annotations,
-              memos, and project contributions — will be permanently lost and
-              cannot be recovered.
+              Their account will not be deleted — they will simply lose access
+              to this project.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button
@@ -739,27 +753,26 @@ export function UsersView() {
               </button>
               <button
                 className="btn btn--danger"
-                onClick={handleDelete}
+                onClick={handleRemoveFromProject}
                 disabled={deleteLoading}
               >
-                {deleteLoading ? "Deleting…" : "Delete User"}
+                {deleteLoading ? "Removing…" : "Remove from Project"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* New User modal */}
-      {newUserOpen && pb && activeProject && (
-        <NewUserModal
+      {/* Add Member modal */}
+      {addMemberOpen && pb && activeProject && (
+        <AddMemberModal
           projectId={activeProject.id}
           currentUserId={currentUser?.id ?? ""}
+          existingMemberIds={new Set(rows.map((r) => r.userId))}
           pb={pb}
-          onDone={() => {
-            setNewUserOpen(false);
-            loadMembers();
-          }}
-          onClose={() => setNewUserOpen(false)}
+          onDone={() => { setAddMemberOpen(false); loadMembers(); }}
+          onClose={() => setAddMemberOpen(false)}
+          onLog={(action, label) => activeProject && logAction(activeProject.id, action, label)}
         />
       )}
 

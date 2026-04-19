@@ -115,7 +115,7 @@ function CaseDetail({
   onBack: () => void;
   onMemoAbout: () => void;
 }) {
-  const { setView, setPendingDocId, setPendingMemoId, activeProject } = useStore();
+  const { setView, setPendingDocId, setPendingMemoId, activeProject, updateCase } = useStore();
   const [row,          setRow]          = useState(initialRow);
   const [editing,      setEditing]      = useState(startEditing);
   const [name,         setName]         = useState(initialRow.name);
@@ -154,7 +154,7 @@ function CaseDetail({
     setError(null);
     try {
       const notes = notesRef.current?.innerHTML ?? row.notes;
-      await pb.collection("cases").update(row.id, { name, notes });
+      await updateCase(row.id, { name, notes });
       setRow({ ...row, name, notes });
       setEditing(false);
     } catch (e) {
@@ -330,6 +330,7 @@ function AssociateDocumentsModal({
   onDone: () => void;
   onClose: () => void;
 }) {
+  const { addCaseDocument, removeCaseDocument } = useStore();
   const [docs,        setDocs]        = useState<DocItem[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [saving,      setSaving]      = useState(false);
@@ -426,12 +427,10 @@ function AssociateDocumentsModal({
       const toRemove = [...init].filter((id) => !selected.has(id));
 
       await Promise.all([
-        ...toAdd.map((docId) =>
-          pb.collection("case_documents").create({ case: caseRow.id, document: docId }),
-        ),
+        ...toAdd.map((docId) => addCaseDocument(caseRow.id, docId)),
         ...toRemove.map((docId) => {
           const recId = casedocRecordId.current[`${docId}:${caseRow.id}`];
-          return recId ? pb.collection("case_documents").delete(recId) : Promise.resolve();
+          return recId ? removeCaseDocument(recId) : Promise.resolve();
         }),
       ]);
       onDone();
@@ -543,7 +542,7 @@ function AssociateDocumentsModal({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function CasesView() {
-  const { activeProject, pb, canEdit, pendingCaseId, setPendingCaseId } = useStore();
+  const { activeProject, pb, canEdit, pendingCaseId, setPendingCaseId, createCase, deleteCase } = useStore();
   const { user: currentUser } = useAuth();
 
   const [rows,    setRows]    = useState<CaseRow[]>([]);
@@ -689,16 +688,10 @@ export function CasesView() {
   // ── Delete ────────────────────────────────────────────────────────────────
 
   async function handleDelete() {
-    if (!confirmDelete || !pb) return;
+    if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      // Delete associated case_documents first
-      const cds = await pb.collection("case_documents").getFullList({
-        filter: `case="${confirmDelete.id}"`,
-        fields: "id",
-      });
-      await Promise.all(cds.map((cd) => pb.collection("case_documents").delete(cd.id)));
-      await pb.collection("cases").delete(confirmDelete.id);
+      await deleteCase(confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
@@ -712,13 +705,10 @@ export function CasesView() {
   // ── New case ──────────────────────────────────────────────────────────────
 
   async function handleNewCase() {
-    if (!pb || !activeProject) return;
+    if (!activeProject) return;
     try {
-      const record = await pb.collection("cases").create({
-        project: activeProject.id,
-        name: "New Case",
-        created_by: currentUser?.id ?? "",
-      });
+      const record = await createCase("New Case", currentUser?.id);
+      if (!record) return;
       const newRow: CaseRow = {
         id:            record.id,
         name:          record.name as string,

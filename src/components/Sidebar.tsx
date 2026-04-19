@@ -20,6 +20,7 @@ const NAV_SECTIONS: {
       { view: "cases",     label: "Cases" },
       { view: "documents", label: "Documents" },
       { view: "codebook",  label: "Codebook" },
+      { view: "project-log", label: "Project Log" },
     ],
   },
   {
@@ -43,7 +44,7 @@ const NAV_SECTIONS: {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
-  const { view, setView, activeProject, userRole } = useStore();
+  const { view, setView, activeProject, userRole, closeProject } = useStore();
   const { user, logout } = useAuth();
 
   const [open, setOpen] = useState<Record<string, boolean>>({
@@ -64,7 +65,8 @@ export function Sidebar() {
         onClick={() => setView("app-settings")}
         title="App settings"
       >
-        <span className="brand-name">Quallect</span>
+        <img src="/logo.png" alt="" className="brand-logo" />
+        <span className="brand-name">Kanqual</span>
       </button>
 
       {/* Active project name / open project prompt */}
@@ -74,7 +76,7 @@ export function Sidebar() {
           <span className="project-badge-name">{activeProject.name}</span>
           <button
             className="sidebar-change-projects"
-            onClick={() => setView("projects")}
+            onClick={() => closeProject(activeProject)}
           >
             Change project
           </button>

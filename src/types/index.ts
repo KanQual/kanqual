@@ -83,12 +83,23 @@ export type View =
   | "cases"          // Project → Cases
   | "documents"      // Project → Documents
   | "codebook"       // Project → Codebook
+  | "project-log"    // Project → Project Log
   | "code-text"      // Analysis → Code Text
   | "memos"          // Analysis → Memos
   | "ai-assist"      // Analysis → AI Assist
   | "code-reports"   // Reports → Code Reports
   | "user-settings"  // user settings page
   | "app-settings";  // app settings page
+
+export interface ProjectLogEntry {
+  id: string;
+  projectId: string;
+  userId: string;
+  userName: string;
+  action: string;   // e.g. "document.create"
+  label: string;    // human-readable summary
+  occurredAt: string; // ISO 8601
+}
 
 export interface AppState {
   view: View;

@@ -16,6 +16,7 @@ import { CodeReportsView } from "./views/CodeReportsView";
 import { AIAssistView } from "./views/AIAssistView";
 import { UserSettingsView } from "./views/UserSettingsView";
 import { AppSettingsView } from "./views/AppSettingsView";
+import { ProjectLogView } from "./views/ProjectLogView";
 import "./App.css";
 
 function AppShell() {
@@ -37,6 +38,7 @@ function AppShell() {
         {view === "memos"         && <MemosView />}
         {view === "ai-assist"     && <AIAssistView />}
         {view === "code-reports"  && <CodeReportsView />}
+        {view === "project-log"   && <ProjectLogView />}
         {view === "user-settings" && <UserSettingsView />}
         {view === "app-settings"  && <AppSettingsView />}
       </main>

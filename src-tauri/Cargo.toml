@@ -1,5 +1,5 @@
 [package]
-name = "quallect"
+name = "kanqual"
 version = "0.1.0"
 description = "Text annotation tool for social science research"
 authors = []

@@ -130,7 +130,7 @@ function ColorSuggestions({
 // ─── NewCodeModal ─────────────────────────────────────────────────────────────
 
 function NewCodeModal({ onClose }: { onClose: () => void }) {
-  const { activeProject, pb, codes } = useStore();
+  const { activeProject, codes, addCode } = useStore();
   const [label,    setLabel]    = useState("");
   const [desc,     setDesc]     = useState("");
   const [color,    setColor]    = useState("#6366f1");
@@ -151,19 +151,11 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!label.trim() || !activeProject || !pb) return;
+    if (!label.trim() || !activeProject) return;
     setLoading(true);
     setError(null);
     try {
-      const payload: Record<string, unknown> = {
-        project: activeProject.id,
-        label: label.trim(),
-        color,
-        description: desc,
-        parent: parentId || null,
-        created_by: pb.authStore.record?.id ?? null,
-      };
-      await pb.collection("codes").create(payload);
+      await addCode(label.trim(), color, desc, undefined, parentId || undefined);
       onClose();
     } catch (e) {
       const fieldErrors = (e as { data?: { data?: Record<string, { message?: string }> } }).data?.data;
@@ -248,7 +240,7 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
 // ─── EditCodeModal ────────────────────────────────────────────────────────────
 
 function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
-  const { pb, codes } = useStore();
+  const { codes, updateCode } = useStore();
   const [label,   setLabel]   = useState(code.label);
   const [color,   setColor]   = useState(code.color || "#6366f1");
   const [desc,    setDesc]    = useState(code.description);
@@ -262,13 +254,11 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!label.trim() || !pb) return;
+    if (!label.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      await pb.collection("codes").update(code.id, {
-        label: label.trim(), color, description: desc,
-      });
+      await updateCode(code.id, { label: label.trim(), color, description: desc });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? (e as Error).message : "Failed to save.");

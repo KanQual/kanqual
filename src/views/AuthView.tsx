@@ -118,7 +118,8 @@ export function AuthView() {
     return (
       <div className="auth-screen">
         <div className="auth-card">
-          <div className="auth-brand">Quallect</div>
+          <img src="/logo.png" alt="Kanqual" className="auth-logo" />
+          <div className="auth-brand">Kanqual</div>
           <p className="auth-starting">Starting up…</p>
         </div>
       </div>
@@ -131,7 +132,8 @@ export function AuthView() {
     return (
       <div className="auth-screen">
         <div className="auth-card">
-          <div className="auth-brand">Quallect</div>
+          <img src="/logo.png" alt="Kanqual" className="auth-logo" />
+          <div className="auth-brand">Kanqual</div>
           <p className="auth-tagline">Text annotation for qualitative research</p>
           <div className="mode-options">
             <button
@@ -176,7 +178,8 @@ export function AuthView() {
     return (
       <div className="auth-screen">
         <div className="auth-card">
-          <div className="auth-brand">Quallect</div>
+          <img src="/logo.png" alt="Kanqual" className="auth-logo" />
+          <div className="auth-brand">Kanqual</div>
           <h2 className="auth-panel-title">Choose an account</h2>
           <ul className="account-list">
             {accounts.map((a) => (
@@ -221,7 +224,8 @@ export function AuthView() {
     return (
       <div className="auth-screen">
         <div className="auth-card">
-          <div className="auth-brand">Quallect</div>
+          <img src="/logo.png" alt="Kanqual" className="auth-logo" />
+          <div className="auth-brand">Kanqual</div>
           <h2 className="auth-panel-title">Recent connections</h2>
           <ul className="account-list">
             {sessions.map((s) => (
@@ -267,7 +271,8 @@ export function AuthView() {
     return (
       <div className="auth-screen">
         <div className="auth-card">
-          <div className="auth-brand">Quallect</div>
+          <img src="/logo.png" alt="Kanqual" className="auth-logo" />
+          <div className="auth-brand">Kanqual</div>
           <p className="auth-tagline">Text annotation for qualitative research</p>
           <form onSubmit={handleServerSave} className="form">
             <h2 className="auth-panel-title">Join a project on another device</h2>
@@ -311,7 +316,7 @@ export function AuthView() {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <div className="auth-brand">Quallect</div>
+        <div className="auth-brand">Kanqual</div>
         <p className="auth-tagline">Text annotation for qualitative research</p>
 
         <form onSubmit={handleSubmit} className="form">

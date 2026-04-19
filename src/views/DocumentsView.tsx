@@ -120,7 +120,7 @@ function DocumentDetail({
   onBack: () => void;
   onMemoAbout: () => void;
 }) {
-  const { setView, setPendingCaseId, setPendingMemoId, activeProject } = useStore();
+  const { setView, setPendingCaseId, setPendingMemoId, activeProject, updateDocument } = useStore();
   const [row,            setRow]            = useState(initialRow);
   const [editing,        setEditing]        = useState(startEditing);
   const [name,           setName]           = useState(initialRow.name);
@@ -172,7 +172,7 @@ function DocumentDetail({
     setError(null);
     try {
       const notes = notesRef.current?.innerHTML ?? row.notes;
-      await pb.collection("documents").update(row.id, { name, notes, content });
+      await updateDocument(row.id, { name, notes, content });
       setRow({ ...row, name, notes, content });
       setEditing(false);
       setContentEdited(false);
@@ -347,7 +347,7 @@ function DocumentDetail({
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>Save Content Changes?</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              You've edited the document contents stored in Quallect.
+              You've edited the document contents stored in Kanqual.
             </p>
             <p className="modal-warning-text">
               This only updates the text stored in this app — the original file
@@ -509,6 +509,7 @@ function AssociateCasesModal({
   onDone: () => void;
   onClose: () => void;
 }) {
+  const { addCaseDocument, removeCaseDocument } = useStore();
   const [cases,    setCases]    = useState<CaseItem[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [saving,   setSaving]   = useState(false);
@@ -605,12 +606,10 @@ function AssociateCasesModal({
       const toRemove = [...init].filter((id) => !selected.has(id));
 
       await Promise.all([
-        ...toAdd.map((caseId) =>
-          pb.collection("case_documents").create({ case: caseId, document: docRow.id }),
-        ),
+        ...toAdd.map((caseId) => addCaseDocument(caseId, docRow.id)),
         ...toRemove.map((caseId) => {
           const recId = casedocRecordId.current[`${docRow.id}:${caseId}`];
-          return recId ? pb.collection("case_documents").delete(recId) : Promise.resolve();
+          return recId ? removeCaseDocument(recId) : Promise.resolve();
         }),
       ]);
       onDone();
@@ -724,18 +723,14 @@ function AssociateCasesModal({
 type InputMode = "upload" | "paste";
 
 function NewDocumentModal({
-  projectId,
-  pb,
-  currentUserId,
   onDone,
   onClose,
 }: {
-  projectId: string;
-  pb: NonNullable<ReturnType<typeof useStore>["pb"]>;
-  currentUserId: string;
   onDone: () => void;
   onClose: () => void;
 }) {
+  const { addDocument } = useStore();
+  const { user: currentUser } = useAuth();
   const [name,      setName]      = useState("");
   const [mode,      setMode]      = useState<InputMode>("upload");
   const [file,      setFile]      = useState<File | null>(null);
@@ -789,18 +784,10 @@ function NewDocumentModal({
     try {
       const content   = mode === "upload" ? extracted : pasted;
       const file_path = file ? file.name : "";
-      const payload: Record<string, unknown> = {
-        project:   projectId,
-        name:      name.trim(),
-        content,
-        file_path,
-      };
-      if (currentUserId) payload.created_by = currentUserId;
-      await pb.collection("documents").create(payload);
+      await addDocument(name.trim(), file_path, content, currentUser?.id);
       onDone();
     } catch (err) {
       console.error("Document create error:", err);
-      // err.data === full response body { code, message, data: { field: { code, message } } }
       const fieldErrors = (err as { data?: { data?: Record<string, { message?: string }> } })
         .data?.data;
       if (fieldErrors && typeof fieldErrors === "object" && Object.keys(fieldErrors).length > 0) {
@@ -919,8 +906,7 @@ function NewDocumentModal({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function DocumentsView() {
-  const { activeProject, pb, canEdit, pendingDocId, setPendingDocId } = useStore();
-  const { user: currentUser } = useAuth();
+  const { activeProject, pb, canEdit, pendingDocId, setPendingDocId, deleteDocument } = useStore();
 
   const [rows,    setRows]    = useState<DocRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1068,16 +1054,10 @@ export function DocumentsView() {
   // ── Delete ────────────────────────────────────────────────────────────────
 
   async function handleDelete() {
-    if (!confirmDelete || !pb) return;
+    if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      // Remove case_document links first
-      const links = await pb.collection("case_documents").getFullList({
-        filter: `document="${confirmDelete.id}"`,
-        fields: "id",
-      });
-      await Promise.all(links.map((l) => pb.collection("case_documents").delete(l.id)));
-      await pb.collection("documents").delete(confirmDelete.id);
+      await deleteDocument(confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
@@ -1276,11 +1256,8 @@ export function DocumentsView() {
       )}
 
       {/* New Document modal */}
-      {newDocOpen && pb && activeProject && (
+      {newDocOpen && (
         <NewDocumentModal
-          projectId={activeProject.id}
-          pb={pb}
-          currentUserId={currentUser?.id ?? ""}
           onDone={() => { setNewDocOpen(false); loadDocuments(); }}
           onClose={() => setNewDocOpen(false)}
         />

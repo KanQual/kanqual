@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Quallect",
+  "productName": "Kanqual",
   "version": "0.1.0",
-  "identifier": "com.quallect.app",
+  "identifier": "com.kanqual.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Quallect",
+        "title": "Kanqual",
         "width": 1280,
         "height": 800,
         "minWidth": 900,

@@ -173,7 +173,7 @@ export function MemoEditorView({
   onSaved: () => void;
   onBack: () => void;
 }) {
-  const { pb, activeProject, documents: storeDocs, codes: storeCodes } = useStore();
+  const { pb, activeProject, documents: storeDocs, codes: storeCodes, addMemo, updateMemo } = useStore();
   const { user: currentUser } = useAuth();
 
   // ── Raw loaded data ────────────────────────────────────────────────────────
@@ -264,26 +264,22 @@ export function MemoEditorView({
 
   // ── Save ──────────────────────────────────────────────────────────────────
   async function handleSave() {
-    if (!pb || !activeProject || !title.trim()) return;
+    if (!activeProject || !title.trim()) return;
     setSaving(true);
     setError(null);
     try {
       const data = {
-        title:      title.trim(),
-        body:       editorRef.current?.innerHTML ?? "",
-        document:   [...selDocIds],
-        annotation: [...selAnnIds],
-        cases:      [...selCaseIds],
-        codes:      [...selCodeIds],
+        title:         title.trim(),
+        body:          editorRef.current?.innerHTML ?? "",
+        documentIds:   [...selDocIds],
+        annotationIds: [...selAnnIds],
+        caseIds:       [...selCaseIds],
+        codeIds:       [...selCodeIds],
       };
       if (editRow) {
-        await pb.collection("memos").update(editRow.id, data);
+        await updateMemo(editRow.id, data);
       } else {
-        await pb.collection("memos").create({
-          ...data,
-          project:    activeProject.id,
-          created_by: currentUser?.id ?? "",
-        });
+        await addMemo({ ...data, createdBy: currentUser?.id });
       }
       onSaved();
     } catch (e) {
@@ -579,7 +575,7 @@ function MemoDetail({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function MemosView() {
-  const { activeProject, pb, canEdit, pendingMemoId, setPendingMemoId } = useStore();
+  const { activeProject, pb, canEdit, pendingMemoId, setPendingMemoId, deleteMemo } = useStore();
 
   const [rows,    setRows]    = useState<MemoRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -710,10 +706,10 @@ export function MemosView() {
   // ── Delete ────────────────────────────────────────────────────────────────
 
   async function handleDelete() {
-    if (!confirmDelete || !pb) return;
+    if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      await pb.collection("memos").delete(confirmDelete.id);
+      await deleteMemo(confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {

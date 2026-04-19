@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+1<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Quallect</title>
+  <title>Kanqual</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -20,6 +20,13 @@
     }
 
     .logo {
+      width: 96px;
+      height: 96px;
+      object-fit: contain;
+      margin-bottom: 12px;
+    }
+
+    .app-name {
       font-size: 28px;
       font-weight: 800;
       letter-spacing: -0.02em;
@@ -54,7 +61,8 @@
   </style>
 </head>
 <body>
-  <div class="logo">Quallect</div>
+  <img class="logo" src="/logo.png" alt="Kanqual" />
+  <div class="app-name">Kanqual</div>
   <div class="tagline">Text annotation for qualitative research</div>
   <div class="spinner"></div>
   <div class="status">Starting up…</div>

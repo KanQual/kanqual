@@ -2,8 +2,8 @@ use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
 const PB_URL: &str = "http://127.0.0.1:8090";
-const PB_SUPERUSER_EMAIL: &str = "app@quallect.internal";
-const PB_SUPERUSER_PASSWORD: &str = "Quallect_Internal_2024!";
+const PB_SUPERUSER_EMAIL: &str = "app@kanqual.internal";
+const PB_SUPERUSER_PASSWORD: &str = "Kanqual_Internal_2024!";
 
 /// Return the URL of the local PocketBase instance.
 #[tauri::command]

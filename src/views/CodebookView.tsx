@@ -261,6 +261,7 @@ function CodeDetail({
   canEdit: boolean;
   onBack: () => void;
 }) {
+  const { updateCode } = useStore();
   const [row,       setRow]      = useState(initialRow);
   const [editing,   setEditing]  = useState(startEditing);
   const [label,     setLabel]    = useState(initialRow.label);
@@ -331,9 +332,7 @@ function CodeDetail({
     setSaving(true);
     setError(null);
     try {
-      await pb.collection("codes").update(row.id, {
-        label: label.trim(), color, description: desc, parent: parentId || null,
-      });
+      await updateCode(row.id, { label: label.trim(), color, description: desc, parentId: parentId || undefined });
       const newParentLabel = allCodes.find((c) => c.id === parentId)?.label ?? "";
       setRow({ ...row, label: label.trim(), color, description: desc, parentId, parentLabel: newParentLabel });
       setEditing(false);
@@ -497,20 +496,16 @@ function CodeDetail({
 // ─── New Code modal ───────────────────────────────────────────────────────────
 
 function NewCodeModal({
-  projectId,
   allCodes,
-  pb,
-  currentUserId,
   onDone,
   onClose,
 }: {
-  projectId: string;
   allCodes: CodeRow[];
-  pb: NonNullable<ReturnType<typeof useStore>["pb"]>;
-  currentUserId: string;
   onDone: () => void;
   onClose: () => void;
 }) {
+  const { addCode } = useStore();
+  const { user: currentUser } = useAuth();
   const [label,    setLabel]    = useState("");
   const [desc,     setDesc]     = useState("");
   const [color,    setColor]    = useState("#6366f1");
@@ -539,12 +534,7 @@ function NewCodeModal({
     setLoading(true);
     setError(null);
     try {
-      const payload: Record<string, unknown> = {
-        project: projectId, label: label.trim(), color, description: desc,
-        parent: parentId || null,
-      };
-      if (currentUserId) payload.created_by = currentUserId;
-      await pb.collection("codes").create(payload);
+      await addCode(label.trim(), color, desc, undefined, parentId || undefined, currentUser?.id);
       onDone();
     } catch (e) {
       const fieldErrors = (e as { data?: { data?: Record<string, { message?: string }> } }).data?.data;
@@ -644,8 +634,7 @@ function NewCodeModal({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function CodebookView() {
-  const { activeProject, pb, canEdit } = useStore();
-  const { user: currentUser } = useAuth();
+  const { activeProject, pb, canEdit, deleteCode } = useStore();
 
   const [rows,    setRows]    = useState<CodeRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -781,15 +770,10 @@ export function CodebookView() {
   // ── Delete ────────────────────────────────────────────────────────────────
 
   async function handleDelete() {
-    if (!confirmDelete || !pb) return;
+    if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      const anns = await pb.collection("annotations").getFullList({
-        filter: `code="${confirmDelete.id}"`,
-        fields: "id",
-      });
-      await Promise.all(anns.map((a) => pb.collection("annotations").delete(a.id)));
-      await pb.collection("codes").delete(confirmDelete.id);
+      await deleteCode(confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
@@ -973,10 +957,7 @@ export function CodebookView() {
       {/* New Code modal */}
       {newCodeOpen && pb && activeProject && (
         <NewCodeModal
-          projectId={activeProject.id}
           allCodes={rows}
-          pb={pb}
-          currentUserId={currentUser?.id ?? ""}
           onDone={() => { setNewCodeOpen(false); loadCodes(); }}
           onClose={() => setNewCodeOpen(false)}
         />

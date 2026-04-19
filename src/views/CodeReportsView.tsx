@@ -76,7 +76,7 @@ function ReportPage({
   onSaved: () => void;
   onBack: () => void;
 }) {
-  const { pb, activeProject, documents: storeDocs, codes: storeCodes } = useStore();
+  const { pb, activeProject, documents: storeDocs, codes: storeCodes, createCodeReport, updateCodeReport } = useStore();
   const { user: currentUser } = useAuth();
 
   // Edit state
@@ -277,24 +277,20 @@ function ReportPage({
   }
 
   async function handleSave() {
-    if (!pb || !activeProject || !name.trim()) return;
+    if (!activeProject || !name.trim()) return;
     setSaving(true);
     setError(null);
     try {
       const data = {
-        name:      name.trim(),
-        cases:     [...selCaseIds],
-        documents: [...selDocIds],
-        codes:     [...selCodeIds],
+        name:        name.trim(),
+        caseIds:     [...selCaseIds],
+        documentIds: [...selDocIds],
+        codeIds:     [...selCodeIds],
       };
       if (row) {
-        await pb.collection("code_reports").update(row.id, data);
+        await updateCodeReport(row.id, data);
       } else {
-        await pb.collection("code_reports").create({
-          ...data,
-          project:    activeProject.id,
-          created_by: currentUser?.id ?? "",
-        });
+        await createCodeReport({ ...data, createdBy: currentUser?.id });
       }
       onSaved();
     } catch (e) {
@@ -834,7 +830,7 @@ function ReportPage({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function CodeReportsView() {
-  const { activeProject, pb, canEdit } = useStore();
+  const { activeProject, pb, canEdit, deleteCodeReport } = useStore();
 
   const [rows,    setRows]    = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -921,10 +917,10 @@ export function CodeReportsView() {
   // ── Delete ────────────────────────────────────────────────────────────────
 
   async function handleDelete() {
-    if (!confirmDelete || !pb) return;
+    if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      await pb.collection("code_reports").delete(confirmDelete.id);
+      await deleteCodeReport(confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {

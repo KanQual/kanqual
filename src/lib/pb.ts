@@ -29,8 +29,8 @@ export async function waitForPb(maxWaitMs = 30000): Promise<PocketBase> {
 
 // ─── Internal superuser credentials (mirrors src-tauri/src/lib.rs) ──────────
 
-const SUPERUSER_EMAIL = "app@quallect.internal";
-const SUPERUSER_PASSWORD = "Quallect_Internal_2024!";
+const SUPERUSER_EMAIL = "app@kanqual.internal";
+const SUPERUSER_PASSWORD = "Kanqual_Internal_2024!";
 
 // ─── Superuser helper ────────────────────────────────────────────────────────
 
@@ -221,16 +221,16 @@ async function upsertCollection(
 // ─── Collection definitions ───────────────────────────────────────────────────
 
 async function ensureCollections(pb: PocketBase): Promise<void> {
-  // Patch the built-in users auth collection so authenticated users can list/view
-  // members (needed for project_members expand). createUserAccount uses withSuperuser
-  // which bypasses these rules for privileged operations.
+  // Patch the built-in users auth collection:
+  // - createRule: "" → anyone can self-register (needed for the login screen)
+  // - list/view/update/delete: AUTH_RULE → only authenticated users
   try {
     const usersCol = await pb.collections.getOne("users");
-    if (usersCol.listRule !== AUTH_RULE) {
+    if (usersCol.listRule !== AUTH_RULE || usersCol.createRule !== "") {
       await pb.collections.update(usersCol.id, {
         listRule:   AUTH_RULE,
         viewRule:   AUTH_RULE,
-        createRule: AUTH_RULE,
+        createRule: "",
         updateRule: AUTH_RULE,
         deleteRule: AUTH_RULE,
       });
@@ -251,11 +251,12 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
   const projects = await pb.collections.getOne("projects");
   await upsertCollection(pb, "project_members", {
     fields: [
-      { name: "project",    type: "relation", collectionId: projects.id,       required: true, maxSelect: 1 },
-      { name: "user",       type: "relation", collectionId: "_pb_users_auth_", required: true, maxSelect: 1 },
-      { name: "role",       type: "select",   required: true, maxSelect: 1,
+      { name: "project",     type: "relation", collectionId: projects.id,       required: true, maxSelect: 1 },
+      { name: "user",        type: "relation", collectionId: "_pb_users_auth_", required: true, maxSelect: 1 },
+      { name: "role",        type: "select",   required: true, maxSelect: 1,
         values: ["owner", "editor", "coder", "viewer"] },
-      { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "created_by",  type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "last_active", type: "text" },
     ],
   });
 
@@ -340,6 +341,18 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
     fields: [
       { name: "case",     type: "relation", collectionId: cases.id,     required: true, maxSelect: 1 },
       { name: "document", type: "relation", collectionId: documents.id, required: true, maxSelect: 1 },
+    ],
+  });
+
+  // project_log — append-only audit trail of mutations within a project
+  await upsertCollection(pb, "project_log", {
+    fields: [
+      { name: "project",      type: "relation", collectionId: projects.id,        required: true, maxSelect: 1 },
+      { name: "user",         type: "relation", collectionId: "_pb_users_auth_",  maxSelect: 1 },
+      { name: "user_name",    type: "text" },
+      { name: "action",       type: "text",     required: true },
+      { name: "label",        type: "text",     required: true },
+      { name: "occurred_at",  type: "autodate", system: false, hidden: false, presentable: false, onCreate: true, onUpdate: false },
     ],
   });
 
