@@ -62,6 +62,7 @@ function toLogEntry(r: RecordModel): ProjectLogEntry {
     userName: r.user_name ?? "",
     action: r.action,
     label: r.label,
+    recordId: r.record_id || undefined,
     occurredAt: r.occurred_at,
   };
 }
@@ -77,6 +78,18 @@ function toMemo(r: RecordModel): Memo {
     createdAt: r.created,
     updatedAt: r.updated,
   };
+}
+
+async function fetchOwnerMap(pb: PocketBase, projectIds: string[]): Promise<Record<string, string>> {
+  if (projectIds.length === 0) return {};
+  const filter = projectIds.map((id) => `project="${id}"`).join("||");
+  const owners = await pb.collection("project_members").getFullList({
+    filter: `(${filter})&&role="owner"`,
+    expand: "user",
+  });
+  return Object.fromEntries(
+    owners.map((m) => [m.project, m.expand?.user?.name || m.expand?.user?.email || "Unknown"])
+  );
 }
 
 // ─── Store ───────────────────────────────────────────────────────────────────
@@ -103,7 +116,7 @@ export function useAppStore(pb: PocketBase) {
   // ── Logging ───────────────────────────────────────────────────────────────
 
   const logAction = useCallback(
-    async (projectId: string, action: string, label: string) => {
+    async (projectId: string, action: string, label: string, recordId?: string) => {
       const uid  = pb.authStore.record?.id;
       const name = pb.authStore.record?.name || pb.authStore.record?.email || "";
       try {
@@ -113,6 +126,7 @@ export function useAppStore(pb: PocketBase) {
           user_name:   name,
           action,
           label,
+          record_id:   recordId ?? "",
         });
         setLogEntries((prev) => [toLogEntry(r), ...prev]);
       } catch {
@@ -130,14 +144,13 @@ export function useAppStore(pb: PocketBase) {
     setProjectsLoading(true);
     pb.collection("project_members")
       .getFullList({ filter: `user="${userId}"`, expand: "project", sort: "-created" })
-      .then((memberships) =>
-        setProjects(
-          memberships
-            .map((m) => m.expand?.project)
-            .filter(Boolean)
-            .map(toProject),
-        ),
-      )
+      .then(async (memberships) => {
+        const projectRecords: RecordModel[] = memberships
+          .map((m) => m.expand?.project)
+          .filter(Boolean);
+        const ownerMap = await fetchOwnerMap(pb, projectRecords.map((r) => r.id));
+        setProjects(projectRecords.map((r) => ({ ...toProject(r), createdBy: ownerMap[r.id] })));
+      })
       .catch(console.error)
       .finally(() => setProjectsLoading(false));
   }, [pb]);
@@ -155,7 +168,9 @@ export function useAppStore(pb: PocketBase) {
       if (e.action === "create") {
         try {
           const proj = await pb.collection("projects").getOne(e.record.project);
-          setProjects((p) => p.some((x) => x.id === proj.id) ? p : [toProject(proj), ...p]);
+          const ownerMap = await fetchOwnerMap(pb, [proj.id]);
+          const project = { ...toProject(proj), createdBy: ownerMap[proj.id] };
+          setProjects((p) => p.some((x) => x.id === proj.id) ? p : [project, ...p]);
         } catch { /* project deleted */ }
       }
       if (e.action === "delete") setProjects((p) => p.filter((x) => x.id !== e.record.project));
@@ -180,17 +195,17 @@ export function useAppStore(pb: PocketBase) {
       .catch(() => setUserRole(null));
 
     pb.collection("documents")
-      .getFullList({ filter: `project="${pid}"`, sort: "created" })
+      .getFullList({ filter: `project="${pid}"&&deleted_at=""`, sort: "created" })
       .then((r) => setDocuments(r.map(toDocument)))
       .catch(console.error);
 
     pb.collection("codes")
-      .getFullList({ filter: `project="${pid}"`, sort: "created" })
+      .getFullList({ filter: `project="${pid}"&&deleted_at=""`, sort: "created" })
       .then((r) => setCodes(r.map(toCode)))
       .catch(console.error);
 
     pb.collection("memos")
-      .getFullList({ filter: `project="${pid}"`, sort: "-created" })
+      .getFullList({ filter: `project="${pid}"&&deleted_at=""`, sort: "-created" })
       .then((r) => setMemos(r.map(toMemo)))
       .catch(console.error);
 
@@ -202,21 +217,42 @@ export function useAppStore(pb: PocketBase) {
     const unsubDocs = pb.collection("documents").subscribe("*", (e) => {
       if (e.record.project !== pid) return;
       if (e.action === "create") setDocuments((p) => [...p, toDocument(e.record)]);
-      if (e.action === "update") setDocuments((p) => p.map((x) => x.id === e.record.id ? toDocument(e.record) : x));
+      if (e.action === "update") {
+        if (e.record.deleted_at) {
+          setDocuments((p) => p.filter((x) => x.id !== e.record.id));
+        } else {
+          const d = toDocument(e.record);
+          setDocuments((p) => p.some((x) => x.id === d.id) ? p.map((x) => x.id === d.id ? d : x) : [...p, d]);
+        }
+      }
       if (e.action === "delete") setDocuments((p) => p.filter((x) => x.id !== e.record.id));
     });
 
     const unsubCodes = pb.collection("codes").subscribe("*", (e) => {
       if (e.record.project !== pid) return;
       if (e.action === "create") setCodes((p) => [...p, toCode(e.record)]);
-      if (e.action === "update") setCodes((p) => p.map((x) => x.id === e.record.id ? toCode(e.record) : x));
+      if (e.action === "update") {
+        if (e.record.deleted_at) {
+          setCodes((p) => p.filter((x) => x.id !== e.record.id));
+        } else {
+          const c = toCode(e.record);
+          setCodes((p) => p.some((x) => x.id === c.id) ? p.map((x) => x.id === c.id ? c : x) : [...p, c]);
+        }
+      }
       if (e.action === "delete") setCodes((p) => p.filter((x) => x.id !== e.record.id));
     });
 
     const unsubMemos = pb.collection("memos").subscribe("*", (e) => {
       if (e.record.project !== pid) return;
       if (e.action === "create") setMemos((p) => [toMemo(e.record), ...p]);
-      if (e.action === "update") setMemos((p) => p.map((x) => x.id === e.record.id ? toMemo(e.record) : x));
+      if (e.action === "update") {
+        if (e.record.deleted_at) {
+          setMemos((p) => p.filter((x) => x.id !== e.record.id));
+        } else {
+          const m = toMemo(e.record);
+          setMemos((p) => p.some((x) => x.id === m.id) ? p.map((x) => x.id === m.id ? m : x) : [m, ...p]);
+        }
+      }
       if (e.action === "delete") setMemos((p) => p.filter((x) => x.id !== e.record.id));
     });
 
@@ -239,21 +275,23 @@ export function useAppStore(pb: PocketBase) {
     const did = activeDocument.id;
 
     pb.collection("annotations")
-      .getFullList({ filter: `document="${did}"`, sort: "start_offset", expand: "created_by" })
+      .getFullList({ filter: `document="${did}"&&deleted_at=""`, sort: "start_offset", expand: "created_by" })
       .then((r) => setAnnotations(r.map(toAnnotation)))
       .catch(console.error);
 
     const unsubAnnotations = pb.collection("annotations").subscribe("*", async (e) => {
       if (e.record.document !== did) return;
-      if (e.action === "create" || e.action === "update") {
+      if (e.action === "create" || (e.action === "update" && !e.record.deleted_at)) {
         const full = await pb.collection("annotations").getOne(e.record.id, { expand: "created_by" });
         if (e.action === "create") {
           setAnnotations((p) => [...p, toAnnotation(full)].sort((a, b) => a.startOffset - b.startOffset));
         } else {
-          setAnnotations((p) => p.map((x) => x.id === full.id ? toAnnotation(full) : x));
+          const ann = toAnnotation(full);
+          setAnnotations((p) => p.some((x) => x.id === ann.id) ? p.map((x) => x.id === ann.id ? ann : x) : [...p, ann].sort((a, b) => a.startOffset - b.startOffset));
         }
       }
-      if (e.action === "delete") setAnnotations((p) => p.filter((x) => x.id !== e.record.id));
+      if (e.action === "delete" || (e.action === "update" && e.record.deleted_at))
+        setAnnotations((p) => p.filter((x) => x.id !== e.record.id));
     });
 
     return () => {
@@ -311,6 +349,51 @@ export function useAppStore(pb: PocketBase) {
 
   // ── Documents ─────────────────────────────────────────────────────────────
 
+  // ── Restore ───────────────────────────────────────────────────────────────
+
+  const restoreRecord = useCallback(
+    async (action: string, recordId: string) => {
+      const entity = action.split(".")[0];
+      try {
+        switch (entity) {
+          case "document": {
+            const rec = await pb.collection("documents").getOne(recordId);
+            const ts = rec.deleted_at;
+            await pb.collection("documents").update(recordId, { deleted_at: "" });
+            const anns = await pb.collection("annotations").getFullList({ filter: `document="${recordId}"&&deleted_at="${ts}"` });
+            await Promise.all(anns.map((a) => pb.collection("annotations").update(a.id, { deleted_at: "" })));
+            break;
+          }
+          case "code": {
+            const rec = await pb.collection("codes").getOne(recordId);
+            const ts = rec.deleted_at;
+            await pb.collection("codes").update(recordId, { deleted_at: "" });
+            const anns = await pb.collection("annotations").getFullList({ filter: `code="${recordId}"&&deleted_at="${ts}"` });
+            await Promise.all(anns.map((a) => pb.collection("annotations").update(a.id, { deleted_at: "" })));
+            break;
+          }
+          case "annotation":
+            await pb.collection("annotations").update(recordId, { deleted_at: "" });
+            break;
+          case "memo":
+            await pb.collection("memos").update(recordId, { deleted_at: "" });
+            break;
+          case "case":
+            await pb.collection("cases").update(recordId, { deleted_at: "" });
+            break;
+          case "code_report":
+            await pb.collection("code_reports").update(recordId, { deleted_at: "" });
+            break;
+        }
+        if (activeProject) await logAction(activeProject.id, `${entity}.restore`, `Restored ${entity}`);
+      } catch (e) {
+        console.error("Restore failed:", e);
+        throw e;
+      }
+    },
+    [pb, activeProject, logAction]
+  );
+
   const addDocument = useCallback(
     async (name: string, filePath: string, content: string, createdBy?: string) => {
       if (!activeProject) return;
@@ -341,10 +424,12 @@ export function useAppStore(pb: PocketBase) {
 
   const deleteDocument = useCallback(
     async (id: string, name?: string) => {
-      const links = await pb.collection("case_documents").getFullList({ filter: `document="${id}"`, fields: "id" });
-      await Promise.all(links.map((l) => pb.collection("case_documents").delete(l.id)));
-      await pb.collection("documents").delete(id);
-      if (activeProject) await logAction(activeProject.id, "document.delete", `Deleted document${name ? ` "${name}"` : ""}`);
+      const deletedAt = new Date().toISOString();
+      // Cascade soft-delete to annotations so they don't surface in reports
+      const anns = await pb.collection("annotations").getFullList({ filter: `document="${id}"&&deleted_at=""`, fields: "id" });
+      await Promise.all(anns.map((a) => pb.collection("annotations").update(a.id, { deleted_at: deletedAt })));
+      await pb.collection("documents").update(id, { deleted_at: deletedAt });
+      if (activeProject) await logAction(activeProject.id, "document.delete", `Deleted document${name ? ` "${name}"` : ""}`, id);
     },
     [pb, activeProject, logAction]
   );
@@ -398,10 +483,11 @@ export function useAppStore(pb: PocketBase) {
 
   const deleteCode = useCallback(
     async (id: string, label?: string) => {
-      const anns = await pb.collection("annotations").getFullList({ filter: `code="${id}"`, fields: "id" });
-      await Promise.all(anns.map((a) => pb.collection("annotations").delete(a.id)));
-      await pb.collection("codes").delete(id);
-      if (activeProject) await logAction(activeProject.id, "code.delete", `Deleted code${label ? ` "${label}"` : ""}`);
+      const deletedAt = new Date().toISOString();
+      const anns = await pb.collection("annotations").getFullList({ filter: `code="${id}"&&deleted_at=""`, fields: "id" });
+      await Promise.all(anns.map((a) => pb.collection("annotations").update(a.id, { deleted_at: deletedAt })));
+      await pb.collection("codes").update(id, { deleted_at: deletedAt });
+      if (activeProject) await logAction(activeProject.id, "code.delete", `Deleted code${label ? ` "${label}"` : ""}`, id);
     },
     [pb, activeProject, logAction]
   );
@@ -436,8 +522,8 @@ export function useAppStore(pb: PocketBase) {
 
   const deleteAnnotation = useCallback(
     async (id: string) => {
-      await pb.collection("annotations").delete(id);
-      if (activeProject) await logAction(activeProject.id, "annotation.delete", "Deleted annotation");
+      await pb.collection("annotations").update(id, { deleted_at: new Date().toISOString() });
+      if (activeProject) await logAction(activeProject.id, "annotation.delete", "Deleted annotation", id);
     },
     [pb, activeProject, logAction]
   );
@@ -468,10 +554,8 @@ export function useAppStore(pb: PocketBase) {
 
   const deleteCase = useCallback(
     async (id: string, name?: string) => {
-      const cds = await pb.collection("case_documents").getFullList({ filter: `case="${id}"`, fields: "id" });
-      await Promise.all(cds.map((cd) => pb.collection("case_documents").delete(cd.id)));
-      await pb.collection("cases").delete(id);
-      if (activeProject) await logAction(activeProject.id, "case.delete", `Deleted case${name ? ` "${name}"` : ""}`);
+      await pb.collection("cases").update(id, { deleted_at: new Date().toISOString() });
+      if (activeProject) await logAction(activeProject.id, "case.delete", `Deleted case${name ? ` "${name}"` : ""}`, id);
     },
     [pb, activeProject, logAction]
   );
@@ -529,8 +613,8 @@ export function useAppStore(pb: PocketBase) {
 
   const deleteMemo = useCallback(
     async (id: string, title?: string) => {
-      await pb.collection("memos").delete(id);
-      if (activeProject) await logAction(activeProject.id, "memo.delete", `Deleted memo${title ? ` "${title}"` : ""}`);
+      await pb.collection("memos").update(id, { deleted_at: new Date().toISOString() });
+      if (activeProject) await logAction(activeProject.id, "memo.delete", `Deleted memo${title ? ` "${title}"` : ""}`, id);
     },
     [pb, activeProject, logAction]
   );
@@ -538,7 +622,7 @@ export function useAppStore(pb: PocketBase) {
   // ── Code Reports ──────────────────────────────────────────────────────────
 
   const createCodeReport = useCallback(
-    async (data: { name: string; caseIds: string[]; documentIds: string[]; codeIds: string[]; createdBy?: string }) => {
+    async (data: { name: string; caseIds: string[]; documentIds: string[]; codeIds: string[]; createdBy?: string; snapshot?: string }) => {
       if (!activeProject) return;
       await pb.collection("code_reports").create({
         project: activeProject.id,
@@ -547,6 +631,7 @@ export function useAppStore(pb: PocketBase) {
         documents: data.documentIds,
         codes: data.codeIds,
         created_by: data.createdBy || pb.authStore.record?.id || "",
+        snapshot: data.snapshot ?? "",
       });
       await logAction(activeProject.id, "code_report.create", `Created report "${data.name}"`);
     },
@@ -568,8 +653,8 @@ export function useAppStore(pb: PocketBase) {
 
   const deleteCodeReport = useCallback(
     async (id: string, name?: string) => {
-      await pb.collection("code_reports").delete(id);
-      if (activeProject) await logAction(activeProject.id, "code_report.delete", `Deleted report${name ? ` "${name}"` : ""}`);
+      await pb.collection("code_reports").update(id, { deleted_at: new Date().toISOString() });
+      if (activeProject) await logAction(activeProject.id, "code_report.delete", `Deleted report${name ? ` "${name}"` : ""}`, id);
     },
     [pb, activeProject, logAction]
   );
@@ -589,6 +674,7 @@ export function useAppStore(pb: PocketBase) {
     memos,
     logEntries,
     createProject, openProject, closeProject,
+    restoreRecord,
     addDocument, updateDocument, deleteDocument,
     addCaseDocument, removeCaseDocument,
     addCode, updateCode, deleteCode,

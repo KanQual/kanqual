@@ -291,7 +291,7 @@ function CodeDetail({
       setLoadingAnn(true);
       try {
         const anns = await pb.collection("annotations").getFullList({
-          filter: `code="${row.id}"`,
+          filter: `code="${row.id}"&&deleted_at=""`,
           expand: "document,created_by",
           sort:   "-created",
         });
@@ -664,14 +664,14 @@ export function CodebookView() {
     setError(null);
     try {
       const codeRecords = await pb.collection("codes").getFullList({
-        filter: `project="${activeProject.id}"`,
+        filter: `project="${activeProject.id}"&&deleted_at=""`,
         expand: "created_by,parent",
         sort:   "label",
       });
 
       const allAnnotations = codeRecords.length > 0
         ? await pb.collection("annotations").getFullList({
-            filter: codeRecords.map((c) => `code="${c.id}"`).join(" || "),
+            filter: `(${codeRecords.map((c) => `code="${c.id}"`).join(" || ")})&&deleted_at=""`,
             fields: "id,code,document",
           })
         : [];

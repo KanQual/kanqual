@@ -85,7 +85,7 @@ function CodeDocumentsLanding() {
 
       const [allAnnotations, caseDocs] = await Promise.all([
         pb.collection("annotations").getFullList({
-          filter: filterExpr,
+          filter: `(${filterExpr})&&deleted_at=""`,
           fields: "id,document,code,start_offset,end_offset",
         }),
         pb.collection("case_documents").getFullList({

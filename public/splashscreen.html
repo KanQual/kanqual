@@ -1,10 +1,26 @@
-1<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kanqual</title>
   <style>
+    @font-face {
+      font-family: "Inter";
+      src: url("/fonts/inter-latin-400-normal.woff2") format("woff2");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: "Ubuntu";
+      src: url("/fonts/ubuntu-latin-400-normal.woff2") format("woff2");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: "Ubuntu";
+      src: url("/fonts/ubuntu-latin-700-normal.woff2") format("woff2");
+      font-weight: 700;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -13,8 +29,8 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: #1e1e1c;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #2C3E50;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: #e8e8e0;
       user-select: none;
     }
@@ -27,8 +43,9 @@
     }
 
     .app-name {
+      font-family: "Ubuntu", sans-serif;
       font-size: 28px;
-      font-weight: 800;
+      font-weight: 700;
       letter-spacing: -0.02em;
       color: #ffffff;
       margin-bottom: 8px;
@@ -36,14 +53,14 @@
 
     .tagline {
       font-size: 13px;
-      color: #8a8a7e;
+      color: #AAB7B8;
       margin-bottom: 40px;
     }
 
     .spinner {
       width: 28px;
       height: 28px;
-      border: 3px solid #2e2e2c;
+      border: 3px solid #34495E;
       border-top-color: #2563eb;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
@@ -52,7 +69,7 @@
     .status {
       margin-top: 16px;
       font-size: 12px;
-      color: #8a8a7e;
+      color: #AAB7B8;
     }
 
     @keyframes spin {
@@ -63,7 +80,7 @@
 <body>
   <img class="logo" src="/logo.png" alt="Kanqual" />
   <div class="app-name">Kanqual</div>
-  <div class="tagline">Text annotation for qualitative research</div>
+  <div class="tagline">Free | Open-Source | Local | Modern</div>
   <div class="spinner"></div>
   <div class="status">Starting up…</div>
 </body>

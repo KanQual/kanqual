@@ -74,13 +74,13 @@ function UserDetail({
 
   useEffect(() => {
     pb.collection("annotations")
-      .getList(1, 1, { filter: `created_by="${row.userId}"`, fields: "id" })
+      .getList(1, 1, { filter: `created_by="${row.userId}"&&deleted_at=""`, fields: "id" })
       .then((r) => setAnnotCount(r.totalItems))
       .catch(() => setAnnotCount(0));
 
     pb.collection("memos")
       .getList(1, 1, {
-        filter: `created_by="${row.userId}" && project="${projectId}"`,
+        filter: `created_by="${row.userId}"&&project="${projectId}"&&deleted_at=""`,
         fields: "id",
       })
       .then((r) => setMemoCount(r.totalItems))

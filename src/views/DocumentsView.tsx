@@ -135,7 +135,7 @@ function DocumentDetail({
 
   useEffect(() => {
     pb.collection("memos")
-      .getFullList({ filter: `document ~ "${row.id}"`, fields: "id,title", sort: "-created" })
+      .getFullList({ filter: `document ~ "${row.id}"&&deleted_at=""`, fields: "id,title", sort: "-created" })
       .then((records) => setDocMemos(records.map((r) => ({ id: r.id, title: r.title as string }))))
       .catch(console.error);
   }, [pb, row.id]);
@@ -527,7 +527,7 @@ function AssociateCasesModal({
     (async () => {
       try {
         const caseRecords = await pb.collection("cases").getFullList({
-          filter: `project="${projectId}"`,
+          filter: `project="${projectId}"&&deleted_at=""`,
           sort: "name",
         });
 
@@ -940,12 +940,12 @@ export function DocumentsView() {
       // Fetch documents and memos in parallel
       const [docRecords, memoRecords] = await Promise.all([
         pb.collection("documents").getFullList({
-          filter: `project="${pid}"`,
+          filter: `project="${pid}"&&deleted_at=""`,
           expand: "created_by",
           sort:   "-created",
         }),
         pb.collection("memos").getFullList({
-          filter: `project="${pid}"`,
+          filter: `project="${pid}"&&deleted_at=""`,
           fields: "id,document",
         }),
       ]);

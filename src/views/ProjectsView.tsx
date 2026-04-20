@@ -15,7 +15,7 @@ export function ProjectsView() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleCreate(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!name.trim()) return;
     setSubmitting(true);
@@ -100,7 +100,20 @@ export function ProjectsView() {
                 <div className="project-card-desc">{p.description}</div>
               )}
               <div className="project-card-meta">
-                Created {new Date(p.createdAt).toLocaleDateString()}
+                {p.createdBy && (
+                  <div className="project-card-meta-row">
+                    <span className="project-card-meta-label">Created by</span>
+                    <span>{p.createdBy}</span>
+                  </div>
+                )}
+                <div className="project-card-meta-row">
+                  <span className="project-card-meta-label">Created</span>
+                  <span>{new Date(p.createdAt).toLocaleDateString()}</span>
+                </div>
+                <div className="project-card-meta-row">
+                  <span className="project-card-meta-label">Last updated</span>
+                  <span>{new Date(p.updatedAt).toLocaleDateString()}</span>
+                </div>
               </div>
             </li>
           ))}

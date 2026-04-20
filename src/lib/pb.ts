@@ -269,6 +269,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "content",    type: "text", max: 10000000, required: false },
       { name: "notes",      type: "text" },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "deleted_at", type: "text" },
     ],
   });
 
@@ -295,6 +296,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "shortcut",    type: "text" },
       { name: "created_by",  type: "relation", collectionId: "_pb_users_auth_",  maxSelect: 1 },
       { name: "parent",      type: "relation", collectionId: codes.id,           maxSelect: 1 },
+      { name: "deleted_at",  type: "text" },
     ],
   });
 
@@ -309,6 +311,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "quote",        type: "text",     required: true },
       { name: "note",         type: "text" },
       { name: "created_by",   type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "deleted_at",   type: "text" },
     ],
   });
 
@@ -322,6 +325,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "title",      type: "text", required: true },
       { name: "body",       type: "text" },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "deleted_at", type: "text" },
     ],
   });
 
@@ -332,6 +336,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "name",       type: "text",     required: true },
       { name: "notes",      type: "text" },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_",  maxSelect: 1 },
+      { name: "deleted_at", type: "text" },
     ],
   });
 
@@ -352,6 +357,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "user_name",    type: "text" },
       { name: "action",       type: "text",     required: true },
       { name: "label",        type: "text",     required: true },
+      { name: "record_id",    type: "text" },
       { name: "occurred_at",  type: "autodate", system: false, hidden: false, presentable: false, onCreate: true, onUpdate: false },
     ],
   });
@@ -367,6 +373,8 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "documents",  type: "relation", collectionId: documents.id,      maxSelect: 100 },
       { name: "codes",      type: "relation", collectionId: codesCol.id,       maxSelect: 100 },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "snapshot",   type: "text" },
+      { name: "deleted_at", type: "text" },
     ],
   });
 }

@@ -348,7 +348,7 @@ function AssociateDocumentsModal({
     (async () => {
       try {
         const docRecords = await pb.collection("documents").getFullList({
-          filter: `project="${projectId}"`,
+          filter: `project="${projectId}"&&deleted_at=""`,
           sort: "name",
         });
 
@@ -576,12 +576,12 @@ export function CasesView() {
       // Fetch cases and memos in parallel
       const [caseRecords, memoRecords] = await Promise.all([
         pb.collection("cases").getFullList({
-          filter: `project="${pid}"`,
+          filter: `project="${pid}"&&deleted_at=""`,
           expand: "created_by",
           sort: "-created",
         }),
         pb.collection("memos").getFullList({
-          filter: `project="${pid}"`,
+          filter: `project="${pid}"&&deleted_at=""`,
           fields: "id,cases",
         }),
       ]);

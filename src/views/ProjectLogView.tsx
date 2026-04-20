@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useStore } from "../context/StoreContext";
 import type { ProjectLogEntry } from "../types";
 
@@ -8,24 +9,39 @@ const ACTION_LABELS: Record<string, string> = {
   "document.create":     "Document added",
   "document.update":     "Document updated",
   "document.delete":     "Document deleted",
+  "document.restore":    "Document restored",
   "code.create":         "Code added",
   "code.update":         "Code updated",
   "code.delete":         "Code deleted",
+  "code.restore":        "Code restored",
   "annotation.create":   "Annotation added",
   "annotation.update":   "Annotation updated",
   "annotation.delete":   "Annotation deleted",
+  "annotation.restore":  "Annotation restored",
   "case.create":         "Case created",
   "case.update":         "Case updated",
   "case.delete":         "Case deleted",
+  "case.restore":        "Case restored",
   "memo.create":         "Memo created",
   "memo.update":         "Memo updated",
   "memo.delete":         "Memo deleted",
+  "memo.restore":        "Memo restored",
   "code_report.create":  "Report created",
   "code_report.update":  "Report updated",
   "code_report.delete":  "Report deleted",
+  "code_report.restore": "Report restored",
   "member.add":          "Member added",
   "member.remove":       "Member removed",
 };
+
+const RESTORABLE = new Set([
+  "document.delete",
+  "code.delete",
+  "annotation.delete",
+  "case.delete",
+  "memo.delete",
+  "code_report.delete",
+]);
 
 function fmtDateTime(iso: string): string {
   const d = new Date(iso);
@@ -40,12 +56,28 @@ function actionCategory(action: string): string {
 }
 
 export function ProjectLogView() {
-  const { logEntries, activeProject } = useStore();
+  const { logEntries, activeProject, restoreRecord } = useStore();
+  const [restoring, setRestoring] = useState<Set<string>>(new Set());
+  const [restored,  setRestored]  = useState<Set<string>>(new Set());
+  const [errors,    setErrors]    = useState<Record<string, string>>({});
 
-  // Entries arrive pre-sorted -occurred_at from the store load; keep that order
   const sorted = [...logEntries].sort(
     (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
   );
+
+  async function handleRestore(entry: ProjectLogEntry) {
+    if (!entry.recordId) return;
+    setRestoring((s) => new Set(s).add(entry.id));
+    setErrors((e) => { const n = { ...e }; delete n[entry.id]; return n; });
+    try {
+      await restoreRecord(entry.action, entry.recordId);
+      setRestored((s) => new Set(s).add(entry.id));
+    } catch {
+      setErrors((e) => ({ ...e, [entry.id]: "Restore failed" }));
+    } finally {
+      setRestoring((s) => { const n = new Set(s); n.delete(entry.id); return n; });
+    }
+  }
 
   return (
     <div className="view project-log-view">
@@ -69,21 +101,46 @@ export function ProjectLogView() {
                 <th>User</th>
                 <th>Category</th>
                 <th>Description</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((entry: ProjectLogEntry) => (
-                <tr key={entry.id} className={`log-row log-row--${actionCategory(entry.action)}`}>
-                  <td className="log-cell log-cell--time">{fmtDateTime(entry.occurredAt)}</td>
-                  <td className="log-cell log-cell--user">{entry.userName || "—"}</td>
-                  <td className="log-cell log-cell--action">
-                    <span className={`log-badge log-badge--${actionCategory(entry.action)}`}>
-                      {ACTION_LABELS[entry.action] ?? entry.action}
-                    </span>
-                  </td>
-                  <td className="log-cell log-cell--label">{entry.label}</td>
-                </tr>
-              ))}
+              {sorted.map((entry: ProjectLogEntry) => {
+                const canRestore = RESTORABLE.has(entry.action) && !!entry.recordId;
+                const isRestoring = restoring.has(entry.id);
+                const isRestored  = restored.has(entry.id);
+                const errMsg      = errors[entry.id];
+                return (
+                  <tr key={entry.id} className={`log-row log-row--${actionCategory(entry.action)}`}>
+                    <td className="log-cell log-cell--time">{fmtDateTime(entry.occurredAt)}</td>
+                    <td className="log-cell log-cell--user">{entry.userName || "—"}</td>
+                    <td className="log-cell log-cell--action">
+                      <span className={`log-badge log-badge--${actionCategory(entry.action)}`}>
+                        {ACTION_LABELS[entry.action] ?? entry.action}
+                      </span>
+                    </td>
+                    <td className="log-cell log-cell--label">{entry.label}</td>
+                    <td className="log-cell log-cell--restore">
+                      {canRestore && !isRestored && (
+                        <button
+                          className="btn btn--xs"
+                          onClick={() => handleRestore(entry)}
+                          disabled={isRestoring}
+                          title="Restore this item"
+                        >
+                          {isRestoring ? "Restoring…" : "Restore"}
+                        </button>
+                      )}
+                      {isRestored && (
+                        <span className="log-restored-badge">Restored</span>
+                      )}
+                      {errMsg && (
+                        <span className="log-restore-error">{errMsg}</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

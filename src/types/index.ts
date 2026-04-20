@@ -6,6 +6,7 @@ export interface Project {
   description: string;
   createdAt: string; // ISO 8601
   updatedAt: string;
+  createdBy?: string; // display name or email of the project owner
 }
 
 export interface Document {
@@ -96,8 +97,9 @@ export interface ProjectLogEntry {
   projectId: string;
   userId: string;
   userName: string;
-  action: string;   // e.g. "document.create"
-  label: string;    // human-readable summary
+  action: string;    // e.g. "document.create"
+  label: string;     // human-readable summary
+  recordId?: string; // id of the affected record (set for delete actions)
   occurredAt: string; // ISO 8601
 }
 

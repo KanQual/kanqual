@@ -209,14 +209,14 @@ export function MemoEditorView({
     (async () => {
       try {
         const caseRecs = await pb.collection("cases").getFullList({
-          filter: `project="${activeProject.id}"`,
+          filter: `project="${activeProject.id}"&&deleted_at=""`,
           sort: "name",
         });
         setCaseItems(caseRecs.map((r) => ({ id: r.id, name: r.name })));
 
         if (storeDocs.length > 0) {
           const annRecs = await pb.collection("annotations").getFullList({
-            filter: storeDocs.map((d) => `document="${d.id}"`).join(" || "),
+            filter: `(${storeDocs.map((d) => `document="${d.id}"`).join(" || ")})&&deleted_at=""`,
             expand: "code,document",
             fields: "id,quote,document,code,expand",
           });
@@ -606,7 +606,7 @@ export function MemosView() {
     setError(null);
     try {
       const memoRecords = await pb.collection("memos").getFullList({
-        filter: `project="${activeProject.id}"`,
+        filter: `project="${activeProject.id}"&&deleted_at=""`,
         expand: "created_by,document,annotation.code,cases,codes",
         sort: "-created",
       });

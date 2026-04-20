@@ -33,12 +33,13 @@ pub fn run() {
             let pb_data_dir = app_data_dir.join("pb_data");
             let pb_dir_arg = format!("--dir={}", pb_data_dir.to_string_lossy());
 
-            // Step 1: Run `pocketbase superuser upsert` as a blocking one-shot
-            // command. This writes the superuser into the database BEFORE
-            // `serve` starts, so PocketBase never sees an empty superuser table
-            // and never opens the browser admin UI.
-            tauri::async_runtime::block_on(async {
-                let _ = app
+            let handle = app.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Step 1: Run `pocketbase superuser upsert` as a one-shot command.
+                // This writes the superuser into the database BEFORE `serve` starts,
+                // so PocketBase never sees an empty superuser table and never opens
+                // the browser admin UI.
+                let _ = handle
                     .shell()
                     .sidecar("pocketbase")
                     .expect("pocketbase sidecar not found")
@@ -51,26 +52,28 @@ pub fn run() {
                     ])
                     .output()
                     .await;
+
+                // Step 2: Now start the server. Superuser already exists — no
+                // browser redirect will be triggered.
+                handle
+                    .shell()
+                    .sidecar("pocketbase")
+                    .expect("pocketbase sidecar not found")
+                    .args(["serve", "--http=127.0.0.1:8090", &pb_dir_arg])
+                    .spawn()
+                    .expect("failed to spawn pocketbase");
+
+                // Step 3: Wait for the frontend to finish loading, then close the splash.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                if let Some(splash) = handle.get_webview_window("splashscreen") {
+                    splash.close().ok();
+                }
+                if let Some(main_window) = handle.get_webview_window("main") {
+                    main_window.show().ok();
+                }
             });
 
-            // Step 2: Now start the server. Superuser already exists — no
-            // browser redirect will be triggered.
-            app.shell()
-                .sidecar("pocketbase")
-                .expect("pocketbase sidecar not found")
-                .args(["serve", "--http=127.0.0.1:8090", &pb_dir_arg])
-                .spawn()
-                .expect("failed to spawn pocketbase");
-
-            // Step 3: Close the splash screen and reveal the main window.
-            if let Some(splash) = app.get_webview_window("splashscreen") {
-                splash.close().ok();
-            }
-            if let Some(main_window) = app.get_webview_window("main") {
-                main_window.show().ok();
-            }
-
-            Ok(())
+            Ok(()) // returns immediately so the splash renders on the first frame
         })
         .invoke_handler(tauri::generate_handler![read_text_file, get_pb_url])
         .run(tauri::generate_context!())
