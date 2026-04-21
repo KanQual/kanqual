@@ -226,13 +226,14 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
   // - list/view/update/delete: AUTH_RULE → only authenticated users
   try {
     const usersCol = await pb.collections.getOne("users");
-    if (usersCol.listRule !== AUTH_RULE || usersCol.createRule !== "") {
+    if (usersCol.listRule !== AUTH_RULE || usersCol.createRule !== "" || (usersCol as any).authRule !== "") {
       await pb.collections.update(usersCol.id, {
         listRule:   AUTH_RULE,
         viewRule:   AUTH_RULE,
         createRule: "",
         updateRule: AUTH_RULE,
         deleteRule: AUTH_RULE,
+        authRule:   "",
       });
     }
   } catch {

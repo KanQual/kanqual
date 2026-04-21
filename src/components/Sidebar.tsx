@@ -37,6 +37,7 @@ const NAV_SECTIONS: {
     label: "Reports",
     items: [
       { view: "code-reports", label: "Code Reports" },
+      { view: "coders",       label: "Coders" },
     ],
   },
 ];

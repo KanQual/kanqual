@@ -89,6 +89,7 @@ export type View =
   | "memos"          // Analysis → Memos
   | "ai-assist"      // Analysis → AI Assist
   | "code-reports"   // Reports → Code Reports
+  | "coders"         // Reports → Coders
   | "user-settings"  // user settings page
   | "app-settings";  // app settings page
 

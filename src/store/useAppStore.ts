@@ -624,7 +624,7 @@ export function useAppStore(pb: PocketBase) {
   const createCodeReport = useCallback(
     async (data: { name: string; caseIds: string[]; documentIds: string[]; codeIds: string[]; createdBy?: string; snapshot?: string }) => {
       if (!activeProject) return;
-      await pb.collection("code_reports").create({
+      const record = await pb.collection("code_reports").create({
         project: activeProject.id,
         name: data.name,
         cases: data.caseIds,
@@ -634,6 +634,7 @@ export function useAppStore(pb: PocketBase) {
         snapshot: data.snapshot ?? "",
       });
       await logAction(activeProject.id, "code_report.create", `Created report "${data.name}"`);
+      return record;
     },
     [pb, activeProject, logAction]
   );

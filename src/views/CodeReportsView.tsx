@@ -3,6 +3,9 @@ import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
+import html2pdf from "html2pdf.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,6 +84,49 @@ const COLS: { key: SortCol; label: string; width: string }[] = [
   { key: "createdAt",     label: "Created",    width: "32%" },
 ];
 
+// ─── Export Modal ─────────────────────────────────────────────────────────────
+
+function ExportModal({
+  onClose,
+  onExportHTML,
+  onExportPDF,
+  onExportDOCX,
+  onExportCSV,
+  exportingFormat,
+}: {
+  onClose: () => void;
+  onExportHTML: () => void;
+  onExportPDF: () => void;
+  onExportDOCX: () => void;
+  onExportCSV: () => void;
+  exportingFormat: string | null;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320 }}>
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>Export Report</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <button className="btn btn--primary" onClick={onExportHTML} disabled={!!exportingFormat}>
+            {exportingFormat === "html" ? "Exporting..." : "Export as HTML"}
+          </button>
+          <button className="btn btn--primary" onClick={onExportPDF} disabled={!!exportingFormat}>
+            {exportingFormat === "pdf" ? "Exporting..." : "Export as PDF"}
+          </button>
+          <button className="btn btn--primary" onClick={onExportDOCX} disabled={!!exportingFormat}>
+            {exportingFormat === "docx" ? "Exporting..." : "Export as DOCX"}
+          </button>
+          <button className="btn btn--primary" onClick={onExportCSV} disabled={!!exportingFormat}>
+            {exportingFormat === "csv" ? "Exporting..." : "Export as CSV"}
+          </button>
+        </div>
+        <div style={{ marginTop: 16, textAlign: "right" }}>
+          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Report page ──────────────────────────────────────────────────────────────
 
 function ReportPage({
@@ -94,7 +140,7 @@ function ReportPage({
   row?: ReportRow;
   isNew?: boolean;
   initialSettings?: ReportSettings;
-  onSaved: () => void;
+  onSaved: (id?: string) => void;
   onBack: () => void;
   onUseSettings?: (settings: ReportSettings) => void;
 }) {
@@ -106,6 +152,10 @@ function ReportPage({
   const [name,   setName]   = useState(row?.name ?? "");
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState<string | null>(null);
+
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
 
   // Filter selections — for new reports these are interactive; for frozen just display
   const [selCaseIds,  setSelCaseIds]  = useState<Set<string>>(() => new Set(row?.caseIds  ?? initialSettings?.caseIds  ?? []));
@@ -288,7 +338,7 @@ function ReportPage({
           users: selUserIds.size > 0 ? selUserIds.size : userItems.length,
         },
       };
-      await createCodeReport({
+      const record = await createCodeReport({
         name:        name.trim(),
         caseIds:     [...selCaseIds],
         documentIds: [...selDocIds],
@@ -296,7 +346,7 @@ function ReportPage({
         createdBy:   currentUser?.id,
         snapshot:    JSON.stringify(snapshot),
       });
-      onSaved();
+      onSaved(record?.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save report.");
       setSaving(false);
@@ -312,6 +362,133 @@ function ReportPage({
   const displayCaseItems = isFrozen ? frozenCaseItems : caseItems;
   const displayUserItems = isFrozen ? frozenUserItems : userItems;
 
+  async function handleExportCSV() {
+    try {
+      setExportingFormat("csv");
+      const path = await save({ defaultPath: `${name || "Report"}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+      if (!path) return;
+      
+      const header = ["Case", "Document", "Coder", "Code", "Quote", "Note"];
+      const rows = filteredAnns.map((ann) => {
+        let caseName = "—";
+        for (const [cId, dIds] of caseDocMap.entries()) {
+          if (dIds.has(ann.documentId)) {
+            const cItem = caseItems.find(c => c.id === cId);
+            if (cItem) { caseName = cItem.name; break; }
+          }
+        }
+        const coderName = userItems.find(u => u.id === ann.createdById)?.name || "—";
+        return [
+          caseName,
+          ann.documentName,
+          coderName,
+          ann.codeName,
+          ann.quote,
+          ann.note
+        ].map(col => `"${col.replace(/"/g, '""')}"`).join(",");
+      });
+      const csv = [header.join(","), ...rows].join("\n");
+      await writeTextFile(path, csv);
+    } catch (e) {
+      setError("CSV export failed.");
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
+  function getHtmlContent() {
+    if (!mainRef.current) return "";
+    const content = mainRef.current.innerHTML;
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>${name || "Report"}</title>
+          <style>
+            body { font-family: sans-serif; padding: 2rem; max-width: 800px; margin: auto; background: white; color: black; line-height: 1.5; }
+            .annotate-card { margin-bottom: 1rem; border: 1px solid #ccc; padding: 1rem; border-radius: 4px; }
+            .annotate-card-header { font-weight: bold; font-size: 1.2rem; margin-bottom: 0.5rem; }
+            .annotation-item { margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
+            .annotation-code-badge { font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; color: white; display: inline-block; margin-right: 0.5rem; }
+            .annotation-quote { font-style: italic; margin: 0.5rem 0; }
+            .annotation-note { font-size: 0.9rem; color: #555; }
+            .summary-card-value { font-size: 1.5rem; font-weight: bold; }
+            .summary-card-label { font-size: 0.9rem; color: #555; }
+            .case-card-value { font-size: 1.1rem; }
+          </style>
+        </head>
+        <body>
+          ${content}
+        </body>
+      </html>
+    `;
+  }
+
+  async function handleExportHTML() {
+    try {
+      setExportingFormat("html");
+      const path = await save({ defaultPath: `${name || "Report"}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
+      if (!path) return;
+      await writeTextFile(path, getHtmlContent());
+    } catch (e) {
+      setError("HTML export failed.");
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
+  async function handleExportPDF() {
+    try {
+      setExportingFormat("pdf");
+      const path = await save({ defaultPath: `${name || "Report"}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+      if (!path) return;
+      
+      const opt = {
+        margin:       0.5,
+        filename:     'report.pdf',
+        image:        { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas:  { scale: 2 },
+        jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' as const }
+      };
+      
+      const pdfBlob = await html2pdf().set(opt).from(getHtmlContent()).output('blob');
+      const buffer = await pdfBlob.arrayBuffer();
+      await writeFile(path, new Uint8Array(buffer));
+    } catch (e) {
+      console.error(e);
+      setError("PDF export failed.");
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
+  async function handleExportDOCX() {
+    try {
+      setExportingFormat("docx");
+      const path = await save({ defaultPath: `${name || "Report"}.doc`, filters: [{ name: "Word Document", extensions: ["doc"] }] });
+      if (!path) return;
+
+      const content = getHtmlContent();
+      const docxHtml = `
+        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head><meta charset='utf-8'><title>${name || "Report"}</title></head>
+        <body>${content}</body>
+        </html>
+      `;
+      await writeTextFile(path, docxHtml);
+    } catch (e) {
+      console.error(e);
+      setError("DOCX export failed.");
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
   return (
     <div className="annotate-view">
 
@@ -320,6 +497,14 @@ function ReportPage({
         <button className="btn" onClick={onBack}>← Back to Reports</button>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
+          <button
+            className="btn btn--secondary"
+            title={!isFrozen ? "Reports must be saved before they can be exported" : "Export Report"}
+            disabled={!isFrozen}
+            onClick={() => setShowExportModal(true)}
+          >
+            Export
+          </button>
           {isFrozen && onUseSettings && (
             <button
               className="btn btn--primary"
@@ -462,7 +647,7 @@ function ReportPage({
         </div>
 
         {/* Middle: report content */}
-        <div className="annotate-main" style={{ overflowY: "auto", gap: 10, flexDirection: "column", display: "flex", padding: "2px 0" }}>
+        <div ref={mainRef} className="annotate-main" style={{ overflowY: "auto", gap: 10, flexDirection: "column", display: "flex", padding: "2px 0" }}>
 
           {/* Title */}
           <div className="annotate-card" style={{ flexShrink: 0 }}>
@@ -677,6 +862,17 @@ function ReportPage({
         </div>
 
       </div>
+
+      {showExportModal && (
+        <ExportModal
+          onClose={() => setShowExportModal(false)}
+          onExportHTML={handleExportHTML}
+          onExportPDF={handleExportPDF}
+          onExportDOCX={handleExportDOCX}
+          onExportCSV={handleExportCSV}
+          exportingFormat={exportingFormat}
+        />
+      )}
     </div>
   );
 }
@@ -706,7 +902,7 @@ export function CodeReportsView() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadReports = useCallback(async () => {
-    if (!activeProject || !pb) return;
+    if (!activeProject || !pb) return [];
     setLoading(true);
     setError(null);
     try {
@@ -715,7 +911,7 @@ export function CodeReportsView() {
         expand: "created_by",
         sort: "-created",
       });
-      setRows(records.map((r) => {
+      const mappedRows = records.map((r) => {
         const cb = r.expand?.created_by;
         let snapshot: ReportSnapshot | undefined;
         if (r.snapshot) {
@@ -731,9 +927,12 @@ export function CodeReportsView() {
           codeIds:       toArr<string>(r.codes),
           snapshot,
         };
-      }));
+      });
+      setRows(mappedRows);
+      return mappedRows;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load reports.");
+      return [];
     } finally {
       setLoading(false);
     }
@@ -789,7 +988,15 @@ export function CodeReportsView() {
       <ReportPage
         isNew
         initialSettings={newFromSettings ?? undefined}
-        onSaved={() => { setShowNew(false); setNewFromSettings(null); loadReports(); }}
+        onSaved={async (id) => { 
+          setShowNew(false); 
+          setNewFromSettings(null); 
+          const newRows = await loadReports();
+          if (id) {
+            const newRow = newRows.find((r) => r.id === id);
+            if (newRow) setOpenRow(newRow);
+          }
+        }}
         onBack={() => { setShowNew(false); setNewFromSettings(null); }}
       />
     );
