@@ -3,21 +3,23 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { StoreProvider, useStore } from "./context/StoreContext";
 import { initTheme } from "./theme";
 import { Sidebar } from "./components/Sidebar";
-import { AuthView } from "./views/AuthView";
-import { ProjectsView } from "./views/ProjectsView";
-import { HomeView } from "./views/HomeView";
-import { UsersView } from "./views/UsersView";
-import { CasesView } from "./views/CasesView";
-import { DocumentsView } from "./views/DocumentsView";
-import { CodebookView } from "./views/CodebookView";
-import { CodeTextView } from "./views/CodeTextView";
-import { MemosView } from "./views/MemosView";
-import { CodeReportsView } from "./views/CodeReportsView";
-import { AIAssistView } from "./views/AIAssistView";
-import { UserSettingsView } from "./views/UserSettingsView";
-import { AppSettingsView } from "./views/AppSettingsView";
-import { ProjectLogView } from "./views/ProjectLogView";
-import { CodersView } from "./views/CodersView";
+import { AuthView } from "./views/Auth_View";
+import { ProjectsView } from "./views/Projects_View";
+import { HomeView } from "./views/Project_Home_View";
+import { UsersView } from "./views/Project_Users_View";
+import { CasesView } from "./views/Project_Cases_View";
+import { DocumentsView } from "./views/Project_Documents_View";
+import { CodebookView } from "./views/Project_Codebook_View";
+import { CodeTextView } from "./views/Analysis_CodeText_View";
+import { MemosView } from "./views/Analysis_Memos_View";
+import { CodeReportsView } from "./views/Reports_Annotations_View";
+import { AIAssistView } from "./views/Analysis_AIAssist_View";
+import { UserSettingsView } from "./views/User_Settings_View";
+import { AppSettingsView } from "./views/App_Settings_View";
+import { ProjectLogView } from "./views/Project_ProjectLog_View";
+import { ProjectSettingsView } from "./views/Project_Settings_View";
+import { CodersView } from "./views/Reports_Coders_View";
+import { CodesView } from "./views/Reports_Codes_View";
 import "./App.css";
 
 function AppShell() {
@@ -35,10 +37,12 @@ function AppShell() {
         {view === "cases"         && <CasesView />}
         {view === "documents"     && <DocumentsView />}
         {view === "codebook"      && <CodebookView />}
+        {view === "project-settings" && <ProjectSettingsView />}
         {view === "code-text"     && <CodeTextView />}
         {view === "memos"         && <MemosView />}
         {view === "ai-assist"     && <AIAssistView />}
         {view === "code-reports"  && <CodeReportsView />}
+        {view === "codes"         && <CodesView />}
         {view === "coders"        && <CodersView />}
         {view === "project-log"   && <ProjectLogView />}
         {view === "user-settings" && <UserSettingsView />}

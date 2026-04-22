@@ -5,7 +5,8 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
-import html2pdf from "html2pdf.js";
+import { Document as DocxDocument, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
+import { jsPDF } from "jspdf";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,11 +26,15 @@ interface AnnItem {
 
 interface CaseItem { id: string; name: string; }
 interface UserItem { id: string; name: string; }
+interface CaseDocumentLink { caseId: string; documentId: string; }
+interface SummaryItem { id: string; name: string; color?: string; }
 
 interface ReportSnapshot {
+  reportType?: "annotations";
   filteredAnns: AnnItem[];
   caseItems: CaseItem[];
   userItems: UserItem[];
+  caseDocLinks?: CaseDocumentLink[];
   summaryCounts: { cases: number; docs: number; codes: number; users: number };
   description?: string;
 }
@@ -74,6 +79,20 @@ function fmtDate(iso: string): string {
 function toArr<T>(v: T | T[] | undefined | null): T[] {
   if (!v) return [];
   return Array.isArray(v) ? v : [v];
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function htmlToPlainText(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return doc.body.textContent?.replace(/\s+\n/g, "\n").trim() ?? "";
 }
 
 // ─── Column definitions ───────────────────────────────────────────────────────
@@ -163,6 +182,7 @@ function ReportPage({
   const [selCodeIds,  setSelCodeIds]  = useState<Set<string>>(() => new Set(row?.codeIds  ?? initialSettings?.codeIds  ?? []));
   const [selUserIds,  setSelUserIds]  = useState<Set<string>>(new Set());
   const [collapsed,   setCollapsed]   = useState<Set<string>>(new Set());
+  const [expandedSummaryCards, setExpandedSummaryCards] = useState<Set<string>>(new Set());
 
   // Report display options (functional even on frozen reports)
   const [showContext,     setShowContext]     = useState(false);
@@ -189,7 +209,7 @@ function ReportPage({
   // Live data (only used for new reports)
   const [caseItems,     setCaseItems]     = useState<CaseItem[]>([]);
   const [userItems,     setUserItems]     = useState<UserItem[]>([]);
-  const [caseDocLinks,  setCaseDocLinks]  = useState<{ caseId: string; documentId: string }[]>([]);
+  const [caseDocLinks,  setCaseDocLinks]  = useState<CaseDocumentLink[]>([]);
   const [allAnns,       setAllAnns]       = useState<AnnItem[]>([]);
   const [docContentMap, setDocContentMap] = useState<Map<string, string>>(new Map());
   const [dataLoading,   setDataLoading]   = useState(!isFrozen);
@@ -198,7 +218,33 @@ function ReportPage({
   const frozenAnns      = row?.snapshot?.filteredAnns  ?? [];
   const frozenCaseItems = row?.snapshot?.caseItems     ?? [];
   const frozenUserItems = row?.snapshot?.userItems     ?? [];
+  const frozenCaseDocLinks = row?.snapshot?.caseDocLinks ?? [];
   const frozenCounts    = row?.snapshot?.summaryCounts;
+
+  useEffect(() => {
+    if (!isFrozen) return;
+    setUserItems(frozenUserItems);
+    setCaseItems(frozenCaseItems);
+    setCaseDocLinks(frozenCaseDocLinks);
+  }, [isFrozen, row?.id]);
+
+  useEffect(() => {
+    if (!isFrozen || !pb || frozenCaseDocLinks.length > 0 || !row?.caseIds.length) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const links = await pb.collection("case_documents").getFullList({
+          filter: row.caseIds.map((caseId) => `case="${caseId}"`).join(" || "),
+        });
+        if (!cancelled) {
+          setCaseDocLinks(links.map((r) => ({ caseId: r.case, documentId: r.document })));
+        }
+      } catch {
+        if (!cancelled) setCaseDocLinks([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isFrozen, pb, row?.id, frozenCaseDocLinks.length]);
 
   useEffect(() => {
     if (isFrozen || !pb || !activeProject) return;
@@ -314,6 +360,14 @@ function ReportPage({
     });
   }
 
+  function toggleSummaryCard(key: string) {
+    setExpandedSummaryCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
   function toggle(set: Set<string>, setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) {
     const next = new Set(set);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -327,9 +381,11 @@ function ReportPage({
     try {
       const descHtml = editor?.getHTML();
       const snapshot: ReportSnapshot = {
+        reportType: "annotations",
         filteredAnns,
         caseItems,
         userItems,
+        caseDocLinks,
         description: hasDescriptionContent(descHtml) ? descHtml : undefined,
         summaryCounts: {
           cases: selCaseIds.size > 0 ? selCaseIds.size : caseItems.length,
@@ -362,6 +418,145 @@ function ReportPage({
   const displayCaseItems = isFrozen ? frozenCaseItems : caseItems;
   const displayUserItems = isFrozen ? frozenUserItems : userItems;
 
+  const uniqueByName = (items: { id: string; name: string }[]) => {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = `${item.id}:${item.name}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const includedCaseItems = selCaseIds.size > 0
+    ? displayCaseItems.filter((item) => selCaseIds.has(item.id))
+    : displayCaseItems;
+
+  const includedDocumentItems = (() => {
+    const selected = selDocIds.size > 0
+      ? storeDocs.filter((doc) => selDocIds.has(doc.id))
+      : storeDocs;
+    if (selected.length > 0 || !isFrozen) {
+      return selected.map((doc) => ({ id: doc.id, name: doc.name }));
+    }
+    return uniqueByName(filteredAnns.map((ann) => ({ id: ann.documentId, name: ann.documentName })));
+  })();
+
+  const includedCodeItems = (() => {
+    const selected = selCodeIds.size > 0
+      ? storeCodes.filter((code) => selCodeIds.has(code.id))
+      : storeCodes;
+    if (selected.length > 0 || !isFrozen) {
+      return selected.map((code) => ({ id: code.id, name: code.label, color: code.color }));
+    }
+    const seen = new Set<string>();
+    return filteredAnns
+      .filter((ann) => {
+        if (seen.has(ann.codeId)) return false;
+        seen.add(ann.codeId);
+        return true;
+      })
+      .map((ann) => ({ id: ann.codeId, name: getCodeName(ann), color: ann.codeColor }));
+  })();
+
+  const includedUserItems = selUserIds.size > 0
+    ? displayUserItems.filter((item) => selUserIds.has(item.id))
+    : displayUserItems;
+
+  const summaryCards: { key: string; label: string; value: number; items: SummaryItem[] }[] = [
+    { key: "cases", label: "Cases", value: caseCount, items: includedCaseItems },
+    { key: "documents", label: "Documents", value: docCount, items: includedDocumentItems },
+    { key: "codes", label: "Codes", value: codeCount, items: includedCodeItems },
+    { key: "users", label: "Users", value: userCount, items: includedUserItems },
+  ];
+
+  function getCoderName(userId: string): string {
+    return displayUserItems.find((u) => u.id === userId)?.name || "Unknown";
+  }
+
+  function getCodeName(ann: AnnItem): string {
+    return ann.codeName || storeCodes.find((code) => code.id === ann.codeId)?.label || "Unknown";
+  }
+
+  function getCaseNameForAnn(ann: AnnItem): string {
+    for (const [caseId, documentIds] of caseDocMap.entries()) {
+      if (documentIds.has(ann.documentId)) {
+        return displayCaseItems.find((c) => c.id === caseId)?.name ?? "Unassigned";
+      }
+    }
+    if (selCaseIds.size === 1) {
+      const [caseId] = [...selCaseIds];
+      return displayCaseItems.find((c) => c.id === caseId)?.name ?? "Unassigned";
+    }
+    return "Unassigned";
+  }
+
+  function getExportDescriptionHtml(): string {
+    if (isFrozen) return frozenDescription ?? "";
+    const html = editor?.getHTML() ?? "";
+    return hasDescriptionContent(html) ? html : "";
+  }
+
+  function getCleanReportHtml(): string {
+    const title = name || "Untitled Report";
+    const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown");
+    const createdAt = row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString());
+    const descriptionHtml = getExportDescriptionHtml();
+    const annotationHtml = filteredAnns.length === 0
+      ? `<p class="muted">No annotations were captured in this report.</p>`
+      : filteredAnns.map((ann) => `
+          <section class="annotation">
+            <div class="annotation-meta">
+              <span class="code" style="background-color:${escapeHtml(ann.codeColor)}">${escapeHtml(ann.codeName)}</span>
+              <span>${escapeHtml(ann.documentName)}</span>
+              <span>${escapeHtml(getCoderName(ann.createdById))}</span>
+              <span>${escapeHtml(getCaseNameForAnn(ann))}</span>
+            </div>
+            <blockquote>${escapeHtml(ann.quote)}</blockquote>
+            ${ann.note ? `<p class="note"><strong>Note:</strong> ${escapeHtml(ann.note)}</p>` : ""}
+          </section>
+        `).join("");
+
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>${escapeHtml(title)}</title>
+    <style>
+      body { font-family: Aptos, Calibri, Arial, sans-serif; color: #1f2933; line-height: 1.45; }
+      h1 { font-size: 26px; margin: 0 0 8px; }
+      h2 { font-size: 18px; margin: 24px 0 8px; border-bottom: 1px solid #d5dbe3; padding-bottom: 4px; }
+      .muted { color: #687385; }
+      .details, .summary { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+      .details td, .summary td, .summary th { border: 1px solid #d5dbe3; padding: 7px 9px; vertical-align: top; }
+      .summary th { background: #eef2f6; text-align: left; }
+      .description { margin: 10px 0 18px; }
+      .annotation { border-top: 1px solid #d5dbe3; padding: 13px 0; page-break-inside: avoid; }
+      .annotation-meta { color: #687385; font-size: 12px; margin-bottom: 7px; }
+      .annotation-meta span { margin-right: 10px; }
+      .code { color: #fff; border-radius: 4px; padding: 2px 6px; font-weight: 700; }
+      blockquote { margin: 7px 0; padding-left: 12px; border-left: 3px solid #b7c1ce; }
+      .note { margin: 7px 0 0; }
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(title)}</h1>
+    <table class="details">
+      <tr><td><strong>Created by</strong></td><td>${escapeHtml(createdBy)}</td></tr>
+      <tr><td><strong>Created</strong></td><td>${escapeHtml(createdAt)}</td></tr>
+    </table>
+    ${descriptionHtml ? `<h2>Description</h2><div class="description">${descriptionHtml}</div>` : ""}
+    <h2>Summary</h2>
+    <table class="summary">
+      <tr><th>Cases</th><th>Documents</th><th>Codes</th><th>Users</th><th>Annotations</th></tr>
+      <tr><td>${caseCount}</td><td>${docCount}</td><td>${codeCount}</td><td>${userCount}</td><td>${filteredAnns.length}</td></tr>
+    </table>
+    <h2>Annotations</h2>
+    ${annotationHtml}
+  </body>
+</html>`;
+  }
+
   async function handleExportCSV() {
     try {
       setExportingFormat("csv");
@@ -373,7 +568,7 @@ function ReportPage({
         let caseName = "—";
         for (const [cId, dIds] of caseDocMap.entries()) {
           if (dIds.has(ann.documentId)) {
-            const cItem = caseItems.find(c => c.id === cId);
+            const cItem = displayCaseItems.find(c => c.id === cId);
             if (cItem) { caseName = cItem.name; break; }
           }
         }
@@ -382,7 +577,7 @@ function ReportPage({
           caseName,
           ann.documentName,
           coderName,
-          ann.codeName,
+          getCodeName(ann),
           ann.quote,
           ann.note
         ].map(col => `"${col.replace(/"/g, '""')}"`).join(",");
@@ -398,32 +593,7 @@ function ReportPage({
   }
 
   function getHtmlContent() {
-    if (!mainRef.current) return "";
-    const content = mainRef.current.innerHTML;
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>${name || "Report"}</title>
-          <style>
-            body { font-family: sans-serif; padding: 2rem; max-width: 800px; margin: auto; background: white; color: black; line-height: 1.5; }
-            .annotate-card { margin-bottom: 1rem; border: 1px solid #ccc; padding: 1rem; border-radius: 4px; }
-            .annotate-card-header { font-weight: bold; font-size: 1.2rem; margin-bottom: 0.5rem; }
-            .annotation-item { margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
-            .annotation-code-badge { font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; color: white; display: inline-block; margin-right: 0.5rem; }
-            .annotation-quote { font-style: italic; margin: 0.5rem 0; }
-            .annotation-note { font-size: 0.9rem; color: #555; }
-            .summary-card-value { font-size: 1.5rem; font-weight: bold; }
-            .summary-card-label { font-size: 0.9rem; color: #555; }
-            .case-card-value { font-size: 1.1rem; }
-          </style>
-        </head>
-        <body>
-          ${content}
-        </body>
-      </html>
-    `;
+    return getCleanReportHtml();
   }
 
   async function handleExportHTML() {
@@ -446,17 +616,59 @@ function ReportPage({
       const path = await save({ defaultPath: `${name || "Report"}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
       if (!path) return;
       
-      const opt = {
-        margin:       0.5,
-        filename:     'report.pdf',
-        image:        { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas:  { scale: 2 },
-        jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' as const }
+      const pdf = new jsPDF({ unit: "pt", format: "letter" });
+      const margin = 54;
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const contentWidth = pageWidth - margin * 2;
+      let y = margin;
+
+      const ensureSpace = (height: number) => {
+        if (y + height > pageHeight - margin) {
+          pdf.addPage();
+          y = margin;
+        }
       };
-      
-      const pdfBlob = await html2pdf().set(opt).from(getHtmlContent()).output('blob');
-      const buffer = await pdfBlob.arrayBuffer();
-      await writeFile(path, new Uint8Array(buffer));
+
+      const addText = (text: string, size = 10, style: "normal" | "bold" | "italic" = "normal", gap = 8) => {
+        pdf.setFont("helvetica", style);
+        pdf.setFontSize(size);
+        const lines = pdf.splitTextToSize(text || "", contentWidth) as string[];
+        const lineHeight = size * 1.35;
+        ensureSpace(lines.length * lineHeight + gap);
+        pdf.text(lines, margin, y);
+        y += lines.length * lineHeight + gap;
+      };
+
+      addText(name || "Untitled Report", 20, "bold", 14);
+      addText(`Created by: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown")}`, 10);
+      addText(`Created: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`, 10, "normal", 14);
+
+      const description = htmlToPlainText(getExportDescriptionHtml());
+      if (description) {
+        addText("Description", 14, "bold", 8);
+        addText(description, 10, "normal", 14);
+      }
+
+      addText("Summary", 14, "bold", 8);
+      addText(`Cases: ${caseCount}   Documents: ${docCount}   Codes: ${codeCount}   Users: ${userCount}   Annotations: ${filteredAnns.length}`, 10, "normal", 14);
+      addText("Annotations", 14, "bold", 8);
+
+      if (filteredAnns.length === 0) {
+        addText("No annotations were captured in this report.", 10, "italic");
+      } else {
+        for (const ann of filteredAnns) {
+          ensureSpace(76);
+          pdf.setDrawColor(210);
+          pdf.line(margin, y, pageWidth - margin, y);
+          y += 14;
+          addText(`${ann.codeName} | ${ann.documentName} | ${getCoderName(ann.createdById)} | ${getCaseNameForAnn(ann)}`, 9, "bold", 6);
+          addText(`"${ann.quote}"`, 10, "italic", 6);
+          if (ann.note) addText(`Note: ${ann.note}`, 9, "normal", 10);
+        }
+      }
+
+      await writeFile(path, new Uint8Array(pdf.output("arraybuffer")));
     } catch (e) {
       console.error(e);
       setError("PDF export failed.");
@@ -469,17 +681,53 @@ function ReportPage({
   async function handleExportDOCX() {
     try {
       setExportingFormat("docx");
-      const path = await save({ defaultPath: `${name || "Report"}.doc`, filters: [{ name: "Word Document", extensions: ["doc"] }] });
+      const path = await save({ defaultPath: `${name || "Report"}.docx`, filters: [{ name: "Word Document", extensions: ["docx"] }] });
       if (!path) return;
 
-      const content = getHtmlContent();
-      const docxHtml = `
-        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-        <head><meta charset='utf-8'><title>${name || "Report"}</title></head>
-        <body>${content}</body>
-        </html>
-      `;
-      await writeTextFile(path, docxHtml);
+      const children: Paragraph[] = [
+        new Paragraph({ text: name || "Untitled Report", heading: HeadingLevel.TITLE }),
+        new Paragraph(`Created by: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown")}`),
+        new Paragraph(`Created: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`),
+        new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }),
+        new Paragraph(`Cases: ${caseCount}   Documents: ${docCount}   Codes: ${codeCount}   Users: ${userCount}   Annotations: ${filteredAnns.length}`),
+      ];
+
+      const description = htmlToPlainText(getExportDescriptionHtml());
+      if (description) {
+        children.push(new Paragraph({ text: "Description", heading: HeadingLevel.HEADING_1 }));
+        for (const line of description.split(/\n+/).filter(Boolean)) {
+          children.push(new Paragraph(line));
+        }
+      }
+
+      children.push(new Paragraph({ text: "Annotations", heading: HeadingLevel.HEADING_1 }));
+      if (filteredAnns.length === 0) {
+        children.push(new Paragraph({ children: [new TextRun({ text: "No annotations were captured in this report.", italics: true })] }));
+      } else {
+        for (const ann of filteredAnns) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({ text: ann.codeName, bold: true }),
+                new TextRun(` | ${ann.documentName} | ${getCoderName(ann.createdById)} | ${getCaseNameForAnn(ann)}`),
+              ],
+              spacing: { before: 240 },
+            }),
+            new Paragraph({ children: [new TextRun({ text: `"${ann.quote}"`, italics: true })] }),
+          );
+          if (ann.note) {
+            children.push(new Paragraph({ children: [new TextRun({ text: "Note: ", bold: true }), new TextRun(ann.note)] }));
+          }
+        }
+      }
+
+      const doc = new DocxDocument({
+        creator: currentUser?.name || currentUser?.email || "Kanqual",
+        title: name || "Report",
+        sections: [{ children }],
+      });
+      const buffer = await (await Packer.toBlob(doc)).arrayBuffer();
+      await writeFile(path, new Uint8Array(buffer));
     } catch (e) {
       console.error(e);
       setError("DOCX export failed.");
@@ -712,16 +960,61 @@ function ReportPage({
 
           {/* Summary counts */}
           <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-            {[
-              { label: "Cases",     value: caseCount },
-              { label: "Documents", value: docCount  },
-              { label: "Codes",     value: codeCount },
-              { label: "Users",     value: userCount },
-            ].map(({ label, value }) => (
-              <div key={label} className="annotate-card" style={{ flex: 1, padding: "14px 10px", textAlign: "center", flexShrink: 0 }}>
+            {summaryCards.map(({ key, label, value, items }) => (
+              <button
+                key={key}
+                className="annotate-card"
+                onClick={() => toggleSummaryCard(key)}
+                aria-expanded={expandedSummaryCards.has(key)}
+                style={{
+                  flex: 1,
+                  padding: "14px 10px",
+                  textAlign: "center",
+                  flexShrink: 0,
+                  border: "var(--border-width) solid var(--color-border)",
+                  background: "var(--color-surface)",
+                  color: "var(--color-text)",
+                  cursor: "pointer",
+                }}
+              >
                 <div className="summary-card-value">{value}</div>
-                <div className="summary-card-label">{label}</div>
-              </div>
+                <div className="summary-card-label">
+                  {label}
+                  <span style={{ marginLeft: 6, fontSize: 10, color: "var(--color-text-muted)" }}>
+                    {expandedSummaryCards.has(key) ? "▾" : "▸"}
+                  </span>
+                </div>
+                {expandedSummaryCards.has(key) && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      paddingTop: 8,
+                      borderTop: "var(--border-width) solid var(--color-border)",
+                      maxHeight: 130,
+                      overflowY: "auto",
+                      textAlign: "left",
+                    }}
+                  >
+                    {items.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>
+                        None included.
+                      </div>
+                    ) : (
+                      items.map((item) => (
+                        <div
+                          key={`${key}-${item.id}`}
+                          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, lineHeight: 1.4, padding: "2px 0" }}
+                        >
+                          {item.color && (
+                            <span className="code-swatch" style={{ background: item.color, width: 9, height: 9 }} />
+                          )}
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </button>
             ))}
           </div>
 
@@ -928,8 +1221,9 @@ export function CodeReportsView() {
           snapshot,
         };
       });
-      setRows(mappedRows);
-      return mappedRows;
+      const annotationRows = mappedRows.filter((row) => !row.snapshot?.reportType || row.snapshot.reportType === "annotations");
+      setRows(annotationRows);
+      return annotationRows;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load reports.");
       return [];
@@ -1018,7 +1312,7 @@ export function CodeReportsView() {
   return (
     <div className="view users-view">
       <header className="view-header">
-        <h1>Code Reports</h1>
+        <h1>Annotation Reports</h1>
         {canEdit && (
           <button className="btn btn--primary" onClick={() => setShowNew(true)}>+ New Report</button>
         )}

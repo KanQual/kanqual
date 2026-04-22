@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
-import { MemoEditorView } from "./MemosView";
+import { MemoEditorView } from "./Analysis_Memos_View";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

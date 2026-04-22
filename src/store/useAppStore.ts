@@ -3,6 +3,22 @@ import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { Project, Document, Code, Annotation, Memo, View, Role, ProjectLogEntry } from "../types";
 
+const RECENT_PROJECTS_KEY = "kq_recent_projects";
+
+function rememberRecentProject(project: Project): void {
+  try {
+    const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
+    const current = raw ? JSON.parse(raw) as Array<Record<string, unknown>> : [];
+    const next = [
+      { id: project.id, name: project.name, description: project.description, openedAt: new Date().toISOString() },
+      ...current.filter((item) => item.id !== project.id),
+    ].slice(0, 25);
+    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next));
+  } catch {
+    // Recent projects are a convenience only; never block opening a project.
+  }
+}
+
 // ─── Map PocketBase records to our typed model ───────────────────────────────
 
 function toProject(r: RecordModel): Project {
@@ -64,6 +80,7 @@ function toLogEntry(r: RecordModel): ProjectLogEntry {
     label: r.label,
     recordId: r.record_id || undefined,
     occurredAt: r.occurred_at,
+    restoredAt: r.restored_at || undefined,
   };
 }
 
@@ -160,7 +177,11 @@ export function useAppStore(pb: PocketBase) {
   useEffect(() => {
     const userId = pb.authStore.record?.id;
     const unsubProjects = pb.collection("projects").subscribe("*", (e) => {
-      if (e.action === "update") setProjects((p) => p.map((x) => x.id === e.record.id ? toProject(e.record) : x));
+      if (e.action === "update") {
+        const project = toProject(e.record);
+        setProjects((p) => p.map((x) => x.id === project.id ? { ...project, createdBy: x.createdBy } : x));
+        setActiveProject((current) => current?.id === project.id ? project : current);
+      }
       if (e.action === "delete") setProjects((p) => p.filter((x) => x.id !== e.record.id));
     });
     const unsubMembers = pb.collection("project_members").subscribe("*", async (e) => {
@@ -256,10 +277,25 @@ export function useAppStore(pb: PocketBase) {
       if (e.action === "delete") setMemos((p) => p.filter((x) => x.id !== e.record.id));
     });
 
+    const unsubLog = pb.collection("project_log").subscribe("*", (e) => {
+      if (e.record.project !== pid) return;
+      const entry = toLogEntry(e.record);
+      if (e.action === "create") {
+        setLogEntries((p) => p.some((x) => x.id === entry.id) ? p : [entry, ...p]);
+      }
+      if (e.action === "update") {
+        setLogEntries((p) => p.map((x) => x.id === entry.id ? entry : x));
+      }
+      if (e.action === "delete") {
+        setLogEntries((p) => p.filter((x) => x.id !== entry.id));
+      }
+    });
+
     return () => {
       unsubDocs.then((fn) => fn()).catch(() => {});
       unsubCodes.then((fn) => fn()).catch(() => {});
       unsubMemos.then((fn) => fn()).catch(() => {});
+      unsubLog.then((fn) => fn()).catch(() => {});
       setDocuments([]);
       setCodes([]);
       setMemos([]);
@@ -317,6 +353,18 @@ export function useAppStore(pb: PocketBase) {
     [pb, logAction]
   );
 
+  const updateProject = useCallback(
+    async (id: string, data: { name: string; description: string }) => {
+      const record = await pb.collection("projects").update(id, data);
+      const project = toProject(record);
+      setProjects((prev) => prev.map((p) => p.id === id ? { ...project, createdBy: p.createdBy } : p));
+      setActiveProject((current) => current?.id === id ? project : current);
+      await logAction(id, "project.update", `Updated project details for "${data.name}"`);
+      return project;
+    },
+    [pb, logAction]
+  );
+
   const openProject = useCallback(async (project: Project, prevProject?: Project | null) => {
     const uid = pb.authStore.record?.id;
     const now = new Date().toISOString();
@@ -335,6 +383,7 @@ export function useAppStore(pb: PocketBase) {
 
     await logAction(project.id, "project.open", `Opened project "${project.name}"`);
 
+    rememberRecentProject(project);
     setActiveProject(project);
     setActiveDocument(null);
     setView("home");
@@ -352,7 +401,7 @@ export function useAppStore(pb: PocketBase) {
   // ── Restore ───────────────────────────────────────────────────────────────
 
   const restoreRecord = useCallback(
-    async (action: string, recordId: string) => {
+    async (action: string, recordId: string, logEntryId?: string) => {
       const entity = action.split(".")[0];
       try {
         switch (entity) {
@@ -385,7 +434,12 @@ export function useAppStore(pb: PocketBase) {
             await pb.collection("code_reports").update(recordId, { deleted_at: "" });
             break;
         }
-        if (activeProject) await logAction(activeProject.id, `${entity}.restore`, `Restored ${entity}`);
+        const restoredAt = new Date().toISOString();
+        if (logEntryId) {
+          const restoredLog = await pb.collection("project_log").update(logEntryId, { restored_at: restoredAt });
+          setLogEntries((prev) => prev.map((entry) => entry.id === logEntryId ? toLogEntry(restoredLog) : entry));
+        }
+        if (activeProject) await logAction(activeProject.id, `${entity}.restore`, `Restored ${entity}`, recordId);
       } catch (e) {
         console.error("Restore failed:", e);
         throw e;
@@ -674,7 +728,7 @@ export function useAppStore(pb: PocketBase) {
     allAnnotations: annotations,
     memos,
     logEntries,
-    createProject, openProject, closeProject,
+    createProject, updateProject, openProject, closeProject,
     restoreRecord,
     addDocument, updateDocument, deleteDocument,
     addCaseDocument, removeCaseDocument,

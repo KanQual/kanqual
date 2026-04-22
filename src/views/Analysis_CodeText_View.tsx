@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../context/StoreContext";
-import { AnnotateView } from "./AnnotateView";
+import { AnnotateView } from "./Analysis_CodeText_Annotate_View";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

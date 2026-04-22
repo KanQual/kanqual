@@ -1,6 +1,8 @@
 // ─── Theme utilities ──────────────────────────────────────────────────────────
 
 export type Theme = "light" | "dark";
+export type Density = "comfortable" | "compact";
+export type FontSize = "small" | "normal" | "large";
 
 export interface ColorVar {
   key: string;
@@ -100,6 +102,24 @@ export function getStoredBorderWidth(): number {
   return Number(localStorage.getItem("mc_border_width") ?? "1");
 }
 
+export function getStoredDensity(): Density {
+  return (localStorage.getItem("kq_density") as Density) || "comfortable";
+}
+
+export function getStoredFontSize(): FontSize {
+  return (localStorage.getItem("kq_font_size") as FontSize) || "normal";
+}
+
+export function applyDensity(density: Density): void {
+  localStorage.setItem("kq_density", density);
+  document.documentElement.setAttribute("data-density", density);
+}
+
+export function applyFontSize(size: FontSize): void {
+  localStorage.setItem("kq_font_size", size);
+  document.documentElement.setAttribute("data-font-size", size);
+}
+
 /** Set/clear inline style overrides on :root for the given theme */
 export function applyOverrides(theme: Theme): void {
   const allKeys = COLOR_VARS.map((v) => v.key);
@@ -127,6 +147,8 @@ export function initTheme(): void {
   applyTheme(getStoredTheme());
   document.documentElement.style.setProperty("--radius", `${getStoredRadius()}px`);
   document.documentElement.style.setProperty("--border-width", `${getStoredBorderWidth()}px`);
+  applyDensity(getStoredDensity());
+  applyFontSize(getStoredFontSize());
 }
 
 // ─── Theme presets ────────────────────────────────────────────────────────────

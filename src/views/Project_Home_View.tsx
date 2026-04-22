@@ -38,7 +38,7 @@ function StatCard({
 }
 
 export function HomeView() {
-  const { pb, activeProject, documents, codes, memos, setView } = useStore();
+  const { pb, activeProject, documents, codes, memos, setView, userRole } = useStore();
   const [remote, setRemote] = useState<RemoteStats | null>(null);
 
   useEffect(() => {
@@ -89,7 +89,21 @@ export function HomeView() {
     <div className="view home-view">
       <header className="view-header">
         <h1>{activeProject?.name ?? "Home"}</h1>
+        {userRole === "owner" && (
+          <button className="btn btn--primary" onClick={() => setView("project-settings")}>
+            Project Settings
+          </button>
+        )}
       </header>
+
+      <section className="home-project-card" aria-label="Project description">
+        <div className="home-project-card-header">
+          <h2>Project Description</h2>
+        </div>
+        <p className={activeProject?.description ? "home-project-description" : "home-project-description home-project-description--empty"}>
+          {activeProject?.description || "No project description has been added yet."}
+        </p>
+      </section>
 
       <div className="home-stats-grid">
         <StatCard

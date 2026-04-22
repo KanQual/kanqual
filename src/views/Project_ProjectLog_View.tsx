@@ -6,6 +6,11 @@ const ACTION_LABELS: Record<string, string> = {
   "project.create":      "Project created",
   "project.open":        "Project opened",
   "project.close":       "Project left",
+  "project.update":      "Project updated",
+  "project.export":      "Project exported",
+  "project.import":      "Project imported",
+  "codebook.export":     "Codebook exported",
+  "codebook.import":     "Codebook imported",
   "document.create":     "Document added",
   "document.update":     "Document updated",
   "document.delete":     "Document deleted",
@@ -22,6 +27,9 @@ const ACTION_LABELS: Record<string, string> = {
   "case.update":         "Case updated",
   "case.delete":         "Case deleted",
   "case.restore":        "Case restored",
+  "case_attribute.create": "Case attribute added",
+  "case_attribute.update": "Case attribute updated",
+  "case_attribute.delete": "Case attribute deleted",
   "memo.create":         "Memo created",
   "memo.update":         "Memo updated",
   "memo.delete":         "Memo deleted",
@@ -30,6 +38,9 @@ const ACTION_LABELS: Record<string, string> = {
   "code_report.update":  "Report updated",
   "code_report.delete":  "Report deleted",
   "code_report.restore": "Report restored",
+  "document_attribute.create": "Document attribute added",
+  "document_attribute.update": "Document attribute updated",
+  "document_attribute.delete": "Document attribute deleted",
   "member.add":          "Member added",
   "member.remove":       "Member removed",
 };
@@ -58,7 +69,6 @@ function actionCategory(action: string): string {
 export function ProjectLogView() {
   const { logEntries, activeProject, restoreRecord } = useStore();
   const [restoring, setRestoring] = useState<Set<string>>(new Set());
-  const [restored,  setRestored]  = useState<Set<string>>(new Set());
   const [errors,    setErrors]    = useState<Record<string, string>>({});
 
   const sorted = [...logEntries].sort(
@@ -70,8 +80,7 @@ export function ProjectLogView() {
     setRestoring((s) => new Set(s).add(entry.id));
     setErrors((e) => { const n = { ...e }; delete n[entry.id]; return n; });
     try {
-      await restoreRecord(entry.action, entry.recordId);
-      setRestored((s) => new Set(s).add(entry.id));
+      await restoreRecord(entry.action, entry.recordId, entry.id);
     } catch {
       setErrors((e) => ({ ...e, [entry.id]: "Restore failed" }));
     } finally {
@@ -108,7 +117,7 @@ export function ProjectLogView() {
               {sorted.map((entry: ProjectLogEntry) => {
                 const canRestore = RESTORABLE.has(entry.action) && !!entry.recordId;
                 const isRestoring = restoring.has(entry.id);
-                const isRestored  = restored.has(entry.id);
+                const restoredAt = entry.restoredAt;
                 const errMsg      = errors[entry.id];
                 return (
                   <tr key={entry.id} className={`log-row log-row--${actionCategory(entry.action)}`}>
@@ -121,7 +130,7 @@ export function ProjectLogView() {
                     </td>
                     <td className="log-cell log-cell--label">{entry.label}</td>
                     <td className="log-cell log-cell--restore">
-                      {canRestore && !isRestored && (
+                      {canRestore && !restoredAt && (
                         <button
                           className="btn btn--xs"
                           onClick={() => handleRestore(entry)}
@@ -131,8 +140,8 @@ export function ProjectLogView() {
                           {isRestoring ? "Restoring…" : "Restore"}
                         </button>
                       )}
-                      {isRestored && (
-                        <span className="log-restored-badge">Restored</span>
+                      {restoredAt && (
+                        <span className="log-restored-badge">Restored {fmtDateTime(restoredAt)}</span>
                       )}
                       {errMsg && (
                         <span className="log-restore-error">{errMsg}</span>

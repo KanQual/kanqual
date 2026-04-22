@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
-import { MemoEditorView } from "./MemosView";
+import { MemoEditorView } from "./Analysis_Memos_View";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
@@ -21,6 +21,28 @@ interface DocRow {
   createdAt: string;
 }
 
+type AttributeDataType = "text" | "number" | "datetime";
+
+interface AttributeDefinition {
+  id: string;
+  name: string;
+  dataType: AttributeDataType;
+  sortOrder: number;
+}
+
+interface AttributeValue {
+  id: string;
+  documentId: string;
+  attributeId: string;
+  value: string;
+}
+
+interface AttributeDraft {
+  id?: string;
+  name: string;
+  dataType: AttributeDataType;
+}
+
 type SortCol = "name" | "cases" | "memos" | "createdByName" | "createdAt";
 type SortDir = "asc" | "desc";
 
@@ -36,6 +58,12 @@ function fmtDate(iso: string): string {
   } catch {
     return "—";
   }
+}
+
+function inputTypeForDataType(dataType: AttributeDataType) {
+  if (dataType === "number") return "number";
+  if (dataType === "datetime") return "datetime-local";
+  return "text";
 }
 
 // ─── Column definitions ───────────────────────────────────────────────────────
@@ -905,8 +933,161 @@ function NewDocumentModal({
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
+function NewAttributeModal({
+  onClose,
+  onCreate,
+  saving,
+}: {
+  onClose: () => void;
+  onCreate: (name: string, dataType: AttributeDataType) => void;
+  saving: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [dataType, setDataType] = useState<AttributeDataType>("text");
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>New Attribute</h2>
+        <div className="form-group">
+          <label className="form-label">Attribute name</label>
+          <input
+            className="form-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Publication date"
+            autoFocus
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Data type</label>
+          <div className="attribute-type-picker">
+            {([
+              { value: "text", label: "Text" },
+              { value: "number", label: "Numbers" },
+              { value: "datetime", label: "Date/time" },
+            ] as { value: AttributeDataType; label: string }[]).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
+                onClick={() => setDataType(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="form-actions" style={{ marginTop: 20 }}>
+          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
+          <button
+            className="btn btn--primary"
+            onClick={() => onCreate(name.trim(), dataType)}
+            disabled={saving || !name.trim()}
+          >
+            {saving ? "Opening..." : "Next"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AttributeValuesModal({
+  draft,
+  rows,
+  attributeValues,
+  saving,
+  onBack,
+  onCancel,
+  onSave,
+}: {
+  draft: AttributeDraft;
+  rows: DocRow[];
+  attributeValues: Record<string, AttributeValue>;
+  saving: boolean;
+  onBack?: () => void;
+  onCancel: () => void;
+  onSave: (draft: AttributeDraft, valuesByDocument: Record<string, string>) => void;
+}) {
+  const [name, setName] = useState(draft.name);
+  const [dataType, setDataType] = useState<AttributeDataType>(draft.dataType);
+  const [valuesByDocument, setValuesByDocument] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const row of rows) {
+      initial[row.id] = draft.id ? attributeValues[`${row.id}:${draft.id}`]?.value ?? "" : "";
+    }
+    return initial;
+  });
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
+        <h2>{draft.id ? "Edit Attribute" : "Attribute Values"}</h2>
+
+        <div className="attribute-values-details">
+          <label className="form-group">
+            <span className="form-label">Attribute name</span>
+            <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <div className="form-group">
+            <span className="form-label">Data type</span>
+            <div className="attribute-type-picker">
+              {([
+                { value: "text", label: "Text" },
+                { value: "number", label: "Numbers" },
+                { value: "datetime", label: "Date/time" },
+              ] as { value: AttributeDataType; label: string }[]).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
+                  onClick={() => setDataType(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="attribute-values-list">
+          {rows.length === 0 ? (
+            <p className="case-card-empty">No documents yet.</p>
+          ) : (
+            rows.map((row) => (
+              <label key={row.id} className="attribute-value-row">
+                <span>{row.name}</span>
+                <input
+                  className="form-input"
+                  type={inputTypeForDataType(dataType)}
+                  step={dataType === "number" ? "any" : undefined}
+                  value={valuesByDocument[row.id] ?? ""}
+                  onChange={(e) => setValuesByDocument((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                />
+              </label>
+            ))
+          )}
+        </div>
+
+        <div className="form-actions" style={{ marginTop: 20 }}>
+          {onBack && <button className="btn" onClick={onBack} disabled={saving}>Back</button>}
+          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button
+            className="btn btn--primary"
+            onClick={() => onSave({ ...draft, name: name.trim(), dataType }, valuesByDocument)}
+            disabled={saving || !name.trim()}
+          >
+            {saving ? "Saving..." : "Save Attribute"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DocumentsView() {
-  const { activeProject, pb, canEdit, pendingDocId, setPendingDocId, deleteDocument } = useStore();
+  const { activeProject, pb, canEdit, pendingDocId, setPendingDocId, deleteDocument, logAction } = useStore();
 
   const [rows,    setRows]    = useState<DocRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -927,6 +1108,14 @@ export function DocumentsView() {
   const [editStartRow,  setEditStartRow]  = useState<DocRow | null>(null);
   const [assocCaseDoc,  setAssocCaseDoc]  = useState<DocRow | null>(null);
   const [memoForDoc,    setMemoForDoc]    = useState<DocRow | null>(null);
+  const [showAttributesTable, setShowAttributesTable] = useState(false);
+  const [attributeDefs, setAttributeDefs] = useState<AttributeDefinition[]>([]);
+  const [attributeValues, setAttributeValues] = useState<Record<string, AttributeValue>>({});
+  const [showNewAttribute, setShowNewAttribute] = useState(false);
+  const [attributeValueDraft, setAttributeValueDraft] = useState<AttributeDraft | null>(null);
+  const [attributeSaving, setAttributeSaving] = useState(false);
+  const [attributeContextMenu, setAttributeContextMenu] = useState<{ x: number; y: number; attr: AttributeDefinition } | null>(null);
+  const attributeContextMenuRef = useRef<HTMLDivElement>(null);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -937,8 +1126,8 @@ export function DocumentsView() {
     try {
       const pid = activeProject.id;
 
-      // Fetch documents and memos in parallel
-      const [docRecords, memoRecords] = await Promise.all([
+      // Fetch documents, memos, and project-level attribute definitions in parallel
+      const [docRecords, memoRecords, attrDefRecords] = await Promise.all([
         pb.collection("documents").getFullList({
           filter: `project="${pid}"&&deleted_at=""`,
           expand: "created_by",
@@ -948,16 +1137,33 @@ export function DocumentsView() {
           filter: `project="${pid}"&&deleted_at=""`,
           fields: "id,document",
         }),
+        pb.collection("document_attribute_definitions").getFullList({
+          filter: `project="${pid}"&&deleted_at=""`,
+          sort: "sort_order,created",
+        }),
       ]);
 
-      // Load case associations (needs doc IDs from above)
+      setAttributeDefs(attrDefRecords.map((r) => ({
+        id: r.id,
+        name: r.name as string,
+        dataType: r.data_type as AttributeDataType,
+        sortOrder: (r.sort_order as number | undefined) ?? 0,
+      })));
+
+      // Load case associations and attributes (needs doc IDs from above)
       const docIds = docRecords.map((d) => d.id);
-      const caseDocs = docIds.length > 0
-        ? await pb.collection("case_documents").getFullList({
-            filter: docIds.map((id) => `document="${id}"`).join(" || "),
-            expand: "case",
-          })
-        : [];
+      const [caseDocs, attrRecords] = docIds.length > 0
+        ? await Promise.all([
+            pb.collection("case_documents").getFullList({
+              filter: docIds.map((id) => `document="${id}"`).join(" || "),
+              expand: "case",
+            }),
+            pb.collection("document_attribute_values").getFullList({
+              filter: `(${docIds.map((id) => `document="${id}"`).join(" || ")})&&deleted_at=""`,
+              sort: "created",
+            }),
+          ])
+        : [[], []];
 
       // Build map docId → cases {id, name}
       const casesByDoc: Record<string, { id: string; name: string }[]> = {};
@@ -967,6 +1173,19 @@ export function DocumentsView() {
       }
 
       // Build map docId → memo count
+      const nextAttributeValues: Record<string, AttributeValue> = {};
+      for (const attr of attrRecords) {
+        const documentId = attr.document as string;
+        const attributeId = attr.attribute as string;
+        nextAttributeValues[`${documentId}:${attributeId}`] = {
+          id: attr.id,
+          documentId,
+          attributeId,
+          value: (attr.value as string | undefined) ?? "",
+        };
+      }
+      setAttributeValues(nextAttributeValues);
+
       const memosByDoc: Record<string, number> = {};
       for (const memo of memoRecords) {
         const ids: string[] = Array.isArray(memo.document)
@@ -1018,9 +1237,14 @@ export function DocumentsView() {
     function onPointerDown(e: MouseEvent) {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node))
         setContextMenu(null);
+      if (attributeContextMenuRef.current && !attributeContextMenuRef.current.contains(e.target as Node))
+        setAttributeContextMenu(null);
     }
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setContextMenu(null);
+      if (e.key === "Escape") {
+        setContextMenu(null);
+        setAttributeContextMenu(null);
+      }
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -1049,6 +1273,132 @@ export function DocumentsView() {
   function handleSort(col: SortCol) {
     if (col === sortCol) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortCol(col); setSortDir("asc"); }
+  }
+
+  function valueKey(documentId: string, attributeId: string) {
+    return `${documentId}:${attributeId}`;
+  }
+
+  function formatAttributeDisplay(value: string, dataType: AttributeDataType) {
+    if (!value) return "";
+    if (dataType === "datetime") {
+      try {
+        return new Date(value).toLocaleString(undefined, {
+          year: "numeric", month: "short", day: "numeric",
+          hour: "2-digit", minute: "2-digit",
+        });
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+
+  function handleCreateAttribute(name: string, dataType: AttributeDataType) {
+    if (!name.trim()) return;
+    setShowNewAttribute(false);
+    setAttributeValueDraft({ name: name.trim(), dataType });
+  }
+
+  async function handleSaveAttribute(draft: AttributeDraft, valuesByDocument: Record<string, string>) {
+    if (!activeProject || !pb || !draft.name.trim()) return;
+    setAttributeSaving(true);
+    setError(null);
+    try {
+      const record = draft.id
+        ? await pb.collection("document_attribute_definitions").update(draft.id, {
+            name: draft.name.trim(),
+            data_type: draft.dataType,
+            deleted_at: "",
+          })
+        : await pb.collection("document_attribute_definitions").create({
+            project: activeProject.id,
+            name: draft.name.trim(),
+            data_type: draft.dataType,
+            sort_order: attributeDefs.length,
+            deleted_at: "",
+          });
+
+      const attrId = record.id;
+      const nextDef: AttributeDefinition = {
+        id: attrId,
+        name: record.name as string,
+        dataType: record.data_type as AttributeDataType,
+        sortOrder: (record.sort_order as number | undefined) ?? attributeDefs.length,
+      };
+
+      const nextValues = { ...attributeValues };
+      await Promise.all(rows.map(async (row) => {
+        const key = valueKey(row.id, attrId);
+        const existing = nextValues[key];
+        const value = valuesByDocument[row.id] ?? "";
+        if (existing?.id) {
+          await pb.collection("document_attribute_values").update(existing.id, {
+            value,
+            deleted_at: value.trim() ? "" : new Date().toISOString(),
+          });
+          if (value.trim()) nextValues[key] = { ...existing, value };
+          else delete nextValues[key];
+        } else if (value.trim()) {
+          const valueRecord = await pb.collection("document_attribute_values").create({
+            document: row.id,
+            attribute: attrId,
+            value,
+            deleted_at: "",
+          });
+          nextValues[key] = { id: valueRecord.id, documentId: row.id, attributeId: attrId, value };
+        }
+      }));
+
+      setAttributeDefs((prev) => {
+        const exists = prev.some((attr) => attr.id === attrId);
+        return exists
+          ? prev.map((attr) => attr.id === attrId ? nextDef : attr)
+          : [...prev, nextDef];
+      });
+      setAttributeValues(nextValues);
+      await logAction(
+        activeProject.id,
+        draft.id ? "document_attribute.update" : "document_attribute.create",
+        `${draft.id ? "Updated" : "Added"} document attribute "${nextDef.name}"`,
+        attrId,
+      );
+      setAttributeValueDraft(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save attribute.");
+    } finally {
+      setAttributeSaving(false);
+    }
+  }
+
+  async function handleDeleteAttribute(attr: AttributeDefinition) {
+    if (!pb) return;
+    setAttributeSaving(true);
+    setError(null);
+    try {
+      const deletedAt = new Date().toISOString();
+      await pb.collection("document_attribute_definitions").update(attr.id, { deleted_at: deletedAt });
+      const valuesForAttribute = Object.values(attributeValues).filter((value) => value.attributeId === attr.id && value.id);
+      await Promise.all(valuesForAttribute.map((value) =>
+        pb.collection("document_attribute_values").update(value.id, { deleted_at: deletedAt })
+      ));
+      setAttributeDefs((prev) => prev.filter((item) => item.id !== attr.id));
+      setAttributeValues((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(next)) {
+          if (next[key].attributeId === attr.id) delete next[key];
+        }
+        return next;
+      });
+      if (activeProject) {
+        await logAction(activeProject.id, "document_attribute.delete", `Deleted document attribute "${attr.name}"`, attr.id);
+      }
+      setAttributeContextMenu(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete attribute.");
+    } finally {
+      setAttributeSaving(false);
+    }
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -1105,17 +1455,78 @@ export function DocumentsView() {
       <header className="view-header">
         <h1>Documents</h1>
         {canEdit && (
-          <button className="btn btn--primary" onClick={() => setNewDocOpen(true)}>
-            + New Document
+          <button
+            className="btn btn--primary"
+            onClick={showAttributesTable ? () => setShowNewAttribute(true) : () => setNewDocOpen(true)}
+          >
+            {showAttributesTable ? "+ Add Attribute" : "+ New Document"}
           </button>
         )}
       </header>
 
       {error && <p className="users-error">{error}</p>}
 
+      <div className="case-table-toolbar">
+        <div />
+        <label className="toggle-switch" title="Show document attributes table">
+          <input
+            type="checkbox"
+            checked={showAttributesTable}
+            onChange={(e) => setShowAttributesTable(e.target.checked)}
+          />
+          <span className="toggle-track"><span className="toggle-thumb" /></span>
+          <span className="toggle-label">Attributes</span>
+        </label>
+      </div>
+
+      {showAttributesTable && (
+        <div className="users-table-wrap case-attributes-table-wrap">
+          <table className="users-table case-attributes-table">
+            <thead>
+              <tr>
+                <th className="users-th case-attributes-case-col">Document</th>
+                {attributeDefs.map((attr) => (
+                  <th
+                    key={attr.id}
+                    className="users-th case-attributes-value-col"
+                    onContextMenu={(e) => {
+                      if (!canEdit) return;
+                      e.preventDefault();
+                      setAttributeContextMenu({ x: e.clientX, y: e.clientY, attr });
+                    }}
+                  >
+                    {attr.name}
+                    <span className="case-attribute-type-label">{attr.dataType === "datetime" ? "Date/time" : attr.dataType}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">Loading...</td></tr>}
+              {!loading && sorted.length === 0 && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No documents yet.</td></tr>}
+              {!loading && sorted.map((row) => (
+                <tr key={row.id} className="users-row">
+                  <td className="users-td users-td--name case-attributes-case-cell">{row.name}</td>
+                  {attributeDefs.map((attr) => {
+                    const key = valueKey(row.id, attr.id);
+                    const cell = attributeValues[key];
+                    return (
+                      <td key={attr.id} className="users-td case-attributes-value-cell">
+                        {cell?.value ? formatAttributeDisplay(cell.value, attr.dataType) : <span className="cases-no-docs">—</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Table */}
       <div
         className="users-table-wrap"
+        hidden={showAttributesTable}
         style={{
           maxHeight:
             34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
@@ -1170,6 +1581,34 @@ export function DocumentsView() {
           </tbody>
         </table>
       </div>
+
+      {attributeContextMenu && (
+        <div
+          ref={attributeContextMenuRef}
+          className="context-menu"
+          style={{ top: attributeContextMenu.y, left: attributeContextMenu.x }}
+        >
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setAttributeValueDraft({
+                id: attributeContextMenu.attr.id,
+                name: attributeContextMenu.attr.name,
+                dataType: attributeContextMenu.attr.dataType,
+              });
+              setAttributeContextMenu(null);
+            }}
+          >
+            Edit Attribute
+          </button>
+          <button
+            className="context-menu-item context-menu-item--danger"
+            onClick={() => handleDeleteAttribute(attributeContextMenu.attr)}
+          >
+            Delete Attribute
+          </button>
+        </div>
+      )}
 
       {/* Context menu */}
       {contextMenu && (
@@ -1260,6 +1699,26 @@ export function DocumentsView() {
         <NewDocumentModal
           onDone={() => { setNewDocOpen(false); loadDocuments(); }}
           onClose={() => setNewDocOpen(false)}
+        />
+      )}
+
+      {showNewAttribute && (
+        <NewAttributeModal
+          saving={attributeSaving}
+          onClose={() => !attributeSaving && setShowNewAttribute(false)}
+          onCreate={handleCreateAttribute}
+        />
+      )}
+
+      {attributeValueDraft && (
+        <AttributeValuesModal
+          draft={attributeValueDraft}
+          rows={sorted}
+          attributeValues={attributeValues}
+          saving={attributeSaving}
+          onBack={attributeValueDraft.id ? undefined : () => { setAttributeValueDraft(null); setShowNewAttribute(true); }}
+          onCancel={() => !attributeSaving && setAttributeValueDraft(null)}
+          onSave={handleSaveAttribute}
         />
       )}
     </div>

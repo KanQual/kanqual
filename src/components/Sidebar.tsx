@@ -36,7 +36,8 @@ const NAV_SECTIONS: {
     key: "reports",
     label: "Reports",
     items: [
-      { view: "code-reports", label: "Code Reports" },
+      { view: "code-reports", label: "Annotations" },
+      { view: "codes",        label: "Codes" },
       { view: "coders",       label: "Coders" },
     ],
   },

@@ -20,6 +20,7 @@ interface AuthContextValue {
   setServerUrl: (url: string) => void;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
+  updateProfile: (data: { name: string; email: string }) => Promise<void>;
   logout: () => void;
   error: string | null;
 }
@@ -115,6 +116,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [pb]
   );
 
+  const updateProfile = useCallback(
+    async (data: { name: string; email: string }) => {
+      if (!pb || !user) return;
+      const record = await pb.collection("users").update(user.id, data);
+      pb.authStore.save(pb.authStore.token, record);
+      setUser(record);
+    },
+    [pb, user]
+  );
+
   const logout = useCallback(() => {
     pb?.authStore.clear();
     setUser(null);
@@ -123,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ pb, user, status, serverUrl, setServerUrl, login, register, logout, error }}
+      value={{ pb, user, status, serverUrl, setServerUrl, login, register, updateProfile, logout, error }}
     >
       {children}
     </AuthContext.Provider>

@@ -85,11 +85,13 @@ export type View =
   | "documents"      // Project → Documents
   | "codebook"       // Project → Codebook
   | "project-log"    // Project → Project Log
+  | "project-settings" // Project → Project Settings
   | "code-text"      // Analysis → Code Text
   | "memos"          // Analysis → Memos
   | "ai-assist"      // Analysis → AI Assist
   | "code-reports"   // Reports → Code Reports
   | "coders"         // Reports → Coders
+  | "codes"          // Reports -> Codes
   | "user-settings"  // user settings page
   | "app-settings";  // app settings page
 
@@ -102,6 +104,7 @@ export interface ProjectLogEntry {
   label: string;     // human-readable summary
   recordId?: string; // id of the affected record (set for delete actions)
   occurredAt: string; // ISO 8601
+  restoredAt?: string; // ISO 8601, set when a delete log entry has been restored
 }
 
 export interface AppState {

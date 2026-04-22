@@ -350,6 +350,59 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
     ],
   });
 
+  // case_attributes — user-defined key/value metadata for a case
+  await upsertCollection(pb, "case_attributes", {
+    fields: [
+      { name: "case",       type: "relation", collectionId: cases.id, required: true, maxSelect: 1 },
+      { name: "key",        type: "text",     required: true },
+      { name: "value",      type: "text" },
+      { name: "sort_order", type: "number" },
+      { name: "deleted_at", type: "text" },
+    ],
+  });
+
+  // case_attribute_definitions — project-level attribute columns for cases
+  await upsertCollection(pb, "case_attribute_definitions", {
+    fields: [
+      { name: "project",    type: "relation", collectionId: projects.id, required: true, maxSelect: 1 },
+      { name: "name",       type: "text",     required: true },
+      { name: "data_type",  type: "select",   required: true, values: ["text", "number", "datetime"] },
+      { name: "sort_order", type: "number" },
+      { name: "deleted_at", type: "text" },
+    ],
+  });
+
+  const caseAttributeDefinitions = await pb.collections.getOne("case_attribute_definitions");
+  await upsertCollection(pb, "case_attribute_values", {
+    fields: [
+      { name: "case",       type: "relation", collectionId: cases.id,                    required: true, maxSelect: 1 },
+      { name: "attribute",  type: "relation", collectionId: caseAttributeDefinitions.id, required: true, maxSelect: 1 },
+      { name: "value",      type: "text" },
+      { name: "deleted_at", type: "text" },
+    ],
+  });
+
+  // document_attribute_definitions — project-level attribute columns for documents
+  await upsertCollection(pb, "document_attribute_definitions", {
+    fields: [
+      { name: "project",    type: "relation", collectionId: projects.id, required: true, maxSelect: 1 },
+      { name: "name",       type: "text",     required: true },
+      { name: "data_type",  type: "select",   required: true, values: ["text", "number", "datetime"] },
+      { name: "sort_order", type: "number" },
+      { name: "deleted_at", type: "text" },
+    ],
+  });
+
+  const documentAttributeDefinitions = await pb.collections.getOne("document_attribute_definitions");
+  await upsertCollection(pb, "document_attribute_values", {
+    fields: [
+      { name: "document",   type: "relation", collectionId: documents.id,                     required: true, maxSelect: 1 },
+      { name: "attribute",  type: "relation", collectionId: documentAttributeDefinitions.id,   required: true, maxSelect: 1 },
+      { name: "value",      type: "text" },
+      { name: "deleted_at", type: "text" },
+    ],
+  });
+
   // project_log — append-only audit trail of mutations within a project
   await upsertCollection(pb, "project_log", {
     fields: [
@@ -360,6 +413,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "label",        type: "text",     required: true },
       { name: "record_id",    type: "text" },
       { name: "occurred_at",  type: "autodate", system: false, hidden: false, presentable: false, onCreate: true, onUpdate: false },
+      { name: "restored_at",  type: "text" },
     ],
   });
 
