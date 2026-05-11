@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
+import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -251,39 +253,28 @@ function CodeDetail({
   allCodes,
   pb,
   startEditing,
-  canEdit,
+  canEditCode,
+  canDeleteCode,
   onBack,
+  onRequestDelete,
 }: {
   row: CodeRow;
   allCodes: CodeRow[];
   pb: NonNullable<ReturnType<typeof useStore>["pb"]>;
   startEditing: boolean;
-  canEdit: boolean;
+  canEditCode: boolean;
+  canDeleteCode: boolean;
   onBack: () => void;
+  onRequestDelete: (row: CodeRow) => void;
 }) {
-  const { updateCode } = useStore();
+  const { updateCode, documents, setActiveDocument, setPendingAnnId, setView } = useStore();
   const [row,       setRow]      = useState(initialRow);
-  const [editing,   setEditing]  = useState(startEditing);
-  const [label,     setLabel]    = useState(initialRow.label);
-  const [color,     setColor]    = useState(initialRow.color || "#6366f1");
-  const [desc,      setDesc]     = useState(initialRow.description);
-  const [parentId,  setParentId] = useState(initialRow.parentId);
+  const [showEditModal, setShowEditModal] = useState(startEditing);
   const [saving,    setSaving]   = useState(false);
-  const [error,     setError]    = useState<string | null>(null);
   const [annotations,  setAnnotations] = useState<AnnotationRow[]>([]);
   const [loadingAnn,   setLoadingAnn]  = useState(true);
-
-  const parentCandidates = allCodes.filter((c) => c.id !== row.id);
-  const parentCode = allCodes.find((c) => c.id === parentId);
-  const siblings   = allCodes.filter((c) => c.parentId === parentId && c.id !== row.id);
-
-  const colorSuggestions = useMemo(() => {
-    if (parentId && parentCode) {
-      return getChildSuggestions(parentCode.color);
-    }
-    const existingColors = allCodes.filter((c) => !c.parentId && c.id !== row.id).map((c) => c.color);
-    return getTopLevelSuggestions([...existingColors, ...siblings.map((c) => c.color)]);
-  }, [parentId, parentCode, allCodes, row.id, siblings]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -316,47 +307,116 @@ function CodeDetail({
     return () => { cancelled = true; };
   }, [pb, row.id]);
 
-  function handleToggleEdit(on: boolean) {
-    if (!on) {
-      setLabel(row.label);
-      setColor(row.color || "#6366f1");
-      setDesc(row.description);
-      setParentId(row.parentId);
-      setError(null);
-    }
-    setEditing(on);
-  }
+  useEffect(() => {
+    if (!menuOpen) return;
 
-  async function handleSave() {
-    if (!label.trim()) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [menuOpen]);
+
+  async function handleSaveFromModal(payload: {
+    label: string;
+    color: string;
+    description: string;
+    parentId?: string;
+  }) {
     setSaving(true);
-    setError(null);
     try {
-      await updateCode(row.id, { label: label.trim(), color, description: desc, parentId: parentId || undefined });
-      const newParentLabel = allCodes.find((c) => c.id === parentId)?.label ?? "";
-      setRow({ ...row, label: label.trim(), color, description: desc, parentId, parentLabel: newParentLabel });
-      setEditing(false);
+      await updateCode(row.id, {
+        label: payload.label,
+        color: payload.color,
+        description: payload.description,
+        parentId: payload.parentId,
+      });
+      const nextParentId = payload.parentId ?? "";
+      const newParentLabel = allCodes.find((c) => c.id === nextParentId)?.label ?? "";
+      setRow((prev) => ({
+        ...prev,
+        label: payload.label,
+        color: payload.color,
+        description: payload.description,
+        parentId: nextParentId,
+        parentLabel: newParentLabel,
+      }));
+      setShowEditModal(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save.");
+      throw e;
     } finally {
       setSaving(false);
     }
+  }
+
+  function jumpToAnnotation(annotation: AnnotationRow) {
+    const document = documents.find((item) => item.id === annotation.documentId);
+    if (!document) return;
+    setActiveDocument(document);
+    setPendingAnnId(annotation.id);
+    setView("code-text");
   }
 
   return (
     <div className="view doc-detail-view">
       <div className="case-detail-topbar">
         <button className="btn" onClick={onBack}>← Back to Codebook</button>
-        {canEdit && (
-          <label className="toggle-switch" title={editing ? "Cancel editing" : "Edit code"}>
-            <input
-              type="checkbox"
-              checked={editing}
-              onChange={(e) => handleToggleEdit(e.target.checked)}
-            />
-            <span className="toggle-track"><span className="toggle-thumb" /></span>
-            <span className="toggle-label">{editing ? "Editing" : "Edit"}</span>
-          </label>
+        {(canEditCode || canDeleteCode) && (
+          <div className="user-detail-menu-wrap" ref={menuRef}>
+            <button
+              type="button"
+              className="home-menu-btn user-detail-menu-btn"
+              aria-label="Code actions"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+            {menuOpen && (
+              <div className="context-menu user-detail-menu" role="menu">
+                {canEditCode && (
+                  <button
+                    type="button"
+                    className="context-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setShowEditModal(true);
+                    }}
+                  >
+                    Edit Code
+                  </button>
+                )}
+                {canDeleteCode && (
+                  <button
+                    type="button"
+                    className="context-menu-item context-menu-item--danger"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onRequestDelete(row);
+                    }}
+                  >
+                    Delete Code
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -366,19 +426,10 @@ function CodeDetail({
 
           <div className="case-card">
             <h3 className="case-card-title">Code</h3>
-            {editing ? (
-              <input
-                className="form-input"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                autoFocus
-              />
-            ) : (
-              <p className="case-card-value" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <ColorSwatch color={row.color} size={18} />
-                {row.label}
-              </p>
-            )}
+            <p className="case-card-value" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <ColorSwatch color={row.color} size={18} />
+              {row.label}
+            </p>
           </div>
 
           <dl className="user-detail-meta case-detail-meta">
@@ -389,77 +440,20 @@ function CodeDetail({
 
           <div className="case-card">
             <h3 className="case-card-title">Color</h3>
-            {editing ? (
-              <>
-                <div className="code-color-row">
-                  <input
-                    type="color"
-                    className="code-color-input"
-                    value={color}
-                    onChange={(e) => setColor(e.target.value)}
-                  />
-                  <span className="code-color-hex">{color}</span>
-                </div>
-                <ColorSuggestions
-                  suggestions={colorSuggestions}
-                  selected={color}
-                  onSelect={setColor}
-                />
-              </>
-            ) : (
-              <div className="code-color-row">
-                <ColorSwatch color={row.color} size={18} />
-                <span className="code-color-hex">{row.color || "—"}</span>
-              </div>
-            )}
+            <div className="code-color-row">
+              <ColorSwatch color={row.color} size={18} />
+              <span className="code-color-hex">{row.color || "-"}</span>
+            </div>
           </div>
 
           <div className="case-card">
             <h3 className="case-card-title">Description</h3>
-            {editing ? (
-              <textarea
-                className="form-input code-desc-textarea"
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                rows={4}
-                placeholder="Optional description…"
-              />
-            ) : desc ? (
-              <p style={{ fontSize: 14, lineHeight: 1.6 }}>{desc}</p>
+            {row.description ? (
+              <p style={{ fontSize: 14, lineHeight: 1.6 }}>{row.description}</p>
             ) : (
               <p className="case-card-empty">No description.</p>
             )}
           </div>
-
-          {editing && (
-            <div className="case-card">
-              <h3 className="case-card-title">Parent Code</h3>
-              <select
-                className="form-input"
-                value={parentId}
-                onChange={(e) => setParentId(e.target.value)}
-              >
-                <option value="">— Top-level (no parent) —</option>
-                {parentCandidates.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.parentLabel ? `${c.parentLabel} › ${c.label}` : c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {editing && (
-            <div className="case-detail-actions">
-              {error && <p className="auth-error">{error}</p>}
-              <button className="btn" onClick={() => handleToggleEdit(false)} disabled={saving}>
-                Cancel
-              </button>
-              <button className="btn btn--primary" onClick={handleSave} disabled={saving || !label.trim()}>
-                {saving ? "Saving…" : "Save Changes"}
-              </button>
-            </div>
-          )}
 
         </div>
 
@@ -476,7 +470,19 @@ function CodeDetail({
             ) : (
               <ul className="code-ann-list">
                 {annotations.map((a) => (
-                  <li key={a.id} className="code-ann-item">
+                  <li
+                    key={a.id}
+                    className="code-ann-item"
+                    onClick={() => jumpToAnnotation(a)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        jumpToAnnotation(a);
+                      }
+                    }}
+                  >
                     <div className="code-ann-doc">{a.documentName}</div>
                     <blockquote className="code-ann-quote">"{a.quote}"</blockquote>
                     {a.note && <p className="code-ann-note">{a.note}</p>}
@@ -489,6 +495,25 @@ function CodeDetail({
         </div>
 
       </div>
+
+      {showEditModal && (
+        <NewCodeModal
+          allCodes={allCodes}
+          title="Edit Code"
+          submitLabel="Save Changes"
+          initialLabel={row.label}
+          initialDescription={row.description}
+          initialColor={row.color || "#6366f1"}
+          initialParentId={row.parentId}
+          excludeCodeId={row.id}
+          onSubmit={handleSaveFromModal}
+          onDone={() => {}}
+          onClose={() => {
+            if (saving) return;
+            setShowEditModal(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -497,36 +522,61 @@ function CodeDetail({
 
 function NewCodeModal({
   allCodes,
+  title = "New Code",
+  submitLabel = "Create Code",
+  initialLabel = "",
+  initialDescription = "",
+  initialColor = "#6366f1",
+  initialParentId = "",
+  excludeCodeId,
+  onSubmit,
   onDone,
   onClose,
 }: {
   allCodes: CodeRow[];
+  title?: string;
+  submitLabel?: string;
+  initialLabel?: string;
+  initialDescription?: string;
+  initialColor?: string;
+  initialParentId?: string;
+  excludeCodeId?: string;
+  onSubmit?: (payload: { label: string; color: string; description: string; parentId?: string }) => Promise<void>;
   onDone: () => void;
   onClose: () => void;
 }) {
   const { addCode } = useStore();
   const { user: currentUser } = useAuth();
-  const [label,    setLabel]    = useState("");
-  const [desc,     setDesc]     = useState("");
-  const [color,    setColor]    = useState("#6366f1");
-  const [parentId, setParentId] = useState("");
+  const [label,    setLabel]    = useState(initialLabel);
+  const [desc,     setDesc]     = useState(initialDescription);
+  const [color,    setColor]    = useState(initialColor);
+  const [parentId, setParentId] = useState(initialParentId);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState<string | null>(null);
 
+  const availableCodes = allCodes.filter((c) => c.id !== excludeCodeId);
   const parentCode = allCodes.find((c) => c.id === parentId);
 
   const colorSuggestions = useMemo(() => {
     if (parentId && parentCode) {
       return getChildSuggestions(parentCode.color);
     }
-    const topLevelColors = allCodes.filter((c) => !c.parentId).map((c) => c.color);
+    const topLevelColors = availableCodes.filter((c) => !c.parentId).map((c) => c.color);
     return getTopLevelSuggestions(topLevelColors);
-  }, [parentId, parentCode, allCodes]);
+  }, [parentId, parentCode, availableCodes]);
 
-  // When parent changes, auto-suggest the first color
-  useEffect(() => {
-    if (colorSuggestions.length > 0) setColor(colorSuggestions[0]);
-  }, [parentId]); // eslint-disable-line react-hooks/exhaustive-deps
+  function handleParentChange(nextParentId: string) {
+    setParentId(nextParentId);
+
+    const nextParentCode = allCodes.find((c) => c.id === nextParentId);
+    const nextSuggestions = nextParentId && nextParentCode
+      ? getChildSuggestions(nextParentCode.color)
+      : getTopLevelSuggestions(availableCodes.filter((c) => !c.parentId).map((c) => c.color));
+
+    if (nextSuggestions.length > 0) {
+      setColor(nextSuggestions[0]);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -534,7 +584,16 @@ function NewCodeModal({
     setLoading(true);
     setError(null);
     try {
-      await addCode(label.trim(), color, desc, undefined, parentId || undefined, currentUser?.id);
+      if (onSubmit) {
+        await onSubmit({
+          label: label.trim(),
+          color,
+          description: desc,
+          parentId: parentId || undefined,
+        });
+      } else {
+        await addCode(label.trim(), color, desc, undefined, parentId || undefined, currentUser?.id);
+      }
       onDone();
     } catch (e) {
       const fieldErrors = (e as { data?: { data?: Record<string, { message?: string }> } }).data?.data;
@@ -551,7 +610,7 @@ function NewCodeModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New Code</h2>
+        <h2>{title}</h2>
         <form className="form" onSubmit={handleSubmit}>
 
           <label className="form-label">
@@ -582,10 +641,10 @@ function NewCodeModal({
             <select
               className="form-input"
               value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
+              onChange={(e) => handleParentChange(e.target.value)}
             >
               <option value="">— Top-level (no parent) —</option>
-              {allCodes.map((c) => (
+              {availableCodes.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.parentLabel ? `${c.parentLabel} › ${c.label}` : c.label}
                 </option>
@@ -621,7 +680,7 @@ function NewCodeModal({
           <div className="form-actions">
             <button type="button" className="btn" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
-              {loading ? "Creating…" : "Create Code"}
+              {loading ? "Saving..." : submitLabel}
             </button>
           </div>
 
@@ -634,7 +693,13 @@ function NewCodeModal({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function CodebookView() {
-  const { activeProject, pb, canEdit, deleteCode } = useStore();
+  const { activeProject, pb, canCurrentUser, deleteCode, pendingCodeId, setPendingCodeId } = useStore();
+  const canCreateCodes = canCurrentUser("createCode");
+  const canEditCodes = canCurrentUser("editCode");
+  const canDeleteCodes = canCurrentUser("deleteCode");
+  const canCreateMemos = canCurrentUser("createMemo");
+  const canAssociateMemoObjects = canCurrentUser("associateMemoObjects");
+  const canMemoAboutCodes = canCreateMemos && canAssociateMemoObjects;
 
   const [rows,    setRows]    = useState<CodeRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -648,10 +713,13 @@ export function CodebookView() {
 
   const [contextMenu,   setContextMenu]   = useState<{ x: number; y: number; row: CodeRow } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
   const [confirmDelete, setConfirmDelete] = useState<CodeRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [newCodeOpen,   setNewCodeOpen]   = useState(false);
+  const [newCodeParentId, setNewCodeParentId] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [selectedRow,   setSelectedRow]   = useState<CodeRow | null>(null);
   const [editStartRow,  setEditStartRow]  = useState<CodeRow | null>(null);
   const [memoForCode,   setMemoForCode]   = useState<CodeRow | null>(null);
@@ -733,6 +801,15 @@ export function CodebookView() {
 
   useEffect(() => { loadCodes(); }, [loadCodes]);
 
+  useEffect(() => {
+    if (!pendingCodeId || rows.length === 0) return;
+    const match = rows.find((row) => row.id === pendingCodeId);
+    if (!match) return;
+    setSelectedRow(match);
+    setEditStartRow(null);
+    setPendingCodeId(null);
+  }, [rows, pendingCodeId, setPendingCodeId]);
+
   // ── Close context menu on outside click / Escape ──────────────────────────
 
   useEffect(() => {
@@ -800,14 +877,41 @@ export function CodebookView() {
   const detailRow = selectedRow ?? editStartRow;
   if (detailRow && pb) {
     return (
-      <CodeDetail
-        row={detailRow}
-        allCodes={rows}
-        pb={pb}
-        startEditing={editStartRow !== null}
-        canEdit={canEdit}
-        onBack={() => { setSelectedRow(null); setEditStartRow(null); loadCodes(); }}
-      />
+      <>
+        <CodeDetail
+          row={detailRow}
+          allCodes={rows}
+          pb={pb}
+          startEditing={editStartRow !== null && canEditCodes}
+          canEditCode={canEditCodes}
+          canDeleteCode={canDeleteCodes}
+          onBack={() => { setSelectedRow(null); setEditStartRow(null); loadCodes(); }}
+          onRequestDelete={(row) => setConfirmDelete(row)}
+        />
+        {confirmDelete && (
+          <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h2>Delete Code</h2>
+              <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                Are you sure you want to permanently delete <strong>{confirmDelete.label}</strong>?
+              </p>
+              <p className="modal-warning-text">
+                All annotations made with this code will be permanently deleted. Child
+                codes will not be deleted but will become top-level codes. This cannot
+                be undone.
+              </p>
+              <div className="form-actions" style={{ marginTop: 24 }}>
+                <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
+                  Cancel
+                </button>
+                <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+                  {deleteLoading ? "Deleting…" : "Delete Code"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -816,16 +920,41 @@ export function CodebookView() {
   return (
     <div className="view users-view">
       <header className="view-header">
-        <h1>Codebook</h1>
-        {canEdit && (
-          <button className="btn btn--primary" onClick={() => setNewCodeOpen(true)}>
-            + New Code
+        <div className="users-title-wrap">
+          <h1>Codebook</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Show Help"
+            aria-label="Show Help"
+          >
+            <img src={helpIcon} alt="" className="users-help-icon" />
           </button>
-        )}
+        </div>
+        <button
+          className="btn btn--primary"
+          onClick={() => {
+            setNewCodeParentId("");
+            setNewCodeOpen(true);
+          }}
+          disabled={!canCreateCodes}
+          title={!canCreateCodes ? "You do not have permission to create codes" : undefined}
+        >
+          + New Code
+        </button>
       </header>
 
       {error && <p className="users-error">{error}</p>}
+      {!error && (
+        <p className="users-permission-note">
+          {canCreateCodes
+            ? "Create and organize project codes here."
+            : "The codebook is view-only with your current role."}
+        </p>
+      )}
 
+      <div className="users-content">
       <div
         className="users-table-wrap"
         style={{
@@ -860,7 +989,7 @@ export function CodebookView() {
             {!loading && visible.map((node) => (
               <tr
                 key={node.id}
-                className="users-row"
+                className="users-row codebook-list-row"
                 onClick={() => setSelectedRow(node)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -898,33 +1027,88 @@ export function CodebookView() {
           </tbody>
         </table>
       </div>
+      </div>
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Codebook Help</h2>
+            <p className="users-guide-copy">
+              The codebook organizes the codes available across the project, including hierarchy, usage, and metadata.
+            </p>
+            <p className="users-guide-copy">
+              Select a row to open details, or right-click for quick actions. Codes can be nested, memoed, and reused across documents and cases.
+            </p>
+            <p className="users-guide-copy">
+              Code creation and management options depend on your project role.
+            </p>
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Context menu */}
       {contextMenu && (
         <div
           ref={contextMenuRef}
           className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
+          style={contextMenuStyle}
         >
-          <button
-            className="context-menu-item"
-            onClick={() => { setMemoForCode(contextMenu.row); setContextMenu(null); }}
-          >
-            Memo About Code
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
-          >
-            Edit Code
-          </button>
-          {canEdit && (
+          {canMemoAboutCodes ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setMemoForCode(contextMenu.row); setContextMenu(null); }}
+            >
+              Memo About Code
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to create a memo about this code">
+              Memo About Code
+            </div>
+          )}
+          {canEditCodes ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
+            >
+              Edit Code
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit codes">
+              Edit Code
+            </div>
+          )}
+          {canCreateCodes ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                setNewCodeParentId(contextMenu.row.id);
+                setNewCodeOpen(true);
+                setContextMenu(null);
+              }}
+            >
+              Create Child Code
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to create child codes">
+              Create Child Code
+            </div>
+          )}
+          {canDeleteCodes ? (
             <button
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}
             >
               Delete Code
             </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete codes">
+              Delete Code
+            </div>
           )}
         </div>
       )}
@@ -958,10 +1142,21 @@ export function CodebookView() {
       {newCodeOpen && pb && activeProject && (
         <NewCodeModal
           allCodes={rows}
-          onDone={() => { setNewCodeOpen(false); loadCodes(); }}
-          onClose={() => setNewCodeOpen(false)}
+          initialParentId={newCodeParentId}
+          onDone={() => {
+            setNewCodeOpen(false);
+            setNewCodeParentId("");
+            loadCodes();
+          }}
+          onClose={() => {
+            setNewCodeOpen(false);
+            setNewCodeParentId("");
+          }}
         />
       )}
     </div>
   );
 }
+
+
+

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
+import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,12 +17,14 @@ interface CaseRow {
   createdAt: string;
 }
 
-type AttributeDataType = "text" | "number" | "datetime";
+type AttributeDataType = "text" | "number" | "datetime" | "categorical";
 
 interface AttributeDefinition {
   id: string;
   name: string;
   dataType: AttributeDataType;
+  description: string;
+  options: string[];
   sortOrder: number;
 }
 
@@ -35,6 +39,8 @@ interface AttributeDraft {
   id?: string;
   name: string;
   dataType: AttributeDataType;
+  description: string;
+  options: string[];
 }
 
 type SortCol = "name" | "documents" | "memos" | "createdByName" | "createdAt";
@@ -59,6 +65,29 @@ function inputTypeForDataType(dataType: AttributeDataType) {
   if (dataType === "datetime") return "datetime-local";
   return "text";
 }
+
+function normalizeAttributeOptions(options: string[]): string[] {
+  return options.map((option) => option.trim()).filter(Boolean);
+}
+
+function parseAttributeOptions(value: unknown): string[] {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? normalizeAttributeOptions(parsed.filter((item): item is string => typeof item === "string")) : [];
+  } catch {
+    return [];
+  }
+}
+
+const ATTRIBUTE_TYPE_OPTIONS: { value: AttributeDataType; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Numbers" },
+  { value: "datetime", label: "Date/time" },
+  { value: "categorical", label: "Categorical" },
+];
+
+const AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY = "kq_ai_assist_add_attribute_target";
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
@@ -128,30 +157,164 @@ function RichTextEditor({
 
 // ─── Case Detail sub-view ─────────────────────────────────────────────────────
 
+function CaseEditorModal({
+  title,
+  initialName,
+  initialNotes,
+  attributeDefs,
+  initialValues,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  title: string;
+  initialName: string;
+  initialNotes: string;
+  attributeDefs: AttributeDefinition[];
+  initialValues: Record<string, string>;
+  saving: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSave: (payload: {
+    name: string;
+    notes: string;
+    valuesByAttribute: Record<string, string>;
+  }) => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [valuesByAttribute, setValuesByAttribute] = useState<Record<string, string>>(initialValues);
+  const notesRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setName(initialName);
+    setValuesByAttribute(initialValues);
+  }, [initialName, initialValues]);
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal--wide assoc-doc-modal" onClick={(e) => e.stopPropagation()}>
+        <h2>{title}</h2>
+        <div className="form">
+          <label className="form-label">
+            Name
+            <input
+              className="form-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+          </label>
+          <label className="form-label">
+            <span className="form-label">Description</span>
+            <RichTextEditor initialHtml={initialNotes} editorRef={notesRef} />
+          </label>
+          {attributeDefs.length > 0 && (
+            <div>
+              <h3 className="case-card-title" style={{ marginBottom: 10 }}>Attributes</h3>
+              <div className="case-detail-attributes-table-wrap">
+                <table className="case-detail-attributes-table">
+                  <tbody>
+                    {attributeDefs.map((attr) => (
+                      <tr key={attr.id}>
+                        <th className="case-detail-attributes-label" scope="row">{attr.name}</th>
+                        <td className="case-detail-attributes-value">
+                          {attr.dataType === "categorical" ? (
+                            <select
+                              className="form-input"
+                              value={valuesByAttribute[attr.id] ?? ""}
+                              onChange={(e) => setValuesByAttribute((prev) => ({ ...prev, [attr.id]: e.target.value }))}
+                            >
+                              <option value="">—</option>
+                              {attr.options.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              className="form-input"
+                              type={inputTypeForDataType(attr.dataType)}
+                              step={attr.dataType === "number" ? "any" : undefined}
+                              value={valuesByAttribute[attr.id] ?? ""}
+                              onChange={(e) => setValuesByAttribute((prev) => ({ ...prev, [attr.id]: e.target.value }))}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+        {error && <p className="auth-error">{error}</p>}
+        <div className="form-actions">
+          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button
+            className="btn btn--primary"
+            onClick={() => onSave({
+              name: name.trim(),
+              notes: notesRef.current?.innerHTML ?? initialNotes,
+              valuesByAttribute,
+            })}
+            disabled={saving || !name.trim()}
+          >
+            {saving ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CaseDetail({
   row: initialRow,
   pb,
   startEditing,
   canEdit,
+  canDelete,
+  canAssociateDocuments,
+  canMemoAbout,
+  attributeDefs,
+  attributeValues,
   onBack,
   onMemoAbout,
+  onRequestDelete,
 }: {
   row: CaseRow;
   pb: NonNullable<ReturnType<typeof useStore>["pb"]>;
   startEditing: boolean;
   canEdit: boolean;
+  canDelete: boolean;
+  canAssociateDocuments: boolean;
+  canMemoAbout: boolean;
+  attributeDefs: AttributeDefinition[];
+  attributeValues: Record<string, AttributeValue>;
   onBack: () => void;
   onMemoAbout: () => void;
+  onRequestDelete: (row: CaseRow) => void;
 }) {
-  const { setView, setPendingDocId, setPendingMemoId, activeProject, updateCase } = useStore();
+  const { setView, setPendingDocId, setPendingMemoId, activeProject, updateCase, logAction } = useStore();
   const [row,          setRow]          = useState(initialRow);
-  const [editing,      setEditing]      = useState(startEditing);
-  const [name,         setName]         = useState(initialRow.name);
+  const [showEditModal, setShowEditModal] = useState(startEditing);
   const [saving,       setSaving]       = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [caseMemos,    setCaseMemos]    = useState<{ id: string; title: string }[]>([]);
   const [showAssocDocs, setShowAssocDocs] = useState(false);
-  const notesRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [caseAttributeValues, setCaseAttributeValues] = useState<Record<string, AttributeValue>>(() => {
+    const initial: Record<string, AttributeValue> = {};
+    for (const attr of attributeDefs) {
+      const value = attributeValues[`${initialRow.id}:${attr.id}`];
+      if (value) initial[attr.id] = value;
+    }
+    return initial;
+  });
+  const editing = false;
+  function handleToggleEdit(_on: boolean) {}
+  function handleSave() {}
 
   useEffect(() => {
     pb.collection("memos")
@@ -172,22 +335,81 @@ function CaseDetail({
     setRow((prev) => ({ ...prev, documents: docs }));
   }, [pb, row.id]);
 
-  function handleToggleEdit(on: boolean) {
-    if (!on) {
-      setName(row.name);
-      setError(null);
-    }
-    setEditing(on);
-  }
+  useEffect(() => {
+    setRow(initialRow);
+    setShowEditModal(startEditing);
+    setError(null);
+    setCaseAttributeValues(() => {
+      const initial: Record<string, AttributeValue> = {};
+      for (const attr of attributeDefs) {
+        const value = attributeValues[`${initialRow.id}:${attr.id}`];
+        if (value) initial[attr.id] = value;
+      }
+      return initial;
+    });
+  }, [initialRow, startEditing, attributeDefs, attributeValues]);
 
-  async function handleSave() {
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [menuOpen]);
+
+  async function handleSaveCase(payload: {
+    name: string;
+    notes: string;
+    valuesByAttribute: Record<string, string>;
+  }) {
     setSaving(true);
     setError(null);
     try {
-      const notes = notesRef.current?.innerHTML ?? row.notes;
-      await updateCase(row.id, { name, notes });
-      setRow({ ...row, name, notes });
-      setEditing(false);
+      await updateCase(row.id, { name: payload.name, notes: payload.notes });
+
+      const nextAttributeValues = { ...caseAttributeValues };
+      await Promise.all(attributeDefs.map(async (attr) => {
+        const nextValue = payload.valuesByAttribute[attr.id] ?? "";
+        const existing = nextAttributeValues[attr.id];
+        if (existing?.id) {
+          await pb.collection("case_attribute_values").update(existing.id, {
+            value: nextValue,
+            deleted_at: nextValue.trim() ? "" : new Date().toISOString(),
+          });
+          if (nextValue.trim()) nextAttributeValues[attr.id] = { ...existing, value: nextValue };
+          else delete nextAttributeValues[attr.id];
+        } else if (nextValue.trim()) {
+          const record = await pb.collection("case_attribute_values").create({
+            case: row.id,
+            attribute: attr.id,
+            value: nextValue,
+            deleted_at: "",
+          });
+          nextAttributeValues[attr.id] = {
+            id: record.id,
+            caseId: row.id,
+            attributeId: attr.id,
+            value: nextValue,
+          };
+        }
+      }));
+
+      setRow((prev) => ({ ...prev, name: payload.name, notes: payload.notes }));
+      setCaseAttributeValues(nextAttributeValues);
+      setShowEditModal(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save.");
     } finally {
@@ -200,17 +422,58 @@ function CaseDetail({
       {/* Top bar */}
       <div className="case-detail-topbar">
         <button className="btn" onClick={onBack}>← Back to Cases</button>
-        {canEdit && (
-          <label className="toggle-switch" title={editing ? "Cancel editing" : "Edit case"}>
-            <input
-              type="checkbox"
-              checked={editing}
-              onChange={(e) => handleToggleEdit(e.target.checked)}
-            />
-            <span className="toggle-track"><span className="toggle-thumb" /></span>
-            <span className="toggle-label">{editing ? "Editing" : "Edit"}</span>
-          </label>
-        )}
+        <div className="user-detail-menu-wrap" ref={menuRef}>
+          <button
+            type="button"
+            className="home-menu-btn user-detail-menu-btn"
+            aria-label="Case actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          {menuOpen && (
+            <div className="context-menu user-detail-menu" role="menu">
+              {canEdit ? (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowEditModal(true);
+                  }}
+                >
+                  Edit Case
+                </button>
+              ) : (
+                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit cases">
+                  Edit Case
+                </div>
+              )}
+              {canDelete ? (
+                <button
+                  type="button"
+                  className="context-menu-item context-menu-item--danger"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRequestDelete(row);
+                  }}
+                >
+                  Delete Case
+                </button>
+              ) : (
+                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete cases">
+                  Delete Case
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Centered body */}
@@ -219,24 +482,13 @@ function CaseDetail({
         {/* Name card */}
         <div className="case-card">
           <h3 className="case-card-title">Case</h3>
-          {editing ? (
-            <input
-              className="form-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-            />
-          ) : (
-            <p className="case-card-value">{row.name}</p>
-          )}
+          <p className="case-card-value">{row.name}</p>
         </div>
 
         {/* Description card (formerly Notes) */}
         <div className="case-card">
           <h3 className="case-card-title">Description</h3>
-          {editing ? (
-            <RichTextEditor initialHtml={row.notes} editorRef={notesRef} />
-          ) : row.notes ? (
+          {row.notes ? (
             <div
               className="case-notes-body"
               dangerouslySetInnerHTML={{ __html: row.notes }}
@@ -255,12 +507,15 @@ function CaseDetail({
         {/* Documents card */}
         <div className="case-card">
           <div className="case-card-header">
-            <h3 className="case-card-title">Documents</h3>
-            {!editing && (
-              <button className="btn btn--sm" onClick={() => setShowAssocDocs(true)}>
-                Associate Documents
-              </button>
-            )}
+              <h3 className="case-card-title">Documents</h3>
+            <button
+              className="btn btn--sm"
+              onClick={() => setShowAssocDocs(true)}
+              disabled={!canAssociateDocuments}
+              title={!canAssociateDocuments ? "You do not have permission to link documents to this case" : undefined}
+            >
+              Associate Documents
+            </button>
           </div>
           {row.documents.length > 0 ? (
             <ul className="case-detail-doc-list">
@@ -283,12 +538,15 @@ function CaseDetail({
         {/* Memos card */}
         <div className="case-card">
           <div className="case-card-header">
-            <h3 className="case-card-title">Memos</h3>
-            {!editing && (
-              <button className="btn btn--sm" onClick={onMemoAbout}>
-                Memo About
-              </button>
-            )}
+              <h3 className="case-card-title">Memos</h3>
+            <button
+              className="btn btn--sm"
+              onClick={onMemoAbout}
+              disabled={!canMemoAbout}
+              title={!canMemoAbout ? "You do not have permission to create a memo about this case" : undefined}
+            >
+              Memo About
+            </button>
           </div>
           {caseMemos.length > 0 ? (
             <ul className="case-detail-doc-list">
@@ -324,13 +582,31 @@ function CaseDetail({
       </div>
 
       {/* Associate Documents modal (opened from within detail) */}
-      {showAssocDocs && activeProject && (
+      {showAssocDocs && activeProject && canAssociateDocuments && (
         <AssociateDocumentsModal
           caseRow={row}
           pb={pb}
           projectId={activeProject.id}
+          onLog={(action, label, recordId) => logAction(activeProject.id, action, label, recordId)}
           onDone={() => { setShowAssocDocs(false); refreshDocuments(); }}
           onClose={() => setShowAssocDocs(false)}
+        />
+      )}
+      {showEditModal && (
+        <CaseEditorModal
+          title="Edit Case"
+          initialName={row.name}
+          initialNotes={row.notes}
+          attributeDefs={attributeDefs}
+          initialValues={Object.fromEntries(attributeDefs.map((attr) => [attr.id, caseAttributeValues[attr.id]?.value ?? ""]))}
+          saving={saving}
+          error={error}
+          onCancel={() => {
+            if (saving) return;
+            setShowEditModal(false);
+            setError(null);
+          }}
+          onSave={handleSaveCase}
         />
       )}
     </div>
@@ -352,12 +628,14 @@ function AssociateDocumentsModal({
   caseRow,
   pb,
   projectId,
+  onLog,
   onDone,
   onClose,
 }: {
   caseRow: CaseRow;
   pb: NonNullable<ReturnType<typeof useStore>["pb"]>;
   projectId: string;
+  onLog: (action: string, label: string, recordId?: string) => Promise<void> | void;
   onDone: () => void;
   onClose: () => void;
 }) {
@@ -464,6 +742,13 @@ function AssociateDocumentsModal({
           return recId ? removeCaseDocument(recId) : Promise.resolve();
         }),
       ]);
+      if (toAdd.length > 0 || toRemove.length > 0) {
+        await onLog(
+          "case.associations",
+          `Updated document associations for case "${caseRow.name}" (+${toAdd.length} / -${toRemove.length})`,
+          caseRow.id,
+        );
+      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save associations.");
@@ -572,66 +857,6 @@ function AssociateDocumentsModal({
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-function NewAttributeModal({
-  onClose,
-  onCreate,
-  saving,
-}: {
-  onClose: () => void;
-  onCreate: (name: string, dataType: AttributeDataType) => void;
-  saving: boolean;
-}) {
-  const [name, setName] = useState("");
-  const [dataType, setDataType] = useState<AttributeDataType>("text");
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New Attribute</h2>
-        <div className="form-group">
-          <label className="form-label">Attribute name</label>
-          <input
-            className="form-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Interview date"
-            autoFocus
-          />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Data type</label>
-          <div className="attribute-type-picker">
-            {([
-              { value: "text", label: "Text" },
-              { value: "number", label: "Numbers" },
-              { value: "datetime", label: "Date/time" },
-            ] as { value: AttributeDataType; label: string }[]).map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
-                onClick={() => setDataType(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            onClick={() => onCreate(name.trim(), dataType)}
-            disabled={saving || !name.trim()}
-          >
-            {saving ? "Opening..." : "Next"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function AttributeValuesModal({
   draft,
   rows,
@@ -651,6 +876,8 @@ function AttributeValuesModal({
 }) {
   const [name, setName] = useState(draft.name);
   const [dataType, setDataType] = useState<AttributeDataType>(draft.dataType);
+  const [description, setDescription] = useState(draft.description);
+  const [options, setOptions] = useState<string[]>(draft.options.length > 0 ? draft.options : ["", ""]);
   const [valuesByCase, setValuesByCase] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const row of rows) {
@@ -678,11 +905,7 @@ function AttributeValuesModal({
           <div className="form-group">
             <span className="form-label">Data type</span>
             <div className="attribute-type-picker">
-              {([
-                { value: "text", label: "Text" },
-                { value: "number", label: "Numbers" },
-                { value: "datetime", label: "Date/time" },
-              ] as { value: AttributeDataType; label: string }[]).map((option) => (
+              {ATTRIBUTE_TYPE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -694,6 +917,38 @@ function AttributeValuesModal({
               ))}
             </div>
           </div>
+          <label className="form-group attribute-details-span">
+            <span className="form-label">Description</span>
+            <textarea
+              className="form-input attribute-description-input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+            />
+          </label>
+          {dataType === "categorical" && (
+            <div className="form-group attribute-details-span">
+              <span className="form-label">Categories</span>
+              <div className="attribute-category-list">
+                {options.map((option, index) => (
+                  <input
+                    key={index}
+                    className="form-input"
+                    value={option}
+                    onChange={(e) => setOptions((prev) => prev.map((item, itemIndex) => itemIndex === index ? e.target.value : item))}
+                    placeholder={`Category ${index + 1}`}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn btn--small"
+                onClick={() => setOptions((prev) => [...prev, ""])}
+              >
+                Add More
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="attribute-values-list">
@@ -703,13 +958,29 @@ function AttributeValuesModal({
             rows.map((row) => (
               <label key={row.id} className="attribute-value-row">
                 <span>{row.name}</span>
-                <input
-                  className="form-input"
-                  type={inputType}
-                  step={dataType === "number" ? "any" : undefined}
-                  value={valuesByCase[row.id] ?? ""}
-                  onChange={(e) => setValuesByCase((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                />
+                {dataType === "categorical" ? (
+                  <select
+                    className="form-input"
+                    value={valuesByCase[row.id] ?? ""}
+                    onChange={(e) => setValuesByCase((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                  >
+                    <option value="">—</option>
+                    {normalizeAttributeOptions(options).map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                    {(valuesByCase[row.id] ?? "").trim() && !normalizeAttributeOptions(options).includes(valuesByCase[row.id] ?? "") && (
+                      <option value={valuesByCase[row.id]}>{valuesByCase[row.id]}</option>
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    className="form-input"
+                    type={inputType}
+                    step={dataType === "number" ? "any" : undefined}
+                    value={valuesByCase[row.id] ?? ""}
+                    onChange={(e) => setValuesByCase((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                  />
+                )}
               </label>
             ))
           )}
@@ -720,8 +991,8 @@ function AttributeValuesModal({
           <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
           <button
             className="btn btn--primary"
-            onClick={() => onSave({ ...draft, name: name.trim(), dataType }, valuesByCase)}
-            disabled={saving || !name.trim()}
+            onClick={() => onSave({ ...draft, name: name.trim(), dataType, description: description.trim(), options: normalizeAttributeOptions(options) }, valuesByCase)}
+            disabled={saving || !name.trim() || (dataType === "categorical" && normalizeAttributeOptions(options).length < 2)}
           >
             {saving ? "Saving..." : "Save Attribute"}
           </button>
@@ -732,8 +1003,32 @@ function AttributeValuesModal({
 }
 
 export function CasesView() {
-  const { activeProject, pb, canEdit, pendingCaseId, setPendingCaseId, createCase, deleteCase, logAction } = useStore();
+  const {
+    activeProject,
+    pb,
+    canCurrentUser,
+    ensureProjectSafetyBackup,
+    pendingCaseId,
+    setPendingCaseId,
+    createCase,
+    deleteCase,
+    logAction,
+  } = useStore();
   const { user: currentUser } = useAuth();
+  const canCreateCases = canCurrentUser("createCase");
+  const canEditCases = canCurrentUser("editCase");
+  const canDeleteCases = canCurrentUser("deleteCase");
+  const canAssociateDocuments = canCurrentUser("linkCaseDocuments") || canCurrentUser("unlinkCaseDocuments");
+  const canCreateMemos = canCurrentUser("createMemo");
+  const canAssociateMemoObjects = canCurrentUser("associateMemoObjects");
+  const canMemoAboutCases = canCreateMemos && canAssociateMemoObjects;
+  const canCreateCaseAttributes = canCurrentUser("createCaseAttributes");
+  const canEditCaseAttributes = canCurrentUser("editCaseAttributes");
+  const canDeleteCaseAttributes = canCurrentUser("deleteCaseAttributes");
+  const canManageCaseAttributes =
+    canCreateCaseAttributes
+    || canEditCaseAttributes
+    || canDeleteCaseAttributes;
 
   const [rows,    setRows]    = useState<CaseRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -746,6 +1041,7 @@ export function CasesView() {
     x: number; y: number; row: CaseRow;
   } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
   const [confirmDelete,  setConfirmDelete]  = useState<CaseRow | null>(null);
   const [deleteLoading,  setDeleteLoading]  = useState(false);
@@ -753,14 +1049,36 @@ export function CasesView() {
   const [editStartRow,   setEditStartRow]   = useState<CaseRow | null>(null);
   const [assocDocCase,   setAssocDocCase]   = useState<CaseRow | null>(null);
   const [memoForCase,    setMemoForCase]    = useState<CaseRow | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [showAttributesTable, setShowAttributesTable] = useState(false);
   const [attributeDefs, setAttributeDefs] = useState<AttributeDefinition[]>([]);
   const [attributeValues, setAttributeValues] = useState<Record<string, AttributeValue>>({});
-  const [showNewAttribute, setShowNewAttribute] = useState(false);
+  const [attributeSortCol, setAttributeSortCol] = useState<string>("name");
+  const [attributeSortDir, setAttributeSortDir] = useState<SortDir>("asc");
+  const [hoveredAttributeColumn, setHoveredAttributeColumn] = useState<string | null>(null);
+  const [hoveredAttributeRow, setHoveredAttributeRow] = useState<string | null>(null);
   const [attributeValueDraft, setAttributeValueDraft] = useState<AttributeDraft | null>(null);
   const [attributeSaving, setAttributeSaving] = useState(false);
   const [attributeContextMenu, setAttributeContextMenu] = useState<{ x: number; y: number; attr: AttributeDefinition } | null>(null);
   const attributeContextMenuRef = useRef<HTMLDivElement>(null);
+  const attributeContextMenuStyle = useViewportContextMenuStyle(attributeContextMenu, attributeContextMenuRef);
+
+  useEffect(() => {
+    if (!activeProject || !canManageCaseAttributes) return;
+    try {
+      if (window.localStorage.getItem(AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY) !== "case") return;
+      window.localStorage.removeItem(AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY);
+      setShowAttributesTable(true);
+      setAttributeValueDraft({
+        name: "",
+        dataType: "text",
+        description: "",
+        options: [],
+      });
+    } catch {
+      // Best-effort handoff only.
+    }
+  }, [activeProject, canManageCaseAttributes]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -792,6 +1110,8 @@ export function CasesView() {
         id: r.id,
         name: r.name as string,
         dataType: r.data_type as AttributeDataType,
+        description: (r.description as string | undefined) ?? "",
+        options: parseAttributeOptions(r.options_json),
         sortOrder: (r.sort_order as number | undefined) ?? 0,
       })));
 
@@ -922,6 +1242,45 @@ export function CasesView() {
     return `${caseId}:${attributeId}`;
   }
 
+  const sortedAttributeRows = [...rows].sort((a, b) => {
+    let cmp: number;
+
+    if (attributeSortCol === "name") {
+      cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    } else {
+      const attr = attributeDefs.find((definition) => definition.id === attributeSortCol);
+      const aValue = attributeValues[valueKey(a.id, attributeSortCol)]?.value ?? "";
+      const bValue = attributeValues[valueKey(b.id, attributeSortCol)]?.value ?? "";
+
+      if (attr?.dataType === "number") {
+        const aNum = Number(aValue);
+        const bNum = Number(bValue);
+        const aMissing = aValue.trim() === "" || Number.isNaN(aNum);
+        const bMissing = bValue.trim() === "" || Number.isNaN(bNum);
+        if (aMissing && bMissing) cmp = 0;
+        else if (aMissing) cmp = -1;
+        else if (bMissing) cmp = 1;
+        else cmp = aNum - bNum;
+      } else if (attr?.dataType === "datetime") {
+        const aTime = aValue ? new Date(aValue).getTime() : Number.NEGATIVE_INFINITY;
+        const bTime = bValue ? new Date(bValue).getTime() : Number.NEGATIVE_INFINITY;
+        cmp = aTime - bTime;
+      } else {
+        cmp = aValue.localeCompare(bValue, undefined, { sensitivity: "base" });
+      }
+    }
+
+    return attributeSortDir === "asc" ? cmp : -cmp;
+  });
+
+  function handleAttributeSort(col: string) {
+    if (col === attributeSortCol) setAttributeSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setAttributeSortCol(col);
+      setAttributeSortDir("asc");
+    }
+  }
+
   function formatAttributeDisplay(value: string, dataType: AttributeDataType) {
     if (!value) return "";
     if (dataType === "datetime") {
@@ -937,14 +1296,9 @@ export function CasesView() {
     return value;
   }
 
-  function handleCreateAttribute(name: string, dataType: AttributeDataType) {
-    if (!name.trim()) return;
-    setShowNewAttribute(false);
-    setAttributeValueDraft({ name: name.trim(), dataType });
-  }
-
   async function handleSaveAttribute(draft: AttributeDraft, valuesByCase: Record<string, string>) {
     if (!activeProject || !pb || !draft.name.trim()) return;
+    if (draft.id ? !canEditCaseAttributes : !canCreateCaseAttributes) return;
     setAttributeSaving(true);
     setError(null);
     try {
@@ -952,12 +1306,16 @@ export function CasesView() {
         ? await pb.collection("case_attribute_definitions").update(draft.id, {
             name: draft.name.trim(),
             data_type: draft.dataType,
+            description: draft.description,
+            options_json: JSON.stringify(draft.options),
             deleted_at: "",
           })
         : await pb.collection("case_attribute_definitions").create({
             project: activeProject.id,
             name: draft.name.trim(),
             data_type: draft.dataType,
+            description: draft.description,
+            options_json: JSON.stringify(draft.options),
             sort_order: attributeDefs.length,
             deleted_at: "",
           });
@@ -967,6 +1325,8 @@ export function CasesView() {
         id: attrId,
         name: record.name as string,
         dataType: record.data_type as AttributeDataType,
+        description: (record.description as string | undefined) ?? "",
+        options: parseAttributeOptions(record.options_json),
         sortOrder: (record.sort_order as number | undefined) ?? attributeDefs.length,
       };
 
@@ -1016,9 +1376,14 @@ export function CasesView() {
 
   async function handleDeleteAttribute(attr: AttributeDefinition) {
     if (!pb) return;
+    if (!canDeleteCaseAttributes) return;
     setAttributeSaving(true);
     setError(null);
     try {
+      await ensureProjectSafetyBackup(
+        "case_attribute.delete",
+        `Deleted case attribute "${attr.name}"`,
+      );
       const deletedAt = new Date().toISOString();
       await pb.collection("case_attribute_definitions").update(attr.id, { deleted_at: deletedAt });
       const valuesForAttribute = Object.values(attributeValues).filter((value) => value.attributeId === attr.id && value.id);
@@ -1052,6 +1417,8 @@ export function CasesView() {
     try {
       await deleteCase(confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
+      setSelectedRow((prev) => prev?.id === confirmDelete.id ? null : prev);
+      setEditStartRow((prev) => prev?.id === confirmDelete.id ? null : prev);
       setConfirmDelete(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete case.");
@@ -1101,14 +1468,56 @@ export function CasesView() {
 
   if (detailRow && pb) {
     return (
-      <CaseDetail
-        row={detailRow}
-        pb={pb}
-        startEditing={startEdit}
-        canEdit={canEdit}
-        onBack={() => { setSelectedRow(null); setEditStartRow(null); loadCases(); }}
-        onMemoAbout={() => setMemoForCase(detailRow)}
-      />
+      <>
+        <CaseDetail
+          row={detailRow}
+          pb={pb}
+          startEditing={startEdit}
+          canEdit={canEditCases}
+          canDelete={canDeleteCases}
+          canAssociateDocuments={canAssociateDocuments}
+          canMemoAbout={canMemoAboutCases}
+          onBack={() => { setSelectedRow(null); setEditStartRow(null); loadCases(); }}
+          attributeDefs={attributeDefs}
+          attributeValues={attributeValues}
+          onMemoAbout={() => setMemoForCase(detailRow)}
+          onRequestDelete={(row) => setConfirmDelete(row)}
+        />
+        {confirmDelete && (
+          <div
+            className="modal-overlay"
+            onClick={() => !deleteLoading && setConfirmDelete(null)}
+          >
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h2>Delete Case</h2>
+              <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                Are you sure you want to permanently delete{" "}
+                <strong>{confirmDelete.name}</strong>?
+              </p>
+              <p className="modal-warning-text">
+                All data associated with this case - including document associations
+                and any linked memos - will be permanently lost and cannot be recovered.
+              </p>
+              <div className="form-actions" style={{ marginTop: 24 }}>
+                <button
+                  className="btn"
+                  onClick={() => setConfirmDelete(null)}
+                  disabled={deleteLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--danger"
+                  onClick={handleDelete}
+                  disabled={deleteLoading}
+                >
+                  {deleteLoading ? "Deleting…" : "Delete Case"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -1118,160 +1527,289 @@ export function CasesView() {
     <div className="view users-view">
       {/* Header */}
       <header className="view-header">
-        <h1>Cases</h1>
-        {canEdit && (
+        <div className="users-title-wrap">
+          <h1>Cases</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Show Help"
+            aria-label="Show Help"
+          >
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
+        </div>
+        <div className="view-header-actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setShowAttributesTable((show) => !show)}
+          >
+            {showAttributesTable ? "Show Cases" : "Show Attributes"}
+          </button>
           <button
             className="btn btn--primary"
-            onClick={showAttributesTable ? () => setShowNewAttribute(true) : handleNewCase}
+            onClick={
+              showAttributesTable
+                ? () =>
+                    setAttributeValueDraft({
+                      name: "",
+                      dataType: "text",
+                      description: "",
+                      options: [],
+                    })
+                : handleNewCase
+            }
+            disabled={showAttributesTable ? !canCreateCaseAttributes : !canCreateCases}
+            title={
+              showAttributesTable
+                ? !canCreateCaseAttributes
+                  ? "You do not have permission to create case attributes"
+                  : undefined
+                : !canCreateCases
+                  ? "You do not have permission to create cases"
+                  : undefined
+            }
           >
             {showAttributesTable ? "+ Add Attribute" : "+ New Case"}
           </button>
-        )}
+        </div>
       </header>
 
       {error && <p className="users-error">{error}</p>}
-
-      <div className="case-table-toolbar">
-        <div />
-        <label className="toggle-switch" title="Show case attributes table">
-          <input
-            type="checkbox"
-            checked={showAttributesTable}
-            onChange={(e) => setShowAttributesTable(e.target.checked)}
-          />
-          <span className="toggle-track"><span className="toggle-thumb" /></span>
-          <span className="toggle-label">Attributes</span>
-        </label>
-      </div>
-
-      {showAttributesTable && (
-        <div className="users-table-wrap case-attributes-table-wrap">
-          <table className="users-table case-attributes-table">
-            <thead>
-              <tr>
-                <th className="users-th case-attributes-case-col">Case</th>
-                {attributeDefs.map((attr) => (
-                  <th
-                    key={attr.id}
-                    className="users-th case-attributes-value-col"
-                    onContextMenu={(e) => {
-                      if (!canEdit) return;
-                      e.preventDefault();
-                      setAttributeContextMenu({ x: e.clientX, y: e.clientY, attr });
-                    }}
-                  >
-                    {attr.name}
-                    <span className="case-attribute-type-label">{attr.dataType === "datetime" ? "Date/time" : attr.dataType}</span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">Loading...</td></tr>}
-              {!loading && sorted.length === 0 && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No cases yet.</td></tr>}
-              {!loading && sorted.map((row) => (
-                <tr key={row.id} className="users-row">
-                  <td className="users-td users-td--name case-attributes-case-cell">{row.name}</td>
-                  {attributeDefs.map((attr) => {
-                    const key = valueKey(row.id, attr.id);
-                    const cell = attributeValues[key];
-                    return (
-                      <td key={attr.id} className="users-td case-attributes-value-cell">
-                        {cell?.value ? formatAttributeDisplay(cell.value, attr.dataType) : <span className="cases-no-docs">—</span>}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {!error && (
+        <p className="users-permission-note">
+          {showAttributesTable
+            ? canCreateCaseAttributes
+              ? "Case attributes can be viewed and managed here."
+              : "Case attributes are view-only with your current role."
+            : canCreateCases
+              ? "Create a new case with the button above."
+              : "Cases are view-only with your current role."}
+        </p>
       )}
 
-      {/* Table */}
-      <div
-        className="users-table-wrap"
-        hidden={showAttributesTable}
-        style={{
-          maxHeight:
-            34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
-        }}
-      >
-        <table className="users-table">
-          <thead>
-            <tr>
-              {COLS.map((col) => (
-                <th
-                  key={col.key}
-                  style={{ width: col.width }}
-                  className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
-                  onClick={() => handleSort(col.key)}
-                >
-                  {col.label}
-                  <span className="users-sort-icon">
-                    {sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={5} className="users-td-msg">Loading…</td></tr>
-            )}
-            {!loading && sorted.length === 0 && (
-              <tr><td colSpan={5} className="users-td-msg">No cases yet.</td></tr>
-            )}
-            {!loading && sorted.map((row) => (
-              <tr
-                key={row.id}
-                className="users-row"
-                onClick={() => setSelectedRow(row)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setContextMenu({ x: e.clientX, y: e.clientY, row });
+      <div className="users-content">
+          {showAttributesTable && (
+            <div className="users-table-wrap case-attributes-table-wrap">
+              <table
+                className="users-table case-attributes-table"
+                onMouseLeave={() => {
+                  setHoveredAttributeColumn(null);
+                  setHoveredAttributeRow(null);
                 }}
               >
-                <td className="users-td users-td--name">{row.name}</td>
-                <td className="users-td users-td--muted users-td--count">
-                  {row.documents.length > 0 ? row.documents.length : <span className="cases-no-docs">—</span>}
-                </td>
-                <td className="users-td users-td--muted users-td--count">
-                  {row.memoCount > 0 ? row.memoCount : <span className="cases-no-docs">—</span>}
-                </td>
-                <td className="users-td users-td--muted">{row.createdByName}</td>
-                <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                <thead>
+                  <tr>
+                    <th
+                      className={`users-th case-attributes-case-col${attributeSortCol === "name" ? " users-th--sorted" : ""}${hoveredAttributeColumn === "name" ? " case-attributes-cell--hover" : ""}`}
+                      onClick={() => handleAttributeSort("name")}
+                      onMouseEnter={() => {
+                        setHoveredAttributeColumn("name");
+                        setHoveredAttributeRow(null);
+                      }}
+                    >
+                      Case
+                      <span className="users-sort-icon">
+                        {attributeSortCol === "name" ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>
+                    </th>
+                    {attributeDefs.map((attr) => (
+                      <th
+                        key={attr.id}
+                        className={`users-th case-attributes-value-col${attributeSortCol === attr.id ? " users-th--sorted" : ""}${hoveredAttributeColumn === attr.id ? " case-attributes-cell--hover" : ""}`}
+                        onClick={() => handleAttributeSort(attr.id)}
+                        onMouseEnter={() => {
+                          setHoveredAttributeColumn(attr.id);
+                          setHoveredAttributeRow(null);
+                        }}
+                        onContextMenu={(e) => {
+                          if (!canManageCaseAttributes) return;
+                          e.preventDefault();
+                          setAttributeContextMenu({ x: e.clientX, y: e.clientY, attr });
+                        }}
+                      >
+                        {attr.name}
+                        <span className="users-sort-icon">
+                          {attributeSortCol === attr.id ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                        </span>
+                        <span className="case-attribute-type-label">{attr.dataType === "datetime" ? "Date/time" : attr.dataType}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">Loading...</td></tr>}
+                  {!loading && sortedAttributeRows.length === 0 && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No cases yet.</td></tr>}
+                  {!loading && sortedAttributeRows.map((row) => (
+                    <tr key={row.id} className={`users-row${hoveredAttributeRow === row.id ? " case-attributes-row--hover" : ""}`}>
+                      <td
+                        className={`users-td users-td--name case-attributes-case-cell${hoveredAttributeColumn === "name" ? " case-attributes-cell--hover" : ""}`}
+                        onMouseEnter={() => {
+                          setHoveredAttributeColumn("name");
+                          setHoveredAttributeRow(row.id);
+                        }}
+                      >
+                        {row.name}
+                      </td>
+                      {attributeDefs.map((attr) => {
+                        const key = valueKey(row.id, attr.id);
+                        const cell = attributeValues[key];
+                        return (
+                          <td
+                            key={attr.id}
+                            className={`users-td case-attributes-value-cell${hoveredAttributeColumn === attr.id ? " case-attributes-cell--hover" : ""}`}
+                            onMouseEnter={() => {
+                              setHoveredAttributeColumn(attr.id);
+                              setHoveredAttributeRow(row.id);
+                            }}
+                            onContextMenu={(e) => {
+                              if (!canManageCaseAttributes) return;
+                              e.preventDefault();
+                              setAttributeContextMenu({
+                                x: e.clientX,
+                                y: e.clientY,
+                                attr,
+                              });
+                            }}
+                          >
+                            {cell?.value ? formatAttributeDisplay(cell.value, attr.dataType) : <span className="cases-no-docs">-</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div
+            className="users-table-wrap"
+            hidden={showAttributesTable}
+            style={{
+              maxHeight:
+                34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
+            }}
+          >
+            <table className="users-table">
+              <thead>
+                <tr>
+                  {COLS.map((col) => (
+                    <th
+                      key={col.key}
+                      style={{ width: col.width }}
+                      className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
+                      onClick={() => handleSort(col.key)}
+                    >
+                      {col.label}
+                      <span className="users-sort-icon">
+                        {sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr><td colSpan={5} className="users-td-msg">Loading...</td></tr>
+                )}
+                {!loading && sorted.length === 0 && (
+                  <tr><td colSpan={5} className="users-td-msg">No cases yet.</td></tr>
+                )}
+                {!loading && sorted.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="users-row case-list-row"
+                    onClick={() => setSelectedRow(row)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, row });
+                    }}
+                  >
+                    <td className="users-td users-td--name">{row.name}</td>
+                    <td className="users-td users-td--muted users-td--count">
+                      {row.documents.length > 0 ? row.documents.length : <span className="cases-no-docs">-</span>}
+                    </td>
+                    <td className="users-td users-td--muted users-td--count">
+                      {row.memoCount > 0 ? row.memoCount : <span className="cases-no-docs">-</span>}
+                    </td>
+                    <td className="users-td users-td--muted">{row.createdByName}</td>
+                    <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
       </div>
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{showAttributesTable ? "Case Attributes Help" : "Cases Help"}</h2>
+            {showAttributesTable ? (
+              <>
+                <p className="users-guide-copy">
+                  Case attributes are intended to represent qualities of each case.
+                </p>
+                <p className="users-guide-copy">
+                  Use attributes to capture structured details like categories, dates, numbers, or other descriptive properties you want to compare across cases.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="users-guide-copy">
+                  Cases are intended to be units of analysis. They help you organize the people, sites, events, or other entities you want to study across the project.
+                </p>
+                <p className="users-guide-copy">
+                  Multiple documents can be connected to a case, and each case can also hold its own description, memos, and attributes. Select a row to open details, or right-click for quick actions. Use <strong>Show Attributes</strong> to switch to a cross-case attribute view.
+                </p>
+              </>
+            )}
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {attributeContextMenu && (
         <div
           ref={attributeContextMenuRef}
           className="context-menu"
-          style={{ top: attributeContextMenu.y, left: attributeContextMenu.x }}
+          style={attributeContextMenuStyle}
         >
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              setAttributeValueDraft({
-                id: attributeContextMenu.attr.id,
-                name: attributeContextMenu.attr.name,
-                dataType: attributeContextMenu.attr.dataType,
-              });
-              setAttributeContextMenu(null);
-            }}
-          >
-            Edit Attribute
-          </button>
-          <button
-            className="context-menu-item context-menu-item--danger"
-            onClick={() => handleDeleteAttribute(attributeContextMenu.attr)}
-          >
-            Delete Attribute
-          </button>
+          {canManageCaseAttributes && (
+            <>
+              {canEditCaseAttributes && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    setAttributeValueDraft({
+                      id: attributeContextMenu.attr.id,
+                      name: attributeContextMenu.attr.name,
+                      dataType: attributeContextMenu.attr.dataType,
+                      description: attributeContextMenu.attr.description,
+                      options: attributeContextMenu.attr.options,
+                    });
+                    setAttributeContextMenu(null);
+                  }}
+                >
+                  Edit Attribute
+                </button>
+              )}
+              {canDeleteCaseAttributes && (
+                <button
+                  className="context-menu-item context-menu-item--danger"
+                  onClick={() => handleDeleteAttribute(attributeContextMenu.attr)}
+                >
+                  Delete Attribute
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -1280,33 +1818,55 @@ export function CasesView() {
         <div
           ref={contextMenuRef}
           className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
+          style={contextMenuStyle}
         >
-          <button
-            className="context-menu-item"
-            onClick={() => { setAssocDocCase(contextMenu.row); setContextMenu(null); }}
-          >
-            Associate Documents with Case
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => { setMemoForCase(contextMenu.row); setContextMenu(null); }}
-          >
-            Memo About Case
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
-          >
-            Edit Case
-          </button>
-          {canEdit && (
+          {canAssociateDocuments ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setAssocDocCase(contextMenu.row); setContextMenu(null); }}
+            >
+              Associate Documents with Case
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to link documents to cases">
+              Associate Documents with Case
+            </div>
+          )}
+          {canMemoAboutCases ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setMemoForCase(contextMenu.row); setContextMenu(null); }}
+            >
+              Memo About Case
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to create a memo about this case">
+              Memo About Case
+            </div>
+          )}
+          {canEditCases ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
+            >
+              Edit Case
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit cases">
+              Edit Case
+            </div>
+          )}
+          {canDeleteCases ? (
             <button
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}
             >
               Delete Case
             </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete cases">
+              Delete Case
+            </div>
           )}
         </div>
       )}
@@ -1353,16 +1913,9 @@ export function CasesView() {
           caseRow={assocDocCase}
           pb={pb}
           projectId={activeProject.id}
+          onLog={(action, label, recordId) => logAction(activeProject.id, action, label, recordId)}
           onDone={() => { setAssocDocCase(null); loadCases(); }}
           onClose={() => setAssocDocCase(null)}
-        />
-      )}
-
-      {showNewAttribute && (
-        <NewAttributeModal
-          saving={attributeSaving}
-          onClose={() => !attributeSaving && setShowNewAttribute(false)}
-          onCreate={handleCreateAttribute}
         />
       )}
 
@@ -1372,7 +1925,6 @@ export function CasesView() {
           rows={sorted}
           attributeValues={attributeValues}
           saving={attributeSaving}
-          onBack={attributeValueDraft.id ? undefined : () => { setAttributeValueDraft(null); setShowNewAttribute(true); }}
           onCancel={() => !attributeSaving && setAttributeValueDraft(null)}
           onSave={handleSaveAttribute}
         />
@@ -1380,4 +1932,5 @@ export function CasesView() {
     </div>
   );
 }
+
 

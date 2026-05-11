@@ -1,9 +1,19 @@
 import PocketBase from "pocketbase";
+import type { RecordModel } from "pocketbase";
 import { invoke } from "@tauri-apps/api/core";
+import { normalizeAppRole, normalizeProjectRole } from "./permissions";
+import type { Role } from "../types";
 
 // ─── Singleton client ────────────────────────────────────────────────────────
 
 let _pb: PocketBase | null = null;
+let _setupPromise: Promise<void> | null = null;
+let _internalBackendAuthPromise: Promise<InternalBackendAuth> | null = null;
+
+type InternalBackendAuth = {
+  superuserEmail: string;
+  superuserPassword: string;
+};
 
 export async function getPb(): Promise<PocketBase> {
   if (_pb) return _pb;
@@ -29,8 +39,21 @@ export async function waitForPb(maxWaitMs = 30000): Promise<PocketBase> {
 
 // ─── Internal superuser credentials (mirrors src-tauri/src/lib.rs) ──────────
 
-const SUPERUSER_EMAIL = "app@kanqual.internal";
-const SUPERUSER_PASSWORD = "Kanqual_Internal_2024!";
+const APP_METADATA_COLLECTION = "app_metadata";
+const BACKEND_IDENTIFIER_KEY = "backend_identifier";
+const USERS_TABLE_IDENTIFIER_KEY = "users_table_identifier";
+const LARGE_REPORT_SNAPSHOT_MAX = 2_000_000;
+
+async function getInternalBackendAuth(): Promise<InternalBackendAuth> {
+  if (_internalBackendAuthPromise) return _internalBackendAuthPromise;
+  _internalBackendAuthPromise = invoke<InternalBackendAuth>("get_internal_backend_auth");
+  try {
+    return await _internalBackendAuthPromise;
+  } catch (error) {
+    _internalBackendAuthPromise = null;
+    throw error;
+  }
+}
 
 // ─── Superuser helper ────────────────────────────────────────────────────────
 
@@ -41,6 +64,7 @@ const SUPERUSER_PASSWORD = "Kanqual_Internal_2024!";
  */
 async function withSuperuser<T>(fn: (admin: PocketBase) => Promise<T>): Promise<T> {
   const pb = await getPb();
+  const auth = await getInternalBackendAuth();
   // Snapshot the current user session so we can restore it after the
   // admin instance's authStore.clear() removes the shared localStorage key.
   const savedToken = pb.authStore.token;
@@ -49,8 +73,8 @@ async function withSuperuser<T>(fn: (admin: PocketBase) => Promise<T>): Promise<
   const admin = new PocketBase(pb.baseURL);
   admin.autoCancellation(false);
   await admin.collection("_superusers").authWithPassword(
-    SUPERUSER_EMAIL,
-    SUPERUSER_PASSWORD,
+    auth.superuserEmail,
+    auth.superuserPassword,
   );
   try {
     return await fn(admin);
@@ -70,16 +94,35 @@ export async function createUserAccount(data: {
   email: string;
   password: string;
   passwordConfirm: string;
+  userIdentifier?: string;
+  mustChangePassword?: boolean;
+  appRole?: "administrator" | "standard";
 }): Promise<string> {
-  return withSuperuser(async (admin) => {
-    const record = await admin.collection("users").create({ ...data, emailVisibility: true });
-    return record.id;
+  return invoke<string>("create_user_account_command", { request: data });
+}
+
+export async function registerUserAccount(data: {
+  name: string;
+  email: string;
+  password: string;
+  passwordConfirm: string;
+}): Promise<{ id: string; appRole: "administrator" | "standard" }> {
+  return invoke<{ id: string; appRole: "administrator" | "standard" }>("register_user_account_command", {
+    request: data,
   });
+}
+
+export async function getRegisteredUserCount(): Promise<number> {
+  return invoke<number>("get_registered_user_count_command");
 }
 
 /** Delete a user account (requires superuser). */
 export async function deleteUserAccount(userId: string): Promise<void> {
-  await withSuperuser((admin) => admin.collection("users").delete(userId));
+  await invoke("delete_user_account_command", { userId });
+}
+
+export async function clearAppDataRecords(): Promise<void> {
+  await invoke("clear_app_data_records_command");
 }
 
 /** Update a user's name and/or email (requires superuser). */
@@ -87,7 +130,145 @@ export async function updateUserAccount(
   userId: string,
   data: { name?: string; email?: string },
 ): Promise<void> {
-  await withSuperuser((admin) => admin.collection("users").update(userId, data));
+  await invoke("update_user_account_command", { request: { userId, ...data } });
+}
+
+export type ImportedUserAccountResult = {
+  id: string;
+  created: boolean;
+  temporaryPassword?: string;
+};
+
+function escapeFilterValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
+function generateIdentifier(): string {
+  return crypto.randomUUID();
+}
+
+async function getMetadataRecord(pb: PocketBase, key: string) {
+  return pb.collection(APP_METADATA_COLLECTION).getFirstListItem(`key="${escapeFilterValue(key)}"`).catch(() => null);
+}
+
+async function ensureMetadataValue(pb: PocketBase, key: string): Promise<string> {
+  const existing = await getMetadataRecord(pb, key);
+  if (existing?.value) return String(existing.value);
+  const value = generateIdentifier();
+  if (existing) {
+    await pb.collection(APP_METADATA_COLLECTION).update(existing.id, { value });
+  } else {
+    await pb.collection(APP_METADATA_COLLECTION).create({ key, value });
+  }
+  return value;
+}
+
+async function backfillUserIdentifiers(pb: PocketBase): Promise<void> {
+  const users = await pb.collection("users").getFullList({ sort: "created" });
+  await Promise.all(
+    users
+      .filter((user) => !user.user_identifier)
+      .map((user) => pb.collection("users").update(user.id, { user_identifier: generateIdentifier() }))
+  );
+}
+
+async function backfillUserAppRoles(pb: PocketBase): Promise<void> {
+  const users = await pb.collection("users").getFullList({ sort: "created" });
+  if (users.length === 0) return;
+
+  const hasAdministrator = users.some((user) => normalizeAppRole(user.app_role) === "administrator");
+  const firstUserId = users[0]?.id;
+
+  await Promise.all(
+    users.flatMap((user) => {
+      const currentRole = String(user.app_role ?? "").trim();
+      const normalizedRole = normalizeAppRole(currentRole);
+      if (currentRole && normalizedRole === currentRole) {
+        return [];
+      }
+      return [
+        pb.collection("users").update(user.id, {
+          app_role: !hasAdministrator && user.id === firstUserId ? "administrator" : normalizedRole,
+        }),
+      ];
+    }),
+  );
+}
+
+async function backfillProjectMemberRoles(pb: PocketBase): Promise<void> {
+  const memberships = await pb.collection("project_members").getFullList({ sort: "created" });
+  if (memberships.length === 0) return;
+
+  const normalizedById = new Map<string, Role>();
+  const updates: Promise<unknown>[] = [];
+
+  for (const membership of memberships) {
+    const normalizedRole = normalizeProjectRole(membership.role) ?? "viewer";
+    normalizedById.set(membership.id, normalizedRole);
+    if (membership.role !== normalizedRole) {
+      updates.push(pb.collection("project_members").update(membership.id, { role: normalizedRole }));
+    }
+  }
+
+  const membershipsByProject = new Map<string, Array<{ id: string; role: Role }>>();
+  for (const membership of memberships) {
+    const projectMemberships = membershipsByProject.get(String(membership.project)) ?? [];
+    projectMemberships.push({
+      id: membership.id,
+      role: normalizedById.get(membership.id) ?? "viewer",
+    });
+    membershipsByProject.set(String(membership.project), projectMemberships);
+  }
+
+  for (const projectMemberships of membershipsByProject.values()) {
+    if (projectMemberships.length === 0) continue;
+    const hasOwner = projectMemberships.some((membership) => membership.role === "owner");
+    if (!hasOwner) {
+      const fallbackOwner = projectMemberships[0];
+      updates.push(pb.collection("project_members").update(fallbackOwner.id, { role: "owner" }));
+    }
+  }
+
+  if (updates.length > 0) {
+    await Promise.all(updates);
+  }
+}
+
+async function backfillDocumentTypes(pb: PocketBase): Promise<void> {
+  const documents = await pb.collection("documents").getFullList({
+    sort: "created",
+    filter: 'deleted_at=""',
+  }).catch(() => [] as RecordModel[]);
+
+  await Promise.all(
+    documents
+      .filter((document) => !String(document.type ?? "").trim())
+      .map((document) =>
+        pb.collection("documents").update(document.id, { type: "Text" }),
+      ),
+  );
+}
+
+export async function getBackendIdentitySnapshot(pb: PocketBase): Promise<{
+  backendIdentifier: string;
+  usersTableIdentifier: string;
+}> {
+  const [backendRecord, usersTableRecord] = await Promise.all([
+    getMetadataRecord(pb, BACKEND_IDENTIFIER_KEY),
+    getMetadataRecord(pb, USERS_TABLE_IDENTIFIER_KEY),
+  ]);
+  return {
+    backendIdentifier: String(backendRecord?.value ?? ""),
+    usersTableIdentifier: String(usersTableRecord?.value ?? ""),
+  };
+}
+
+export async function ensureImportedUserAccount(data: {
+  name: string;
+  email: string;
+  password?: string;
+}): Promise<ImportedUserAccountResult> {
+  return invoke<ImportedUserAccountResult>("ensure_imported_user_account_command", { request: data });
 }
 
 // ─── Access rules ────────────────────────────────────────────────────────────
@@ -107,48 +288,34 @@ const OPEN_RULES = {
 
 // ─── First-run setup ─────────────────────────────────────────────────────────
 
-export async function ensureSetup(pb: PocketBase): Promise<void> {
-  // Preserve any existing user session before temporarily authenticating as
-  // superuser. This allows persistent logins to survive across app restarts.
-  const savedToken = pb.authStore.token;
-  const savedRecord = pb.authStore.record;
+export async function ensureSetup(_pb: PocketBase): Promise<void> {
+  if (_setupPromise) return _setupPromise;
 
-  // Authenticate as the internal superuser (created by Rust before window shows).
-  // Retry several times because PocketBase's auth system can take a moment to
-  // become ready even after the health check passes.
-  const maxAttempts = 8;
-  let lastError: unknown;
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      await pb.collection("_superusers").authWithPassword(
-        SUPERUSER_EMAIL,
-        SUPERUSER_PASSWORD
-      );
-      lastError = null;
-      break;
-    } catch (e) {
-      lastError = e;
-      await new Promise((r) => setTimeout(r, 500));
+  _setupPromise = (async () => {
+    const maxAttempts = 8;
+    let lastError: unknown;
+
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        await withSuperuser(async (admin) => {
+          await ensureCollections(admin);
+        });
+        return;
+      } catch (e) {
+        lastError = e;
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
-  }
 
-  if (lastError) {
-    // Restore any user session before throwing.
-    if (savedToken) pb.authStore.save(savedToken, savedRecord);
-    else pb.authStore.clear();
-    console.error("Superuser auth failed after retries:", lastError);
+    console.error("Superuser setup failed after retries:", lastError);
     throw new Error("Database initialisation failed. Please restart the app.");
-  }
+  })();
 
   try {
-    await ensureCollections(pb);
-  } finally {
-    // Drop the superuser token and restore the previous user session (if any).
-    if (savedToken) {
-      pb.authStore.save(savedToken, savedRecord);
-    } else {
-      pb.authStore.clear();
-    }
+    await _setupPromise;
+  } catch (e) {
+    _setupPromise = null;
+    throw e;
   }
 }
 
@@ -172,11 +339,18 @@ const AUTO_DATE_FIELDS = [
 async function upsertCollection(
   pb: PocketBase,
   name: string,
-  definition: Record<string, unknown>
+  definition: Record<string, unknown>,
+  options?: { exactFields?: boolean }
 ): Promise<void> {
   const existing = await getCollection(pb, name);
+  const exactFields = options?.exactFields ?? false;
   if (existing) {
-    const needsRuleUpdate = existing.listRule !== AUTH_RULE;
+    const needsRuleUpdate =
+      existing.listRule !== OPEN_RULES.listRule ||
+      existing.viewRule !== OPEN_RULES.viewRule ||
+      existing.createRule !== OPEN_RULES.createRule ||
+      existing.updateRule !== OPEN_RULES.updateRule ||
+      existing.deleteRule !== OPEN_RULES.deleteRule;
     const existingFields  = (existing.fields as Array<Record<string, unknown>>) ?? [];
     const defFields       = (definition.fields as Array<{ name: string } & Record<string, unknown>>) ?? [];
 
@@ -193,16 +367,23 @@ async function upsertCollection(
       return { ...ef, ...df };
     });
     const existingChanged = JSON.stringify(mergedExisting) !== JSON.stringify(existingFields);
+    const prunedFields = exactFields
+      ? mergedExisting.filter((ef) =>
+          defFields.some((df) => df.name === ef["name"])
+          || AUTO_DATE_FIELDS.some((df) => df.name === ef["name"])
+        )
+      : mergedExisting;
+    const extraFieldsRemoved = exactFields && prunedFields.length !== mergedExisting.length;
 
     const missingDates = AUTO_DATE_FIELDS.filter(
       (f) => !existingFields.some((e) => e["name"] === f.name)
     );
 
-    if (needsRuleUpdate || missingDates.length > 0 || missingCustom.length > 0 || existingChanged) {
+    if (needsRuleUpdate || missingDates.length > 0 || missingCustom.length > 0 || existingChanged || extraFieldsRemoved) {
       const patch: Record<string, unknown> = {};
       if (needsRuleUpdate) Object.assign(patch, OPEN_RULES);
-      if (missingDates.length > 0 || missingCustom.length > 0 || existingChanged) {
-        patch.fields = [...mergedExisting, ...missingCustom, ...missingDates];
+      if (missingDates.length > 0 || missingCustom.length > 0 || existingChanged || extraFieldsRemoved) {
+        patch.fields = [...prunedFields, ...missingCustom, ...missingDates];
       }
       await pb.collections.update(existing.id, patch);
     }
@@ -226,25 +407,61 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
   // - list/view/update/delete: AUTH_RULE → only authenticated users
   try {
     const usersCol = await pb.collections.getOne("users");
-    if (usersCol.listRule !== AUTH_RULE || usersCol.createRule !== "" || (usersCol as any).authRule !== "") {
+    const existingFields = ((usersCol as { fields?: Array<Record<string, unknown>> }).fields) ?? [];
+    const hasUserIdentifier = existingFields.some((field) => field.name === "user_identifier");
+    const hasMustChangePassword = existingFields.some((field) => field.name === "must_change_password");
+    const hasAppRole = existingFields.some((field) => field.name === "app_role");
+    const needsUserPatch =
+      usersCol.listRule !== AUTH_RULE ||
+      usersCol.viewRule !== AUTH_RULE ||
+      usersCol.createRule !== "" ||
+      usersCol.updateRule !== AUTH_RULE ||
+      usersCol.deleteRule !== AUTH_RULE ||
+      (usersCol as unknown as { authRule?: string }).authRule !== "" ||
+      !hasUserIdentifier ||
+      !hasMustChangePassword ||
+      !hasAppRole;
+    if (needsUserPatch) {
       await pb.collections.update(usersCol.id, {
         listRule:   AUTH_RULE,
         viewRule:   AUTH_RULE,
         createRule: "",
         updateRule: AUTH_RULE,
         deleteRule: AUTH_RULE,
-        authRule:   "",
+        authRule: "",
+        fields: hasUserIdentifier && hasMustChangePassword && hasAppRole
+          ? existingFields
+          : [
+              ...existingFields,
+              ...(hasUserIdentifier ? [] : [{ name: "user_identifier", type: "text" }]),
+              ...(hasMustChangePassword ? [] : [{ name: "must_change_password", type: "bool" }]),
+              ...(hasAppRole ? [] : [{ name: "app_role", type: "select", required: true, maxSelect: 1, values: ["administrator", "standard"] }]),
+            ],
       });
     }
   } catch {
     // users collection not yet available — PocketBase creates it automatically
   }
 
+  await upsertCollection(pb, APP_METADATA_COLLECTION, {
+    fields: [
+      { name: "key", type: "text", required: true },
+      { name: "value", type: "text", required: true },
+    ],
+  });
+
+  await ensureMetadataValue(pb, BACKEND_IDENTIFIER_KEY);
+  await ensureMetadataValue(pb, USERS_TABLE_IDENTIFIER_KEY);
+  await backfillUserIdentifiers(pb);
+  await backfillUserAppRoles(pb);
+
   // projects
   await upsertCollection(pb, "projects", {
     fields: [
       { name: "name",        type: "text", required: true },
       { name: "description", type: "text" },
+      { name: "backend_identifier", type: "text" },
+      { name: "users_table_identifier", type: "text" },
     ],
   });
 
@@ -254,6 +471,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
     fields: [
       { name: "project",     type: "relation", collectionId: projects.id,       required: true, maxSelect: 1 },
       { name: "user",        type: "relation", collectionId: "_pb_users_auth_", required: true, maxSelect: 1 },
+      { name: "user_identifier", type: "text" },
       { name: "role",        type: "select",   required: true, maxSelect: 1,
         values: ["owner", "editor", "coder", "viewer"] },
       { name: "created_by",  type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
@@ -266,13 +484,17 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
     fields: [
       { name: "project",    type: "relation", collectionId: projects.id,       required: true, maxSelect: 1 },
       { name: "name",       type: "text",     required: true },
+      { name: "type",       type: "text",     required: true },
       { name: "file_path",  type: "text" },
       { name: "content",    type: "text", max: 10000000, required: false },
+      { name: "structured_content_json", type: "text", max: 10000000 },
       { name: "notes",      type: "text" },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
       { name: "deleted_at", type: "text" },
     ],
-  });
+  }, { exactFields: true });
+  await backfillDocumentTypes(pb);
 
   // codes — first pass (without self-referential parent)
   await upsertCollection(pb, "codes", {
@@ -283,6 +505,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "description", type: "text" },
       { name: "shortcut",    type: "text" },
       { name: "created_by",  type: "relation", collectionId: "_pb_users_auth_",  maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
     ],
   });
 
@@ -296,6 +519,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "description", type: "text" },
       { name: "shortcut",    type: "text" },
       { name: "created_by",  type: "relation", collectionId: "_pb_users_auth_",  maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
       { name: "parent",      type: "relation", collectionId: codes.id,           maxSelect: 1 },
       { name: "deleted_at",  type: "text" },
     ],
@@ -303,32 +527,75 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
 
   // annotations
   const documents   = await pb.collections.getOne("documents");
+  await upsertCollection(pb, "document_locks", {
+    fields: [
+      { name: "document",      type: "relation", collectionId: documents.id,        required: true, maxSelect: 1 },
+      { name: "user",          type: "relation", collectionId: "_pb_users_auth_",   required: true, maxSelect: 1 },
+      { name: "user_name",     type: "text",     required: true },
+      { name: "expires_at_ms", type: "number",   required: true },
+    ],
+  });
+
+  await upsertCollection(pb, "document_lock_kicks", {
+    fields: [
+      { name: "document",        type: "relation", collectionId: documents.id,        required: true, maxSelect: 1 },
+      { name: "user",            type: "relation", collectionId: "_pb_users_auth_",   required: true, maxSelect: 1 },
+      { name: "kicked_by",       type: "relation", collectionId: "_pb_users_auth_",   maxSelect: 1 },
+      { name: "kicked_by_name",  type: "text",     required: true },
+      { name: "expires_at_ms",   type: "number",   required: true },
+    ],
+  });
+
   await upsertCollection(pb, "annotations", {
     fields: [
       { name: "document",     type: "relation", collectionId: documents.id,        required: true, maxSelect: 1 },
       { name: "code",         type: "relation", collectionId: codes.id,            required: true, maxSelect: 1 },
-      { name: "start_offset", type: "number",   required: true },
-      { name: "end_offset",   type: "number",   required: true },
+      { name: "start_offset", type: "number",   required: false },
+      { name: "end_offset",   type: "number",   required: false },
       { name: "quote",        type: "text",     required: true },
       { name: "note",         type: "text" },
       { name: "created_by",   type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
       { name: "deleted_at",   type: "text" },
     ],
-  });
+  }, { exactFields: true });
 
   // memos
   const annotations = await pb.collections.getOne("annotations");
   await upsertCollection(pb, "memos", {
     fields: [
       { name: "project",    type: "relation", collectionId: projects.id,    required: true, maxSelect: 1 },
-      { name: "document",   type: "relation", collectionId: documents.id,   maxSelect: 1 },
-      { name: "annotation", type: "relation", collectionId: annotations.id, maxSelect: 1 },
+      { name: "document",   type: "relation", collectionId: documents.id,   maxSelect: 9999 },
+      { name: "annotation", type: "relation", collectionId: annotations.id, maxSelect: 9999 },
       { name: "title",      type: "text", required: true },
       { name: "body",       type: "text" },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
       { name: "deleted_at", type: "text" },
     ],
   });
+  await backfillProjectMemberRoles(pb);
+
+  await upsertCollection(pb, "processed_document_reviews", {
+    fields: [
+      { name: "project",    type: "relation", collectionId: projects.id,       required: true, maxSelect: 1 },
+      { name: "document",   type: "relation", collectionId: documents.id,      required: true, maxSelect: 1 },
+      { name: "document_name", type: "text",  required: true },
+      { name: "file_path",  type: "text" },
+      { name: "status",     type: "select",   required: true, maxSelect: 1, values: ["pending_review", "reviewed"] },
+      { name: "model",      type: "text" },
+      { name: "base_url",   type: "text" },
+      { name: "chunk_count", type: "number" },
+      { name: "processed_content", type: "text", max: 10000000 },
+      { name: "segments_json", type: "text", max: 10000000 },
+      { name: "proper_name_candidates_json", type: "text", max: 1000000 },
+      { name: "enabled_review_lenses_json", type: "text" },
+      { name: "exported_to_project", type: "bool" },
+      { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
+      { name: "deleted_at", type: "text" },
+    ],
+  }, { exactFields: true });
 
   // cases
   await upsertCollection(pb, "cases", {
@@ -337,6 +604,7 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "name",       type: "text",     required: true },
       { name: "notes",      type: "text" },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_",  maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
       { name: "deleted_at", type: "text" },
     ],
   });
@@ -366,7 +634,9 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
     fields: [
       { name: "project",    type: "relation", collectionId: projects.id, required: true, maxSelect: 1 },
       { name: "name",       type: "text",     required: true },
-      { name: "data_type",  type: "select",   required: true, values: ["text", "number", "datetime"] },
+      { name: "data_type",  type: "select",   required: true, values: ["text", "number", "datetime", "categorical"] },
+      { name: "description", type: "text" },
+      { name: "options_json", type: "text" },
       { name: "sort_order", type: "number" },
       { name: "deleted_at", type: "text" },
     ],
@@ -387,7 +657,9 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
     fields: [
       { name: "project",    type: "relation", collectionId: projects.id, required: true, maxSelect: 1 },
       { name: "name",       type: "text",     required: true },
-      { name: "data_type",  type: "select",   required: true, values: ["text", "number", "datetime"] },
+      { name: "data_type",  type: "select",   required: true, values: ["text", "number", "datetime", "categorical"] },
+      { name: "description", type: "text" },
+      { name: "options_json", type: "text" },
       { name: "sort_order", type: "number" },
       { name: "deleted_at", type: "text" },
     ],
@@ -403,12 +675,24 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
     ],
   });
 
+  // memos — second pass to add relations that depend on collections defined above
+  await upsertCollection(pb, "memos", {
+    fields: [
+      { name: "cases",                   type: "relation", collectionId: cases.id,                        maxSelect: 9999 },
+      { name: "codes",                   type: "relation", collectionId: codes.id,                        maxSelect: 9999 },
+      { name: "case_attribute_defs",     type: "relation", collectionId: caseAttributeDefinitions.id,     maxSelect: 9999 },
+      { name: "document_attribute_defs", type: "relation", collectionId: documentAttributeDefinitions.id, maxSelect: 9999 },
+    ],
+  });
+
   // project_log — append-only audit trail of mutations within a project
   await upsertCollection(pb, "project_log", {
     fields: [
       { name: "project",      type: "relation", collectionId: projects.id,        required: true, maxSelect: 1 },
       { name: "user",         type: "relation", collectionId: "_pb_users_auth_",  maxSelect: 1 },
+      { name: "user_identifier", type: "text" },
       { name: "user_name",    type: "text" },
+      { name: "access_mode",  type: "select", values: ["local", "remote"], maxSelect: 1 },
       { name: "action",       type: "text",     required: true },
       { name: "label",        type: "text",     required: true },
       { name: "record_id",    type: "text" },
@@ -428,7 +712,25 @@ async function ensureCollections(pb: PocketBase): Promise<void> {
       { name: "documents",  type: "relation", collectionId: documents.id,      maxSelect: 100 },
       { name: "codes",      type: "relation", collectionId: codesCol.id,       maxSelect: 100 },
       { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
-      { name: "snapshot",   type: "text" },
+      { name: "created_by_identifier", type: "text" },
+      { name: "snapshot",   type: "text", max: LARGE_REPORT_SNAPSHOT_MAX },
+      { name: "deleted_at", type: "text" },
+    ],
+  });
+
+  // coder_reports — named analytical reports about coder activity and agreement
+  await upsertCollection(pb, "coder_reports", {
+    fields: [
+      { name: "project",    type: "relation", collectionId: projects.id,       required: true, maxSelect: 1 },
+      { name: "name",       type: "text",     required: true },
+      { name: "coders",     type: "relation", collectionId: "_pb_users_auth_", maxSelect: 100 },
+      { name: "cases",      type: "relation", collectionId: casesCol.id,       maxSelect: 100 },
+      { name: "documents",  type: "relation", collectionId: documents.id,      maxSelect: 100 },
+      { name: "codes",      type: "relation", collectionId: codesCol.id,       maxSelect: 100 },
+      { name: "created_by", type: "relation", collectionId: "_pb_users_auth_", maxSelect: 1 },
+      { name: "created_by_identifier", type: "text" },
+      { name: "coder_identifiers", type: "text" },
+      { name: "snapshot",   type: "text", max: LARGE_REPORT_SNAPSHOT_MAX },
       { name: "deleted_at", type: "text" },
     ],
   });

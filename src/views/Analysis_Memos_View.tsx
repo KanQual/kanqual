@@ -2,6 +2,18 @@ import { useState, useEffect, useCallback, useRef, useId, useMemo } from "react"
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import type { Code } from "../types";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { jsPDF } from "jspdf";
+import {
+  Document as DocxDocument,
+  HeadingLevel,
+  Packer,
+  Paragraph,
+  TextRun,
+} from "docx";
+import { useViewportContextMenuStyle } from "../lib/contextMenu";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 // ─── Rich text editor ─────────────────────────────────────────────────────────
 
@@ -87,6 +99,13 @@ interface MemoRow {
   documentIds: string[];
   codeIds: string[];
   annotationIds: string[];
+  caseAttributeDefIds: string[];
+  documentAttributeDefIds: string[];
+  // Display names for attribute defs
+  caseAttributeDefNames: string[];
+  documentAttributeDefNames: string[];
+  // Full annotation details for display
+  annotationDetails: AnnItem[];
 }
 
 type SortCol = "title" | "createdByName" | "createdAt" | "cases" | "documents" | "codes";
@@ -161,6 +180,8 @@ export function MemoEditorView({
   preselectedCaseIds,
   preselectedDocumentIds,
   preselectedCodeIds,
+  preselectedCaseAttributeDefIds,
+  preselectedDocumentAttributeDefIds,
   backLabel,
   onSaved,
   onBack,
@@ -169,37 +190,70 @@ export function MemoEditorView({
   preselectedCaseIds?: string[];
   preselectedDocumentIds?: string[];
   preselectedCodeIds?: string[];
+  preselectedCaseAttributeDefIds?: string[];
+  preselectedDocumentAttributeDefIds?: string[];
   backLabel?: string;
   onSaved: () => void;
   onBack: () => void;
 }) {
-  const { pb, activeProject, documents: storeDocs, codes: storeCodes, addMemo, updateMemo } = useStore();
+  const {
+    pb,
+    activeProject,
+    documents: storeDocs,
+    codes: storeCodes,
+    addMemo,
+    updateMemo,
+    canCurrentUser,
+  } = useStore();
   const { user: currentUser } = useAuth();
+  const canCreateMemos = canCurrentUser("createMemo");
+  const canEditMemos = canCurrentUser("editMemo");
+  const canAssociateMemoObjects = canCurrentUser("associateMemoObjects");
 
   // ── Raw loaded data ────────────────────────────────────────────────────────
-  const [caseItems,   setCaseItems]   = useState<{ id: string; name: string }[]>([]);
-  const [annItems,    setAnnItems]    = useState<AnnItem[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [caseItems,    setCaseItems]    = useState<{ id: string; name: string }[]>([]);
+  const [annItems,     setAnnItems]     = useState<AnnItem[]>([]);
+  const [caseAttrDefs, setCaseAttrDefs] = useState<{ id: string; name: string }[]>([]);
+  const [docAttrDefs,  setDocAttrDefs]  = useState<{ id: string; name: string }[]>([]);
+  const [dataLoading,  setDataLoading]  = useState(true);
 
   // ── Selections (pre-filled from editRow when editing) ─────────────────────
-  const [selCaseIds, setSelCaseIds] = useState<Set<string>>(
+  const [selCaseIds,        setSelCaseIds]        = useState<Set<string>>(
     () => new Set([...(editRow?.caseIds ?? []), ...(preselectedCaseIds ?? [])]),
   );
-  const [selDocIds,  setSelDocIds]  = useState<Set<string>>(
+  const [selDocIds,         setSelDocIds]         = useState<Set<string>>(
     () => new Set([...(editRow?.documentIds ?? []), ...(preselectedDocumentIds ?? [])]),
   );
-  const [selCodeIds, setSelCodeIds] = useState<Set<string>>(
+  const [selCodeIds,        setSelCodeIds]        = useState<Set<string>>(
     () => new Set([...(editRow?.codeIds ?? []), ...(preselectedCodeIds ?? [])]),
   );
-  const [selAnnIds,  setSelAnnIds]  = useState<Set<string>>(
+  const [selAnnIds,         setSelAnnIds]         = useState<Set<string>>(
     () => new Set(editRow?.annotationIds ?? []),
+  );
+  const [selCaseAttrDefIds, setSelCaseAttrDefIds] = useState<Set<string>>(
+    () => new Set([...(editRow?.caseAttributeDefIds ?? []), ...(preselectedCaseAttributeDefIds ?? [])]),
+  );
+  const [selDocAttrDefIds,  setSelDocAttrDefIds]  = useState<Set<string>>(
+    () => new Set([...(editRow?.documentAttributeDefIds ?? []), ...(preselectedDocumentAttributeDefIds ?? [])]),
   );
 
   // ── UI state ──────────────────────────────────────────────────────────────
-  const [title,     setTitle]     = useState(editRow?.title ?? "");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [saving,    setSaving]    = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
+  const [title,                setTitle]                = useState(editRow?.title ?? "");
+  const [collapsed,            setCollapsed]            = useState<Set<string>>(() => {
+    // All panels start collapsed; expand only those with pre-selected items
+    const all = new Set(["cases", "documents", "codes", "annotations", "case_attr_defs", "doc_attr_defs"]);
+    if ((editRow?.caseIds?.length          ?? 0) > 0 || (preselectedCaseIds?.length                  ?? 0) > 0) all.delete("cases");
+    if ((editRow?.documentIds?.length      ?? 0) > 0 || (preselectedDocumentIds?.length              ?? 0) > 0) all.delete("documents");
+    if ((editRow?.codeIds?.length          ?? 0) > 0 || (preselectedCodeIds?.length                  ?? 0) > 0) all.delete("codes");
+    if ((editRow?.annotationIds?.length    ?? 0) > 0)                                                           all.delete("annotations");
+    if ((editRow?.caseAttributeDefIds?.length    ?? 0) > 0 || (preselectedCaseAttributeDefIds?.length    ?? 0) > 0) all.delete("case_attr_defs");
+    if ((editRow?.documentAttributeDefIds?.length ?? 0) > 0 || (preselectedDocumentAttributeDefIds?.length ?? 0) > 0) all.delete("doc_attr_defs");
+    return all;
+  });
+  const [expandedSummaryCards, setExpandedSummaryCards] = useState<Set<string>>(new Set());
+  const [annCardCollapsed,     setAnnCardCollapsed]     = useState(true);
+  const [saving,               setSaving]               = useState(false);
+  const [error,                setError]                = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
 
   // ── Load cases and annotations ─────────────────────────────────────────────
@@ -230,6 +284,17 @@ export function MemoEditorView({
             docName:   r.expand?.document?.name ?? "—",
           })));
         }
+
+        const [caseAttrDefRecs, docAttrDefRecs] = await Promise.all([
+          pb.collection("case_attribute_definitions").getFullList({
+            filter: `project="${activeProject.id}"&&deleted_at=""`, sort: "sort_order,created",
+          }),
+          pb.collection("document_attribute_definitions").getFullList({
+            filter: `project="${activeProject.id}"&&deleted_at=""`, sort: "sort_order,created",
+          }),
+        ]);
+        setCaseAttrDefs(caseAttrDefRecs.map((r) => ({ id: r.id, name: r.name })));
+        setDocAttrDefs(docAttrDefRecs.map((r) => ({ id: r.id, name: r.name })));
       } catch (e) {
         console.error(e);
       } finally {
@@ -254,6 +319,14 @@ export function MemoEditorView({
     setter(next);
   }
 
+  function toggleSummaryCard(key: string) {
+    setExpandedSummaryCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
   function toggleSection(name: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -265,16 +338,25 @@ export function MemoEditorView({
   // ── Save ──────────────────────────────────────────────────────────────────
   async function handleSave() {
     if (!activeProject || !title.trim()) return;
+    if ((editRow && !canEditMemos) || (!editRow && !canCreateMemos)) return;
     setSaving(true);
     setError(null);
     try {
+      const preservedCaseIds = editRow?.caseIds ?? preselectedCaseIds ?? [];
+      const preservedDocumentIds = editRow?.documentIds ?? preselectedDocumentIds ?? [];
+      const preservedCodeIds = editRow?.codeIds ?? preselectedCodeIds ?? [];
+      const preservedAnnotationIds = editRow?.annotationIds ?? [];
+      const preservedCaseAttributeDefIds = editRow?.caseAttributeDefIds ?? preselectedCaseAttributeDefIds ?? [];
+      const preservedDocumentAttributeDefIds = editRow?.documentAttributeDefIds ?? preselectedDocumentAttributeDefIds ?? [];
       const data = {
-        title:         title.trim(),
-        body:          editorRef.current?.innerHTML ?? "",
-        documentIds:   [...selDocIds],
-        annotationIds: [...selAnnIds],
-        caseIds:       [...selCaseIds],
-        codeIds:       [...selCodeIds],
+        title:                   title.trim(),
+        body:                    editorRef.current?.innerHTML ?? "",
+        documentIds:             canAssociateMemoObjects ? [...selDocIds] : preservedDocumentIds,
+        annotationIds:           canAssociateMemoObjects ? [...selAnnIds] : preservedAnnotationIds,
+        caseIds:                 canAssociateMemoObjects ? [...selCaseIds] : preservedCaseIds,
+        codeIds:                 canAssociateMemoObjects ? [...selCodeIds] : preservedCodeIds,
+        caseAttributeDefIds:     canAssociateMemoObjects ? [...selCaseAttrDefIds] : preservedCaseAttributeDefIds,
+        documentAttributeDefIds: canAssociateMemoObjects ? [...selDocAttrDefIds] : preservedDocumentAttributeDefIds,
       };
       if (editRow) {
         await updateMemo(editRow.id, data);
@@ -311,20 +393,10 @@ export function MemoEditorView({
 
       <div className="doc-detail-layout">
 
-        {/* ── Left: title + associations ── */}
+        {/* ── Left: associations ── */}
         <div className="doc-detail-left">
-
-          <div className="case-card">
-            <h3 className="case-card-title">{isEdit ? "Edit Memo" : "New Memo"}</h3>
-            <input
-              className="form-input"
-              placeholder="Memo title…"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus
-            />
-          </div>
-
+          {canAssociateMemoObjects ? (
+            <>
           <p className="memo-assoc-label">Associate Memo with…</p>
 
           {/* Cases */}
@@ -336,7 +408,14 @@ export function MemoEditorView({
               <span className="codebook-collapse-icon">{collapsed.has("cases") ? "▶" : "▼"}</span>
             </div>
             {!collapsed.has("cases") && (
-              <ul className="memo-sel-list">
+              <>
+                {!dataLoading && caseItems.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseIds(new Set(caseItems.map(c => c.id)))}>All</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseIds(new Set())}>Clear</button>
+                  </div>
+                )}
+                <ul className="memo-sel-list">
                 {dataLoading
                   ? <li className="memo-sel-empty">Loading…</li>
                   : caseItems.length === 0
@@ -358,7 +437,51 @@ export function MemoEditorView({
                         </li>
                       ))
                 }
-              </ul>
+                </ul>
+              </>
+            )}
+          </div>
+
+          {/* Case Attributes */}
+          <div className="case-card">
+            <div className="memo-card-header" onClick={() => toggleSection("case_attr_defs")}>
+              <h3 className="case-card-title" style={{ margin: 0 }}>
+                Case Attributes{selCaseAttrDefIds.size > 0 ? ` (${selCaseAttrDefIds.size})` : ""}
+              </h3>
+              <span className="codebook-collapse-icon">{collapsed.has("case_attr_defs") ? "▶" : "▼"}</span>
+            </div>
+            {!collapsed.has("case_attr_defs") && (
+              <>
+                {!dataLoading && caseAttrDefs.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseAttrDefIds(new Set(caseAttrDefs.map(d => d.id)))}>All</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseAttrDefIds(new Set())}>Clear</button>
+                  </div>
+                )}
+                <ul className="memo-sel-list">
+                  {dataLoading
+                    ? <li className="memo-sel-empty">Loading…</li>
+                    : caseAttrDefs.length === 0
+                      ? <li className="memo-sel-empty">No case attributes.</li>
+                      : caseAttrDefs.map((def) => (
+                          <li
+                            key={def.id}
+                            className={`memo-sel-item${selCaseAttrDefIds.has(def.id) ? " memo-sel-item--checked" : ""}`}
+                            onClick={() => toggle(selCaseAttrDefIds, setSelCaseAttrDefIds, def.id)}
+                          >
+                            <input
+                              type="checkbox"
+                              className="memo-sel-checkbox"
+                              checked={selCaseAttrDefIds.has(def.id)}
+                              onChange={() => toggle(selCaseAttrDefIds, setSelCaseAttrDefIds, def.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <span className="memo-sel-item-label">{def.name}</span>
+                          </li>
+                        ))
+                  }
+                </ul>
+              </>
             )}
           </div>
 
@@ -371,27 +494,78 @@ export function MemoEditorView({
               <span className="codebook-collapse-icon">{collapsed.has("documents") ? "▶" : "▼"}</span>
             </div>
             {!collapsed.has("documents") && (
-              <ul className="memo-sel-list">
-                {storeDocs.length === 0
-                  ? <li className="memo-sel-empty">No documents.</li>
-                  : storeDocs.map((doc) => (
-                      <li
-                        key={doc.id}
-                        className={`memo-sel-item${selDocIds.has(doc.id) ? " memo-sel-item--checked" : ""}`}
-                        onClick={() => toggle(selDocIds, setSelDocIds, doc.id)}
-                      >
-                        <input
-                          type="checkbox"
-                          className="memo-sel-checkbox"
-                          checked={selDocIds.has(doc.id)}
-                          onChange={() => toggle(selDocIds, setSelDocIds, doc.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <span className="memo-sel-item-label">{doc.name}</span>
-                      </li>
-                    ))
-                }
-              </ul>
+              <>
+                {storeDocs.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocIds(new Set(storeDocs.map(d => d.id)))}>All</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocIds(new Set())}>Clear</button>
+                  </div>
+                )}
+                <ul className="memo-sel-list">
+                  {storeDocs.length === 0
+                    ? <li className="memo-sel-empty">No documents.</li>
+                    : storeDocs.map((doc) => (
+                        <li
+                          key={doc.id}
+                          className={`memo-sel-item${selDocIds.has(doc.id) ? " memo-sel-item--checked" : ""}`}
+                          onClick={() => toggle(selDocIds, setSelDocIds, doc.id)}
+                        >
+                          <input
+                            type="checkbox"
+                            className="memo-sel-checkbox"
+                            checked={selDocIds.has(doc.id)}
+                            onChange={() => toggle(selDocIds, setSelDocIds, doc.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span className="memo-sel-item-label">{doc.name}</span>
+                        </li>
+                      ))
+                  }
+                </ul>
+              </>
+            )}
+          </div>
+
+          {/* Document Attributes */}
+          <div className="case-card">
+            <div className="memo-card-header" onClick={() => toggleSection("doc_attr_defs")}>
+              <h3 className="case-card-title" style={{ margin: 0 }}>
+                Document Attributes{selDocAttrDefIds.size > 0 ? ` (${selDocAttrDefIds.size})` : ""}
+              </h3>
+              <span className="codebook-collapse-icon">{collapsed.has("doc_attr_defs") ? "▶" : "▼"}</span>
+            </div>
+            {!collapsed.has("doc_attr_defs") && (
+              <>
+                {!dataLoading && docAttrDefs.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocAttrDefIds(new Set(docAttrDefs.map(d => d.id)))}>All</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocAttrDefIds(new Set())}>Clear</button>
+                  </div>
+                )}
+                <ul className="memo-sel-list">
+                  {dataLoading
+                    ? <li className="memo-sel-empty">Loading…</li>
+                    : docAttrDefs.length === 0
+                      ? <li className="memo-sel-empty">No document attributes.</li>
+                      : docAttrDefs.map((def) => (
+                          <li
+                            key={def.id}
+                            className={`memo-sel-item${selDocAttrDefIds.has(def.id) ? " memo-sel-item--checked" : ""}`}
+                            onClick={() => toggle(selDocAttrDefIds, setSelDocAttrDefIds, def.id)}
+                          >
+                            <input
+                              type="checkbox"
+                              className="memo-sel-checkbox"
+                              checked={selDocAttrDefIds.has(def.id)}
+                              onChange={() => toggle(selDocAttrDefIds, setSelDocAttrDefIds, def.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <span className="memo-sel-item-label">{def.name}</span>
+                          </li>
+                        ))
+                  }
+                </ul>
+              </>
             )}
           </div>
 
@@ -404,32 +578,40 @@ export function MemoEditorView({
               <span className="codebook-collapse-icon">{collapsed.has("codes") ? "▶" : "▼"}</span>
             </div>
             {!collapsed.has("codes") && (
-              <ul className="memo-sel-list">
-                {codeTree.length === 0
-                  ? <li className="memo-sel-empty">No codes.</li>
-                  : codeTree.map(({ code, depth }) => (
-                      <li
-                        key={code.id}
-                        className={`memo-sel-item${selCodeIds.has(code.id) ? " memo-sel-item--checked" : ""}`}
-                        style={{ paddingLeft: 14 + depth * 16 }}
-                        onClick={() => toggle(selCodeIds, setSelCodeIds, code.id)}
-                      >
-                        <input
-                          type="checkbox"
-                          className="memo-sel-checkbox"
-                          checked={selCodeIds.has(code.id)}
-                          onChange={() => toggle(selCodeIds, setSelCodeIds, code.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <span
-                          className="code-swatch"
-                          style={{ background: code.color, flexShrink: 0, marginTop: 1 }}
-                        />
-                        <span className="memo-sel-item-label">{code.label}</span>
-                      </li>
-                    ))
-                }
-              </ul>
+              <>
+                {codeTree.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCodeIds(new Set(codeTree.map(({ code }) => code.id)))}>All</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCodeIds(new Set())}>Clear</button>
+                  </div>
+                )}
+                <ul className="memo-sel-list">
+                  {codeTree.length === 0
+                    ? <li className="memo-sel-empty">No codes.</li>
+                    : codeTree.map(({ code, depth }) => (
+                        <li
+                          key={code.id}
+                          className={`memo-sel-item${selCodeIds.has(code.id) ? " memo-sel-item--checked" : ""}`}
+                          style={{ paddingLeft: 14 + depth * 16 }}
+                          onClick={() => toggle(selCodeIds, setSelCodeIds, code.id)}
+                        >
+                          <input
+                            type="checkbox"
+                            className="memo-sel-checkbox"
+                            checked={selCodeIds.has(code.id)}
+                            onChange={() => toggle(selCodeIds, setSelCodeIds, code.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span
+                            className="code-swatch"
+                            style={{ background: code.color, flexShrink: 0, marginTop: 1 }}
+                          />
+                          <span className="memo-sel-item-label">{code.label}</span>
+                        </li>
+                      ))
+                  }
+                </ul>
+              </>
             )}
           </div>
 
@@ -442,44 +624,180 @@ export function MemoEditorView({
               <span className="codebook-collapse-icon">{collapsed.has("annotations") ? "▶" : "▼"}</span>
             </div>
             {!collapsed.has("annotations") && (
-              <ul className="memo-sel-list">
-                {annItems.length === 0
-                  ? <li className="memo-sel-empty">No annotations.</li>
-                  : annItems.map((ann) => (
-                      <li
-                        key={ann.id}
-                        className={`memo-sel-item${selAnnIds.has(ann.id) ? " memo-sel-item--checked" : ""}`}
-                        style={{ borderRight: `3px solid ${ann.codeColor}`, paddingRight: 11 }}
-                        onClick={() => toggle(selAnnIds, setSelAnnIds, ann.id)}
-                      >
-                        <input
-                          type="checkbox"
-                          className="memo-sel-checkbox"
-                          checked={selAnnIds.has(ann.id)}
-                          onChange={() => toggle(selAnnIds, setSelAnnIds, ann.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <div className="memo-sel-item-text">
-                          <span
-                            className="annotation-code-badge"
-                            style={{ background: ann.codeColor, marginBottom: 3, display: "inline-block", alignSelf: "flex-start" }}
-                          >
-                            {ann.codeName}
-                          </span>
-                          <span className="memo-sel-item-label">{ann.quote}</span>
-                          <span className="memo-sel-item-sub">{ann.docName}</span>
-                        </div>
-                      </li>
-                    ))
-                }
-              </ul>
+              <>
+                {annItems.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelAnnIds(new Set(annItems.map(a => a.id)))}>All</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelAnnIds(new Set())}>Clear</button>
+                  </div>
+                )}
+                <ul className="memo-sel-list">
+                  {annItems.length === 0
+                    ? <li className="memo-sel-empty">No annotations.</li>
+                    : annItems.map((ann) => (
+                        <li
+                          key={ann.id}
+                          className={`memo-sel-item${selAnnIds.has(ann.id) ? " memo-sel-item--checked" : ""}`}
+                          style={{ borderRight: `3px solid ${ann.codeColor}`, paddingRight: 11 }}
+                          onClick={() => toggle(selAnnIds, setSelAnnIds, ann.id)}
+                        >
+                          <input
+                            type="checkbox"
+                            className="memo-sel-checkbox"
+                            checked={selAnnIds.has(ann.id)}
+                            onChange={() => toggle(selAnnIds, setSelAnnIds, ann.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="memo-sel-item-text">
+                            <span
+                              className="annotation-code-badge"
+                              style={{ background: ann.codeColor, marginBottom: 3, display: "inline-block", alignSelf: "flex-start" }}
+                            >
+                              {ann.codeName}
+                            </span>
+                            <span className="memo-sel-item-label">{ann.quote}</span>
+                            <span className="memo-sel-item-sub">{ann.docName}</span>
+                          </div>
+                        </li>
+                      ))
+                  }
+                </ul>
+              </>
             )}
           </div>
-
+            </>
+          ) : (
+            <div className="case-card">
+              <h3 className="case-card-title">Associations</h3>
+              <p className="case-card-empty">
+                Your role can save memo contents, but only higher-access roles can change memo associations.
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* ── Right: body editor ── */}
+        {/* ── Right: title + body editor ── */}
         <div className="doc-detail-right">
+          <div className="case-card" style={{ maxWidth: "none" }}>
+            <h3 className="case-card-title">{isEdit ? "Edit Memo" : "New Memo"}</h3>
+            <input
+              className="form-input"
+              placeholder="Memo title…"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="case-card" style={{ maxWidth: "none" }}>
+            <h3 className="case-card-title">Memo Details</h3>
+            <dl className="user-detail-meta case-detail-meta">
+              <dt>Created By</dt>
+              <dd>{isEdit ? editRow?.createdByName : (currentUser?.name || currentUser?.email || "—")}</dd>
+              <dt>Created</dt>
+              <dd>{isEdit ? fmtDate(editRow?.createdAt ?? "") : "Not yet saved"}</dd>
+            </dl>
+          </div>
+          {(() => {
+            const includedCases      = caseItems.filter((c) => selCaseIds.has(c.id));
+            const includedCaseAttrs  = caseAttrDefs.filter((d) => selCaseAttrDefIds.has(d.id));
+            const includedDocs       = storeDocs.filter((d) => selDocIds.has(d.id));
+            const includedDocAttrs   = docAttrDefs.filter((d) => selDocAttrDefIds.has(d.id));
+            const includedCodes      = codeTree
+              .filter(({ code }) => selCodeIds.has(code.id))
+              .map(({ code }) => ({ id: code.id, name: code.label, color: code.color }));
+
+            const cards: { key: string; label: string; value: number; items: { id: string; name: string; color?: string }[]; expandable?: boolean }[] = [
+              { key: "cases",      label: "Cases",       value: includedCases.length,     items: includedCases },
+              { key: "case_attrs", label: "Case Attrs",  value: includedCaseAttrs.length,  items: includedCaseAttrs },
+              { key: "documents",  label: "Documents",   value: includedDocs.length,       items: includedDocs.map((d) => ({ id: d.id, name: d.name })) },
+              { key: "doc_attrs",  label: "Doc. Attrs",  value: includedDocAttrs.length,   items: includedDocAttrs },
+              { key: "codes",      label: "Codes",       value: includedCodes.length,      items: includedCodes },
+            ];
+
+            return (
+              <div style={{ display: "flex", gap: 10 }}>
+                {cards.map(({ key, label, value, items, expandable = true }) => (
+                  <button
+                    key={key}
+                    className="annotate-card"
+                    onClick={expandable ? () => toggleSummaryCard(key) : undefined}
+                    aria-expanded={expandable ? expandedSummaryCards.has(key) : undefined}
+                    tabIndex={expandable ? undefined : -1}
+                    style={{
+                      flex: 1,
+                      padding: "14px 10px",
+                      textAlign: "center",
+                      border: "var(--border-width) solid var(--color-border)",
+                      background: "var(--color-surface)",
+                      color: "var(--color-text)",
+                      cursor: expandable ? "pointer" : "default",
+                    }}
+                  >
+                    <div className="summary-card-value">{value}</div>
+                    <div className="summary-card-label">
+                      {label}
+                      {expandable && (
+                        <span style={{ marginLeft: 6, fontSize: 10, color: "var(--color-text-muted)" }}>
+                          {expandedSummaryCards.has(key) ? "▾" : "▸"}
+                        </span>
+                      )}
+                    </div>
+                    {expandable && expandedSummaryCards.has(key) && (
+                      <div style={{ marginTop: 10, paddingTop: 8, borderTop: "var(--border-width) solid var(--color-border)", maxHeight: 130, overflowY: "auto", textAlign: "left" }}>
+                        {items.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>None.</div>
+                        ) : (
+                          items.map((item) => (
+                            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, lineHeight: 1.4, padding: "2px 0" }}>
+                              {item.color && <span className="code-swatch" style={{ background: item.color, width: 9, height: 9, flexShrink: 0 }} />}
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+          {(() => {
+            const includedAnns = annItems.filter((a) => selAnnIds.has(a.id));
+            return (
+              <div className="case-card" style={{ maxWidth: "none" }}>
+                <div
+                  className="memo-card-header"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setAnnCardCollapsed((v) => !v)}
+                >
+                  <h3 className="case-card-title" style={{ margin: 0 }}>
+                    Annotations{includedAnns.length > 0 ? ` (${includedAnns.length})` : ""}
+                  </h3>
+                  <span className="codebook-collapse-icon">{annCardCollapsed ? "▶" : "▼"}</span>
+                </div>
+                {!annCardCollapsed && (
+                  includedAnns.length === 0
+                    ? <p className="case-card-empty">No annotations associated.</p>
+                    : <ul className="memo-sel-list" style={{ marginTop: 4 }}>
+                        {includedAnns.map((ann) => (
+                          <li key={ann.id} className="memo-sel-item" style={{ borderRight: `3px solid ${ann.codeColor}`, paddingRight: 11, cursor: "default" }}>
+                            <div className="memo-sel-item-text">
+                              <span
+                                className="annotation-code-badge"
+                                style={{ background: ann.codeColor, marginBottom: 3, display: "inline-block", alignSelf: "flex-start" }}
+                              >
+                                {ann.codeName}
+                              </span>
+                              <span className="memo-sel-item-label">{ann.quote}</span>
+                              <span className="memo-sel-item-sub">{ann.docName}</span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                )}
+              </div>
+            );
+          })()}
           <div className="case-card doc-content-card">
             <h3 className="case-card-title">Body</h3>
             <RichTextEditor initialHtml={editRow?.body ?? ""} editorRef={editorRef} grow />
@@ -493,6 +811,108 @@ export function MemoEditorView({
 
 // ─── Memo Detail sub-view ──────────────────────────────────────────────────────
 
+function htmlToText(html: string): string {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return div.innerText || div.textContent || "";
+}
+
+function escHtml(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function ExportMemoModal({
+  onClose,
+  onExportHTML,
+  onExportPDF,
+  onExportDOCX,
+  exportingFormat,
+}: {
+  onClose: () => void;
+  onExportHTML: () => void;
+  onExportPDF: () => void;
+  onExportDOCX: () => void;
+  exportingFormat: string | null;
+}) {
+  const options = [
+    {
+      key: "html",
+      label: "HTML",
+      description: "Can be opened in a web browser and is closest to what you see in the app.",
+      onClick: onExportHTML,
+    },
+    {
+      key: "pdf",
+      label: "PDF",
+      description: "Uses a simpler layout and is the best for sharing.",
+      onClick: onExportPDF,
+    },
+    {
+      key: "docx",
+      label: "DOCX",
+      description: "Uses a simpler layout and is the best for further editing.",
+      onClick: onExportDOCX,
+    },
+  ] as const;
+
+  return (
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+    >
+      <div
+        className="modal-content"
+        onClick={(e) => e.stopPropagation()}
+        style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}
+      >
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>Export Memo</h2>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: 12,
+            alignItems: "stretch",
+          }}
+        >
+          {options.map((option) => (
+            <button
+              key={option.key}
+              className={`btn export-option-card${exportingFormat === option.key ? " export-option-card--active" : ""}`}
+              onClick={option.onClick}
+              disabled={!!exportingFormat}
+              style={{
+                minHeight: 220,
+                padding: 18,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "space-between",
+                textAlign: "center",
+                whiteSpace: "normal",
+                color: exportingFormat === option.key ? "#fff" : "var(--color-text)",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{option.label}</div>
+                <div style={{ fontSize: 13, lineHeight: 1.5, color: exportingFormat === option.key ? "rgba(255,255,255,0.9)" : "var(--color-text-muted)" }}>
+                  {option.description}
+                </div>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {exportingFormat === option.key ? "Exporting..." : `Export as ${option.label}`}
+              </div>
+            </button>
+          ))}
+        </div>
+        <div style={{ marginTop: 16, textAlign: "right" }}>
+          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MemoDetail({
   row,
   canEdit,
@@ -504,67 +924,372 @@ function MemoDetail({
   onBack: () => void;
   onEdit: () => void;
 }) {
+  const { pb } = useStore();
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
+  const [expandedSummaryCards, setExpandedSummaryCards] = useState<Set<string>>(new Set());
+  const [annCardCollapsed,     setAnnCardCollapsed]     = useState(true);
+
+  function toggleSummaryCard(key: string) {
+    setExpandedSummaryCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  const summaryCards = [
+    { key: "cases",       label: "Cases",       count: row.caseIds.length,                 names: row.cases,                    expandable: true },
+    { key: "case_attrs",  label: "Case Attrs",   count: row.caseAttributeDefIds.length,     names: row.caseAttributeDefNames,    expandable: true },
+    { key: "documents",   label: "Documents",    count: row.documentIds.length,             names: row.documents,                expandable: true },
+    { key: "doc_attrs",   label: "Doc. Attrs",   count: row.documentAttributeDefIds.length, names: row.documentAttributeDefNames, expandable: true },
+    { key: "codes",       label: "Codes",        count: row.codeIds.length,                 names: row.codes,                    expandable: true },
+  ];
+
+  async function handleExportHTML() {
+    try {
+      setExportingFormat("html");
+      const path = await save({ defaultPath: `${row.title || "Memo"}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
+      if (!path) return;
+
+      // Fetch annotation details (quote, code name, document name)
+      type AnnDetail = { id: string; quote: string; codeName: string; docName: string };
+
+      const annRecords = row.annotationIds.length > 0
+        ? await pb.collection("annotations").getFullList({
+            filter: row.annotationIds.map((id) => `id="${id}"`).join("||"),
+            expand: "code,document",
+            fields: "id,quote,expand",
+          })
+        : [];
+
+      const annDetails: AnnDetail[] = (annRecords as { id: string; quote?: string; expand?: { code?: { label?: string }; document?: { name?: string } } }[]).map((a) => ({
+        id: a.id,
+        quote: a.quote ?? "",
+        codeName: a.expand?.code?.label ?? "—",
+        docName:  a.expand?.document?.name ?? "—",
+      }));
+
+      function section(title: string, items: string[]): string {
+        if (items.length === 0) return "";
+        return `<section><h2>${escHtml(title)}</h2><ul>${items.map((s) => `<li>${escHtml(s)}</li>`).join("")}</ul></section>`;
+      }
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${escHtml(row.title)}</title>
+<style>
+  body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { margin-bottom: 4px; }
+  h2 { font-size: 1em; text-transform: uppercase; letter-spacing: .05em; color: #555; margin: 28px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  .meta { color: #666; font-size: .9em; margin-bottom: 20px; }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin: 3px 0; line-height: 1.5; }
+  .body { line-height: 1.7; margin-top: 28px; }
+  .ann-quote { font-style: italic; color: #333; }
+  .ann-meta { font-size: .85em; color: #666; }
+  section { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<h1>${escHtml(row.title)}</h1>
+<p class="meta">Created by ${escHtml(row.createdByName)} &middot; ${escHtml(fmtDate(row.createdAt))}</p>
+${section("Cases", row.cases)}
+${section("Case Attributes", row.caseAttributeDefNames)}
+${section("Documents", row.documents)}
+${section("Document Attributes", row.documentAttributeDefNames)}
+${section("Codes", row.codes)}
+${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a) => `<li><span class="ann-quote">"${escHtml(a.quote)}"</span><br><span class="ann-meta">${escHtml(a.codeName)} &mdash; ${escHtml(a.docName)}</span></li>`).join("")}</ul></section>` : ""}
+<div class="body">${row.body || ""}</div>
+</body>
+</html>`;
+      await writeTextFile(path, html);
+    } catch {
+      /* ignore */
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
+  async function handleExportPDF() {
+    try {
+      setExportingFormat("pdf");
+      const path = await save({ defaultPath: `${row.title || "Memo"}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+      if (!path) return;
+
+      const annRecords = row.annotationIds.length > 0
+        ? await pb.collection("annotations").getFullList({
+            filter: row.annotationIds.map((id) => `id="${id}"`).join("||"),
+            expand: "code,document",
+            fields: "id,quote,code,document,expand",
+          })
+        : [];
+      type AnnDetail = { id: string; quote: string; codeName: string; docName: string };
+      const annDetails: AnnDetail[] = (annRecords as { id: string; quote?: string; expand?: { code?: { label?: string }; document?: { name?: string } } }[]).map((a) => ({
+        id: a.id,
+        quote: a.quote ?? "",
+        codeName: a.expand?.code?.label ?? "—",
+        docName:  a.expand?.document?.name ?? "—",
+      }));
+
+      const pdf = new jsPDF({ unit: "pt", format: "letter" });
+      const margin = 54;
+      const pageH = pdf.internal.pageSize.getHeight();
+      const contentWidth = pdf.internal.pageSize.getWidth() - margin * 2;
+      let y = margin;
+      const ensureSpace = (h: number) => { if (y + h > pageH - margin) { pdf.addPage(); y = margin; } };
+      const addText = (text: string, size = 10, style: "normal" | "bold" | "italic" = "normal", gap = 8) => {
+        pdf.setFont("helvetica", style);
+        pdf.setFontSize(size);
+        const lines = pdf.splitTextToSize(text || "", contentWidth) as string[];
+        const lh = size * 1.35;
+        ensureSpace(lines.length * lh + gap);
+        pdf.text(lines, margin, y);
+        y += lines.length * lh + gap;
+      };
+      const addSection = (title: string, items: string[]) => {
+        if (items.length === 0) return;
+        addText(title, 9, "bold", 4);
+        for (const item of items) addText(`• ${item}`, 10, "normal", 3);
+        y += 10;
+      };
+
+      addText(row.title || "Untitled Memo", 20, "bold", 6);
+      addText(`Created by: ${row.createdByName}`, 10, "normal", 2);
+      addText(`Created: ${fmtDate(row.createdAt)}`, 10, "normal", 20);
+
+      addSection("Cases", row.cases);
+      addSection("Case Attributes", row.caseAttributeDefNames);
+      addSection("Documents", row.documents);
+      addSection("Document Attributes", row.documentAttributeDefNames);
+      addSection("Codes", row.codes);
+
+      if (annDetails.length > 0) {
+        addText("Annotations", 9, "bold", 4);
+        for (const ann of annDetails) {
+          addText(`"${ann.quote}"`, 10, "italic", 2);
+          addText(`${ann.codeName} — ${ann.docName}`, 9, "normal", 6);
+        }
+        y += 10;
+      }
+
+      const bodyText = htmlToText(row.body || "");
+      if (bodyText.trim()) {
+        addText("Body", 9, "bold", 4);
+        addText(bodyText, 11, "normal", 8);
+      }
+
+      const pdfBytes = pdf.output("arraybuffer");
+      await writeFile(path, new Uint8Array(pdfBytes));
+    } catch {
+      /* ignore */
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
+  async function handleExportDOCX() {
+    try {
+      setExportingFormat("docx");
+      const path = await save({ defaultPath: `${row.title || "Memo"}.docx`, filters: [{ name: "Word Document", extensions: ["docx"] }] });
+      if (!path) return;
+
+      const annRecords = row.annotationIds.length > 0
+        ? await pb.collection("annotations").getFullList({
+            filter: row.annotationIds.map((id) => `id="${id}"`).join("||"),
+            expand: "code,document",
+            fields: "id,quote,code,document,expand",
+          })
+        : [];
+      type AnnDetail = { id: string; quote: string; codeName: string; docName: string };
+      const annDetails: AnnDetail[] = (annRecords as { id: string; quote?: string; expand?: { code?: { label?: string }; document?: { name?: string } } }[]).map((a) => ({
+        id: a.id,
+        quote: a.quote ?? "",
+        codeName: a.expand?.code?.label ?? "—",
+        docName:  a.expand?.document?.name ?? "—",
+      }));
+
+      function sectionParagraphs(title: string, items: string[]): Paragraph[] {
+        if (items.length === 0) return [];
+        return [
+          new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: title })] }),
+          ...items.map((item) => new Paragraph({ children: [new TextRun({ text: `• ${item}` })] })),
+          new Paragraph({ children: [] }),
+        ];
+      }
+
+      const bodyText = htmlToText(row.body || "");
+      const bodyParagraphs = bodyText.split("\n").filter((l) => l.trim());
+
+      const doc = new DocxDocument({
+        sections: [{
+          children: [
+            new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: row.title || "Untitled Memo" })] }),
+            new Paragraph({ children: [new TextRun({ text: `Created by: ${row.createdByName}`, color: "666666" })] }),
+            new Paragraph({ children: [new TextRun({ text: `Created: ${fmtDate(row.createdAt)}`, color: "666666" })] }),
+            new Paragraph({ children: [] }),
+            ...sectionParagraphs("Cases", row.cases),
+            ...sectionParagraphs("Case Attributes", row.caseAttributeDefNames),
+            ...sectionParagraphs("Documents", row.documents),
+            ...sectionParagraphs("Document Attributes", row.documentAttributeDefNames),
+            ...sectionParagraphs("Codes", row.codes),
+            ...(annDetails.length > 0 ? [
+              new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Annotations" })] }),
+              ...annDetails.flatMap((ann) => [
+                new Paragraph({ children: [new TextRun({ text: `"${ann.quote}"`, italics: true })] }),
+                new Paragraph({ children: [new TextRun({ text: `${ann.codeName} — ${ann.docName}`, color: "666666" })] }),
+                new Paragraph({ children: [] }),
+              ]),
+            ] : []),
+            ...(bodyText.trim() ? [
+              new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Body" })] }),
+              ...bodyParagraphs.map((text) => new Paragraph({ children: [new TextRun({ text })] })),
+            ] : []),
+          ],
+        }],
+      });
+      const buffer = await Packer.toBuffer(doc);
+      await writeFile(path, new Uint8Array(buffer));
+    } catch {
+      /* ignore */
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
   return (
     <div className="view doc-detail-view">
       <div className="case-detail-topbar">
         <button className="btn" onClick={onBack}>← Back to Memos</button>
-        {canEdit && (
-          <label className="toggle-switch" title="Edit memo">
-            <input
-              type="checkbox"
-              checked={false}
-              onChange={(e) => { if (e.target.checked) onEdit(); }}
-            />
-            <span className="toggle-track"><span className="toggle-thumb" /></span>
-            <span className="toggle-label">Edit</span>
-          </label>
-        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={() => setShowExportModal(true)}>Export</button>
+          <button
+            className="btn btn--primary"
+            onClick={onEdit}
+            disabled={!canEdit}
+            title={!canEdit ? "You do not have permission to edit this memo" : undefined}
+          >
+            Edit
+          </button>
+        </div>
       </div>
+
+      {showExportModal && (
+        <ExportMemoModal
+          onClose={() => setShowExportModal(false)}
+          onExportHTML={handleExportHTML}
+          onExportPDF={handleExportPDF}
+          onExportDOCX={handleExportDOCX}
+          exportingFormat={exportingFormat}
+        />
+      )}
 
       <div className="doc-detail-layout">
 
-        <div className="doc-detail-left">
+        <div className="doc-detail-left" />
 
-          <div className="case-card">
+        <div className="doc-detail-right">
+
+          <div className="case-card" style={{ maxWidth: "none" }}>
             <h3 className="case-card-title">Memo</h3>
             <p className="case-card-value">{row.title}</p>
           </div>
 
-          <dl className="user-detail-meta case-detail-meta">
-            <dt>Created By</dt><dd>{row.createdByName}</dd>
-            <dt>Created</dt>   <dd>{fmtDate(row.createdAt)}</dd>
-          </dl>
-
-          <div className="case-card">
-            <h3 className="case-card-title">Cases</h3>
-            {row.cases.length > 0
-              ? <ul className="case-detail-doc-list">{row.cases.map((c) => <li key={c} className="case-detail-doc-item">{c}</li>)}</ul>
-              : <p className="case-card-empty">No cases associated.</p>}
+          <div className="case-card" style={{ maxWidth: "none" }}>
+            <h3 className="case-card-title">Memo Details</h3>
+            <dl className="user-detail-meta case-detail-meta">
+              <dt>Created By</dt><dd>{row.createdByName}</dd>
+              <dt>Created</dt>  <dd>{fmtDate(row.createdAt)}</dd>
+            </dl>
           </div>
 
-          <div className="case-card">
-            <h3 className="case-card-title">Documents</h3>
-            {row.documents.length > 0
-              ? <ul className="case-detail-doc-list">{row.documents.map((d) => <li key={d} className="case-detail-doc-item">{d}</li>)}</ul>
-              : <p className="case-card-empty">No documents associated.</p>}
+          <div style={{ display: "flex", gap: 10 }}>
+            {summaryCards.map(({ key, label, count, names, expandable }) => (
+              <button
+                key={key}
+                className="annotate-card"
+                onClick={expandable ? () => toggleSummaryCard(key) : undefined}
+                aria-expanded={expandable ? expandedSummaryCards.has(key) : undefined}
+                tabIndex={expandable ? undefined : -1}
+                style={{
+                  flex: 1,
+                  padding: "14px 10px",
+                  textAlign: "center",
+                  border: "var(--border-width) solid var(--color-border)",
+                  background: "var(--color-surface)",
+                  color: "var(--color-text)",
+                  cursor: expandable ? "pointer" : "default",
+                }}
+              >
+                <div className="summary-card-value">{count}</div>
+                <div className="summary-card-label">
+                  {label}
+                  {expandable && (
+                    <span style={{ marginLeft: 6, fontSize: 10, color: "var(--color-text-muted)" }}>
+                      {expandedSummaryCards.has(key) ? "▾" : "▸"}
+                    </span>
+                  )}
+                </div>
+                {expandable && expandedSummaryCards.has(key) && (
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: "var(--border-width) solid var(--color-border)", maxHeight: 130, overflowY: "auto", textAlign: "left" }}>
+                    {names.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>None.</div>
+                    ) : (
+                      names.map((name, i) => (
+                        <div key={i} style={{ fontSize: 12, lineHeight: 1.4, padding: "2px 0" }}>{name}</div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </button>
+            ))}
           </div>
 
-          <div className="case-card">
-            <h3 className="case-card-title">Codes</h3>
-            {row.codes.length > 0
-              ? <ul className="case-detail-doc-list">{row.codes.map((c) => <li key={c} className="case-detail-doc-item">{c}</li>)}</ul>
-              : <p className="case-card-empty">No codes associated.</p>}
+          <div className="case-card" style={{ maxWidth: "none" }}>
+            <div
+              className="memo-card-header"
+              style={{ cursor: "pointer" }}
+              onClick={() => setAnnCardCollapsed((v) => !v)}
+            >
+              <h3 className="case-card-title" style={{ margin: 0 }}>
+                Annotations{row.annotationDetails.length > 0 ? ` (${row.annotationDetails.length})` : ""}
+              </h3>
+              <span className="codebook-collapse-icon">{annCardCollapsed ? "▶" : "▼"}</span>
+            </div>
+            {!annCardCollapsed && (
+              row.annotationDetails.length === 0
+                ? <p className="case-card-empty">No annotations associated.</p>
+                : <ul className="memo-sel-list" style={{ marginTop: 4 }}>
+                    {row.annotationDetails.map((ann) => (
+                      <li key={ann.id} className="memo-sel-item" style={{ borderRight: `3px solid ${ann.codeColor}`, paddingRight: 11, cursor: "default" }}>
+                        <div className="memo-sel-item-text">
+                          <span
+                            className="annotation-code-badge"
+                            style={{ background: ann.codeColor, marginBottom: 3, display: "inline-block", alignSelf: "flex-start" }}
+                          >
+                            {ann.codeName}
+                          </span>
+                          <span className="memo-sel-item-label">{ann.quote}</span>
+                          <span className="memo-sel-item-sub">{ann.docName}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+            )}
           </div>
 
-        </div>
-
-        <div className="doc-detail-right">
           <div className="case-card doc-content-card">
             <h3 className="case-card-title">Body</h3>
             {row.body
               ? <div className="case-notes-body" dangerouslySetInnerHTML={{ __html: row.body }} />
               : <p className="case-card-empty">No body text.</p>}
           </div>
+
         </div>
 
       </div>
@@ -575,7 +1300,10 @@ function MemoDetail({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function MemosView() {
-  const { activeProject, pb, canEdit, pendingMemoId, setPendingMemoId, deleteMemo } = useStore();
+  const { activeProject, pb, canCurrentUser, pendingMemoId, setPendingMemoId, deleteMemo } = useStore();
+  const canCreateMemos = canCurrentUser("createMemo");
+  const canEditMemos = canCurrentUser("editMemo");
+  const canDeleteMemos = canCurrentUser("deleteMemo");
 
   const [rows,    setRows]    = useState<MemoRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -586,6 +1314,8 @@ export function MemosView() {
 
   const [contextMenu,   setContextMenu]   = useState<{ x: number; y: number; row: MemoRow } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState<MemoRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -607,7 +1337,7 @@ export function MemosView() {
     try {
       const memoRecords = await pb.collection("memos").getFullList({
         filter: `project="${activeProject.id}"&&deleted_at=""`,
-        expand: "created_by,document,annotation.code,cases,codes",
+        expand: "created_by,document,annotation.code,annotation.document,cases,codes,case_attribute_defs,document_attribute_defs",
         sort: "-created",
       });
 
@@ -621,28 +1351,46 @@ export function MemosView() {
             return Array.isArray(v) ? v : [v];
           }
 
-          const docExpands  = toArr(r.expand?.document);
-          const caseExpands = toArr(r.expand?.cases);
-          const codeExpands = toArr(r.expand?.codes);
+          const docExpands      = toArr(r.expand?.document);
+          const caseExpands     = toArr(r.expand?.cases);
+          const codeExpands     = toArr(r.expand?.codes);
+          const caseAttrExpands = toArr(r.expand?.case_attribute_defs);
+          const docAttrExpands  = toArr(r.expand?.document_attribute_defs);
+          const annExpands      = toArr(r.expand?.annotation);
 
-          const docIds  = toArr<string>(r.document);
-          const annIds  = toArr<string>(r.annotation);
-          const caseIds = toArr<string>(r.cases);
-          const codeIds = toArr<string>(r.codes);
+          const docIds         = toArr<string>(r.document);
+          const annIds         = toArr<string>(r.annotation);
+          const caseIds        = toArr<string>(r.cases);
+          const codeIds        = toArr<string>(r.codes);
+          const caseAttrDefIds = toArr<string>(r.case_attribute_defs);
+          const docAttrDefIds  = toArr<string>(r.document_attribute_defs);
 
           return {
-            id:            r.id,
-            title:         r.title,
-            body:          r.body ?? "",
-            createdByName: cb?.name || cb?.email || "—",
-            createdAt:     r.created,
-            cases:         caseExpands.map((c: { name?: string }) => c.name ?? "—"),
-            documents:     docExpands.map((d: { name?: string }) => d.name ?? "—"),
-            codes:         codeExpands.map((c: { label?: string }) => c.label ?? "—"),
+            id:                         r.id,
+            title:                      r.title,
+            body:                       r.body ?? "",
+            createdByName:              cb?.name || cb?.email || "—",
+            createdAt:                  r.created,
+            cases:                      caseExpands.map((c: { name?: string }) => c.name ?? "—"),
+            documents:                  docExpands.map((d: { name?: string }) => d.name ?? "—"),
+            codes:                      codeExpands.map((c: { label?: string }) => c.label ?? "—"),
             caseIds,
-            documentIds:   docIds,
+            documentIds:                docIds,
             codeIds,
-            annotationIds: annIds,
+            annotationIds:              annIds,
+            caseAttributeDefIds:        caseAttrDefIds,
+            documentAttributeDefIds:    docAttrDefIds,
+            caseAttributeDefNames:      caseAttrExpands.map((d: { name?: string }) => d.name ?? "—"),
+            documentAttributeDefNames:  docAttrExpands.map((d: { name?: string }) => d.name ?? "—"),
+            annotationDetails:          annExpands.map((a: { id?: string; quote?: string; expand?: { code?: { label?: string; color?: string }; document?: { name?: string } } }) => ({
+              id:        a.id ?? "",
+              quote:     a.quote ?? "",
+              docId:     "",
+              codeId:    "",
+              codeName:  a.expand?.code?.label    ?? "—",
+              codeColor: a.expand?.code?.color    ?? "#888888",
+              docName:   a.expand?.document?.name ?? "—",
+            })),
           };
         }),
       );
@@ -743,9 +1491,9 @@ export function MemosView() {
 
   if (selectedRowId && selectedRow) {
     return (
-      <MemoDetail
-        row={selectedRow}
-        canEdit={canEdit}
+        <MemoDetail
+          row={selectedRow}
+        canEdit={canEditMemos}
         onBack={() => { setSelectedRowId(null); loadMemos(); }}
         onEdit={() => setEditorRowId(selectedRowId)}
       />
@@ -757,90 +1505,139 @@ export function MemosView() {
   return (
     <div className="view users-view">
       <header className="view-header">
-        <h1>Memos</h1>
-        {canEdit && (
-          <button className="btn btn--primary" onClick={() => setShowNewEditor(true)}>
-            + New Memo
+        <div className="users-title-wrap">
+          <h1>Memos</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            aria-label="Show memos help"
+            title="Show Help"
+            onClick={() => setHelpOpen(true)}
+          >
+            <img src={helpIcon} alt="" className="users-help-icon" />
           </button>
-        )}
+        </div>
+        <button
+          className="btn btn--primary"
+          onClick={() => setShowNewEditor(true)}
+          disabled={!canCreateMemos}
+          title={!canCreateMemos ? "You do not have permission to create memos" : undefined}
+        >
+          + New Memo
+        </button>
       </header>
 
       {error && <p className="users-error">{error}</p>}
+      {!error && (
+        <p className="users-permission-note">
+          {canCreateMemos
+            ? "Create and manage project memos here."
+            : "Memos are view-only with your current role."}
+        </p>
+      )}
 
-      <div
-        className="users-table-wrap"
-        style={{
-          maxHeight:
-            34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
-        }}
-      >
-        <table className="users-table">
-          <thead>
-            <tr>
-              {COLS.map((col) => (
-                <th
-                  key={col.key}
-                  style={{ width: col.width }}
-                  className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
-                  onClick={() => handleSort(col.key)}
-                >
-                  {col.label}
-                  <span className="users-sort-icon">
-                    {sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={6} className="users-td-msg">Loading…</td></tr>
-            )}
-            {!loading && sorted.length === 0 && (
-              <tr><td colSpan={6} className="users-td-msg">No memos yet.</td></tr>
-            )}
-            {!loading && sorted.map((row) => (
-              <tr
-                key={row.id}
-                className="users-row"
-                onClick={() => setSelectedRowId(row.id)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setContextMenu({ x: e.clientX, y: e.clientY, row });
-                }}
-              >
-                <td className="users-td users-td--name">{row.title}</td>
-                <td className="users-td users-td--muted">{row.createdByName}</td>
-                <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
-                <td className="users-td users-td--count">
-                  {row.cases.length > 0 ? row.cases.length : <span className="users-td--muted">—</span>}
-                </td>
-                <td className="users-td users-td--count">
-                  {row.documents.length > 0 ? row.documents.length : <span className="users-td--muted">—</span>}
-                </td>
-                <td className="users-td users-td--count">
-                  {row.codes.length > 0 ? row.codes.length : <span className="users-td--muted">—</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="users-content">
+        <section className="users-layout-main">
+          <div
+            className="users-table-wrap"
+            style={{
+              maxHeight:
+                34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
+            }}
+          >
+            <table className="users-table">
+              <thead>
+                <tr>
+                  {COLS.map((col) => (
+                    <th
+                      key={col.key}
+                      style={{ width: col.width }}
+                      className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
+                      onClick={() => handleSort(col.key)}
+                    >
+                      {col.label}
+                      <span className="users-sort-icon">
+                        {sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr><td colSpan={6} className="users-td-msg">Loading…</td></tr>
+                )}
+                {!loading && sorted.length === 0 && (
+                  <tr><td colSpan={6} className="users-td-msg">No memos yet.</td></tr>
+                )}
+                {!loading && sorted.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="users-row"
+                    onClick={() => setSelectedRowId(row.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, row });
+                    }}
+                  >
+                    <td className="users-td users-td--name">{row.title}</td>
+                    <td className="users-td users-td--muted">{row.createdByName}</td>
+                    <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
+                    <td className="users-td users-td--count">
+                      {row.cases.length > 0 ? row.cases.length : <span className="users-td--muted">—</span>}
+                    </td>
+                    <td className="users-td users-td--count">
+                      {row.documents.length > 0 ? row.documents.length : <span className="users-td--muted">—</span>}
+                    </td>
+                    <td className="users-td users-td--count">
+                      {row.codes.length > 0 ? row.codes.length : <span className="users-td--muted">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Memos Help</h2>
+            <p className="users-guide-copy">
+              Memos are free-form notes attached to annotations, documents, codes, or cases.
+            </p>
+            <p className="users-guide-copy">
+              Select a memo to view or edit it. Right-click a row to delete.
+            </p>
+            <p className="users-guide-copy">
+              Memo creation and editing options depend on your project role.
+            </p>
+            <div className="form-actions">
+              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Context menu */}
       {contextMenu && (
         <div
           ref={contextMenuRef}
           className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
+          style={contextMenuStyle}
         >
-          <button
-            className="context-menu-item"
-            onClick={() => { setEditorRowId(contextMenu.row.id); setContextMenu(null); }}
-          >
-            Edit Memo
-          </button>
-          {canEdit && (
+          {canEditMemos && (
+            <button
+              className="context-menu-item"
+              onClick={() => { setEditorRowId(contextMenu.row.id); setContextMenu(null); }}
+            >
+              Edit Memo
+            </button>
+          )}
+          {canDeleteMemos && (
             <button
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}

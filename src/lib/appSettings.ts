@@ -1,0 +1,216 @@
+export type StartupSettings = {
+  autoLoginLastUser: boolean;
+  reopenLastProject: boolean;
+};
+
+export type DocumentImportMode = "upload" | "paste";
+
+export type DocumentImportSettings = {
+  defaultMode: DocumentImportMode;
+  autoNameFromFile: boolean;
+  trimImportedText: boolean;
+  storeOriginalFileName: boolean;
+  warnBeforeEmptyImport: boolean;
+};
+
+export type PrivacySecuritySettings = {
+  maskFilePaths: boolean;
+  clearRecentProjectsOnSignOut: boolean;
+  forgetLoginIdentitiesOnLogout: boolean;
+};
+
+export type UpdateSettings = {
+  channel: "stable" | "beta";
+  autoCheck: boolean;
+  installOnQuit: boolean;
+};
+
+export type LlmSettings = {
+  chunkSize: number;
+  overlapSize: number;
+  batchSize: number;
+  prefixPassages: boolean;
+  prefixQueries: boolean;
+  normalizeWhitespace: boolean;
+  ollamaEnabled: boolean;
+  ollamaProtocol: "http" | "https";
+  ollamaHost: string;
+  ollamaPort: number;
+  ollamaSelectedModel: string;
+  ollamaRequestTimeoutSeconds: number;
+  ollamaTemperature: number;
+  ollamaNumCtx: number;
+  ollamaKeepAliveMinutes: number;
+  ollamaRelevantSegmentsCandidateLimit: number;
+  ollamaRelevantSegmentsMaxResults: number;
+};
+
+export type AppSettings = {
+  startup: StartupSettings;
+  documentImport: DocumentImportSettings;
+  privacy: PrivacySecuritySettings;
+  updates: UpdateSettings;
+  llm: LlmSettings;
+};
+
+export const APP_SETTINGS_KEY = "kq_app_settings_v1";
+export const LAST_PROJECT_ID_KEY = "kq_last_project_id";
+export const RECENT_PROJECTS_KEY = "kq_recent_projects";
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  startup: {
+    autoLoginLastUser: false,
+    reopenLastProject: false,
+  },
+  documentImport: {
+    defaultMode: "upload",
+    autoNameFromFile: true,
+    trimImportedText: true,
+    storeOriginalFileName: true,
+    warnBeforeEmptyImport: true,
+  },
+  privacy: {
+    maskFilePaths: false,
+    clearRecentProjectsOnSignOut: false,
+    forgetLoginIdentitiesOnLogout: false,
+  },
+  updates: {
+    channel: "stable",
+    autoCheck: true,
+    installOnQuit: false,
+  },
+  llm: {
+    chunkSize: 1200,
+    overlapSize: 150,
+    batchSize: 16,
+    prefixPassages: true,
+    prefixQueries: true,
+    normalizeWhitespace: true,
+    ollamaEnabled: false,
+    ollamaProtocol: "http",
+    ollamaHost: "127.0.0.1",
+    ollamaPort: 11434,
+    ollamaSelectedModel: "",
+    ollamaRequestTimeoutSeconds: 120,
+    ollamaTemperature: 0.2,
+    ollamaNumCtx: 8192,
+    ollamaKeepAliveMinutes: 10,
+    ollamaRelevantSegmentsCandidateLimit: 12,
+    ollamaRelevantSegmentsMaxResults: 6,
+  },
+};
+
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSettings {
+  const chunkSize = clampInteger(value?.chunkSize, DEFAULT_APP_SETTINGS.llm.chunkSize, 100, 20000);
+  const overlapSize = clampInteger(value?.overlapSize, DEFAULT_APP_SETTINGS.llm.overlapSize, 0, chunkSize - 1);
+  const rawTemperature = Number(value?.ollamaTemperature);
+  const ollamaTemperature = Number.isFinite(rawTemperature)
+    ? Math.max(0, Math.min(2, rawTemperature))
+    : DEFAULT_APP_SETTINGS.llm.ollamaTemperature;
+  const ollamaRelevantSegmentsCandidateLimit = clampInteger(
+    value?.ollamaRelevantSegmentsCandidateLimit,
+    DEFAULT_APP_SETTINGS.llm.ollamaRelevantSegmentsCandidateLimit,
+    1,
+    50,
+  );
+  const ollamaRelevantSegmentsMaxResults = clampInteger(
+    value?.ollamaRelevantSegmentsMaxResults,
+    DEFAULT_APP_SETTINGS.llm.ollamaRelevantSegmentsMaxResults,
+    1,
+    ollamaRelevantSegmentsCandidateLimit,
+  );
+  return {
+    chunkSize,
+    overlapSize,
+    batchSize: clampInteger(value?.batchSize, DEFAULT_APP_SETTINGS.llm.batchSize, 1, 256),
+    prefixPassages: value?.prefixPassages ?? DEFAULT_APP_SETTINGS.llm.prefixPassages,
+    prefixQueries: value?.prefixQueries ?? DEFAULT_APP_SETTINGS.llm.prefixQueries,
+    normalizeWhitespace: value?.normalizeWhitespace ?? DEFAULT_APP_SETTINGS.llm.normalizeWhitespace,
+    ollamaEnabled: value?.ollamaEnabled ?? DEFAULT_APP_SETTINGS.llm.ollamaEnabled,
+    ollamaProtocol: value?.ollamaProtocol === "https" ? "https" : DEFAULT_APP_SETTINGS.llm.ollamaProtocol,
+    ollamaHost: typeof value?.ollamaHost === "string" && value.ollamaHost.trim()
+      ? value.ollamaHost.trim()
+      : DEFAULT_APP_SETTINGS.llm.ollamaHost,
+    ollamaPort: clampInteger(value?.ollamaPort, DEFAULT_APP_SETTINGS.llm.ollamaPort, 1, 65535),
+    ollamaSelectedModel: typeof value?.ollamaSelectedModel === "string" ? value.ollamaSelectedModel : "",
+    ollamaRequestTimeoutSeconds: clampInteger(
+      value?.ollamaRequestTimeoutSeconds,
+      DEFAULT_APP_SETTINGS.llm.ollamaRequestTimeoutSeconds,
+      5,
+      600,
+    ),
+    ollamaTemperature,
+    ollamaNumCtx: clampInteger(value?.ollamaNumCtx, DEFAULT_APP_SETTINGS.llm.ollamaNumCtx, 256, 131072),
+    ollamaKeepAliveMinutes: clampInteger(
+      value?.ollamaKeepAliveMinutes,
+      DEFAULT_APP_SETTINGS.llm.ollamaKeepAliveMinutes,
+      0,
+      1440,
+    ),
+    ollamaRelevantSegmentsCandidateLimit,
+    ollamaRelevantSegmentsMaxResults,
+  };
+}
+
+export function readAppSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem(APP_SETTINGS_KEY);
+    if (!raw) return DEFAULT_APP_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return {
+      startup: {
+        ...DEFAULT_APP_SETTINGS.startup,
+        ...parsed.startup,
+      },
+      documentImport: {
+        ...DEFAULT_APP_SETTINGS.documentImport,
+        ...parsed.documentImport,
+      },
+      privacy: {
+        ...DEFAULT_APP_SETTINGS.privacy,
+        ...parsed.privacy,
+      },
+      updates: {
+        ...DEFAULT_APP_SETTINGS.updates,
+        ...parsed.updates,
+      },
+      llm: normalizeLlmSettings(parsed.llm),
+    };
+  } catch {
+    return DEFAULT_APP_SETTINGS;
+  }
+}
+
+export function saveAppSettings(settings: AppSettings): void {
+  localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function rememberLastProjectId(projectId: string): void {
+  localStorage.setItem(LAST_PROJECT_ID_KEY, projectId);
+}
+
+export function getLastProjectId(): string | null {
+  return localStorage.getItem(LAST_PROJECT_ID_KEY);
+}
+
+export function clearLastProjectId(): void {
+  localStorage.removeItem(LAST_PROJECT_ID_KEY);
+}
+
+export function clearRecentProjects(): void {
+  localStorage.removeItem(RECENT_PROJECTS_KEY);
+}
+
+export function formatBytes(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return "0 B";
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  if (sizeBytes < 1024 * 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}

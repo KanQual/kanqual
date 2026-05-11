@@ -1,6 +1,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
-import type { Project } from "../types";
+import type { PendingImportedUser, Project, Role } from "../types";
+import { getBackendIdentitySnapshot } from "./pb";
 
 type ExportTable = {
   name: string;
@@ -15,8 +16,27 @@ export type ProjectExportData = {
   tables: ExportTable[];
 };
 
+export type ProjectBackupReason = "automatic" | "manual" | "session";
+
+export type ProjectBackupEnvelope = {
+  kind: "kanqual-project-backup";
+  version: 1;
+  createdAt: string;
+  projectId: string;
+  projectName: string;
+  reason: ProjectBackupReason;
+  payload: ProjectExportData;
+};
+
 export type ImportedProjectSummary = {
   tableCounts: Record<string, number>;
+  importedUsers: PendingImportedUser[];
+  identityChecks: {
+    backendMatched: boolean;
+    usersTableMatched: boolean;
+    allUsersPresent: boolean;
+  };
+  requiresUserResolution: boolean;
 };
 
 export type RefiQdaImportData = {
@@ -81,7 +101,7 @@ const TABLE_SPECS: {
   expand?: string;
 }[] = [
   { name: "project_members", filter: (id) => `project="${id}"`, sort: "created", expand: "user" },
-  { name: "documents", filter: (id) => `project="${id}"`, sort: "created" },
+  { name: "documents",         filter: (id) => `project="${id}"`,          sort: "created" },
   { name: "codes", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "annotations", filter: (id) => `document.project="${id}"`, sort: "document,start_offset", expand: "created_by" },
   { name: "cases", filter: (id) => `project="${id}"`, sort: "created" },
@@ -93,6 +113,7 @@ const TABLE_SPECS: {
   { name: "document_attribute_values", filter: (id) => `document.project="${id}"`, sort: "created" },
   { name: "memos", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "code_reports", filter: (id) => `project="${id}"`, sort: "created" },
+  { name: "coder_reports", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "project_log", filter: (id) => `project="${id}"`, sort: "occurred_at" },
 ];
 
@@ -156,6 +177,30 @@ async function fetchTable(
   return { name, rows: records.map((r: RecordModel) => serializeRecord(r)) };
 }
 
+function usersTableFromMembers(membersTable: ExportTable | undefined): ExportTable {
+  const seen = new Set<string>();
+  const rows: Record<string, unknown>[] = [];
+  for (const member of membersTable?.rows ?? []) {
+    const expanded = member.expand && typeof member.expand === "object"
+      ? member.expand as Record<string, unknown>
+      : {};
+    const user = expanded.user && typeof expanded.user === "object"
+      ? expanded.user as Record<string, unknown>
+      : {};
+    const id = typeof user.id === "string" ? user.id : typeof member.user === "string" ? member.user : "";
+    const email = typeof user.email === "string" ? user.email : "";
+    if (!id || !email || seen.has(id)) continue;
+    seen.add(id);
+    rows.push({
+      id,
+      name: typeof user.name === "string" ? user.name : "",
+      email,
+      user_identifier: typeof user.user_identifier === "string" ? user.user_identifier : "",
+    });
+  }
+  return { name: "users", rows };
+}
+
 export async function fetchProjectExportData(pb: PocketBase, project: Project): Promise<ProjectExportData> {
   const projectRecord = await pb.collection("projects").getOne(project.id);
   const tables = await Promise.all(
@@ -167,18 +212,38 @@ export async function fetchProjectExportData(pb: PocketBase, project: Project): 
       }),
     ),
   );
+  const projectMembers = tables.find((table) => table.name === "project_members");
+  const usersTable = usersTableFromMembers(projectMembers);
 
   return {
     format: "kanqual-project-export",
     version: 1,
     exportedAt: new Date().toISOString(),
     project: serializeRecord(projectRecord),
-    tables: [{ name: "projects", rows: [serializeRecord(projectRecord)] }, ...tables],
+    tables: [{ name: "projects", rows: [serializeRecord(projectRecord)] }, usersTable, ...tables],
   };
 }
 
-export function makeProjectBackupJson(data: ProjectExportData): string {
-  return JSON.stringify(data, null, 2);
+export function makeProjectBackupEnvelope(
+  data: ProjectExportData,
+  reason: ProjectBackupReason = "manual",
+): ProjectBackupEnvelope {
+  return {
+    kind: "kanqual-project-backup",
+    version: 1,
+    createdAt: new Date().toISOString(),
+    projectId: String(data.project.id ?? ""),
+    projectName: String(data.project.name ?? "Kanqual Project"),
+    reason,
+    payload: data,
+  };
+}
+
+export function makeProjectBackupJson(
+  data: ProjectExportData,
+  reason: ProjectBackupReason = "manual",
+): string {
+  return JSON.stringify(makeProjectBackupEnvelope(data, reason), null, 2);
 }
 
 function tableRows(data: ProjectExportData, name: string): Record<string, unknown>[] {
@@ -222,6 +287,95 @@ function currentUserId(pb: PocketBase): string {
   return pb.authStore.record?.id ?? "";
 }
 
+function currentUserEmail(pb: PocketBase): string {
+  return String(pb.authStore.record?.email ?? "").trim().toLowerCase();
+}
+void currentUserEmail;
+
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeEmail(value: unknown): string {
+  return textValue(value).trim().toLowerCase();
+}
+
+function roleValue(value: unknown): Role {
+  return value === "owner" || value === "editor" || value === "coder" || value === "viewer"
+    ? value
+    : "viewer";
+}
+
+function stringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value === "string" && value) return [value];
+  return [];
+}
+
+function importedUsersFromBackup(data: ProjectExportData): PendingImportedUser[] {
+  const roleBySourceUserId = new Map<string, Role>();
+  for (const row of findTable(data, "project_members")) {
+    const sourceUserId = textValue(row.user);
+    if (!sourceUserId) continue;
+    roleBySourceUserId.set(sourceUserId, roleValue(row.role));
+  }
+
+  return findTable(data, "users").map((row) => ({
+    sourceUserId: textValue(row.id),
+    userIdentifier: textValue(row.user_identifier),
+    name: textValue(row.name) || normalizeEmail(row.email),
+    email: normalizeEmail(row.email),
+    role: roleBySourceUserId.get(textValue(row.id)) ?? "viewer",
+    status: "no_access" as const,
+  })).filter((row) => row.sourceUserId && row.userIdentifier && row.email);
+}
+
+async function validateImportedUsers(
+  pb: PocketBase,
+  data: ProjectExportData,
+  idMap: Map<string, string>,
+): Promise<ImportedProjectSummary> {
+  const identity = await getBackendIdentitySnapshot(pb);
+  const importedUsers = importedUsersFromBackup(data);
+  const backupBackendIdentifier = textValue(data.project.backend_identifier);
+  const backupUsersTableIdentifier = textValue(data.project.users_table_identifier);
+  const backendMatched = !!backupBackendIdentifier && backupBackendIdentifier === identity.backendIdentifier;
+  const usersTableMatched = !!backupUsersTableIdentifier && backupUsersTableIdentifier === identity.usersTableIdentifier;
+  const hasUserTable = importedUsers.length > 0;
+  let allUsersPresent = false;
+
+  if (backendMatched && usersTableMatched && hasUserTable) {
+    const currentUsers = await pb.collection("users").getFullList({ sort: "created" });
+    const usersByIdentifier = new Map<string, RecordModel>();
+    currentUsers.forEach((user) => {
+      if (typeof user.user_identifier === "string" && user.user_identifier) {
+        usersByIdentifier.set(user.user_identifier, user);
+      }
+    });
+
+    allUsersPresent = importedUsers.every((user) => usersByIdentifier.has(user.userIdentifier));
+
+    if (allUsersPresent) {
+      importedUsers.forEach((user) => {
+        const matchingUser = usersByIdentifier.get(user.userIdentifier);
+        if (!matchingUser) return;
+        idMap.set(user.sourceUserId, matchingUser.id);
+      });
+    }
+  }
+
+  return {
+    tableCounts: {},
+    importedUsers,
+    identityChecks: {
+      backendMatched,
+      usersTableMatched,
+      allUsersPresent,
+    },
+    requiresUserResolution: !(backendMatched && usersTableMatched && allUsersPresent),
+  };
+}
+
 async function createMappedRecord(
   pb: PocketBase,
   collection: string,
@@ -237,7 +391,15 @@ async function createMappedRecord(
 }
 
 export function parseProjectBackupJson(text: string): ProjectExportData {
-  return assertProjectExportData(JSON.parse(text));
+  const parsed = JSON.parse(text);
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    (parsed as ProjectBackupEnvelope).kind === "kanqual-project-backup"
+  ) {
+    return assertProjectExportData((parsed as ProjectBackupEnvelope).payload);
+  }
+  return assertProjectExportData(parsed);
 }
 
 export async function importProjectBackupIntoProject(
@@ -248,12 +410,33 @@ export async function importProjectBackupIntoProject(
   const idMap = new Map<string, string>();
   const tableCounts: Record<string, number> = {};
   const userId = currentUserId(pb);
+  const validation = await validateImportedUsers(pb, data, idMap);
+  const importedUsers = validation.importedUsers;
+  const canReassociateUsers = !validation.requiresUserResolution;
+  const importedUsersBySourceId = new Map(importedUsers.map((user) => [user.sourceUserId, user]));
+  const sourceIdentifier = (value: unknown) => importedUsersBySourceId.get(textValue(value))?.userIdentifier || "";
+
+  if (canReassociateUsers) {
+    for (const row of findTable(data, "project_members")) {
+      const mappedUser = remapOne(row.user, idMap);
+      if (!mappedUser || mappedUser === userId) continue;
+      const payload = {
+        ...stripSystemFields(row),
+        project: projectId,
+        user: mappedUser,
+        user_identifier: typeof row.user_identifier === "string" ? row.user_identifier : sourceIdentifier(row.user),
+        created_by: remapOne(row.created_by, idMap) || userId || undefined,
+      };
+      await createMappedRecord(pb, "project_members", row, payload, idMap, tableCounts);
+    }
+  }
 
   for (const row of findTable(data, "documents")) {
     const payload = {
       ...stripSystemFields(row),
       project: projectId,
-      created_by: userId || undefined,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
     };
     await createMappedRecord(pb, "documents", row, payload, idMap, tableCounts);
   }
@@ -262,7 +445,8 @@ export async function importProjectBackupIntoProject(
     const payload = {
       ...stripSystemFields(row),
       project: projectId,
-      created_by: userId || undefined,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
     };
     await createMappedRecord(pb, "cases", row, payload, idMap, tableCounts);
   }
@@ -272,7 +456,8 @@ export async function importProjectBackupIntoProject(
       ...stripSystemFields(row),
       project: projectId,
       parent: null,
-      created_by: userId || undefined,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
     };
     await createMappedRecord(pb, "codes", row, payload, idMap, tableCounts);
   }
@@ -336,7 +521,8 @@ export async function importProjectBackupIntoProject(
       ...stripSystemFields(row),
       document: remapOne(row.document, idMap),
       code: remapOne(row.code, idMap),
-      created_by: userId || undefined,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
     };
     if (!payload.document || !payload.code) continue;
     await createMappedRecord(pb, "annotations", row, payload, idMap, tableCounts);
@@ -350,7 +536,8 @@ export async function importProjectBackupIntoProject(
       annotation: remapMany(row.annotation, idMap),
       cases: remapMany(row.cases, idMap),
       codes: remapMany(row.codes, idMap),
-      created_by: userId || undefined,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
     };
     await createMappedRecord(pb, "memos", row, payload, idMap, tableCounts);
   }
@@ -362,23 +549,47 @@ export async function importProjectBackupIntoProject(
       cases: remapMany(row.cases, idMap),
       documents: remapMany(row.documents, idMap),
       codes: remapMany(row.codes, idMap),
-      created_by: userId || undefined,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
     };
     await createMappedRecord(pb, "code_reports", row, payload, idMap, tableCounts);
+  }
+
+  for (const row of findTable(data, "coder_reports")) {
+    const payload = {
+      ...stripSystemFields(row),
+      project: projectId,
+      cases: remapMany(row.cases, idMap),
+      documents: remapMany(row.documents, idMap),
+      codes: remapMany(row.codes, idMap),
+      coders: canReassociateUsers ? remapMany(row.coders, idMap) : [],
+      coder_identifiers: JSON.stringify(
+        stringArray(row.coders).map((value) => sourceIdentifier(value)).filter(Boolean),
+      ),
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
+    };
+    await createMappedRecord(pb, "coder_reports", row, payload, idMap, tableCounts);
   }
 
   for (const row of findTable(data, "project_log")) {
     const payload = {
       ...stripSystemFields(row),
       project: projectId,
-      user: userId || undefined,
-      user_name: pb.authStore.record?.name || pb.authStore.record?.email || "",
+      user: canReassociateUsers ? remapOne(row.user, idMap) || userId || undefined : userId || undefined,
+      user_identifier: sourceIdentifier(row.user),
+      user_name: typeof row.user_name === "string" ? row.user_name : pb.authStore.record?.name || pb.authStore.record?.email || "",
       record_id: typeof row.record_id === "string" ? idMap.get(row.record_id) ?? row.record_id : "",
     };
     await createMappedRecord(pb, "project_log", row, payload, idMap, tableCounts);
   }
 
-  return { tableCounts };
+  return {
+    tableCounts,
+    importedUsers,
+    identityChecks: validation.identityChecks,
+    requiresUserResolution: validation.requiresUserResolution,
+  };
 }
 
 function xmlEscape(value: unknown): string {
@@ -937,7 +1148,16 @@ export async function importRefiQdaIntoProject(
   });
   await bump("project_log");
 
-  return { tableCounts };
+  return {
+    tableCounts,
+    importedUsers: [],
+    identityChecks: {
+      backendMatched: false,
+      usersTableMatched: false,
+      allUsersPresent: false,
+    },
+    requiresUserResolution: false,
+  };
 }
 
 export async function importRefiQdaCodebookIntoProject(
@@ -964,7 +1184,16 @@ export async function importRefiQdaCodebookIntoProject(
   }
 
   await createCodeTree(codes);
-  return { tableCounts };
+  return {
+    tableCounts,
+    importedUsers: [],
+    identityChecks: {
+      backendMatched: false,
+      usersTableMatched: false,
+      allUsersPresent: false,
+    },
+    requiresUserResolution: false,
+  };
 }
 
 export function makeProjectBackupXlsx(data: ProjectExportData): Uint8Array {

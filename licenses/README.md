@@ -1,0 +1,31 @@
+# Third-Party License Texts
+
+This folder contains license texts for the main third-party license families and
+bundled components used in KanQual releases.
+
+It is intended to ship alongside the application and the
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) inventory.
+
+## Included files
+
+- `APACHE-2.0.txt`
+  Covers KanQual itself and many bundled code dependencies that are licensed
+  under Apache 2.0 or dual Apache 2.0 / MIT terms.
+- `MIT.txt`
+  Generic MIT license text used by many JavaScript, Rust, and bundled
+  components.
+- `POCKETBASE-MIT.txt`
+  PocketBase redistribution notice and MIT license text for the bundled
+  PocketBase server executable.
+- `SIL-OFL-1.1.txt`
+  License text for the bundled Inter font assets.
+- `UBUNTU-FONT-LICENCE-1.0.txt`
+  License text for the bundled Ubuntu font assets.
+
+## Notes
+
+- The per-package inventory remains in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+- When a dependency is dual licensed, this folder includes the common license
+  texts rather than one file per package.
+- If future releases add new bundled binaries or assets with different license
+  families, add their texts here as well.

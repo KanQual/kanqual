@@ -8,7 +8,9 @@ import {
 } from "react";
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
-import { waitForPb, ensureSetup } from "../lib/pb";
+import { waitForPb, ensureSetup, registerUserAccount } from "../lib/pb";
+import { clearRecentProjects, readAppSettings } from "../lib/appSettings";
+import { clearLocalAccounts, clearRemoteSessions } from "../lib/authHistory";
 
 type AuthStatus = "loading" | "ready" | "authenticated";
 
@@ -21,6 +23,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   updateProfile: (data: { name: string; email: string }) => Promise<void>;
+  changePassword: (data: { currentPassword: string; newPassword: string }) => Promise<void>;
   logout: () => void;
   error: string | null;
 }
@@ -45,8 +48,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await ensureSetup(instance);
         if (cancelled) return;
 
-        // Restore persisted auth token if valid
-        if (instance.authStore.isValid) {
+        const settings = readAppSettings();
+
+        // Restore persisted auth token only when startup auto-login is enabled.
+        if (instance.authStore.isValid && settings.startup.autoLoginLastUser) {
           try {
             await instance.collection("users").authRefresh();
             setUser(instance.authStore.record);
@@ -56,6 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setStatus("ready");
           }
         } else {
+          if (instance.authStore.isValid && !settings.startup.autoLoginLastUser) {
+            instance.authStore.clear();
+          }
           setStatus("ready");
         }
 
@@ -97,10 +105,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!pb) return;
       setError(null);
       try {
-        await pb.collection("users").create({
+        await registerUserAccount({
           name,
           email,
-          emailVisibility: true,
           password,
           passwordConfirm: password,
         });
@@ -126,7 +133,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [pb, user]
   );
 
+  const changePassword = useCallback(
+    async (data: { currentPassword: string; newPassword: string }) => {
+      if (!pb || !user) return;
+      const record = await pb.collection("users").update(user.id, {
+        oldPassword: data.currentPassword,
+        password: data.newPassword,
+        passwordConfirm: data.newPassword,
+        must_change_password: false,
+      });
+      pb.authStore.save(pb.authStore.token, record);
+      setUser(record);
+    },
+    [pb, user]
+  );
+
   const logout = useCallback(() => {
+    const settings = readAppSettings();
+    if (settings.privacy.clearRecentProjectsOnSignOut) {
+      clearRecentProjects();
+    }
+    if (settings.privacy.forgetLoginIdentitiesOnLogout) {
+      clearLocalAccounts();
+      clearRemoteSessions();
+    }
     pb?.authStore.clear();
     setUser(null);
     setStatus("ready");
@@ -134,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ pb, user, status, serverUrl, setServerUrl, login, register, updateProfile, logout, error }}
+      value={{ pb, user, status, serverUrl, setServerUrl, login, register, updateProfile, changePassword, logout, error }}
     >
       {children}
     </AuthContext.Provider>

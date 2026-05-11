@@ -1,110 +1,93 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import localDeviceIcon from "../assets/computer-line.svg";
+import networkDeviceIcon from "../assets/network--2.svg";
+import startupLogo from "../assets/logo-outline.png";
+import {
+  getLocalAccounts,
+  getRemoteSessions,
+  LOCAL_PB_URL,
+  saveLocalAccount,
+  saveRemoteSession,
+} from "../lib/authHistory";
+import { getRegisteredUserCount } from "../lib/pb";
 
 type Panel = "mode" | "local-accounts" | "remote-sessions" | "login" | "register" | "server";
 
-// ─── History stored in localStorage ─────────────────────────────────────────
-
-interface AccountHistory {
-  email: string;
-  name: string;
-  lastLogin: string; // ISO 8601
-}
-
-interface RemoteSession {
-  serverUrl: string;
-  email: string;
-  name: string;
-  lastLogin: string; // ISO 8601
-}
-
-const LOCAL_ACCOUNTS_KEY  = "mc_local_accounts";
-const REMOTE_SESSIONS_KEY = "mc_remote_sessions";
-const LOCAL_PB_URL        = "http://127.0.0.1:8090";
-
-function getLocalAccounts(): AccountHistory[] {
-  try { return JSON.parse(localStorage.getItem(LOCAL_ACCOUNTS_KEY) ?? "[]"); }
-  catch { return []; }
-}
-
-function saveLocalAccount(email: string, name: string): void {
-  const list = getLocalAccounts().filter((a) => a.email !== email);
-  list.unshift({ email, name, lastLogin: new Date().toISOString() });
-  localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(list.slice(0, 20)));
-}
-
-function getRemoteSessions(): RemoteSession[] {
-  try { return JSON.parse(localStorage.getItem(REMOTE_SESSIONS_KEY) ?? "[]"); }
-  catch { return []; }
-}
-
-function saveRemoteSession(serverUrl: string, email: string, name: string): void {
-  const list = getRemoteSessions().filter(
-    (s) => !(s.serverUrl === serverUrl && s.email === email)
-  );
-  list.unshift({ serverUrl, email, name, lastLogin: new Date().toISOString() });
-  localStorage.setItem(REMOTE_SESSIONS_KEY, JSON.stringify(list.slice(0, 20)));
-}
-
-// ─── Formatting helpers ───────────────────────────────────────────────────────
-
 function fmtLastLogin(iso: string): string {
-  const d    = new Date(iso);
-  const now  = new Date();
-  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const date = new Date(iso);
+  const now = new Date();
+  const days = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (days === 0) return `Today at ${time}`;
   if (days === 1) return `Yesterday at ${time}`;
-  const date = d.toLocaleDateString([], { month: "short", day: "numeric" });
-  return `${date} at ${time}`;
+  const shortDate = date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${shortDate} at ${time}`;
 }
 
 function initials(name: string): string {
   return (name || "?")
     .split(/\s+/)
-    .map((w) => w[0])
+    .map((word) => word[0])
     .join("")
     .slice(0, 2)
     .toUpperCase();
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
 export function AuthView() {
   const { login, register, error, status, serverUrl, setServerUrl, pb } = useAuth();
-  const [panel,      setPanel]      = useState<Panel>("mode");
-  const [name,       setName]       = useState("");
-  const [email,      setEmail]      = useState("");
-  const [password,   setPassword]   = useState("");
-  const [tempUrl,    setTempUrl]    = useState(serverUrl);
+  const [panel, setPanel] = useState<Panel>("mode");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [tempUrl, setTempUrl] = useState(serverUrl);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [localUserCount, setLocalUserCount] = useState<number | null>(null);
 
-  // ── Login / Register submit ──────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    void getRegisteredUserCount()
+      .then((count) => {
+        if (!cancelled) {
+          setLocalUserCount(count);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocalUserCount(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isFirstLocalUser = localUserCount === 0;
+  const isLocal = serverUrl === LOCAL_PB_URL;
+  const showRegisterOnly = isLocal && isFirstLocalUser;
+  const authMode: "login" | "register" = showRegisterOnly ? "register" : panel === "register" ? "register" : "login";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLocalError(null);
     setSubmitting(true);
     try {
-      const isLocal = serverUrl === LOCAL_PB_URL;
-      if (panel === "login") {
+      if (authMode === "login") {
         await login(email, password);
         const displayName = String(pb?.authStore.record?.name ?? email.split("@")[0]);
         if (isLocal) saveLocalAccount(email, displayName);
-        else         saveRemoteSession(serverUrl, email, displayName);
+        else saveRemoteSession(serverUrl, email, displayName);
       } else {
         await register(name, email, password);
         saveLocalAccount(email, name);
       }
-    } catch (e) {
-      setLocalError(e instanceof Error ? e.message : "Something went wrong");
+    } catch (submitError) {
+      setLocalError(submitError instanceof Error ? submitError.message : "Something went wrong");
     } finally {
       setSubmitting(false);
     }
   }
-
-  // ── Server URL submit ────────────────────────────────────────────────────────
 
   function handleServerSave(e: React.FormEvent) {
     e.preventDefault();
@@ -112,40 +95,46 @@ export function AuthView() {
     setPanel("login");
   }
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
-
   if (status === "loading") {
     return (
       <div className="auth-screen">
         <div className="auth-card">
-          <img src="/logo.png" alt="Kanqual" className="auth-logo" />
+          <img src={startupLogo} alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
-          <p className="auth-starting">Starting up…</p>
+          <p className="auth-starting">Starting up...</p>
         </div>
       </div>
     );
   }
 
-  // ── Mode selection ───────────────────────────────────────────────────────────
-
   if (panel === "mode") {
     return (
       <div className="auth-screen">
-        <div className="auth-card">
-          <img src="/logo.png" alt="Kanqual" className="auth-logo" />
-          <div className="auth-brand">Kanqual</div>
-          <p className="auth-tagline">Text annotation for qualitative research</p>
+        <div className="auth-card auth-card--mode">
+          <div className="auth-mode-header">
+            <img src="/logo.png" alt="KanQual" className="auth-logo auth-logo--mode" />
+            <div className="auth-brand auth-brand--mode">KanQual</div>
+          </div>
           <div className="mode-options">
             <button
               className="mode-option"
-              onClick={() => {
+              onClick={async () => {
+                const count = localUserCount ?? await getRegisteredUserCount().catch(() => null);
+                if (count === 0) {
+                  setEmail("");
+                  setPassword("");
+                  setName("");
+                  setPanel("register");
+                  return;
+                }
                 const accounts = getLocalAccounts();
                 setPanel(accounts.length > 0 ? "local-accounts" : "login");
               }}
             >
+              <img src={localDeviceIcon} alt="" className="mode-option-icon" aria-hidden="true" />
               <span className="mode-option-title">Work on my own device</span>
               <span className="mode-option-desc">
-                Store and analyse your data locally — nothing leaves this computer.
+                Store and analyse your data locally - nothing leaves this computer.
               </span>
             </button>
             <button
@@ -160,6 +149,7 @@ export function AuthView() {
                 }
               }}
             >
+              <img src={networkDeviceIcon} alt="" className="mode-option-icon" aria-hidden="true" />
               <span className="mode-option-title">Join a project on another device</span>
               <span className="mode-option-desc">
                 Connect to a project hosted by someone else on your network.
@@ -171,8 +161,6 @@ export function AuthView() {
     );
   }
 
-  // ── Local accounts list ──────────────────────────────────────────────────────
-
   if (panel === "local-accounts") {
     const accounts = getLocalAccounts();
     return (
@@ -182,42 +170,44 @@ export function AuthView() {
           <div className="auth-brand">Kanqual</div>
           <h2 className="auth-panel-title">Choose an account</h2>
           <ul className="account-list">
-            {accounts.map((a) => (
+            {accounts.map((account) => (
               <li
-                key={a.email}
+                key={account.email}
                 className="account-item"
                 onClick={() => {
-                  setEmail(a.email);
+                  setEmail(account.email);
                   setPassword("");
                   setPanel("login");
                 }}
               >
-                <div className="account-avatar">{initials(a.name)}</div>
+                <div className="account-avatar">{initials(account.name)}</div>
                 <div className="account-info">
-                  <div className="account-name">{a.name}</div>
-                  <div className="account-email">{a.email}</div>
+                  <div className="account-name">{account.name}</div>
+                  <div className="account-email">{account.email}</div>
                 </div>
-                <div className="account-login-time">{fmtLastLogin(a.lastLogin)}</div>
+                <div className="account-login-time">{fmtLastLogin(account.lastLogin)}</div>
               </li>
             ))}
           </ul>
           <div className="account-list-actions">
             <button
               className="btn btn--sm"
-              onClick={() => { setEmail(""); setPassword(""); setPanel("login"); }}
+              onClick={() => {
+                setEmail("");
+                setPassword("");
+                setPanel("login");
+              }}
             >
               + Use a different account
             </button>
             <button className="btn btn--sm" onClick={() => setPanel("mode")}>
-              ← Back
+              &larr; Back
             </button>
           </div>
         </div>
       </div>
     );
   }
-
-  // ── Remote sessions list ─────────────────────────────────────────────────────
 
   if (panel === "remote-sessions") {
     const sessions = getRemoteSessions();
@@ -228,44 +218,45 @@ export function AuthView() {
           <div className="auth-brand">Kanqual</div>
           <h2 className="auth-panel-title">Recent connections</h2>
           <ul className="account-list">
-            {sessions.map((s) => (
+            {sessions.map((session) => (
               <li
-                key={`${s.serverUrl}:${s.email}`}
+                key={`${session.serverUrl}:${session.email}`}
                 className="account-item"
                 onClick={() => {
-                  setServerUrl(s.serverUrl);
-                  setEmail(s.email);
+                  setServerUrl(session.serverUrl);
+                  setEmail(session.email);
                   setPassword("");
                   setPanel("login");
                 }}
               >
-                <div className="account-avatar">{initials(s.name)}</div>
+                <div className="account-avatar">{initials(session.name)}</div>
                 <div className="account-info">
-                  <div className="account-name">{s.name}</div>
-                  <div className="account-email">{s.email}</div>
-                  <div className="account-server">{s.serverUrl}</div>
+                  <div className="account-name">{session.name}</div>
+                  <div className="account-email">{session.email}</div>
+                  <div className="account-server">{session.serverUrl}</div>
                 </div>
-                <div className="account-login-time">{fmtLastLogin(s.lastLogin)}</div>
+                <div className="account-login-time">{fmtLastLogin(session.lastLogin)}</div>
               </li>
             ))}
           </ul>
           <div className="account-list-actions">
             <button
               className="btn btn--sm"
-              onClick={() => { setTempUrl(serverUrl); setPanel("server"); }}
+              onClick={() => {
+                setTempUrl(serverUrl);
+                setPanel("server");
+              }}
             >
               + Connect to a new server
             </button>
             <button className="btn btn--sm" onClick={() => setPanel("mode")}>
-              ← Back
+              &larr; Back
             </button>
           </div>
         </div>
       </div>
     );
   }
-
-  // ── Server URL entry ─────────────────────────────────────────────────────────
 
   if (panel === "server") {
     return (
@@ -309,10 +300,6 @@ export function AuthView() {
     );
   }
 
-  // ── Login / Register ─────────────────────────────────────────────────────────
-
-  const isLocal = serverUrl === LOCAL_PB_URL;
-
   return (
     <div className="auth-screen">
       <div className="auth-card">
@@ -320,24 +307,35 @@ export function AuthView() {
         <p className="auth-tagline">Text annotation for qualitative research</p>
 
         <form onSubmit={handleSubmit} className="form">
-          <div className="auth-tabs">
-            <button
-              type="button"
-              className={`auth-tab ${panel === "login" ? "auth-tab--active" : ""}`}
-              onClick={() => setPanel("login")}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              className={`auth-tab ${panel === "register" ? "auth-tab--active" : ""}`}
-              onClick={() => setPanel("register")}
-            >
-              Create account
-            </button>
-          </div>
+          {!showRegisterOnly && (
+            <div className="auth-tabs">
+              <button
+                type="button"
+                className={`auth-tab ${panel === "login" ? "auth-tab--active" : ""}`}
+                onClick={() => setPanel("login")}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                className={`auth-tab ${panel === "register" ? "auth-tab--active" : ""}`}
+                onClick={() => setPanel("register")}
+              >
+                Create account
+              </button>
+            </div>
+          )}
 
-          {panel === "register" && (
+          {showRegisterOnly && (
+            <div className="auth-admin-notice">
+              <strong>This account will be the administrator on this device.</strong>
+              <span>
+                It will have access to all local KanQual information, including project and user administration, editing, deletion, and app-data clearing tools.
+              </span>
+            </div>
+          )}
+
+          {(panel === "register" || showRegisterOnly) && (
             <label className="form-label">
               Name
               <input
@@ -370,7 +368,7 @@ export function AuthView() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="........"
               required
               minLength={8}
               autoFocus={!!email}
@@ -383,10 +381,10 @@ export function AuthView() {
 
           <button type="submit" className="btn btn--primary" disabled={submitting}>
             {submitting
-              ? "Please wait…"
-              : panel === "login"
-              ? "Sign in"
-              : "Create account"}
+              ? "Please wait..."
+              : authMode === "login"
+                ? "Sign in"
+                : "Create account"}
           </button>
 
           <button
@@ -402,7 +400,7 @@ export function AuthView() {
               }
             }}
           >
-            ← Back
+            &larr; Back
           </button>
 
           <p className="auth-server-info">

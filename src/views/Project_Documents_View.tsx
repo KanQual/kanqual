@@ -1,7 +1,16 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
+import ExcelJS from "exceljs";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
+import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
+import { readAppSettings } from "../lib/appSettings";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
+import {
+  ProcessedTranscriptView,
+  getProcessedTranscriptQuestionOutline,
+  parseProcessedTranscriptSegments,
+} from "../components/ProcessedTranscriptView";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
@@ -12,8 +21,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 interface DocRow {
   id: string;
   name: string;
+  type: string;
   notes: string;
   content: string;
+  structuredContentJson: string;
   filePath: string;
   cases: { id: string; name: string }[];   // associated cases (used by detail view)
   memoCount: number;
@@ -21,12 +32,14 @@ interface DocRow {
   createdAt: string;
 }
 
-type AttributeDataType = "text" | "number" | "datetime";
+type AttributeDataType = "text" | "number" | "datetime" | "categorical";
 
 interface AttributeDefinition {
   id: string;
   name: string;
   dataType: AttributeDataType;
+  description: string;
+  options: string[];
   sortOrder: number;
 }
 
@@ -41,6 +54,8 @@ interface AttributeDraft {
   id?: string;
   name: string;
   dataType: AttributeDataType;
+  description: string;
+  options: string[];
 }
 
 type SortCol = "name" | "cases" | "memos" | "createdByName" | "createdAt";
@@ -60,20 +75,47 @@ function fmtDate(iso: string): string {
   }
 }
 
+function maskedFileLabel(filePath: string): string {
+  if (!filePath) return "—";
+  return readAppSettings().privacy.maskFilePaths ? "Hidden by app settings" : filePath;
+}
+
 function inputTypeForDataType(dataType: AttributeDataType) {
   if (dataType === "number") return "number";
   if (dataType === "datetime") return "datetime-local";
   return "text";
 }
 
+function normalizeAttributeOptions(options: string[]): string[] {
+  return options.map((option) => option.trim()).filter(Boolean);
+}
+
+function parseAttributeOptions(value: unknown): string[] {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? normalizeAttributeOptions(parsed.filter((item): item is string => typeof item === "string")) : [];
+  } catch {
+    return [];
+  }
+}
+
+const ATTRIBUTE_TYPE_OPTIONS: { value: AttributeDataType; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Numbers" },
+  { value: "datetime", label: "Date/time" },
+  { value: "categorical", label: "Categorical" },
+];
+
+const AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY = "kq_ai_assist_add_attribute_target";
+
 // ─── Column definitions ───────────────────────────────────────────────────────
 
 const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "name",          label: "Name",       width: "28%" },
-  { key: "cases",         label: "Cases",      width: "12%" },
-  { key: "memos",         label: "Memos",      width: "11%" },
-  { key: "createdByName", label: "Created By", width: "25%" },
-  { key: "createdAt",     label: "Created",    width: "24%" },
+  { key: "cases",         label: "Cases",      width: "11%" },
+  { key: "memos",         label: "Memos",      width: "10%" },
+  { key: "createdByName", label: "Created By", width: "22%" },
+  { key: "createdAt",     label: "Created",    width: "20%" },
 ];
 
 // ─── Rich text editor ─────────────────────────────────────────────────────────
@@ -89,9 +131,13 @@ const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
 function RichTextEditor({
   initialHtml,
   editorRef,
+  onChange,
+  minRows,
 }: {
   initialHtml: string;
   editorRef: React.RefObject<HTMLDivElement | null>;
+  onChange?: () => void;
+  minRows?: number;
 }) {
   const id = useId();
 
@@ -104,6 +150,10 @@ function RichTextEditor({
     document.getElementById(id)?.focus();
     document.execCommand(cmd, false);
   }
+
+  const contentStyle = minRows
+    ? { height: `${minRows * 1.5}em`, overflowY: "auto" as const }
+    : undefined;
 
   return (
     <div className="rte">
@@ -126,7 +176,81 @@ function RichTextEditor({
         className="rte-content"
         contentEditable
         suppressContentEditableWarning
+        onInput={onChange}
+        style={contentStyle}
       />
+    </div>
+  );
+}
+
+// ─── EditMetadataModal ───────────────────────────────────────────────────────
+
+function EditMetadataModal({
+  row,
+  onSave,
+  onClose,
+}: {
+  row: DocRow;
+  onSave: (name: string, notes: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [name,   setName]   = useState(row.name);
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState<string | null>(null);
+  const notesRef = useRef<HTMLDivElement | null>(null);
+
+  async function handleSave() {
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(name.trim(), notesRef.current?.innerHTML ?? row.notes);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={() => !saving && onClose()}>
+      <div
+        className="modal doc-upload-modal doc-upload-modal--text-entry"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2>Edit Metadata</h2>
+        <div className="form">
+          <label className="form-label">
+            Document Title
+            <input
+              className="form-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+          </label>
+          <label className="form-label">Description</label>
+          <RichTextEditor
+            initialHtml={ensureHtml(row.notes)}
+            editorRef={notesRef}
+            minRows={10}
+          />
+          {error && <p className="auth-error">{error}</p>}
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => void handleSave()}
+              disabled={saving || !name.trim()}
+            >
+              {saving ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -137,29 +261,44 @@ function DocumentDetail({
   row: initialRow,
   pb,
   startEditing,
-  canEdit,
+  canEditMetadata,
+  canEditContent,
+  canDelete,
+  canAssociateCases,
+  canMemoAbout,
+  canCreateEditableCopy,
   onBack,
   onMemoAbout,
+  onRequestDelete,
 }: {
   row: DocRow;
   pb: NonNullable<ReturnType<typeof useStore>["pb"]>;
   startEditing: boolean;
-  canEdit: boolean;
+  canEditMetadata: boolean;
+  canEditContent: boolean;
+  canDelete: boolean;
+  canAssociateCases: boolean;
+  canMemoAbout: boolean;
+  canCreateEditableCopy: boolean;
   onBack: () => void;
   onMemoAbout: () => void;
+  onRequestDelete: (row: DocRow) => void;
 }) {
-  const { setView, setPendingCaseId, setPendingMemoId, activeProject, updateDocument } = useStore();
+  const { setView, setPendingCaseId, setPendingMemoId, activeProject, updateDocument, logAction } = useStore();
   const [row,            setRow]            = useState(initialRow);
-  const [editing,        setEditing]        = useState(startEditing);
-  const [name,           setName]           = useState(initialRow.name);
-  const [content,        setContent]        = useState(initialRow.content);
-  const [contentEdited,  setContentEdited]  = useState(false);
-  const [saving,         setSaving]         = useState(false);
-  const [error,          setError]          = useState<string | null>(null);
-  const [showWarning,    setShowWarning]    = useState(false);
+  const [showEditMetadataModal, setShowEditMetadataModal] = useState(startEditing && canEditMetadata);
+  const [showEditWarning, setShowEditWarning] = useState(false);
   const [docMemos,       setDocMemos]       = useState<{ id: string; title: string }[]>([]);
   const [showAssocCases, setShowAssocCases] = useState(false);
-  const notesRef = useRef<HTMLDivElement>(null);
+  const [showEditableCopyModal, setShowEditableCopyModal] = useState(false);
+  const [showRawEditModal, setShowRawEditModal] = useState(startEditing && !canEditMetadata && canEditContent);
+  const [annotationCount, setAnnotationCount] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [selectedOutlineSortOrder, setSelectedOutlineSortOrder] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const transcriptViewerRef = useRef<HTMLDivElement | null>(null);
+
 
   useEffect(() => {
     pb.collection("memos")
@@ -167,6 +306,38 @@ function DocumentDetail({
       .then((records) => setDocMemos(records.map((r) => ({ id: r.id, title: r.title as string }))))
       .catch(console.error);
   }, [pb, row.id]);
+
+  useEffect(() => {
+    pb.collection("annotations")
+      .getFullList({ filter: `document="${row.id}"&&deleted_at=""`, fields: "id" })
+      .then((records) => setAnnotationCount(records.length))
+      .catch(() => setAnnotationCount(0));
+  }, [pb, row.id]);
+
+  useEffect(() => {
+    setRow(initialRow);
+  }, [initialRow]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [menuOpen]);
 
   const refreshCases = useCallback(async () => {
     const caseDocs = await pb.collection("case_documents").getFullList({
@@ -184,38 +355,84 @@ function DocumentDetail({
   const fileExt = row.filePath
     ? (row.filePath.split(".").pop()?.toLowerCase() ?? "")
     : "";
+  const hasAnnotations = (annotationCount ?? 0) > 0;
+  const processedTranscriptSegments =
+    row.type === "Processed Transcript"
+      ? parseProcessedTranscriptSegments(row.structuredContentJson)
+      : [];
+  const questionOutline = getProcessedTranscriptQuestionOutline(processedTranscriptSegments);
 
-  function handleToggleEdit(on: boolean) {
-    if (!on) {
-      setName(row.name);
-      setContent(row.content);
-      setContentEdited(false);
-      setError(null);
+  useEffect(() => {
+    if (selectedOutlineSortOrder == null || !transcriptViewerRef.current) return;
+    const target = transcriptViewerRef.current.querySelector<HTMLElement>(
+      `[data-transcript-sort-order="${selectedOutlineSortOrder}"]`,
+    );
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedOutlineSortOrder]);
+
+  async function handleEditableCopyCreated(newDocumentId: string) {
+    const [caseDocs, attributeValues] = await Promise.all([
+      pb.collection("case_documents").getFullList({
+        filter: `document="${row.id}"`,
+        fields: "id,case,document",
+      }),
+      pb.collection("document_attribute_values").getFullList({
+        filter: `document="${row.id}"&&deleted_at=""`,
+        fields: "id,attribute,value",
+      }),
+    ]);
+
+    await Promise.all([
+      ...caseDocs.map((record) =>
+        pb.collection("case_documents").create({
+          case: record.case,
+          document: newDocumentId,
+        })
+      ),
+      ...attributeValues.map((record) =>
+        pb.collection("document_attribute_values").create({
+          document: newDocumentId,
+          attribute: record.attribute,
+          value: record.value ?? "",
+          deleted_at: "",
+        })
+      ),
+    ]);
+
+    if (row.notes) {
+      await pb.collection("documents").update(newDocumentId, { notes: row.notes });
     }
-    setEditing(on);
+
+    if (activeProject) {
+      await logAction(
+        activeProject.id,
+        "document.create",
+        `Created editable copy of "${row.name}"`,
+        newDocumentId,
+      );
+    }
   }
 
-  async function doSave() {
-    setSaving(true);
-    setError(null);
-    try {
-      const notes = notesRef.current?.innerHTML ?? row.notes;
-      await updateDocument(row.id, { name, notes, content });
-      setRow({ ...row, name, notes, content });
-      setEditing(false);
-      setContentEdited(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save.");
-    } finally {
-      setSaving(false);
-    }
+  async function handleSaveMetadata(newName: string, newNotes: string) {
+    await updateDocument(row.id, { name: newName, notes: newNotes });
+    setRow({ ...row, name: newName, notes: newNotes });
+    setShowEditMetadataModal(false);
   }
 
-  function handleSave() {
-    if (contentEdited) {
-      setShowWarning(true);
-    } else {
-      doSave();
+  function handleRequestEditableCopy() {
+    if (!canCreateEditableCopy && !canEditContent) return;
+    if (hasAnnotations) {
+      if (!canCreateEditableCopy) return;
+      setShowEditWarning(true);
+      return;
+    }
+    if (canEditContent) {
+      setShowRawEditModal(true);
+      return;
+    }
+    if (canCreateEditableCopy) {
+      setShowEditableCopyModal(true);
     }
   }
 
@@ -224,17 +441,58 @@ function DocumentDetail({
       {/* Top bar */}
       <div className="case-detail-topbar">
         <button className="btn" onClick={onBack}>← Back to Documents</button>
-        {canEdit && (
-          <label className="toggle-switch" title={editing ? "Cancel editing" : "Edit document"}>
-            <input
-              type="checkbox"
-              checked={editing}
-              onChange={(e) => handleToggleEdit(e.target.checked)}
-            />
-            <span className="toggle-track"><span className="toggle-thumb" /></span>
-            <span className="toggle-label">{editing ? "Editing" : "Edit"}</span>
-          </label>
-        )}
+        <div className="user-detail-menu-wrap" ref={menuRef}>
+          <button
+            type="button"
+            className="home-menu-btn user-detail-menu-btn"
+            aria-label="Document actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          {menuOpen && (
+            <div className="context-menu user-detail-menu" role="menu">
+              {canEditMetadata ? (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowEditMetadataModal(true);
+                  }}
+                >
+                  Edit Metadata
+                </button>
+              ) : (
+                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit document metadata">
+                  Edit Metadata
+                </div>
+              )}
+              {canDelete ? (
+                <button
+                  type="button"
+                  className="context-menu-item context-menu-item--danger"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRequestDelete(row);
+                  }}
+                >
+                  Delete Document
+                </button>
+              ) : (
+                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete documents">
+                  Delete Document
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Two-column layout */}
@@ -246,35 +504,39 @@ function DocumentDetail({
           {/* Name card */}
           <div className="case-card">
             <h3 className="case-card-title">Document</h3>
-            {editing ? (
-              <input
-                className="form-input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-              />
-            ) : (
-              <p className="case-card-value">{row.name}</p>
-            )}
+            <p className="case-card-value">{row.name}</p>
           </div>
 
           {/* Meta */}
           <dl className="user-detail-meta case-detail-meta">
             <dt>Created By</dt> <dd>{row.createdByName}</dd>
             <dt>Created</dt>    <dd>{fmtDate(row.createdAt)}</dd>
-            <dt>File Name</dt>  <dd>{row.filePath || "—"}</dd>
+            <dt>File Name</dt>  <dd>{maskedFileLabel(row.filePath)}</dd>
             <dt>Extension</dt>  <dd>{fileExt ? `.${fileExt}` : "—"}</dd>
           </dl>
+
+          {/* Description card — above cases */}
+          <div className="case-card">
+            <h3 className="case-card-title">Description</h3>
+            {row.notes ? (
+              <div className="case-notes-body" dangerouslySetInnerHTML={{ __html: row.notes }} />
+            ) : (
+              <p className="case-card-empty">No description yet.</p>
+            )}
+          </div>
 
           {/* Cases card */}
           <div className="case-card">
             <div className="case-card-header">
               <h3 className="case-card-title">Cases</h3>
-              {!editing && (
-                <button className="btn btn--sm" onClick={() => setShowAssocCases(true)}>
-                  Associate Cases
-                </button>
-              )}
+              <button
+                className="btn btn--sm"
+                onClick={() => setShowAssocCases(true)}
+                disabled={!canAssociateCases}
+                title={!canAssociateCases ? "You do not have permission to associate documents with cases" : undefined}
+              >
+                Associate Cases
+              </button>
             </div>
             {row.cases.length > 0 ? (
               <ul className="case-detail-doc-list">
@@ -298,11 +560,14 @@ function DocumentDetail({
           <div className="case-card">
             <div className="case-card-header">
               <h3 className="case-card-title">Memos</h3>
-              {!editing && (
-                <button className="btn btn--sm" onClick={onMemoAbout}>
-                  Memo About
-                </button>
-              )}
+              <button
+                className="btn btn--sm"
+                onClick={onMemoAbout}
+                disabled={!canMemoAbout}
+                title={!canMemoAbout ? "You do not have permission to create a memo about this document" : undefined}
+              >
+                Memo About
+              </button>
             </div>
             {docMemos.length > 0 ? (
               <ul className="case-detail-doc-list">
@@ -322,45 +587,71 @@ function DocumentDetail({
             )}
           </div>
 
-          {/* Notes card */}
-          <div className="case-card">
-            <h3 className="case-card-title">Notes</h3>
-            {editing ? (
-              <RichTextEditor initialHtml={row.notes} editorRef={notesRef} />
-            ) : row.notes ? (
-              <div className="case-notes-body" dangerouslySetInnerHTML={{ __html: row.notes }} />
-            ) : (
-              <p className="case-card-empty">No notes yet.</p>
-            )}
-          </div>
-
-          {/* Save / cancel */}
-          {editing && (
-            <div className="case-detail-actions">
-              {error && <p className="auth-error">{error}</p>}
-              <button className="btn" onClick={() => handleToggleEdit(false)} disabled={saving}>
-                Cancel
-              </button>
-              <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
-                {saving ? "Saving…" : "Save Changes"}
-              </button>
-            </div>
-          )}
-
         </div>
 
         {/* Right column — document content (2/3) */}
         <div className="doc-detail-right">
           <div className="case-card doc-content-card">
-            <h3 className="case-card-title">Contents</h3>
-            {editing ? (
-              <textarea
-                className="doc-content-editor"
-                value={content}
-                onChange={(e) => { setContent(e.target.value); setContentEdited(true); }}
-              />
-            ) : content ? (
-              <pre className="doc-content-body">{content}</pre>
+            <div className="case-card-header">
+              <div className="doc-content-header-title">
+                <div className="processed-transcript-title-row">
+                  <h3 className="case-card-title">Contents</h3>
+                  {questionOutline.length > 0 && (
+                    <div className="processed-transcript-outline-wrap">
+                      <button
+                        type="button"
+                        className="processed-transcript-outline-btn"
+                        aria-label="Show transcript outline"
+                        aria-expanded={outlineOpen}
+                        onClick={() => setOutlineOpen((open) => !open)}
+                      >
+                        ≡
+                      </button>
+                      {outlineOpen && (
+                        <div className="processed-transcript-outline-menu">
+                          {questionOutline.map((item, index) => (
+                            <button
+                              key={`${item.sortOrder}-${index}`}
+                              type="button"
+                              className="processed-transcript-outline-item"
+                              onClick={() => {
+                                setSelectedOutlineSortOrder(item.sortOrder);
+                                setOutlineOpen(false);
+                              }}
+                              title={item.label}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="doc-toolbar-actions">
+                {((hasAnnotations && canCreateEditableCopy) || (!hasAnnotations && (canEditContent || canCreateEditableCopy))) && (
+                  <button className="btn btn--sm btn--primary" onClick={handleRequestEditableCopy}>
+                    {hasAnnotations || !canEditContent ? "Create Editable Copy" : "Edit"}
+                  </button>
+                )}
+              </div>
+            </div>
+            {row.content ? (
+              row.type === "Processed Transcript" && processedTranscriptSegments.length > 0 ? (
+                <div
+                  ref={transcriptViewerRef}
+                  className="doc-content-body doc-content-body--structured"
+                >
+                  <ProcessedTranscriptView
+                    segments={processedTranscriptSegments}
+                    renderSegmentText={(segment) => segment.text}
+                    selectedSortOrder={selectedOutlineSortOrder}
+                  />
+                </div>
+              ) : (
+                <pre className="doc-content-body">{row.content}</pre>
+              )
             ) : (
               <p className="case-card-empty">No content extracted.</p>
             )}
@@ -369,28 +660,52 @@ function DocumentDetail({
 
       </div>
 
-      {/* Content-edit warning modal */}
-      {showWarning && (
-        <div className="modal-overlay" onClick={() => setShowWarning(false)}>
+      {showEditMetadataModal && canEditMetadata && (
+        <EditMetadataModal
+          row={row}
+          onSave={handleSaveMetadata}
+          onClose={() => setShowEditMetadataModal(false)}
+        />
+      )}
+
+      {showRawEditModal && canEditContent && (
+        <EditDocumentContentModal
+          documentName={row.name}
+          initialContent={row.content}
+          onClose={() => setShowRawEditModal(false)}
+          onSave={async (content) => {
+            await updateDocument(row.id, { content });
+            setRow((prev) => ({ ...prev, content }));
+            setShowRawEditModal(false);
+          }}
+        />
+      )}
+
+            {/* Edit warning modal */}
+      {showEditWarning && (
+        <div className="modal-overlay" onClick={() => setShowEditWarning(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Save Content Changes?</h2>
+            <h2>Create Editable Copy</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              You've edited the document contents stored in Kanqual.
+              The editable copy will not keep this document's annotations.
             </p>
             <p className="modal-warning-text">
-              This only updates the text stored in this app — the original file
-              on your computer will not be modified.
+              {annotationCount && annotationCount > 0
+                ? `This document currently has ${annotationCount} annotation${annotationCount === 1 ? "" : "s"}. If you create an editable copy, those annotations will not be carried over to the new document.`
+                : "The current document will remain unchanged. Cases, document attributes, and notes will be copied to the new editable document."}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setShowWarning(false)} disabled={saving}>
+              <button className="btn" onClick={() => setShowEditWarning(false)}>
                 Cancel
               </button>
               <button
                 className="btn btn--primary"
-                onClick={() => { setShowWarning(false); doSave(); }}
-                disabled={saving}
+                onClick={() => {
+                  setShowEditWarning(false);
+                  setShowEditableCopyModal(true);
+                }}
               >
-                Save Anyway
+                Continue
               </button>
             </div>
           </div>
@@ -398,13 +713,29 @@ function DocumentDetail({
       )}
 
       {/* Associate Cases modal (opened from within detail) */}
-      {showAssocCases && activeProject && (
+      {showAssocCases && activeProject && canAssociateCases && (
         <AssociateCasesModal
           docRow={row}
           pb={pb}
           projectId={activeProject.id}
+          onLog={(action, label, recordId) => logAction(activeProject.id, action, label, recordId)}
           onDone={() => { setShowAssocCases(false); refreshCases(); }}
           onClose={() => setShowAssocCases(false)}
+        />
+      )}
+
+      {showEditableCopyModal && canCreateEditableCopy && (
+        <NewDocumentModal
+          initialName={`${row.name} (Editable Copy)`}
+          initialMode="paste"
+          initialPasted={row.content}
+          allowedModes={["paste"]}
+          onCreated={handleEditableCopyCreated}
+          onDone={() => {
+            setShowEditableCopyModal(false);
+            onBack();
+          }}
+          onClose={() => setShowEditableCopyModal(false)}
         />
       )}
 
@@ -528,12 +859,14 @@ function AssociateCasesModal({
   docRow,
   pb,
   projectId,
+  onLog,
   onDone,
   onClose,
 }: {
   docRow: DocRow;
   pb: NonNullable<ReturnType<typeof useStore>["pb"]>;
   projectId: string;
+  onLog: (action: string, label: string, recordId?: string) => Promise<void> | void;
   onDone: () => void;
   onClose: () => void;
 }) {
@@ -640,6 +973,13 @@ function AssociateCasesModal({
           return recId ? removeCaseDocument(recId) : Promise.resolve();
         }),
       ]);
+      if (toAdd.length > 0 || toRemove.length > 0) {
+        await onLog(
+          "document.associations",
+          `Updated case associations for document "${docRow.name}" (+${toAdd.length} / -${toRemove.length})`,
+          docRow.id,
+        );
+      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save associations.");
@@ -748,28 +1088,239 @@ function AssociateCasesModal({
 
 // ─── New Document modal ───────────────────────────────────────────────────────
 
-type InputMode = "upload" | "paste";
+type InputMode = "upload" | "paste" | "batch" | "csv";
+type CsvColumnRole = "ignore" | "name" | "description" | "content" | "attribute";
+
+interface CsvColumnMapping {
+  header: string;
+  role: CsvColumnRole;
+  attributeName: string;
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        value += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+      continue;
+    }
+
+    if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      if (ch === "\r" && next === "\n") i += 1;
+      row.push(value);
+      rows.push(row);
+      row = [];
+      value = "";
+      continue;
+    }
+
+    value += ch;
+  }
+
+  if (value.length > 0 || row.length > 0) {
+    row.push(value);
+    rows.push(row);
+  }
+
+  return rows
+    .map((cells) => cells.map((cell) => cell.trim()))
+    .filter((cells) => cells.some((cell) => cell.length > 0));
+}
+
+function suggestCsvRole(header: string): CsvColumnRole {
+  const normalized = header.trim().toLowerCase();
+  if (/(^|[_\s-])(name|title)([_\s-]|$)/.test(normalized)) return "name";
+  if (/(description|notes|summary)/.test(normalized)) return "description";
+  if (/(content|text|body|transcript)/.test(normalized)) return "content";
+  return "attribute";
+}
+
+async function parseSpreadsheetFile(file: File): Promise<string[][]> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "csv") {
+    return parseCsv(await file.text());
+  }
+  if (ext !== "xlsx") {
+    throw new Error(`Unsupported spreadsheet type ".${ext}".`);
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await file.arrayBuffer());
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
+    throw new Error("Spreadsheet does not contain any worksheets.");
+  }
+
+  const rows: string[][] = [];
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    const cells = row.values;
+    const normalized = Array.isArray(cells)
+      ? cells.slice(1).map((cell) => (cell == null ? "" : String(cell).trim()))
+      : [];
+    if (normalized.some((cell) => cell.length > 0)) {
+      rows.push(normalized);
+    }
+  });
+
+  return rows;
+}
+
+// If text already contains structural HTML tags, use it as-is;
+// otherwise escape entities and convert newlines to <br> so the
+// RichTextEditor displays plain-text content correctly.
+function ensureHtml(text: string): string {
+  if (/<(p|div|br|ul|ol|li|strong|em|b|i|h[1-6])[^>]*>/i.test(text)) return text;
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+}
+
+function EditDocumentContentModal({
+  documentName,
+  initialContent,
+  onSave,
+  onClose,
+}: {
+  documentName: string;
+  initialContent: string;
+  onSave: (content: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(editorRef.current?.innerHTML ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save document.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={() => !saving && onClose()}>
+      <div className="modal doc-upload-modal doc-upload-modal--text-entry" onClick={(e) => e.stopPropagation()}>
+        <h2>Edit Document</h2>
+        <p className="settings-section-desc" style={{ marginBottom: 16 }}>{documentName}</p>
+        <form className="form" onSubmit={handleSubmit}>
+          <RichTextEditor
+            initialHtml={ensureHtml(initialContent)}
+            editorRef={editorRef}
+            minRows={16}
+          />
+
+          {error && <p className="auth-error">{error}</p>}
+
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={onClose} disabled={saving}>Cancel</button>
+            <button type="submit" className="btn btn--primary" disabled={saving}>
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 function NewDocumentModal({
+  initialName = "",
+  initialMode,
+  initialPasted = "",
+  allowedModes = ["upload", "paste", "batch", "csv"],
+  attributeDefs = [],
+  onCreated,
   onDone,
   onClose,
 }: {
+  initialName?: string;
+  initialMode?: InputMode;
+  initialPasted?: string;
+  allowedModes?: InputMode[];
+  attributeDefs?: AttributeDefinition[];
+  onCreated?: (documentId: string) => Promise<void> | void;
   onDone: () => void;
   onClose: () => void;
 }) {
-  const { addDocument } = useStore();
+  const { addDocument, pb, activeProject } = useStore();
   const { user: currentUser } = useAuth();
-  const [name,      setName]      = useState("");
-  const [mode,      setMode]      = useState<InputMode>("upload");
+  const importSettings = readAppSettings().documentImport;
+  const [name,      setName]      = useState(initialName);
+  const [mode,      setMode]      = useState<InputMode>(
+    initialMode && allowedModes.includes(initialMode)
+      ? initialMode
+      : allowedModes[0] ?? "upload",
+  );
   const [file,      setFile]      = useState<File | null>(null);
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvMappings, setCsvMappings] = useState<CsvColumnMapping[]>([]);
+  const [csvPreviewRows, setCsvPreviewRows] = useState<string[][]>([]);
+  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [extracted, setExtracted] = useState("");
   const [extracting,setExtracting]= useState(false);
   const [extractErr,setExtractErr]= useState<string | null>(null);
-  const [pasted,    setPasted]    = useState("");
+  const [pasteHasContent, setPasteHasContent] = useState(initialPasted.length > 0);
+  const pastedRef = useRef<HTMLDivElement | null>(null);
   const [dragging,  setDragging]  = useState(false);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const batchInputRef = useRef<HTMLInputElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!allowedModes.includes(mode)) {
+      setMode(allowedModes[0] ?? "upload");
+      resetUploadState();
+    }
+  }, [allowedModes, mode]);
+
+  function resetUploadState() {
+    setFile(null);
+    setBatchFiles([]);
+    setCsvFile(null);
+    setCsvMappings([]);
+    setCsvPreviewRows([]);
+    setCsvRows([]);
+    setExtracted("");
+    setExtractErr(null);
+    setExtracting(false);
+  }
+
+  function setModeAndReset(nextMode: InputMode) {
+    setMode(nextMode);
+    resetUploadState();
+    if (nextMode !== "upload" && nextMode !== "paste") {
+      setName(initialName);
+    }
+  }
 
   async function processFile(f: File) {
     const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
@@ -778,11 +1329,14 @@ function NewDocumentModal({
       return;
     }
     setFile(f);
-    if (!name) setName(f.name.replace(/\.[^/.]+$/, ""));
+    if (importSettings.autoNameFromFile && !name.trim()) {
+      setName(f.name.replace(/\.[^/.]+$/, ""));
+    }
     setExtracting(true);
     setExtractErr(null);
     try {
-      setExtracted(await extractTextFromFile(f));
+      const nextExtracted = await extractTextFromFile(f);
+      setExtracted(importSettings.trimImportedText ? nextExtracted.trim() : nextExtracted);
     } catch {
       setExtractErr("Could not read file contents.");
       setExtracted("");
@@ -791,9 +1345,64 @@ function NewDocumentModal({
     }
   }
 
+  async function processBatchFiles(nextFiles: File[]) {
+    const uniqueFiles = nextFiles.filter((candidate, index) =>
+      nextFiles.findIndex((item) => item.name === candidate.name && item.size === candidate.size) === index,
+    );
+    const invalidFiles = uniqueFiles.filter((candidate) => {
+      const ext = candidate.name.split(".").pop()?.toLowerCase() ?? "";
+      return !ACCEPTED_EXTS.has(ext);
+    });
+    if (invalidFiles.length > 0) {
+      setExtractErr(`Unsupported file types: ${invalidFiles.map((candidate) => candidate.name).join(", ")}`);
+      return;
+    }
+    setBatchFiles(uniqueFiles);
+    setExtractErr(null);
+  }
+
+  async function processSpreadsheetFile(nextFile: File) {
+    setCsvFile(nextFile);
+    setExtractErr(null);
+    try {
+      const parsed = await parseSpreadsheetFile(nextFile);
+      if (parsed.length < 2) {
+        throw new Error("Spreadsheet must include a header row and at least one data row.");
+      }
+      const headers = parsed[0];
+      const bodyRows = parsed.slice(1).map((cells) =>
+        Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ""])),
+      );
+      setCsvRows(bodyRows);
+      setCsvPreviewRows(parsed.slice(0, 4));
+      setCsvMappings(headers.map((header) => ({
+        header,
+        role: suggestCsvRole(header),
+        attributeName: header,
+      })));
+    } catch (err) {
+      setCsvRows([]);
+      setCsvPreviewRows([]);
+      setCsvMappings([]);
+      setExtractErr(err instanceof Error ? err.message : "Could not parse spreadsheet file.");
+    }
+  }
+
   function onFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
-    if (f) processFile(f);
+    if (f) void processFile(f);
+    e.target.value = "";
+  }
+
+  function onBatchInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(e.target.files ?? []);
+    if (nextFiles.length > 0) void processBatchFiles(nextFiles);
+    e.target.value = "";
+  }
+
+  function onCsvInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const nextFile = e.target.files?.[0];
+    if (nextFile) void processSpreadsheetFile(nextFile);
     e.target.value = "";
   }
 
@@ -801,18 +1410,175 @@ function NewDocumentModal({
     e.preventDefault();
     setDragging(false);
     const f = e.dataTransfer.files?.[0];
-    if (f) processFile(f);
+    if (f) void processFile(f);
+  }
+
+  function onBatchDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const nextFiles = Array.from(e.dataTransfer.files ?? []);
+    if (nextFiles.length > 0) void processBatchFiles(nextFiles);
+  }
+
+  function onCsvDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const nextFile = e.dataTransfer.files?.[0];
+    if (nextFile) void processSpreadsheetFile(nextFile);
+  }
+
+  function updateCsvMapping(index: number, patch: Partial<CsvColumnMapping>) {
+    setCsvMappings((prev) => {
+      const next = prev.map((mapping, mappingIndex) =>
+        mappingIndex === index ? { ...mapping, ...patch } : mapping,
+      );
+      const role = patch.role;
+      if (role === "name" || role === "description" || role === "content") {
+        return next.map((mapping, mappingIndex) =>
+          mappingIndex !== index && mapping.role === role
+            ? { ...mapping, role: "ignore" }
+            : mapping,
+        );
+      }
+      return next;
+    });
+  }
+
+  async function ensureCsvAttributeDefinitions() {
+    if (!activeProject) return new Map<string, string>();
+
+    const definitionsByName = new Map(
+      attributeDefs.map((definition) => [definition.name.trim().toLowerCase(), definition.id]),
+    );
+    const attributeMappings = csvMappings.filter((mapping) =>
+      mapping.role === "attribute" && mapping.attributeName.trim(),
+    );
+
+    for (const mapping of attributeMappings) {
+      const normalized = mapping.attributeName.trim().toLowerCase();
+      if (definitionsByName.has(normalized)) continue;
+      const created = await pb.collection("document_attribute_definitions").create({
+        project: activeProject.id,
+        name: mapping.attributeName.trim(),
+        data_type: "text",
+        description: "",
+        options_json: JSON.stringify([]),
+        sort_order: attributeDefs.length + definitionsByName.size,
+        deleted_at: "",
+      });
+      definitionsByName.set(normalized, created.id);
+    }
+
+    return definitionsByName;
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if ((mode === "upload" || mode === "paste") && !name.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const content   = mode === "upload" ? extracted : pasted;
-      const file_path = file ? file.name : "";
-      await addDocument(name.trim(), file_path, content, currentUser?.id);
+      if (mode === "upload" || mode === "paste") {
+        const rawContent = mode === "upload" ? extracted : (pastedRef.current?.innerHTML ?? "");
+        const content = importSettings.trimImportedText ? rawContent.trim() : rawContent;
+        const file_path = importSettings.storeOriginalFileName && file ? file.name : "";
+        if (
+          mode === "upload" &&
+          importSettings.warnBeforeEmptyImport &&
+          !content.trim() &&
+          !window.confirm("No text was extracted from this file. Create the document anyway?")
+        ) {
+          setLoading(false);
+          return;
+        }
+        const document = await addDocument(name.trim(), file_path, content, currentUser?.id);
+        if (document?.id && onCreated) {
+          await onCreated(document.id);
+        }
+        onDone();
+        return;
+      }
+
+      if (mode === "batch") {
+        const failures: string[] = [];
+        let createdCount = 0;
+        for (const currentFile of batchFiles) {
+          try {
+            const rawContent = await extractTextFromFile(currentFile);
+            const content = importSettings.trimImportedText ? rawContent.trim() : rawContent;
+            if (
+              importSettings.warnBeforeEmptyImport &&
+              !content.trim() &&
+              !window.confirm(`No text was extracted from ${currentFile.name}. Create the document anyway?`)
+            ) {
+              failures.push(`${currentFile.name}: skipped because no text was extracted`);
+              continue;
+            }
+            await addDocument(
+              currentFile.name.replace(/\.[^/.]+$/, ""),
+              importSettings.storeOriginalFileName ? currentFile.name : "",
+              content,
+              currentUser?.id,
+              { notes: "", setActive: false },
+            );
+            createdCount += 1;
+          } catch (err) {
+            failures.push(`${currentFile.name}: ${err instanceof Error ? err.message : "failed"}`);
+          }
+        }
+
+        if (createdCount === 0) {
+          throw new Error(failures[0] ?? "No documents were created.");
+        }
+        if (failures.length > 0) {
+          window.alert(`Created ${createdCount} documents.\n\nSome files were skipped:\n${failures.join("\n")}`);
+        }
+        onDone();
+        return;
+      }
+
+      const contentMapping = csvMappings.find((mapping) => mapping.role === "content");
+      if (!contentMapping) {
+        throw new Error('Choose one CSV column for "Text Contents".');
+      }
+      const nameHeader = csvMappings.find((mapping) => mapping.role === "name")?.header;
+      const descriptionHeader = csvMappings.find((mapping) => mapping.role === "description")?.header;
+      const definitionsByName = await ensureCsvAttributeDefinitions();
+
+      let createdCount = 0;
+      for (let index = 0; index < csvRows.length; index += 1) {
+        const row = csvRows[index];
+        const document = await addDocument(
+          (nameHeader ? row[nameHeader] : "").trim() || `Document ${index + 1}`,
+          importSettings.storeOriginalFileName && csvFile ? csvFile.name : "",
+          importSettings.trimImportedText ? (row[contentMapping.header] ?? "").trim() : (row[contentMapping.header] ?? ""),
+          currentUser?.id,
+          {
+            notes: (descriptionHeader ? row[descriptionHeader] : "").trim(),
+            setActive: false,
+          },
+        );
+        if (!document?.id) continue;
+        createdCount += 1;
+
+        for (const mapping of csvMappings) {
+          if (mapping.role !== "attribute" || !mapping.attributeName.trim()) continue;
+          const value = row[mapping.header] ?? "";
+          if (!value.trim()) continue;
+          const attributeId = definitionsByName.get(mapping.attributeName.trim().toLowerCase());
+          if (!attributeId) continue;
+          await pb.collection("document_attribute_values").create({
+            document: document.id,
+            attribute: attributeId,
+            value,
+            deleted_at: "",
+          });
+        }
+      }
+
+      if (createdCount === 0) {
+        throw new Error("No documents were created from the CSV file.");
+      }
       onDone();
     } catch (err) {
       console.error("Document create error:", err);
@@ -831,25 +1597,76 @@ function NewDocumentModal({
     }
   }
 
-  const canSubmit = name.trim().length > 0 && (mode === "paste" ? pasted.trim().length > 0 : !!file);
+  const canSubmit =
+    mode === "paste"
+      ? name.trim().length > 0 && pasteHasContent
+      : mode === "upload"
+        ? name.trim().length > 0 && !!file
+        : mode === "batch"
+          ? batchFiles.length > 0
+          : !!csvFile && csvRows.length > 0 && csvMappings.some((mapping) => mapping.role === "content");
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal doc-upload-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New Document</h2>
+      <div className={`modal doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : mode === "csv" ? " modal--wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+        <div className="doc-upload-modal-title-row">
+          <h2>New Document</h2>
+          {!initialMode && (
+            <div className="doc-mode-toggle">
+              {allowedModes.includes("upload") && (
+                <button
+                  type="button"
+                  className={`doc-mode-toggle-btn${mode === "upload" ? " doc-mode-toggle-btn--active" : ""}`}
+                  onClick={() => setModeAndReset("upload")}
+                >
+                  Upload
+                </button>
+              )}
+              {allowedModes.includes("paste") && (
+                <button
+                  type="button"
+                  className={`doc-mode-toggle-btn${mode === "paste" ? " doc-mode-toggle-btn--active" : ""}`}
+                  onClick={() => setModeAndReset("paste")}
+                >
+                  Text Entry
+                </button>
+              )}
+              {allowedModes.includes("batch") && (
+                <button
+                  type="button"
+                  className={`doc-mode-toggle-btn${mode === "batch" ? " doc-mode-toggle-btn--active" : ""}`}
+                  onClick={() => setModeAndReset("batch")}
+                >
+                  Batch Upload
+                </button>
+              )}
+              {allowedModes.includes("csv") && (
+                <button
+                  type="button"
+                  className={`doc-mode-toggle-btn${mode === "csv" ? " doc-mode-toggle-btn--active" : ""}`}
+                  onClick={() => setModeAndReset("csv")}
+                >
+                  Spreadsheet
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <form className="form" onSubmit={handleSubmit}>
 
-          <label className="form-label">
-            Document Name
-            <input
-              className="form-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Document name"
-              required
-              autoFocus={mode === "paste"}
-            />
-          </label>
+          {(mode === "upload" || mode === "paste") && (
+            <label className="form-label">
+              Document Name
+              <input
+                className="form-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Document name"
+                required
+                autoFocus={mode === "paste"}
+              />
+            </label>
+          )}
 
           {mode === "upload" ? (
             <>
@@ -895,15 +1712,153 @@ function NewDocumentModal({
                 )}
               </div>
             </>
-          ) : (
-            <textarea
-              className="form-input doc-content-textarea"
-              value={pasted}
-              onChange={(e) => setPasted(e.target.value)}
-              placeholder="Paste or type document text…"
-              rows={8}
-              autoFocus
+          ) : mode === "paste" ? (
+            <RichTextEditor
+              initialHtml={initialPasted ? ensureHtml(initialPasted) : ""}
+              editorRef={pastedRef}
+              minRows={14}
+              onChange={() => setPasteHasContent(!!(pastedRef.current?.textContent?.trim()))}
             />
+          ) : mode === "batch" ? (
+            <>
+              <input
+                ref={batchInputRef}
+                type="file"
+                accept={ACCEPTED_TYPES}
+                multiple
+                style={{ display: "none" }}
+                onChange={onBatchInput}
+              />
+              <div
+                className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${batchFiles.length > 0 ? " doc-dropzone--filled" : ""}`}
+                onClick={() => batchInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={onBatchDrop}
+              >
+                {batchFiles.length === 0 ? (
+                  <>
+                    <span className="doc-dropzone-icon">↑</span>
+                    <span className="doc-dropzone-primary">Click to browse or drag &amp; drop multiple files</span>
+                    <span className="doc-dropzone-hint">Each file becomes a new document named from its filename.</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="doc-dropzone-primary">{batchFiles.length} files selected</span>
+                    <span className="doc-dropzone-hint">
+                      {batchFiles.slice(0, 5).map((currentFile) => currentFile.name).join(", ")}
+                      {batchFiles.length > 5 ? ` and ${batchFiles.length - 5} more` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      className="doc-dropzone-change"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setBatchFiles([]);
+                        batchInputRef.current?.click();
+                      }}
+                    >
+                      Change files
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                style={{ display: "none" }}
+                onChange={onCsvInput}
+              />
+              <div
+                className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${csvFile ? " doc-dropzone--filled" : ""}`}
+                onClick={() => csvInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={onCsvDrop}
+              >
+                {!csvFile ? (
+                  <>
+                    <span className="doc-dropzone-icon">↑</span>
+                    <span className="doc-dropzone-primary">Upload a spreadsheet</span>
+                    <span className="doc-dropzone-hint">CSV or XLSX supported. For XLSX files, sheet 1 is used.</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="doc-dropzone-filename">{csvFile.name}</span>
+                    <span className="doc-dropzone-hint">{csvRows.length.toLocaleString()} rows ready for mapping</span>
+                    <button
+                      type="button"
+                      className="doc-dropzone-change"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCsvFile(null);
+                        setCsvRows([]);
+                        setCsvMappings([]);
+                        setCsvPreviewRows([]);
+                        csvInputRef.current?.click();
+                      }}
+                    >
+                      Change file
+                    </button>
+                  </>
+                )}
+              </div>
+              {csvMappings.length > 0 && (
+                <div className="attribute-values-details" style={{ marginTop: 16 }}>
+                  <h3 className="case-card-title">Column Mapping</h3>
+                  {csvMappings.map((mapping, index) => (
+                    <div key={mapping.header} className="attribute-value-row" style={{ alignItems: "center" }}>
+                      <span>{mapping.header}</span>
+                      <select
+                        className="form-input"
+                        value={mapping.role}
+                        onChange={(e) => updateCsvMapping(index, { role: e.target.value as CsvColumnRole })}
+                      >
+                        <option value="ignore">Ignore</option>
+                        <option value="name">Document Name</option>
+                        <option value="description">Document Description</option>
+                        <option value="content">Text Contents</option>
+                        <option value="attribute">Document Attribute</option>
+                      </select>
+                      {mapping.role === "attribute" && (
+                        <input
+                          className="form-input"
+                          value={mapping.attributeName}
+                          onChange={(e) => updateCsvMapping(index, { attributeName: e.target.value })}
+                          placeholder="Attribute name"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {csvPreviewRows.length > 0 && (
+                <div className="assoc-doc-table-wrap" style={{ marginTop: 16 }}>
+                  <table className="users-table">
+                    <thead>
+                      <tr>
+                        {csvPreviewRows[0].map((cell, index) => (
+                          <th key={`${cell}-${index}`} className="users-th">{cell || `Column ${index + 1}`}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreviewRows.slice(1).map((previewRow, rowIndex) => (
+                        <tr key={rowIndex} className="users-row">
+                          {csvPreviewRows[0].map((_, cellIndex) => (
+                            <td key={cellIndex} className="users-td users-td--muted">{previewRow[cellIndex] ?? ""}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
 
           {error && <p className="auth-error">{error}</p>}
@@ -915,16 +1870,6 @@ function NewDocumentModal({
             </button>
           </div>
 
-          <button
-            type="button"
-            className="doc-mode-switch"
-            onClick={() => setMode(mode === "upload" ? "paste" : "upload")}
-          >
-            {mode === "upload"
-              ? "Or paste text content instead"
-              : "Or upload a file instead"}
-          </button>
-
         </form>
       </div>
     </div>
@@ -932,66 +1877,6 @@ function NewDocumentModal({
 }
 
 // ─── Main view ────────────────────────────────────────────────────────────────
-
-function NewAttributeModal({
-  onClose,
-  onCreate,
-  saving,
-}: {
-  onClose: () => void;
-  onCreate: (name: string, dataType: AttributeDataType) => void;
-  saving: boolean;
-}) {
-  const [name, setName] = useState("");
-  const [dataType, setDataType] = useState<AttributeDataType>("text");
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New Attribute</h2>
-        <div className="form-group">
-          <label className="form-label">Attribute name</label>
-          <input
-            className="form-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Publication date"
-            autoFocus
-          />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Data type</label>
-          <div className="attribute-type-picker">
-            {([
-              { value: "text", label: "Text" },
-              { value: "number", label: "Numbers" },
-              { value: "datetime", label: "Date/time" },
-            ] as { value: AttributeDataType; label: string }[]).map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
-                onClick={() => setDataType(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            onClick={() => onCreate(name.trim(), dataType)}
-            disabled={saving || !name.trim()}
-          >
-            {saving ? "Opening..." : "Next"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function AttributeValuesModal({
   draft,
@@ -1012,6 +1897,8 @@ function AttributeValuesModal({
 }) {
   const [name, setName] = useState(draft.name);
   const [dataType, setDataType] = useState<AttributeDataType>(draft.dataType);
+  const [description, setDescription] = useState(draft.description);
+  const [options, setOptions] = useState<string[]>(draft.options.length > 0 ? draft.options : ["", ""]);
   const [valuesByDocument, setValuesByDocument] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const row of rows) {
@@ -1033,11 +1920,7 @@ function AttributeValuesModal({
           <div className="form-group">
             <span className="form-label">Data type</span>
             <div className="attribute-type-picker">
-              {([
-                { value: "text", label: "Text" },
-                { value: "number", label: "Numbers" },
-                { value: "datetime", label: "Date/time" },
-              ] as { value: AttributeDataType; label: string }[]).map((option) => (
+              {ATTRIBUTE_TYPE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -1049,6 +1932,38 @@ function AttributeValuesModal({
               ))}
             </div>
           </div>
+          <label className="form-group attribute-details-span">
+            <span className="form-label">Description</span>
+            <textarea
+              className="form-input attribute-description-input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+            />
+          </label>
+          {dataType === "categorical" && (
+            <div className="form-group attribute-details-span">
+              <span className="form-label">Categories</span>
+              <div className="attribute-category-list">
+                {options.map((option, index) => (
+                  <input
+                    key={index}
+                    className="form-input"
+                    value={option}
+                    onChange={(e) => setOptions((prev) => prev.map((item, itemIndex) => itemIndex === index ? e.target.value : item))}
+                    placeholder={`Category ${index + 1}`}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn btn--small"
+                onClick={() => setOptions((prev) => [...prev, ""])}
+              >
+                Add More
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="attribute-values-list">
@@ -1058,13 +1973,29 @@ function AttributeValuesModal({
             rows.map((row) => (
               <label key={row.id} className="attribute-value-row">
                 <span>{row.name}</span>
-                <input
-                  className="form-input"
-                  type={inputTypeForDataType(dataType)}
-                  step={dataType === "number" ? "any" : undefined}
-                  value={valuesByDocument[row.id] ?? ""}
-                  onChange={(e) => setValuesByDocument((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                />
+                {dataType === "categorical" ? (
+                  <select
+                    className="form-input"
+                    value={valuesByDocument[row.id] ?? ""}
+                    onChange={(e) => setValuesByDocument((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                  >
+                    <option value="">—</option>
+                    {normalizeAttributeOptions(options).map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                    {(valuesByDocument[row.id] ?? "").trim() && !normalizeAttributeOptions(options).includes(valuesByDocument[row.id] ?? "") && (
+                      <option value={valuesByDocument[row.id]}>{valuesByDocument[row.id]}</option>
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    className="form-input"
+                    type={inputTypeForDataType(dataType)}
+                    step={dataType === "number" ? "any" : undefined}
+                    value={valuesByDocument[row.id] ?? ""}
+                    onChange={(e) => setValuesByDocument((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                  />
+                )}
               </label>
             ))
           )}
@@ -1075,8 +2006,8 @@ function AttributeValuesModal({
           <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
           <button
             className="btn btn--primary"
-            onClick={() => onSave({ ...draft, name: name.trim(), dataType }, valuesByDocument)}
-            disabled={saving || !name.trim()}
+            onClick={() => onSave({ ...draft, name: name.trim(), dataType, description: description.trim(), options: normalizeAttributeOptions(options) }, valuesByDocument)}
+            disabled={saving || !name.trim() || (dataType === "categorical" && normalizeAttributeOptions(options).length < 2)}
           >
             {saving ? "Saving..." : "Save Attribute"}
           </button>
@@ -1087,7 +2018,50 @@ function AttributeValuesModal({
 }
 
 export function DocumentsView() {
-  const { activeProject, pb, canEdit, pendingDocId, setPendingDocId, deleteDocument, logAction } = useStore();
+  const {
+    activeProject,
+    pb,
+    canCurrentUser,
+    ensureProjectSafetyBackup,
+    documents,
+    activeDocument,
+    setActiveDocument,
+    documentLockConflict,
+    clearDocumentLockConflict,
+    pendingDocId,
+    setPendingDocId,
+    deleteDocument,
+    logAction,
+  } = useStore();
+  const canCreateTypedDocuments = canCurrentUser("createDocument");
+  const canUploadDocuments = canCurrentUser("uploadDocument");
+  const canBatchUploadDocuments = canCurrentUser("batchUploadDocuments");
+  const canImportSpreadsheetDocuments = canCurrentUser("importSpreadsheetDocuments");
+  const canOpenDocumentCreateModal =
+    canCreateTypedDocuments
+    || canUploadDocuments
+    || canBatchUploadDocuments
+    || canImportSpreadsheetDocuments;
+  const canEditDocumentMetadata = canCurrentUser("editDocumentMetadata");
+  const canEditDocumentContent = canCurrentUser("editDocumentContent");
+  const canDeleteDocuments = canCurrentUser("deleteDocument");
+  const canAssociateCaseDocuments = canCurrentUser("associateDocumentsWithCases");
+  const canCreateMemos = canCurrentUser("createMemo");
+  const canAssociateMemoObjects = canCurrentUser("associateMemoObjects");
+  const canMemoAboutDocuments = canCreateMemos && canAssociateMemoObjects;
+  const canCreateDocumentAttributes = canCurrentUser("createDocumentAttributes");
+  const canEditDocumentAttributes = canCurrentUser("editDocumentAttributes");
+  const canDeleteDocumentAttributes = canCurrentUser("deleteDocumentAttributes");
+  const canManageDocumentAttributes =
+    canCreateDocumentAttributes
+    || canEditDocumentAttributes
+    || canDeleteDocumentAttributes;
+  const allowedDocumentCreateModes: InputMode[] = [
+    canUploadDocuments ? "upload" : null,
+    canCreateTypedDocuments ? "paste" : null,
+    canBatchUploadDocuments ? "batch" : null,
+    canImportSpreadsheetDocuments ? "csv" : null,
+  ].filter((mode): mode is InputMode => mode !== null);
 
   const [rows,    setRows]    = useState<DocRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1100,6 +2074,7 @@ export function DocumentsView() {
     x: number; y: number; row: DocRow;
   } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
   const [confirmDelete, setConfirmDelete] = useState<DocRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -1108,14 +2083,36 @@ export function DocumentsView() {
   const [editStartRow,  setEditStartRow]  = useState<DocRow | null>(null);
   const [assocCaseDoc,  setAssocCaseDoc]  = useState<DocRow | null>(null);
   const [memoForDoc,    setMemoForDoc]    = useState<DocRow | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [showAttributesTable, setShowAttributesTable] = useState(false);
   const [attributeDefs, setAttributeDefs] = useState<AttributeDefinition[]>([]);
   const [attributeValues, setAttributeValues] = useState<Record<string, AttributeValue>>({});
-  const [showNewAttribute, setShowNewAttribute] = useState(false);
+  const [attributeSortCol, setAttributeSortCol] = useState<string>("name");
+  const [attributeSortDir, setAttributeSortDir] = useState<SortDir>("asc");
+  const [hoveredAttributeColumn, setHoveredAttributeColumn] = useState<string | null>(null);
+  const [hoveredAttributeRow, setHoveredAttributeRow] = useState<string | null>(null);
   const [attributeValueDraft, setAttributeValueDraft] = useState<AttributeDraft | null>(null);
   const [attributeSaving, setAttributeSaving] = useState(false);
   const [attributeContextMenu, setAttributeContextMenu] = useState<{ x: number; y: number; attr: AttributeDefinition } | null>(null);
   const attributeContextMenuRef = useRef<HTMLDivElement>(null);
+  const attributeContextMenuStyle = useViewportContextMenuStyle(attributeContextMenu, attributeContextMenuRef);
+
+  useEffect(() => {
+    if (!activeProject || !canManageDocumentAttributes) return;
+    try {
+      if (window.localStorage.getItem(AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY) !== "document") return;
+      window.localStorage.removeItem(AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY);
+      setShowAttributesTable(true);
+      setAttributeValueDraft({
+        name: "",
+        dataType: "text",
+        description: "",
+        options: [],
+      });
+    } catch {
+      // Best-effort handoff only.
+    }
+  }, [activeProject, canManageDocumentAttributes]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -1147,6 +2144,8 @@ export function DocumentsView() {
         id: r.id,
         name: r.name as string,
         dataType: r.data_type as AttributeDataType,
+        description: (r.description as string | undefined) ?? "",
+        options: parseAttributeOptions(r.options_json),
         sortOrder: (r.sort_order as number | undefined) ?? 0,
       })));
 
@@ -1202,9 +2201,11 @@ export function DocumentsView() {
           return {
             id:            r.id,
             name:          r.name,
+            type:          (r.type as string | undefined) ?? "Text",
             notes:         r.notes ?? "",
-            content:       r.content ?? "",
-            filePath:      r.file_path ?? "",
+            content:          r.content ?? "",
+            structuredContentJson: r.structured_content_json ?? "",
+            filePath:         r.file_path ?? "",
             cases:         casesByDoc[r.id] ?? [],
             memoCount:     memosByDoc[r.id] ?? 0,
             createdByName: cb?.name || cb?.email || "—",
@@ -1230,6 +2231,20 @@ export function DocumentsView() {
       setPendingDocId(null);
     }
   }, [rows, pendingDocId, setPendingDocId]);
+
+  const detailRow = selectedRow ?? editStartRow;
+  const startEdit = editStartRow !== null;
+
+  useEffect(() => {
+    if (!detailRow || memoForDoc) {
+      if (activeDocument) setActiveDocument(null);
+      return;
+    }
+    const nextActiveDocument = documents.find((document) => document.id === detailRow.id) ?? null;
+    if (nextActiveDocument && activeDocument?.id !== nextActiveDocument.id) {
+      setActiveDocument(nextActiveDocument);
+    }
+  }, [detailRow, memoForDoc, documents, activeDocument, setActiveDocument]);
 
   // ── Close context menu on outside click / Escape ──────────────────────────
 
@@ -1279,6 +2294,45 @@ export function DocumentsView() {
     return `${documentId}:${attributeId}`;
   }
 
+  const sortedAttributeRows = [...rows].sort((a, b) => {
+    let cmp: number;
+
+    if (attributeSortCol === "name") {
+      cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    } else {
+      const attr = attributeDefs.find((definition) => definition.id === attributeSortCol);
+      const aValue = attributeValues[valueKey(a.id, attributeSortCol)]?.value ?? "";
+      const bValue = attributeValues[valueKey(b.id, attributeSortCol)]?.value ?? "";
+
+      if (attr?.dataType === "number") {
+        const aNum = Number(aValue);
+        const bNum = Number(bValue);
+        const aMissing = aValue.trim() === "" || Number.isNaN(aNum);
+        const bMissing = bValue.trim() === "" || Number.isNaN(bNum);
+        if (aMissing && bMissing) cmp = 0;
+        else if (aMissing) cmp = -1;
+        else if (bMissing) cmp = 1;
+        else cmp = aNum - bNum;
+      } else if (attr?.dataType === "datetime") {
+        const aTime = aValue ? new Date(aValue).getTime() : Number.NEGATIVE_INFINITY;
+        const bTime = bValue ? new Date(bValue).getTime() : Number.NEGATIVE_INFINITY;
+        cmp = aTime - bTime;
+      } else {
+        cmp = aValue.localeCompare(bValue, undefined, { sensitivity: "base" });
+      }
+    }
+
+    return attributeSortDir === "asc" ? cmp : -cmp;
+  });
+
+  function handleAttributeSort(col: string) {
+    if (col === attributeSortCol) setAttributeSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setAttributeSortCol(col);
+      setAttributeSortDir("asc");
+    }
+  }
+
   function formatAttributeDisplay(value: string, dataType: AttributeDataType) {
     if (!value) return "";
     if (dataType === "datetime") {
@@ -1294,14 +2348,9 @@ export function DocumentsView() {
     return value;
   }
 
-  function handleCreateAttribute(name: string, dataType: AttributeDataType) {
-    if (!name.trim()) return;
-    setShowNewAttribute(false);
-    setAttributeValueDraft({ name: name.trim(), dataType });
-  }
-
   async function handleSaveAttribute(draft: AttributeDraft, valuesByDocument: Record<string, string>) {
     if (!activeProject || !pb || !draft.name.trim()) return;
+    if (draft.id ? !canEditDocumentAttributes : !canCreateDocumentAttributes) return;
     setAttributeSaving(true);
     setError(null);
     try {
@@ -1309,12 +2358,16 @@ export function DocumentsView() {
         ? await pb.collection("document_attribute_definitions").update(draft.id, {
             name: draft.name.trim(),
             data_type: draft.dataType,
+            description: draft.description,
+            options_json: JSON.stringify(draft.options),
             deleted_at: "",
           })
         : await pb.collection("document_attribute_definitions").create({
             project: activeProject.id,
             name: draft.name.trim(),
             data_type: draft.dataType,
+            description: draft.description,
+            options_json: JSON.stringify(draft.options),
             sort_order: attributeDefs.length,
             deleted_at: "",
           });
@@ -1324,6 +2377,8 @@ export function DocumentsView() {
         id: attrId,
         name: record.name as string,
         dataType: record.data_type as AttributeDataType,
+        description: (record.description as string | undefined) ?? "",
+        options: parseAttributeOptions(record.options_json),
         sortOrder: (record.sort_order as number | undefined) ?? attributeDefs.length,
       };
 
@@ -1373,9 +2428,14 @@ export function DocumentsView() {
 
   async function handleDeleteAttribute(attr: AttributeDefinition) {
     if (!pb) return;
+    if (!canDeleteDocumentAttributes) return;
     setAttributeSaving(true);
     setError(null);
     try {
+      await ensureProjectSafetyBackup(
+        "document_attribute.delete",
+        `Deleted document attribute "${attr.name}"`,
+      );
       const deletedAt = new Date().toISOString();
       await pb.collection("document_attribute_definitions").update(attr.id, { deleted_at: deletedAt });
       const valuesForAttribute = Object.values(attributeValues).filter((value) => value.attributeId === attr.id && value.id);
@@ -1431,19 +2491,62 @@ export function DocumentsView() {
     );
   }
 
-  const detailRow = selectedRow ?? editStartRow;
-  const startEdit = editStartRow !== null;
-
   if (detailRow && pb) {
     return (
+      <>
       <DocumentDetail
         row={detailRow}
         pb={pb}
         startEditing={startEdit}
-        canEdit={canEdit}
+        canEditMetadata={canEditDocumentMetadata}
+        canEditContent={canEditDocumentContent}
+        canDelete={canDeleteDocuments}
+        canAssociateCases={canAssociateCaseDocuments}
+        canMemoAbout={canMemoAboutDocuments}
+        canCreateEditableCopy={canCreateTypedDocuments}
         onBack={() => { setSelectedRow(null); setEditStartRow(null); loadDocuments(); }}
         onMemoAbout={() => setMemoForDoc(detailRow)}
+        onRequestDelete={(row) => setConfirmDelete(row)}
       />
+        {documentLockConflict && (
+          <div className="modal-overlay" onClick={() => {}}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h2>{documentLockConflict.reason === "kicked" ? "Removed From Document" : "Document Locked"}</h2>
+              {documentLockConflict.reason === "kicked" ? (
+                <>
+                  <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                    <strong>{documentLockConflict.userName || "A project owner"}</strong> removed you from this document.
+                  </p>
+                  <p className="modal-warning-text">
+                    Kanqual is using a strict document lock across document detail and coding workspaces, so you will need to return to the documents list before reopening it.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                    <strong>{documentLockConflict.userName || "Another user"}</strong> is currently viewing or annotating this document.
+                  </p>
+                  <p className="modal-warning-text">
+                    Kanqual is using a strict document lock across document detail and coding workspaces, so only one user can open a document at a time.
+                  </p>
+                </>
+              )}
+              <div className="form-actions" style={{ marginTop: 24 }}>
+                <button
+                  className="btn btn--primary"
+                  onClick={() => {
+                    clearDocumentLockConflict();
+                    setSelectedRow(null);
+                    setEditStartRow(null);
+                  }}
+                >
+                  Back to Documents
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -1453,49 +2556,112 @@ export function DocumentsView() {
     <div className="view users-view">
       {/* Header */}
       <header className="view-header">
-        <h1>Documents</h1>
-        {canEdit && (
+        <div className="users-title-wrap">
+          <h1>Documents</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Show Help"
+            aria-label="Show Help"
+          >
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
+        </div>
+        <div className="view-header-actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setShowAttributesTable((show) => !show)}
+          >
+            {showAttributesTable ? "Show Documents" : "Show Attributes"}
+          </button>
           <button
             className="btn btn--primary"
-            onClick={showAttributesTable ? () => setShowNewAttribute(true) : () => setNewDocOpen(true)}
+            onClick={
+              showAttributesTable
+                ? () =>
+                    setAttributeValueDraft({
+                      name: "",
+                      dataType: "text",
+                      description: "",
+                      options: [],
+                    })
+                : () => setNewDocOpen(true)
+            }
+            disabled={showAttributesTable ? !canCreateDocumentAttributes : !canOpenDocumentCreateModal}
+            title={
+              showAttributesTable
+                ? !canCreateDocumentAttributes
+                  ? "You do not have permission to create document attributes"
+                  : undefined
+                : !canOpenDocumentCreateModal
+                  ? "You do not have permission to create or import documents"
+                  : undefined
+            }
           >
             {showAttributesTable ? "+ Add Attribute" : "+ New Document"}
           </button>
-        )}
+        </div>
       </header>
 
       {error && <p className="users-error">{error}</p>}
+      {!error && (
+        <p className="users-permission-note">
+          {showAttributesTable
+            ? canCreateDocumentAttributes
+              ? "Document attributes can be viewed and managed here."
+              : "Document attributes are view-only with your current role."
+            : canOpenDocumentCreateModal
+              ? "Create, upload, or import documents using the button above."
+              : "Documents are view-only with your current role."}
+        </p>
+      )}
 
-      <div className="case-table-toolbar">
-        <div />
-        <label className="toggle-switch" title="Show document attributes table">
-          <input
-            type="checkbox"
-            checked={showAttributesTable}
-            onChange={(e) => setShowAttributesTable(e.target.checked)}
-          />
-          <span className="toggle-track"><span className="toggle-thumb" /></span>
-          <span className="toggle-label">Attributes</span>
-        </label>
-      </div>
-
+      <div className="users-content">
       {showAttributesTable && (
         <div className="users-table-wrap case-attributes-table-wrap">
-          <table className="users-table case-attributes-table">
+          <table
+            className="users-table case-attributes-table"
+            onMouseLeave={() => {
+              setHoveredAttributeColumn(null);
+              setHoveredAttributeRow(null);
+            }}
+          >
             <thead>
               <tr>
-                <th className="users-th case-attributes-case-col">Document</th>
+                <th
+                  className={`users-th case-attributes-case-col${attributeSortCol === "name" ? " users-th--sorted" : ""}${hoveredAttributeColumn === "name" ? " case-attributes-cell--hover" : ""}`}
+                  onClick={() => handleAttributeSort("name")}
+                  onMouseEnter={() => {
+                    setHoveredAttributeColumn("name");
+                    setHoveredAttributeRow(null);
+                  }}
+                >
+                  Document
+                  <span className="users-sort-icon">
+                    {attributeSortCol === "name" ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                  </span>
+                </th>
                 {attributeDefs.map((attr) => (
                   <th
                     key={attr.id}
-                    className="users-th case-attributes-value-col"
+                    className={`users-th case-attributes-value-col${attributeSortCol === attr.id ? " users-th--sorted" : ""}${hoveredAttributeColumn === attr.id ? " case-attributes-cell--hover" : ""}`}
+                    onClick={() => handleAttributeSort(attr.id)}
+                    onMouseEnter={() => {
+                      setHoveredAttributeColumn(attr.id);
+                      setHoveredAttributeRow(null);
+                    }}
                     onContextMenu={(e) => {
-                      if (!canEdit) return;
+                      if (!canManageDocumentAttributes) return;
                       e.preventDefault();
                       setAttributeContextMenu({ x: e.clientX, y: e.clientY, attr });
                     }}
                   >
                     {attr.name}
+                    <span className="users-sort-icon">
+                      {attributeSortCol === attr.id ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                    </span>
                     <span className="case-attribute-type-label">{attr.dataType === "datetime" ? "Date/time" : attr.dataType}</span>
                   </th>
                 ))}
@@ -1503,15 +2669,35 @@ export function DocumentsView() {
             </thead>
             <tbody>
               {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">Loading...</td></tr>}
-              {!loading && sorted.length === 0 && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No documents yet.</td></tr>}
-              {!loading && sorted.map((row) => (
-                <tr key={row.id} className="users-row">
-                  <td className="users-td users-td--name case-attributes-case-cell">{row.name}</td>
+              {!loading && sortedAttributeRows.length === 0 && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No documents yet.</td></tr>}
+              {!loading && sortedAttributeRows.map((row) => (
+                <tr key={row.id} className={`users-row${hoveredAttributeRow === row.id ? " case-attributes-row--hover" : ""}`}>
+                  <td
+                    className={`users-td users-td--name case-attributes-case-cell${hoveredAttributeColumn === "name" ? " case-attributes-cell--hover" : ""}`}
+                    onMouseEnter={() => {
+                      setHoveredAttributeColumn("name");
+                      setHoveredAttributeRow(row.id);
+                    }}
+                  >
+                    {row.name}
+                  </td>
                   {attributeDefs.map((attr) => {
                     const key = valueKey(row.id, attr.id);
                     const cell = attributeValues[key];
                     return (
-                      <td key={attr.id} className="users-td case-attributes-value-cell">
+                      <td
+                        key={attr.id}
+                        className={`users-td case-attributes-value-cell${hoveredAttributeColumn === attr.id ? " case-attributes-cell--hover" : ""}`}
+                        onMouseEnter={() => {
+                          setHoveredAttributeColumn(attr.id);
+                          setHoveredAttributeRow(row.id);
+                        }}
+                        onContextMenu={(e) => {
+                          if (!canManageDocumentAttributes) return;
+                          e.preventDefault();
+                          setAttributeContextMenu({ x: e.clientX, y: e.clientY, attr });
+                        }}
+                      >
                         {cell?.value ? formatAttributeDisplay(cell.value, attr.dataType) : <span className="cases-no-docs">—</span>}
                       </td>
                     );
@@ -1535,6 +2721,17 @@ export function DocumentsView() {
         <table className="users-table">
           <thead>
             <tr>
+              <th
+                style={{ width: "23%" }}
+                className={`users-th${sortCol === "name" ? " users-th--sorted" : ""}`}
+                onClick={() => handleSort("name")}
+              >
+                Name
+                <span className="users-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
+              </th>
+              <th style={{ width: "14%" }} className="users-th">
+                Type
+              </th>
               {COLS.map((col) => (
                 <th
                   key={col.key}
@@ -1552,15 +2749,15 @@ export function DocumentsView() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={5} className="users-td-msg">Loading…</td></tr>
+              <tr><td colSpan={6} className="users-td-msg">Loading…</td></tr>
             )}
             {!loading && sorted.length === 0 && (
-              <tr><td colSpan={5} className="users-td-msg">No documents yet.</td></tr>
+              <tr><td colSpan={6} className="users-td-msg">No documents yet.</td></tr>
             )}
             {!loading && sorted.map((row) => (
               <tr
                 key={row.id}
-                className="users-row"
+                className="users-row case-list-row"
                 onClick={() => setSelectedRow(row)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -1568,6 +2765,7 @@ export function DocumentsView() {
                 }}
               >
                 <td className="users-td users-td--name">{row.name}</td>
+                <td className="users-td users-td--muted">{row.type || "Text"}</td>
                 <td className="users-td users-td--muted users-td--count">
                   {row.cases.length > 0 ? row.cases.length : <span className="cases-no-docs">—</span>}
                 </td>
@@ -1581,32 +2779,81 @@ export function DocumentsView() {
           </tbody>
         </table>
       </div>
+      </div>
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{showAttributesTable ? "Document Attributes Help" : "Documents Help"}</h2>
+            {showAttributesTable ? (
+              <>
+                <p className="users-guide-copy">
+                  Document attributes are intended to represent qualities of each document.
+                </p>
+                <p className="users-guide-copy">
+                  Use attributes to capture structured details like source type, date, format, or other document-level properties you want to compare across the project.
+                </p>
+                <p className="users-guide-copy">
+                  If your role does not allow editing, this table remains available in a view-only mode.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="users-guide-copy">
+                  Documents are the main units of observation in a project. They can be associated with cases, linked to memos, and enriched with structured attributes.
+                </p>
+                <p className="users-guide-copy">
+                  Select a row to open details, or right-click for quick actions. Use <strong>Show Attributes</strong> to switch to a cross-document attribute view.
+                </p>
+                <p className="users-guide-copy">
+                  Creation, upload, and import options depend on your project role.
+                </p>
+              </>
+            )}
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {attributeContextMenu && (
         <div
           ref={attributeContextMenuRef}
           className="context-menu"
-          style={{ top: attributeContextMenu.y, left: attributeContextMenu.x }}
+          style={attributeContextMenuStyle}
         >
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              setAttributeValueDraft({
-                id: attributeContextMenu.attr.id,
-                name: attributeContextMenu.attr.name,
-                dataType: attributeContextMenu.attr.dataType,
-              });
-              setAttributeContextMenu(null);
-            }}
-          >
-            Edit Attribute
-          </button>
-          <button
-            className="context-menu-item context-menu-item--danger"
-            onClick={() => handleDeleteAttribute(attributeContextMenu.attr)}
-          >
-            Delete Attribute
-          </button>
+          {canManageDocumentAttributes && (
+            <>
+              {canEditDocumentAttributes && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    setAttributeValueDraft({
+                      id: attributeContextMenu.attr.id,
+                      name: attributeContextMenu.attr.name,
+                      dataType: attributeContextMenu.attr.dataType,
+                      description: attributeContextMenu.attr.description,
+                      options: attributeContextMenu.attr.options,
+                    });
+                    setAttributeContextMenu(null);
+                  }}
+                >
+                  Edit Attribute
+                </button>
+              )}
+              {canDeleteDocumentAttributes && (
+                <button
+                  className="context-menu-item context-menu-item--danger"
+                  onClick={() => handleDeleteAttribute(attributeContextMenu.attr)}
+                >
+                  Delete Attribute
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -1615,33 +2862,55 @@ export function DocumentsView() {
         <div
           ref={contextMenuRef}
           className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
+          style={contextMenuStyle}
         >
-          <button
-            className="context-menu-item"
-            onClick={() => { setAssocCaseDoc(contextMenu.row); setContextMenu(null); }}
-          >
-            Associate Cases with Document
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => { setMemoForDoc(contextMenu.row); setContextMenu(null); }}
-          >
-            Memo About Document
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
-          >
-            Edit Document
-          </button>
-          {canEdit && (
+          {canAssociateCaseDocuments ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setAssocCaseDoc(contextMenu.row); setContextMenu(null); }}
+            >
+              Associate Cases with Document
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to associate documents with cases">
+              Associate Cases with Document
+            </div>
+          )}
+          {canMemoAboutDocuments ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setMemoForDoc(contextMenu.row); setContextMenu(null); }}
+            >
+              Memo About Document
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to create a memo about this document">
+              Memo About Document
+            </div>
+          )}
+          {canEditDocumentMetadata || canEditDocumentContent ? (
+            <button
+              className="context-menu-item"
+              onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
+            >
+              {canEditDocumentMetadata ? "Edit Document" : "Open Edit View"}
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit this document">
+              Edit Document
+            </div>
+          )}
+          {canDeleteDocuments ? (
             <button
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}
             >
               Delete Document
             </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete documents">
+              Delete Document
+            </div>
           )}
         </div>
       )}
@@ -1689,6 +2958,7 @@ export function DocumentsView() {
           docRow={assocCaseDoc}
           pb={pb}
           projectId={activeProject.id}
+          onLog={(action, label, recordId) => logAction(activeProject.id, action, label, recordId)}
           onDone={() => { setAssocCaseDoc(null); loadDocuments(); }}
           onClose={() => setAssocCaseDoc(null)}
         />
@@ -1697,16 +2967,10 @@ export function DocumentsView() {
       {/* New Document modal */}
       {newDocOpen && (
         <NewDocumentModal
+          allowedModes={allowedDocumentCreateModes}
+          attributeDefs={attributeDefs}
           onDone={() => { setNewDocOpen(false); loadDocuments(); }}
           onClose={() => setNewDocOpen(false)}
-        />
-      )}
-
-      {showNewAttribute && (
-        <NewAttributeModal
-          saving={attributeSaving}
-          onClose={() => !attributeSaving && setShowNewAttribute(false)}
-          onCreate={handleCreateAttribute}
         />
       )}
 
@@ -1716,7 +2980,6 @@ export function DocumentsView() {
           rows={sorted}
           attributeValues={attributeValues}
           saving={attributeSaving}
-          onBack={attributeValueDraft.id ? undefined : () => { setAttributeValueDraft(null); setShowNewAttribute(true); }}
           onCancel={() => !attributeSaving && setAttributeValueDraft(null)}
           onSave={handleSaveAttribute}
         />
@@ -1724,3 +2987,4 @@ export function DocumentsView() {
     </div>
   );
 }
+

@@ -19,6 +19,8 @@ export interface ThemePreset {
   borderWidth: number;
 }
 
+const ACTIVE_THEME_PRESET_KEY = "mc_active_theme_preset";
+
 export const COLOR_VARS: ColorVar[] = [
   { key: "--color-bg",             label: "Background",    group: "Interface" },
   { key: "--color-surface",        label: "Surface",       group: "Interface" },
@@ -34,6 +36,8 @@ export const COLOR_VARS: ColorVar[] = [
   { key: "--color-sidebar-muted",  label: "Muted Text",    group: "Sidebar" },
   { key: "--color-sidebar-hover",  label: "Hover",         group: "Sidebar" },
   { key: "--color-sidebar-active", label: "Active",        group: "Sidebar" },
+  { key: "--color-heatmap-low",    label: "Heatmap Low",   group: "Reports" },
+  { key: "--color-heatmap-high",   label: "Heatmap High",  group: "Reports" },
 ];
 
 export const LIGHT_DEFAULTS: Record<string, string> = {
@@ -51,6 +55,8 @@ export const LIGHT_DEFAULTS: Record<string, string> = {
   "--color-sidebar-muted":  "#AAB7B8",
   "--color-sidebar-hover":  "#34495E",
   "--color-sidebar-active": "#1A252F",
+  "--color-heatmap-low":    "#F1DDD7",
+  "--color-heatmap-high":   "#B04A33",
 };
 
 export const DARK_DEFAULTS: Record<string, string> = {
@@ -68,6 +74,8 @@ export const DARK_DEFAULTS: Record<string, string> = {
   "--color-sidebar-muted":  "#7F8C8D",
   "--color-sidebar-hover":  "#2C3E50",
   "--color-sidebar-active": "#34495E",
+  "--color-heatmap-low":    "#5A403A",
+  "--color-heatmap-high":   "#E29A86",
 };
 
 export function getAppDefaults(theme: Theme): Record<string, string> {
@@ -140,6 +148,34 @@ export function applyTheme(theme: Theme): void {
     document.documentElement.removeAttribute("data-theme");
   }
   applyOverrides(theme);
+}
+
+export function getActivePresetId(): string | null {
+  return localStorage.getItem(ACTIVE_THEME_PRESET_KEY);
+}
+
+export function setActivePresetId(id: string | null): void {
+  if (id) localStorage.setItem(ACTIVE_THEME_PRESET_KEY, id);
+  else localStorage.removeItem(ACTIVE_THEME_PRESET_KEY);
+}
+
+export function resetThemeToDefaults(theme: Theme = getStoredTheme()): void {
+  localStorage.setItem("mc_theme", theme);
+  localStorage.removeItem(`mc_colors_${theme}`);
+  localStorage.setItem("mc_radius", "6");
+  localStorage.setItem("mc_border_width", "1");
+  setActivePresetId(null);
+
+  if (theme === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  for (const key of COLOR_VARS.map((v) => v.key)) {
+    document.documentElement.style.removeProperty(key);
+  }
+  document.documentElement.style.setProperty("--radius", "6px");
+  document.documentElement.style.setProperty("--border-width", "1px");
 }
 
 /** Call once at app startup to restore persisted theme + custom colors + ui settings */

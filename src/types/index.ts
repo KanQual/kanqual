@@ -1,73 +1,76 @@
-// ─── Core data model ────────────────────────────────────────────────────────
-
 export interface Project {
   id: string;
   name: string;
   description: string;
-  createdAt: string; // ISO 8601
+  createdAt: string;
   updatedAt: string;
-  createdBy?: string; // display name or email of the project owner
+  createdBy?: string;
 }
 
 export interface Document {
   id: string;
   projectId: string;
-  name: string;         // display name / file basename
-  filePath: string;     // original path on disk
-  content: string;      // full text content
+  name: string;
+  type: string;
+  filePath: string;
+  content: string;
+  structuredContentJson: string;
   importedAt: string;
 }
 
-/** A labeling scheme entry — the vocabulary researchers code against */
+export interface Case {
+  id: string;
+  projectId: string;
+  name: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Code {
   id: string;
   projectId: string;
-  label: string;        // e.g. "Theme: Power"
-  color: string;        // hex color for highlighting
+  label: string;
+  color: string;
   description: string;
-  shortcut?: string;    // optional keyboard shortcut letter
-  parentId?: string;    // parent code id for hierarchy
+  shortcut?: string;
+  parentId?: string;
 }
 
-/** A single annotation: a span of text in a document tagged with a code */
 export interface Annotation {
   id: string;
   documentId: string;
   codeId: string;
-  startOffset: number;  // character index in document.content
+  startOffset: number;
   endOffset: number;
-  quote: string;        // the selected text (denormalized for display)
-  note: string;         // researcher note about this annotation
+  quote: string;
+  note: string;
   createdAt: string;
-  createdBy: string;    // display name or email of the annotator
-  createdById: string;  // user record id of the annotator
+  createdBy: string;
+  createdById: string;
 }
 
-/** A freeform memo written by the researcher */
 export interface Memo {
   id: string;
   projectId: string;
-  documentId?: string;      // optionally linked to a document
-  annotationId?: string;    // optionally linked to an annotation
+  documentId?: string;
+  annotationId?: string;
   title: string;
   body: string;
   createdAt: string;
   updatedAt: string;
 }
 
-// ─── Roles ──────────────────────────────────────────────────────────────────
-
-/** Hierarchical project roles, highest to lowest. */
+export type AppRole = "administrator" | "standard";
 export type Role = "owner" | "editor" | "coder" | "viewer";
 
 export const ROLE_LABELS: Record<Role, string> = {
-  owner:  "Owner",
+  owner: "Owner",
   editor: "Editor",
-  coder:  "Coder",
+  coder: "Coder",
   viewer: "Viewer",
 };
 
-/** Membership record linking a user to a project with a role. */
 export interface ProjectMember {
   id: string;
   projectId: string;
@@ -75,36 +78,70 @@ export interface ProjectMember {
   role: Role;
 }
 
-// ─── UI state ───────────────────────────────────────────────────────────────
+export type ImportedUserResolutionStatus =
+  | "no_access"
+  | "associated_current_user"
+  | "associated_existing_user"
+  | "temporary_password_created"
+  | "removed";
+
+export interface PendingImportedUser {
+  sourceUserId: string;
+  userIdentifier: string;
+  name: string;
+  email: string;
+  role: Role;
+  status: ImportedUserResolutionStatus;
+}
+
+export interface PendingImportedUserResolution {
+  projectId: string;
+  projectName: string;
+  source: "import" | "restore";
+  mismatchNotes: string[];
+  users: PendingImportedUser[];
+}
 
 export type View =
-  | "projects"       // project list / no active project
-  | "home"           // Project → Home
-  | "users"          // Project → Users
-  | "cases"          // Project → Cases
-  | "documents"      // Project → Documents
-  | "codebook"       // Project → Codebook
-  | "project-log"    // Project → Project Log
-  | "project-settings" // Project → Project Settings
-  | "code-text"      // Analysis → Code Text
-  | "memos"          // Analysis → Memos
-  | "ai-assist"      // Analysis → AI Assist
-  | "code-reports"   // Reports → Code Reports
-  | "coders"         // Reports → Coders
-  | "codes"          // Reports -> Codes
-  | "user-settings"  // user settings page
-  | "app-settings";  // app settings page
+  | "projects"
+  | "home"
+  | "blueprint"
+  | "blueprint-2-column-landing"
+  | "collaboration"
+  | "users"
+  | "cases"
+  | "documents"
+  | "codebook"
+  | "annotations"
+  | "project-log"
+  | "project-settings"
+  | "code-text"
+  | "memos"
+  | "ai-assist"
+  | "ai-assist-chat"
+  | "ai-assist-process-documents"
+  | "ai-assist-process-documents-review"
+  | "ai-assisted-coding"
+  | "ai-assist-case-attributes"
+  | "ai-assist-document-attributes"
+  | "ai-analyze"
+  | "code-reports"
+  | "coders"
+  | "codes"
+  | "user-settings"
+  | "app-settings";
 
 export interface ProjectLogEntry {
   id: string;
   projectId: string;
   userId: string;
   userName: string;
-  action: string;    // e.g. "document.create"
-  label: string;     // human-readable summary
-  recordId?: string; // id of the affected record (set for delete actions)
-  occurredAt: string; // ISO 8601
-  restoredAt?: string; // ISO 8601, set when a delete log entry has been restored
+  accessMode?: "local" | "remote";
+  action: string;
+  label: string;
+  recordId?: string;
+  occurredAt: string;
+  restoredAt?: string;
 }
 
 export interface AppState {
