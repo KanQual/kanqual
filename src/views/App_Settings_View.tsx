@@ -2388,7 +2388,7 @@ export function AppSettingsView() {
                 </p>
                 <div className="about-kanqual-citation">
                   Cansoy, M. (2026). <em>KanQual</em> (Version {appInfo?.appVersion ?? "0.9.0"}){" "}
-                  [Computer software]. Fairfield University.
+                  [Computer software]. https://github.com/KanQual/kanqual
                 </div>
               </section>
 
