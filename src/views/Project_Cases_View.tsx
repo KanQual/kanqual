@@ -1577,17 +1577,6 @@ export function CasesView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {!error && (
-        <p className="users-permission-note">
-          {showAttributesTable
-            ? canCreateCaseAttributes
-              ? "Case attributes can be viewed and managed here."
-              : "Case attributes are view-only with your current role."
-            : canCreateCases
-              ? "Create a new case with the button above."
-              : "Cases are view-only with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
           {showAttributesTable && (
@@ -1745,24 +1734,30 @@ export function CasesView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>{showAttributesTable ? "Case Attributes Help" : "Cases Help"}</h2>
             {showAttributesTable ? (
               <>
                 <p className="users-guide-copy">
-                  Case attributes are intended to represent qualities of each case.
+                  Review case attributes across cases, create a new attribute, edit attribute definitions, edit values, delete attributes when permitted, and switch back to the case list.
                 </p>
                 <p className="users-guide-copy">
-                  Use attributes to capture structured details like categories, dates, numbers, or other descriptive properties you want to compare across cases.
+                  Use the attribute table when you need a cross-case structured view instead of individual case cards. Create an attribute once, then fill or compare its values across cases.
+                </p>
+                <p className="users-guide-copy">
+                  Attribute definitions are shared across the project. Editing rights depend on project permissions.
                 </p>
               </>
             ) : (
               <>
                 <p className="users-guide-copy">
-                  Cases are intended to be units of analysis. They help you organize the people, sites, events, or other entities you want to study across the project.
+                  Create, open, edit, or delete cases, associate documents to cases, switch to the case attributes table, create or edit case attributes, and review structured case values.
                 </p>
                 <p className="users-guide-copy">
-                  Multiple documents can be connected to a case, and each case can also hold its own description, memos, and attributes. Select a row to open details, or right-click for quick actions. Use <strong>Show Attributes</strong> to switch to a cross-case attribute view.
+                  Use Cases to manage the units of analysis in the project. Open a case for details, connect supporting documents, and switch to attribute view when you need structured case comparisons.
+                </p>
+                <p className="users-guide-copy">
+                  Case editing and deletion depend on role. Attribute editing uses shared project data, and associated documents can affect downstream analysis and reporting.
                 </p>
               </>
             )}

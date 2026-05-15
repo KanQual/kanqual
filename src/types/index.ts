@@ -105,9 +105,6 @@ export interface PendingImportedUserResolution {
 export type View =
   | "projects"
   | "home"
-  | "blueprint"
-  | "blueprint-2-column-landing"
-  | "collaboration"
   | "users"
   | "cases"
   | "documents"

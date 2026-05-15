@@ -651,6 +651,7 @@ export function UsersView() {
         reassignCreatedBy("memos", `project="${activeProject.id}" && created_by_identifier="${importedUser.userIdentifier}"`),
         reassignCreatedBy("code_reports", `project="${activeProject.id}" && created_by_identifier="${importedUser.userIdentifier}"`),
         reassignCreatedBy("coder_reports", `project="${activeProject.id}" && created_by_identifier="${importedUser.userIdentifier}"`),
+        reassignCreatedBy("ai_analyses", `project="${activeProject.id}" && created_by_identifier="${importedUser.userIdentifier}"`),
       ]);
 
       const logRecords = await pb.collection("project_log").getFullList({
@@ -720,6 +721,7 @@ export function UsersView() {
         clearCreatedByIdentifier("memos", `project="${activeProject.id}" && created_by_identifier="${removeImportedUser.userIdentifier}"`),
         clearCreatedByIdentifier("code_reports", `project="${activeProject.id}" && created_by_identifier="${removeImportedUser.userIdentifier}"`),
         clearCreatedByIdentifier("coder_reports", `project="${activeProject.id}" && created_by_identifier="${removeImportedUser.userIdentifier}"`),
+        clearCreatedByIdentifier("ai_analyses", `project="${activeProject.id}" && created_by_identifier="${removeImportedUser.userIdentifier}"`),
       ]);
 
       const logRecords = await pb.collection("project_log").getFullList({
@@ -773,6 +775,7 @@ export function UsersView() {
     setResolutionBusy(true);
     try {
       const createdUserId = await createUserAccount({
+        pb,
         name: tempPasswordUser.name,
         email: tempPasswordUser.email,
         password: temporaryPassword,
@@ -1012,13 +1015,6 @@ export function UsersView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {!error && (
-        <p className="users-permission-note">
-          {canInviteMembers || canChangeRoles || canRemoveMembers
-            ? "Membership management options depend on your project role."
-            : "You can view project members, but membership changes are restricted with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
       <div
@@ -1095,13 +1091,16 @@ export function UsersView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Users Help</h2>
             <p className="users-guide-copy">
-              This page shows who has access to the project and what role each person currently holds.
+              Review members and roles, add a member, open row details, edit a member role, remove a member, resolve imported users, and create a temporary password when needed.
             </p>
             <p className="users-guide-copy">
-              Select a row to open more detail. Right-click a row for quick actions, and use <strong>Add Member</strong> to add more users to the project. Users have to register first before they can be added to a project.
+              Use this page to manage who can access the project. Add registered users to the project, inspect current roles, and resolve user-account issues after imports or restores.
+            </p>
+            <p className="users-guide-copy">
+              User-management actions depend on project role and app role. Some imported-user flows create or reassociate workspace accounts.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button

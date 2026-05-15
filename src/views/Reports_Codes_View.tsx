@@ -3925,13 +3925,6 @@ export function CodesView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {!error && (
-        <p className="users-permission-note">
-          {canCreateReports
-            ? "Create a new code report or open a saved one."
-            : "Saved code reports are available to view, but creating new reports is restricted with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
         <section className="users-layout-main">
@@ -3979,16 +3972,16 @@ export function CodesView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Code Reports Help</h2>
             <p className="users-guide-copy">
-              Code reports help you compare coding activity across cases, documents, codes, and coders.
+              Create or open a code report, review descriptions, summaries, and report sections, compare codes across project dimensions, and delete a report when permitted.
             </p>
             <p className="users-guide-copy">
-              Select a report to open it, or right-click a row for quick actions. Use <strong>New Report</strong> to create a fresh analysis.
+              Use code reports to compare coding patterns across the project. Open a report from the list or create a new one, then read the summary sections generated for that report.
             </p>
             <p className="users-guide-copy">
-              Report creation, deletion, and export options depend on your project role.
+              Report actions depend on your role. Reports reflect current project data and may change as coding changes.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>

@@ -1,7 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type { RecordModel } from "pocketbase";
 import { useStore } from "../context/StoreContext";
-import { readProjectAiAssistSettings } from "../lib/projectAiAssistSettings";
 import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 type TranscriptProcessingSegment = {
@@ -372,10 +371,11 @@ export function AIAssistProcessDocumentsView() {
     canCurrentUser,
     startBackgroundDocumentProcessing,
     documentProcessingStatus,
+    projectAiAssistSettings,
   } = useStore();
   const canUseAiProcessDocuments = canCurrentUser("useAiProcessDocuments");
   const canReviewProcessedDocuments = canCurrentUser("reviewProcessedDocuments");
-  const aiAssistEnabledForProject = activeProject ? readProjectAiAssistSettings(activeProject.id).enabled : false;
+  const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
   const [helpOpen, setHelpOpen] = useState(false);
   const [processModalOpen, setProcessModalOpen] = useState(false);
   const [reviewWorkspaceOpen, setReviewWorkspaceOpen] = useState(false);
@@ -684,15 +684,16 @@ export function AIAssistProcessDocumentsView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help modal--wide" onClick={(e) => e.stopPropagation()}>
             <h2>Process Documents Help</h2>
             <p className="users-guide-copy">
-              Use <strong>Process Documents</strong> to select one or more interview transcripts and send them to Ollama.
-              Each processed result is saved into a project review queue so you can come back later without losing work.
+              Select one or more documents, choose processing options, submit processing, monitor progress, and return later to review saved results.
             </p>
             <p className="users-guide-copy">
-              Use <strong>Review</strong> to open saved processed documents, inspect extracted elements, edit tags, speakers,
-              and text, and save the reviewed output back into the queue.
+              Use this page to send supported transcripts or documents through the document-processing workflow. Start the run here, then open the review page to inspect and clean the output.
+            </p>
+            <p className="users-guide-copy">
+              Processing may run through host-executed AI in collaborative sessions. A batch can continue even if one document fails, and failures are surfaced in the banner.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>

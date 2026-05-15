@@ -1268,9 +1268,12 @@ function NewDocumentModal({
   onDone: () => void;
   onClose: () => void;
 }) {
-  const { addDocument, pb, activeProject } = useStore();
+  const { addDocument, pb, activeProject, projectDocumentImportSettings } = useStore();
   const { user: currentUser } = useAuth();
-  const importSettings = readAppSettings().documentImport;
+  const importSettings = {
+    ...readAppSettings().documentImport,
+    storeOriginalFileName: projectDocumentImportSettings.storeOriginalFileName,
+  };
   const [name,      setName]      = useState(initialName);
   const [mode,      setMode]      = useState<InputMode>(
     initialMode && allowedModes.includes(initialMode)
@@ -1608,7 +1611,10 @@ function NewDocumentModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className={`modal doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : mode === "csv" ? " modal--wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`modal doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : ""}${mode === "csv" ? " doc-upload-modal--spreadsheet" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="doc-upload-modal-title-row">
           <h2>New Document</h2>
           {!initialMode && (
@@ -1808,32 +1814,53 @@ function NewDocumentModal({
                 )}
               </div>
               {csvMappings.length > 0 && (
-                <div className="attribute-values-details" style={{ marginTop: 16 }}>
+                <div className="spreadsheet-mapping-panel" style={{ marginTop: 16 }}>
                   <h3 className="case-card-title">Column Mapping</h3>
-                  {csvMappings.map((mapping, index) => (
-                    <div key={mapping.header} className="attribute-value-row" style={{ alignItems: "center" }}>
-                      <span>{mapping.header}</span>
-                      <select
-                        className="form-input"
-                        value={mapping.role}
-                        onChange={(e) => updateCsvMapping(index, { role: e.target.value as CsvColumnRole })}
-                      >
-                        <option value="ignore">Ignore</option>
-                        <option value="name">Document Name</option>
-                        <option value="description">Document Description</option>
-                        <option value="content">Text Contents</option>
-                        <option value="attribute">Document Attribute</option>
-                      </select>
-                      {mapping.role === "attribute" && (
-                        <input
-                          className="form-input"
-                          value={mapping.attributeName}
-                          onChange={(e) => updateCsvMapping(index, { attributeName: e.target.value })}
-                          placeholder="Attribute name"
-                        />
-                      )}
+                  <div className="spreadsheet-mapping-table-wrap">
+                    <div className="spreadsheet-mapping-table" role="table" aria-label="Spreadsheet column mapping">
+                      <div className="spreadsheet-mapping-row spreadsheet-mapping-row--head" role="row">
+                        <div className="spreadsheet-mapping-cell" role="columnheader">Source Column</div>
+                        <div className="spreadsheet-mapping-cell" role="columnheader">Sample Value</div>
+                        <div className="spreadsheet-mapping-cell" role="columnheader">Map To</div>
+                        <div className="spreadsheet-mapping-cell" role="columnheader">Attribute Name</div>
+                      </div>
+                      {csvMappings.map((mapping, index) => (
+                        <div key={mapping.header} className="spreadsheet-mapping-row" role="row">
+                          <div className="spreadsheet-mapping-cell spreadsheet-mapping-cell--header" role="cell">
+                            {mapping.header}
+                          </div>
+                          <div className="spreadsheet-mapping-cell spreadsheet-mapping-cell--sample" role="cell">
+                            {csvPreviewRows[1]?.[index] ?? ""}
+                          </div>
+                          <div className="spreadsheet-mapping-cell" role="cell">
+                            <select
+                              className="form-input"
+                              value={mapping.role}
+                              onChange={(e) => updateCsvMapping(index, { role: e.target.value as CsvColumnRole })}
+                            >
+                              <option value="ignore">Ignore</option>
+                              <option value="name">Document Name</option>
+                              <option value="description">Document Description</option>
+                              <option value="content">Text Contents</option>
+                              <option value="attribute">Document Attribute</option>
+                            </select>
+                          </div>
+                          <div className="spreadsheet-mapping-cell" role="cell">
+                            {mapping.role === "attribute" ? (
+                              <input
+                                className="form-input"
+                                value={mapping.attributeName}
+                                onChange={(e) => updateCsvMapping(index, { attributeName: e.target.value })}
+                                placeholder="Attribute name"
+                              />
+                            ) : (
+                              <span className="spreadsheet-mapping-empty">-</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
               )}
               {csvPreviewRows.length > 0 && (
@@ -2606,17 +2633,6 @@ export function DocumentsView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {!error && (
-        <p className="users-permission-note">
-          {showAttributesTable
-            ? canCreateDocumentAttributes
-              ? "Document attributes can be viewed and managed here."
-              : "Document attributes are view-only with your current role."
-            : canOpenDocumentCreateModal
-              ? "Create, upload, or import documents using the button above."
-              : "Documents are view-only with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
       {showAttributesTable && (
@@ -2783,30 +2799,30 @@ export function DocumentsView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>{showAttributesTable ? "Document Attributes Help" : "Documents Help"}</h2>
             {showAttributesTable ? (
               <>
                 <p className="users-guide-copy">
-                  Document attributes are intended to represent qualities of each document.
+                  Review document attributes across documents, create or edit attributes, set values, delete attributes, and switch back to the document list.
                 </p>
                 <p className="users-guide-copy">
-                  Use attributes to capture structured details like source type, date, format, or other document-level properties you want to compare across the project.
+                  Use the attribute table when you want a structured cross-document comparison view. Define an attribute once and then compare values across many documents.
                 </p>
                 <p className="users-guide-copy">
-                  If your role does not allow editing, this table remains available in a view-only mode.
+                  Attribute definitions are project-wide. Editing rights depend on your project role.
                 </p>
               </>
             ) : (
               <>
                 <p className="users-guide-copy">
-                  Documents are the main units of observation in a project. They can be associated with cases, linked to memos, and enriched with structured attributes.
+                  Create, upload, import, edit, or delete documents; edit metadata; create an editable copy; associate cases; switch to document attributes; and open a document for coding or review.
                 </p>
                 <p className="users-guide-copy">
-                  Select a row to open details, or right-click for quick actions. Use <strong>Show Attributes</strong> to switch to a cross-document attribute view.
+                  Use Documents as the source-management page for the project. Bring documents in, inspect metadata, connect them to cases, and move into coding or other analysis workflows from there.
                 </p>
                 <p className="users-guide-copy">
-                  Creation, upload, and import options depend on your project role.
+                  Document availability and editing depend on role. Some document actions may create or respect document locks in coding workspaces.
                 </p>
               </>
             )}

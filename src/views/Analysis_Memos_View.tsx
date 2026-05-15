@@ -180,6 +180,7 @@ export function MemoEditorView({
   preselectedCaseIds,
   preselectedDocumentIds,
   preselectedCodeIds,
+  preselectedAnnotationIds,
   preselectedCaseAttributeDefIds,
   preselectedDocumentAttributeDefIds,
   backLabel,
@@ -190,6 +191,7 @@ export function MemoEditorView({
   preselectedCaseIds?: string[];
   preselectedDocumentIds?: string[];
   preselectedCodeIds?: string[];
+  preselectedAnnotationIds?: string[];
   preselectedCaseAttributeDefIds?: string[];
   preselectedDocumentAttributeDefIds?: string[];
   backLabel?: string;
@@ -228,7 +230,7 @@ export function MemoEditorView({
     () => new Set([...(editRow?.codeIds ?? []), ...(preselectedCodeIds ?? [])]),
   );
   const [selAnnIds,         setSelAnnIds]         = useState<Set<string>>(
-    () => new Set(editRow?.annotationIds ?? []),
+    () => new Set([...(editRow?.annotationIds ?? []), ...(preselectedAnnotationIds ?? [])]),
   );
   const [selCaseAttrDefIds, setSelCaseAttrDefIds] = useState<Set<string>>(
     () => new Set([...(editRow?.caseAttributeDefIds ?? []), ...(preselectedCaseAttributeDefIds ?? [])]),
@@ -245,7 +247,7 @@ export function MemoEditorView({
     if ((editRow?.caseIds?.length          ?? 0) > 0 || (preselectedCaseIds?.length                  ?? 0) > 0) all.delete("cases");
     if ((editRow?.documentIds?.length      ?? 0) > 0 || (preselectedDocumentIds?.length              ?? 0) > 0) all.delete("documents");
     if ((editRow?.codeIds?.length          ?? 0) > 0 || (preselectedCodeIds?.length                  ?? 0) > 0) all.delete("codes");
-    if ((editRow?.annotationIds?.length    ?? 0) > 0)                                                           all.delete("annotations");
+    if ((editRow?.annotationIds?.length    ?? 0) > 0 || (preselectedAnnotationIds?.length            ?? 0) > 0) all.delete("annotations");
     if ((editRow?.caseAttributeDefIds?.length    ?? 0) > 0 || (preselectedCaseAttributeDefIds?.length    ?? 0) > 0) all.delete("case_attr_defs");
     if ((editRow?.documentAttributeDefIds?.length ?? 0) > 0 || (preselectedDocumentAttributeDefIds?.length ?? 0) > 0) all.delete("doc_attr_defs");
     return all;
@@ -1300,7 +1302,16 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function MemosView() {
-  const { activeProject, pb, canCurrentUser, pendingMemoId, setPendingMemoId, deleteMemo } = useStore();
+  const {
+    activeProject,
+    pb,
+    canCurrentUser,
+    pendingMemoId,
+    setPendingMemoId,
+    pendingNewMemoContext,
+    setPendingNewMemoContext,
+    deleteMemo,
+  } = useStore();
   const canCreateMemos = canCurrentUser("createMemo");
   const canEditMemos = canCurrentUser("editMemo");
   const canDeleteMemos = canCurrentUser("deleteMemo");
@@ -1413,6 +1424,13 @@ export function MemosView() {
     }
   }, [rows, pendingMemoId, setPendingMemoId]);
 
+  useEffect(() => {
+    if (!pendingNewMemoContext) return;
+    setSelectedRowId(null);
+    setEditorRowId(null);
+    setShowNewEditor(true);
+  }, [pendingNewMemoContext]);
+
   // ── Close context menu ────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1473,8 +1491,16 @@ export function MemosView() {
   if (showNewEditor) {
     return (
       <MemoEditorView
-        onSaved={() => { setShowNewEditor(false); loadMemos(); }}
-        onBack={() => setShowNewEditor(false)}
+        preselectedAnnotationIds={pendingNewMemoContext?.annotationIds}
+        onSaved={() => {
+          setShowNewEditor(false);
+          setPendingNewMemoContext(null);
+          loadMemos();
+        }}
+        onBack={() => {
+          setShowNewEditor(false);
+          setPendingNewMemoContext(null);
+        }}
       />
     );
   }
@@ -1528,13 +1554,6 @@ export function MemosView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {!error && (
-        <p className="users-permission-note">
-          {canCreateMemos
-            ? "Create and manage project memos here."
-            : "Memos are view-only with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
         <section className="users-layout-main">
@@ -1602,16 +1621,16 @@ export function MemosView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Memos Help</h2>
             <p className="users-guide-copy">
-              Memos are free-form notes attached to annotations, documents, codes, or cases.
+              Browse memos, open and edit a memo, create memos from supported contexts, delete memos, and inspect linked annotations or project objects.
             </p>
             <p className="users-guide-copy">
-              Select a memo to view or edit it. Right-click a row to delete.
+              Use Memos as the place to capture analytic notes tied to documents, annotations, codes, or cases. Select a memo to review or edit its content.
             </p>
             <p className="users-guide-copy">
-              Memo creation and editing options depend on your project role.
+              Memo creation and editing depend on your project role. Some memos are contextual and make most sense when opened alongside their linked object.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>

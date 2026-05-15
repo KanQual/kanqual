@@ -100,6 +100,9 @@ const TABLE_SPECS: {
   sort?: string;
   expand?: string;
 }[] = [
+  { name: "project_settings", filter: (id) => `project="${id}"`, sort: "created" },
+  { name: "project_ai_chats", filter: (id) => `project="${id}"`, sort: "created" },
+  { name: "project_ai_chat_messages", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "project_members", filter: (id) => `project="${id}"`, sort: "created", expand: "user" },
   { name: "documents",         filter: (id) => `project="${id}"`,          sort: "created" },
   { name: "codes", filter: (id) => `project="${id}"`, sort: "created" },
@@ -114,6 +117,7 @@ const TABLE_SPECS: {
   { name: "memos", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "code_reports", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "coder_reports", filter: (id) => `project="${id}"`, sort: "created" },
+  { name: "ai_analyses", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "project_log", filter: (id) => `project="${id}"`, sort: "occurred_at" },
 ];
 
@@ -417,7 +421,38 @@ export async function importProjectBackupIntoProject(
   const sourceIdentifier = (value: unknown) => importedUsersBySourceId.get(textValue(value))?.userIdentifier || "";
 
   if (canReassociateUsers) {
-    for (const row of findTable(data, "project_members")) {
+  for (const row of findTable(data, "project_settings")) {
+      const payload = {
+        ...stripSystemFields(row),
+        project: projectId,
+      };
+      await createMappedRecord(pb, "project_settings", row, payload, idMap, tableCounts);
+  }
+
+  for (const row of findTable(data, "project_ai_chats")) {
+    const payload = {
+      ...stripSystemFields(row),
+      project: projectId,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
+      participant_users: canReassociateUsers ? remapMany(row.participant_users, idMap) : [],
+      participant_identifiers_json: typeof row.participant_identifiers_json === "string" ? row.participant_identifiers_json : "[]",
+    };
+    await createMappedRecord(pb, "project_ai_chats", row, payload, idMap, tableCounts);
+  }
+
+  for (const row of findTable(data, "project_ai_chat_messages")) {
+    const payload = {
+      ...stripSystemFields(row),
+      chat: remapOne(row.chat, idMap),
+      project: projectId,
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || undefined : undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
+    };
+    await createMappedRecord(pb, "project_ai_chat_messages", row, payload, idMap, tableCounts);
+  }
+
+  for (const row of findTable(data, "project_members")) {
       const mappedUser = remapOne(row.user, idMap);
       if (!mappedUser || mappedUser === userId) continue;
       const payload = {
@@ -428,6 +463,14 @@ export async function importProjectBackupIntoProject(
         created_by: remapOne(row.created_by, idMap) || userId || undefined,
       };
       await createMappedRecord(pb, "project_members", row, payload, idMap, tableCounts);
+    }
+  } else {
+    for (const row of findTable(data, "project_settings")) {
+      const payload = {
+        ...stripSystemFields(row),
+        project: projectId,
+      };
+      await createMappedRecord(pb, "project_settings", row, payload, idMap, tableCounts);
     }
   }
 
@@ -570,6 +613,17 @@ export async function importProjectBackupIntoProject(
       created_by_identifier: sourceIdentifier(row.created_by),
     };
     await createMappedRecord(pb, "coder_reports", row, payload, idMap, tableCounts);
+  }
+
+  for (const row of findTable(data, "ai_analyses")) {
+    const payload = {
+      ...stripSystemFields(row),
+      project: projectId,
+      code: remapOne(row.code, idMap),
+      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
+      created_by_identifier: sourceIdentifier(row.created_by),
+    };
+    await createMappedRecord(pb, "ai_analyses", row, payload, idMap, tableCounts);
   }
 
   for (const row of findTable(data, "project_log")) {

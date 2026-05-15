@@ -205,13 +205,19 @@ export function AnnotationsView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Annotations Help</h2>
             <p className="users-guide-copy">
-              This page lists every annotation in the project, including its source document, assigned code, memo count, and note status.
+              Browse all annotations, inspect code, document, note, and memo state, select a row to jump to the source location, and review annotation status across the project.
             </p>
             <p className="users-guide-copy">
-              Select a row to jump directly to that annotation in the document viewer.
+              Use this page as a project-wide annotation index. Pick an annotation from the list to navigate directly back to its source context.
+            </p>
+            <p className="users-guide-copy">
+              This page is mainly for navigation and review; actual annotation edits usually happen in coding views.
+            </p>
+            <p className="users-guide-copy">
+              Project permissions for annotation editing in coding views, plus current code and document availability, affect what you can do after you jump out of this page.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>

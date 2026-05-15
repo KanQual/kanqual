@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useStore } from "../context/StoreContext";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 export function ReportView() {
   const {
@@ -8,6 +10,7 @@ export function ReportView() {
     documents,
     memos,
   } = useStore();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   if (!activeProject) {
     return (
@@ -17,7 +20,8 @@ export function ReportView() {
     );
   }
 
-  // Compute per-code counts across all documents in this project
+  const project = activeProject;
+
   const projectDocIds = new Set(documents.map((d) => d.id));
   const projectAnnotations = allAnnotations.filter((a) => projectDocIds.has(a.documentId));
   const codeMap = Object.fromEntries(codes.map((c) => [c.id, c]));
@@ -27,7 +31,6 @@ export function ReportView() {
     countByCode[ann.codeId] = (countByCode[ann.codeId] ?? 0) + 1;
   }
 
-  // Per-document breakdown
   const docBreakdown = documents.map((doc) => {
     const docAnns = projectAnnotations.filter((a) => a.documentId === doc.id);
     const byCode: Record<string, { code: string; color: string; quotes: string[] }> = {};
@@ -44,20 +47,18 @@ export function ReportView() {
 
   function handleExport() {
     const lines: string[] = [
-      `# Report: ${activeProject!.name}`,
+      `# Report: ${project.name}`,
       `Generated: ${new Date().toLocaleString()}`,
       "",
-      `## Summary`,
+      "## Summary",
       `Documents: ${documents.length}`,
       `Total annotations: ${projectAnnotations.length}`,
       `Memos: ${memos.length}`,
       "",
-      `## Annotation Counts by Code`,
-      ...codes.map(
-        (c) => `- ${c.label}: ${countByCode[c.id] ?? 0}`
-      ),
+      "## Annotation Counts by Code",
+      ...codes.map((c) => `- ${c.label}: ${countByCode[c.id] ?? 0}`),
       "",
-      `## By Document`,
+      "## By Document",
     ];
 
     for (const { doc, entries } of docBreakdown) {
@@ -74,10 +75,10 @@ export function ReportView() {
     }
 
     if (memos.length > 0) {
-      lines.push("", `## Memos`);
-      for (const m of memos) {
-        lines.push(`\n### ${m.title}`);
-        lines.push(m.body || "*(empty)*");
+      lines.push("", "## Memos");
+      for (const memo of memos) {
+        lines.push(`\n### ${memo.title}`);
+        lines.push(memo.body || "*(empty)*");
       }
     }
 
@@ -85,7 +86,7 @@ export function ReportView() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${activeProject!.name.replace(/\s+/g, "_")}_report.md`;
+    a.download = `${project.name.replace(/\s+/g, "_")}_report.md`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -93,7 +94,12 @@ export function ReportView() {
   return (
     <div className="view report-view">
       <header className="view-header">
-        <h1>Report — {activeProject.name}</h1>
+        <div className="view-title-with-help">
+          <h1>Report - {project.name}</h1>
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open report help">
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
+        </div>
         <button className="btn btn--primary" onClick={handleExport}>
           Export as Markdown
         </button>
@@ -178,6 +184,29 @@ export function ReportView() {
           </div>
         ))}
       </section>
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
+            <h2>Report Help</h2>
+            <div className="app-settings-modal-body">
+                <p className="settings-section-desc">
+                  Review summary cards, inspect code-count comparisons, inspect document-level quotation breakdowns, and export the report as markdown.
+                </p>
+                <ul className="settings-help-list">
+                  <li>Use this page as a lightweight project-wide summary report. Read the overall counts first, then move into the code and document breakdowns for detail.</li>
+                  <li>This is a synthesized readout of existing project content, not a separate editable report-configuration page.</li>
+                  <li>Current project content such as codes, annotations, documents, and memos, plus export-as-markdown behavior, affect what appears here.</li>
+                </ul>
+              <div className="form-actions">
+                <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

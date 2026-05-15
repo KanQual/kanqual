@@ -34,6 +34,7 @@ import { getAppRuntimeInfo, joinFsPath, type AppRuntimeInfo } from "../lib/dataR
 import { clearAppDataRecords, deleteUserAccount } from "../lib/pb";
 import { permissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
 import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -877,6 +878,7 @@ export function AppSettingsView() {
   const [ollamaDiscovery, setOllamaDiscovery] = useState<OllamaDiscoveryResult | null>(null);
   const [ollamaModels, setOllamaModels] = useState<OllamaModelSummary[]>([]);
   const [aboutCardExpanded, setAboutCardExpanded] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [registeredUsers, setRegisteredUsers] = useState<RecordModel[]>([]);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminNotice, setAdminNotice] = useState("");
@@ -954,6 +956,15 @@ export function AppSettingsView() {
       : []),
   ].filter((card) => card.visible);
 
+  const openRequestedSettingsModal = useCallback(() => {
+    const requestedModal = sessionStorage.getItem("kanqual:open-app-settings-modal");
+    if (!requestedModal) return;
+    sessionStorage.removeItem("kanqual:open-app-settings-modal");
+    if (settingsOverviewCards.some((card) => card.id === requestedModal)) {
+      setActiveSettingsModal(requestedModal);
+    }
+  }, [settingsOverviewCards]);
+
   const permissionMatrixByCategory = permissionMatrixRows.reduce<Record<string, PermissionMatrixRow[]>>((acc, row) => {
     if (!acc[row.category]) acc[row.category] = [];
     acc[row.category].push(row);
@@ -999,8 +1010,8 @@ export function AppSettingsView() {
       await setNetworkMode(mode);
       setNotice(
         mode === "lan"
-          ? `Network mode enabled. Other devices can connect at http://${localIp ?? "your-ip"}:8090`
-          : "Local-only mode restored."
+          ? `LAN mode enabled for this session. Other devices can connect at http://${localIp ?? "your-ip"}:8090 until the app closes.`
+          : "Local-only mode restored for this session."
       );
     } catch (e) {
       setNotice(`Failed to switch mode: ${e instanceof Error ? e.message : String(e)}`);
@@ -1079,13 +1090,19 @@ export function AppSettingsView() {
   }, [refreshEmbeddingModelStatus, refreshEmbeddingModelPreflight]);
 
   useEffect(() => {
-    const requestedModal = sessionStorage.getItem("kanqual:open-app-settings-modal");
-    if (!requestedModal) return;
-    sessionStorage.removeItem("kanqual:open-app-settings-modal");
-    if (settingsOverviewCards.some((card) => card.id === requestedModal)) {
-      setActiveSettingsModal(requestedModal);
+    openRequestedSettingsModal();
+  }, [openRequestedSettingsModal]);
+
+  useEffect(() => {
+    function handleOpenRequestedSettingsModal() {
+      openRequestedSettingsModal();
     }
-  }, []);
+
+    window.addEventListener("kanqual:open-app-settings-modal", handleOpenRequestedSettingsModal);
+    return () => {
+      window.removeEventListener("kanqual:open-app-settings-modal", handleOpenRequestedSettingsModal);
+    };
+  }, [openRequestedSettingsModal]);
 
   useEffect(() => {
     const phase = embeddingModelDownloadStatus?.phase;
@@ -1147,7 +1164,7 @@ export function AppSettingsView() {
 
     setAdminBusy(true);
     try {
-      await deleteUserAccount(userId);
+      await deleteUserAccount(pb, userId);
       await refreshRegisteredUsers();
       setAdminNotice("Registered user deleted.");
     } catch (error) {
@@ -1158,7 +1175,7 @@ export function AppSettingsView() {
   }
 
   async function handleClearAppData() {
-    if (!canClearLocalAppData) return;
+    if (!pb || !canClearLocalAppData) return;
     const shouldClear = window.confirm(
       "Clear all local app data? This deletes registered users, projects, documents, and other stored records on this device.",
     );
@@ -1166,7 +1183,7 @@ export function AppSettingsView() {
 
     setAdminBusy(true);
     try {
-      await clearAppDataRecords();
+      await clearAppDataRecords(pb);
       clearRecentProjects();
       clearLocalAccounts();
       clearRemoteSessions();
@@ -1220,7 +1237,9 @@ export function AppSettingsView() {
     setEmbeddingModelError("");
     setEmbeddingModelNotice("");
     try {
-      const status = await invoke<EmbeddingModelStatus>("clear_multilingual_e5_model");
+      const status = await invoke<EmbeddingModelStatus>("clear_multilingual_e5_model", {
+        authToken: pb?.authStore.token ?? "",
+      });
       setEmbeddingModelStatus(status);
       void refreshEmbeddingModelStatus();
       refreshEmbeddingModelPreflight();
@@ -1368,6 +1387,18 @@ export function AppSettingsView() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div className={`settings-warning ${networkMode === "lan" ? "settings-warning--danger" : ""}`}>
+              <strong>{networkMode === "lan" ? "LAN mode is live for this session." : "Local-only mode is recommended for routine work."}</strong>
+              <br />
+              {networkMode === "lan"
+                ? "Anyone on the same trusted network who can reach this device can attempt to connect to Kanqual until the app closes or you switch back to local-only mode."
+                : "Other devices cannot reach this Kanqual database while local-only mode is active."}
+            </div>
+            <div className="settings-warning">
+              <strong>Session behavior and auditability</strong>
+              <br />
+              Kanqual always reverts to local-only mode on next launch. When a project is open, LAN/local mode changes are also written to that project's log.
             </div>
 
             {networkMode === "lan" && (
@@ -1538,21 +1569,6 @@ export function AppSettingsView() {
                 onChange={(e) => persist({
                   ...settings,
                   documentImport: { ...settings.documentImport, trimImportedText: e.target.checked },
-                }, "Document import defaults saved.")}
-              />
-            </label>
-
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Store original filename</strong>
-                <small>Keeps the uploaded filename in document metadata for later reference.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.documentImport.storeOriginalFileName}
-                onChange={(e) => persist({
-                  ...settings,
-                  documentImport: { ...settings.documentImport, storeOriginalFileName: e.target.checked },
                 }, "Document import defaults saved.")}
               />
             </label>
@@ -1812,9 +1828,174 @@ export function AppSettingsView() {
           <>
             <div className="settings-row settings-row--block">
               <div className="settings-row-info">
+                <div className="settings-row-label">Embedding model</div>
+                <div className="settings-row-desc">
+                  Step 1: download the multilingual-e5 embedding model to this device. Step 2: keep it installed so Kanqual can build project embeddings. Step 3: tune chunking below before you run or rebuild embeddings for a project.
+                </div>
+              </div>
+            </div>
+
+            {embeddingModelError && <div className="form-error project-settings-error">{embeddingModelError}</div>}
+            {embeddingModelNotice && <div className="settings-success project-settings-success">{embeddingModelNotice}</div>}
+
+            <div className="project-model-card">
+              <div>
+                <div className="project-model-name">{embeddingModelStatus?.displayName ?? "multilingual-e5-large"}</div>
+                <p className="project-model-description">
+                  Repo: <code>{embeddingModelStatus?.repoId ?? "intfloat/multilingual-e5-large"}</code>
+                </p>
+                <p className="project-model-description">
+                  Status: {embeddingModelStatus?.installed ? "Downloaded locally" : "Not downloaded yet"}
+                  {embeddingModelStatus?.bytes ? ` | ${formatBytes(embeddingModelStatus.bytes)}` : ""}
+                  {embeddingModelStatus?.files ? ` | ${embeddingModelStatus.files} files` : ""}
+                </p>
+                <p className="project-model-description">
+                  Completion status: {formatCompletionStatus(embeddingModelDownloadStatus, embeddingModelStatus)}
+                </p>
+                <p className="project-model-description">
+                  Total download size: {formatBytes(embeddingModelPreflight?.totalBytes ?? 0)}
+                </p>
+                <p className="project-model-description">
+                  Already on device: {formatBytes(embeddingModelPreflight?.existingBytes ?? embeddingModelStatus?.bytes ?? 0)}
+                  {embeddingModelPreflight?.manifestAvailable
+                    ? ` | ${embeddingModelPreflight?.existingFiles ?? 0} files`
+                    : ""}
+                </p>
+                <p className="project-model-description">
+                  Remaining download: {formatBytes(embeddingModelPreflight?.remainingBytes ?? 0)}
+                  {embeddingModelPreflight?.manifestAvailable && embeddingModelPreflight?.remainingFiles != null
+                    ? ` across ${embeddingModelPreflight.remainingFiles} files`
+                    : ""}
+                </p>
+                <p className="project-model-description">
+                  Downloaded: {embeddingModelStatus?.installed ? formatDownloadDate(embeddingModelStatus.downloadedAtMs) : "Not downloaded yet"}
+                </p>
+                <p className="project-model-description">
+                  Location: <code>{embeddingModelStatus?.modelDir ?? "Detecting local model directory..."}</code>
+                </p>
+                {embeddingModelPreflight?.message && (
+                  <p className="project-model-description">{embeddingModelPreflight.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="project-export-actions project-export-actions--modal">
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => void handleEmbeddingModelDownload()}
+                disabled={embeddingModelBusy || !!embeddingModelStatus?.installed || !canDownloadEmbeddingModel}
+              >
+                {embeddingModelBusy
+                  ? embeddingModelDownloadStatus?.phase === "cancelling"
+                    ? "Cancelling..."
+                    : "Downloading..."
+                  : embeddingModelStatus?.installed
+                    ? "Already Downloaded"
+                    : "Download from Hugging Face"}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => void handleEmbeddingModelCancel()}
+                disabled={
+                  !canDownloadEmbeddingModel ||
+                  !embeddingModelDownloadStatus ||
+                  (embeddingModelDownloadStatus.phase !== "downloading" &&
+                    embeddingModelDownloadStatus.phase !== "cancelling")
+                }
+              >
+                {embeddingModelDownloadStatus?.phase === "cancelling" ? "Cancelling..." : "Cancel Download"}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => void handleEmbeddingModelClear()}
+                disabled={
+                  !canDeleteEmbeddingModel ||
+                  embeddingModelBusy ||
+                  (!embeddingModelStatus?.installed && !(embeddingModelStatus?.files && embeddingModelStatus.files > 0))
+                }
+              >
+                Clear Local Model
+              </button>
+            </div>
+
+            <div className="llm-settings-grid">
+              <label className="form-label">
+                Chunk size
+                <span className="settings-field-hint">
+                  Step 1 after download: choose how much text Kanqual should place into each embedding chunk before indexing.
+                </span>
+                <input
+                  className="form-input"
+                  type="number"
+                  min={100}
+                  max={20000}
+                  value={settings.llm.chunkSize}
+                  onChange={(e) => {
+                    const chunkSize = clampInteger(Number(e.target.value), 100, 20000);
+                    const overlapSize = Math.min(settings.llm.overlapSize, Math.max(0, chunkSize - 1));
+                    persist({
+                      ...settings,
+                      llm: {
+                        ...settings.llm,
+                        chunkSize,
+                        overlapSize,
+                      },
+                    }, "LLM settings saved.");
+                  }}
+                />
+              </label>
+
+              <label className="form-label">
+                Overlap size
+                <span className="settings-field-hint">
+                  Step 2: keep some shared text between neighboring chunks so retrieval can preserve context across boundaries.
+                </span>
+                <input
+                  className="form-input"
+                  type="number"
+                  min={0}
+                  max={Math.max(0, settings.llm.chunkSize - 1)}
+                  value={settings.llm.overlapSize}
+                  onChange={(e) => persist({
+                    ...settings,
+                    llm: {
+                      ...settings.llm,
+                      overlapSize: clampInteger(Number(e.target.value), 0, Math.max(0, settings.llm.chunkSize - 1)),
+                    },
+                  }, "LLM settings saved.")}
+                />
+              </label>
+
+              <label className="form-label">
+                Batch size
+                <span className="settings-field-hint">
+                  Step 3: choose how many chunks Kanqual should process together when it builds embeddings.
+                </span>
+                <input
+                  className="form-input"
+                  type="number"
+                  min={1}
+                  max={256}
+                  value={settings.llm.batchSize}
+                  onChange={(e) => persist({
+                    ...settings,
+                    llm: {
+                      ...settings.llm,
+                      batchSize: clampInteger(Number(e.target.value), 1, 256),
+                    },
+                  }, "LLM settings saved.")}
+                />
+              </label>
+            </div>
+
+            <div className="settings-row settings-row--block">
+              <div className="settings-row-info">
                 <div className="settings-row-label">Local LLM over HTTP</div>
                 <div className="settings-row-desc">
-                  Connect Kanqual to a local or network-accessible LLM server, test the connection, and choose which installed local model to use for future AI Assist generation workflows.
+                  Step 1: enable local LLM integration. Step 2: enter the LLM service's address and port. Step 3: test the connection. Step 4: choose the model Kanqual should use for generation features.
                 </div>
               </div>
             </div>
@@ -1955,7 +2136,7 @@ export function AppSettingsView() {
               <div className="settings-row-info">
                 <div className="settings-row-label">LLM Settings</div>
                 <div className="settings-row-desc">
-                  Choose the local model and configure how AI Assist should use it during generation and retrieval workflows.
+                  Once the connection test succeeds, pick a model first, then adjust how Kanqual should use it during AI Assist generation and retrieval workflows.
                 </div>
               </div>
             </div>
@@ -2106,171 +2287,6 @@ export function AppSettingsView() {
             </fieldset>
 
 
-            <div className="settings-row settings-row--block">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Embedding model</div>
-                <div className="settings-row-desc">
-                  Download the Hugging Face multilingual-e5 embedding model to this device for future multilingual retrieval workflows.
-                </div>
-              </div>
-            </div>
-
-            {embeddingModelError && <div className="form-error project-settings-error">{embeddingModelError}</div>}
-            {embeddingModelNotice && <div className="settings-success project-settings-success">{embeddingModelNotice}</div>}
-
-            <div className="project-model-card">
-              <div>
-                <div className="project-model-name">{embeddingModelStatus?.displayName ?? "multilingual-e5-large"}</div>
-                <p className="project-model-description">
-                  Repo: <code>{embeddingModelStatus?.repoId ?? "intfloat/multilingual-e5-large"}</code>
-                </p>
-                <p className="project-model-description">
-                  Status: {embeddingModelStatus?.installed ? "Downloaded locally" : "Not downloaded yet"}
-                  {embeddingModelStatus?.bytes ? ` | ${formatBytes(embeddingModelStatus.bytes)}` : ""}
-                  {embeddingModelStatus?.files ? ` | ${embeddingModelStatus.files} files` : ""}
-                </p>
-                <p className="project-model-description">
-                  Completion status: {formatCompletionStatus(embeddingModelDownloadStatus, embeddingModelStatus)}
-                </p>
-                <p className="project-model-description">
-                  Total download size: {formatBytes(embeddingModelPreflight?.totalBytes ?? 0)}
-                </p>
-                <p className="project-model-description">
-                  Already on device: {formatBytes(embeddingModelPreflight?.existingBytes ?? embeddingModelStatus?.bytes ?? 0)}
-                  {embeddingModelPreflight?.manifestAvailable
-                    ? ` | ${embeddingModelPreflight?.existingFiles ?? 0} files`
-                    : ""}
-                </p>
-                <p className="project-model-description">
-                  Remaining download: {formatBytes(embeddingModelPreflight?.remainingBytes ?? 0)}
-                  {embeddingModelPreflight?.manifestAvailable && embeddingModelPreflight?.remainingFiles != null
-                    ? ` across ${embeddingModelPreflight.remainingFiles} files`
-                    : ""}
-                </p>
-                <p className="project-model-description">
-                  Downloaded: {embeddingModelStatus?.installed ? formatDownloadDate(embeddingModelStatus.downloadedAtMs) : "Not downloaded yet"}
-                </p>
-                <p className="project-model-description">
-                  Location: <code>{embeddingModelStatus?.modelDir ?? "Detecting local model directory..."}</code>
-                </p>
-                {embeddingModelPreflight?.message && (
-                  <p className="project-model-description">{embeddingModelPreflight.message}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="project-export-actions project-export-actions--modal">
-              <button
-                className="btn btn--primary"
-                type="button"
-                onClick={() => void handleEmbeddingModelDownload()}
-                disabled={embeddingModelBusy || !!embeddingModelStatus?.installed || !canDownloadEmbeddingModel}
-              >
-                {embeddingModelBusy
-                  ? embeddingModelDownloadStatus?.phase === "cancelling"
-                    ? "Cancelling..."
-                    : "Downloading..."
-                  : embeddingModelStatus?.installed
-                    ? "Already Downloaded"
-                    : "Download from Hugging Face"}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void handleEmbeddingModelCancel()}
-                disabled={
-                  !canDownloadEmbeddingModel ||
-                  !embeddingModelDownloadStatus ||
-                  (embeddingModelDownloadStatus.phase !== "downloading" &&
-                    embeddingModelDownloadStatus.phase !== "cancelling")
-                }
-              >
-                {embeddingModelDownloadStatus?.phase === "cancelling" ? "Cancelling..." : "Cancel Download"}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void handleEmbeddingModelClear()}
-                disabled={
-                  !canDeleteEmbeddingModel ||
-                  embeddingModelBusy ||
-                  (!embeddingModelStatus?.installed && !(embeddingModelStatus?.files && embeddingModelStatus.files > 0))
-                }
-              >
-                Clear Local Model
-              </button>
-            </div>
-
-            <div className="llm-settings-grid">
-              <label className="form-label">
-                Chunk size
-                <span className="settings-field-hint">
-                  Maximum characters per chunk before embedding. Larger chunks preserve more context but can reduce retrieval precision.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={100}
-                  max={20000}
-                  value={settings.llm.chunkSize}
-                  onChange={(e) => {
-                    const chunkSize = clampInteger(Number(e.target.value), 100, 20000);
-                    const overlapSize = Math.min(settings.llm.overlapSize, Math.max(0, chunkSize - 1));
-                    persist({
-                      ...settings,
-                      llm: {
-                        ...settings.llm,
-                        chunkSize,
-                        overlapSize,
-                      },
-                    }, "LLM settings saved.");
-                  }}
-                />
-              </label>
-
-              <label className="form-label">
-                Overlap size
-                <span className="settings-field-hint">
-                  Shared characters between neighboring chunks so relevant context survives chunk boundaries.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={0}
-                  max={Math.max(0, settings.llm.chunkSize - 1)}
-                  value={settings.llm.overlapSize}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      overlapSize: clampInteger(Number(e.target.value), 0, Math.max(0, settings.llm.chunkSize - 1)),
-                    },
-                  }, "LLM settings saved.")}
-                />
-              </label>
-
-              <label className="form-label">
-                Batch size
-                <span className="settings-field-hint">
-                  Number of chunks to process together in one embedding batch when multilingual-e5 indexing is wired in.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={1}
-                  max={256}
-                  value={settings.llm.batchSize}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      batchSize: clampInteger(Number(e.target.value), 1, 256),
-                    },
-                  }, "LLM settings saved.")}
-                />
-              </label>
-            </div>
-
           </>
         );
       default:
@@ -2283,11 +2299,39 @@ export function AppSettingsView() {
       <header className="view-header">
         <div className="users-header-title-wrap">
           <h1>App Settings</h1>
-        </div>
-        <div>
-          <div className="view-header-sub">Device-wide behavior and local app diagnostics.</div>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            aria-label="Show App Settings help"
+            title="Show Help"
+            onClick={() => setHelpOpen(true)}
+          >
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
         </div>
       </header>
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
+            <h2>App Settings Help</h2>
+            <p className="users-guide-copy">
+                Manage network mode, configure AI runtime details, download, clear, or inspect embedding models, customize appearance, review storage and diagnostics, and perform administrator-only maintenance.
+            </p>
+            <p className="users-guide-copy">
+                Use App Settings for device-wide or host-runtime behavior rather than project-shared behavior. Open the card that matches the area you want to manage.
+              </p>
+              <p className="users-guide-copy">
+                Some actions are host-only and some are administrator-only. Changes here affect the local machine or host environment, not shared project content.
+              </p>
+            <div className="form-actions">
+              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {notice && <div className="settings-success" style={{ marginBottom: 18 }}>{notice}</div>}
 
@@ -2480,6 +2524,16 @@ export function AppSettingsView() {
 
         {networkMode === "lan" && (
           <>
+            <div className="settings-warning settings-warning--danger">
+              <strong>LAN mode is live for this session.</strong>
+              <br />
+              Anyone on the same trusted network who can reach this device can attempt to connect to Kanqual until the app closes or you switch back to local-only mode.
+            </div>
+            <div className="settings-warning">
+              <strong>Session behavior and auditability</strong>
+              <br />
+              Kanqual always reverts to local-only mode on next launch. When a project is open, LAN/local mode changes are also written to that project's log.
+            </div>
             <CollaborationAddressCard
               label="Local Network"
               description="Reachable by devices on the same Wi-Fi or LAN. Share this address with collaborators on your local network."
@@ -2504,6 +2558,13 @@ export function AppSettingsView() {
               scope="internet"
             />
           </>
+        )}
+        {networkMode !== "lan" && (
+          <div className="settings-warning">
+            <strong>Local-only mode is recommended for routine work.</strong>
+            <br />
+            Other devices cannot reach this Kanqual database while local-only mode is active. Kanqual will also start this way again on next launch.
+          </div>
         )}
       </section>
 
@@ -2643,21 +2704,6 @@ export function AppSettingsView() {
             onChange={(e) => persist({
               ...settings,
               documentImport: { ...settings.documentImport, trimImportedText: e.target.checked },
-            }, "Document import defaults saved.")}
-          />
-        </label>
-
-        <label className="settings-toggle-row">
-          <span>
-            <strong>Store original filename</strong>
-            <small>Keeps the uploaded filename in document metadata for later reference.</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.documentImport.storeOriginalFileName}
-            onChange={(e) => persist({
-              ...settings,
-              documentImport: { ...settings.documentImport, storeOriginalFileName: e.target.checked },
             }, "Document import defaults saved.")}
           />
         </label>

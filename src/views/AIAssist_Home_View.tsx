@@ -7,7 +7,7 @@ import {
   buildProjectEmbeddingItems,
   type ProjectEmbeddingIndexStatus,
 } from "../lib/projectEmbeddings";
-import { readProjectAiAssistSettings } from "../lib/projectAiAssistSettings";
+import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 type EmbeddingModelStatus = {
@@ -49,15 +49,29 @@ type AttributeSuggestionRow = {
   evidenceText: string;
 };
 
-type OllamaAttributeSuggestionResponse = {
-  model: string;
-  baseUrl: string;
-  suggestions: Array<{
-    itemId: string;
-    itemName: string;
-    suggestedValue: string;
-    evidenceText: string;
-  }>;
+type TextCitationTarget = {
+  documentId: string;
+  startOffset: number;
+  endOffset: number;
+};
+
+type AttributeSuggestionSnapshot = {
+  reportType: "ai-attribute-suggestions";
+  kind: "case" | "document";
+  selectedAttributeId: string | null;
+  suggestionRowsByAttribute: Record<string, AttributeSuggestionRow[]>;
+  suggestionModelByAttribute: Record<string, string>;
+};
+
+type SavedAttributeSuggestionRow = {
+  id: string;
+  name: string;
+  targetKind: "case" | "document";
+  attributeId: string | null;
+  attributeName: string;
+  createdByName: string;
+  createdAt: string;
+  snapshot: AttributeSuggestionSnapshot;
 };
 
 type OllamaAttributeSuggestionProgressEvent = {
@@ -78,6 +92,26 @@ type AttributeSuggestionRunState = {
   completedItems: number;
   totalItems: number;
 };
+
+const ATTRIBUTE_SUGGESTION_COLS: Array<{ key: "name" | "attributeName" | "createdByName" | "createdAt" | "actions"; label: string; width: string }> = [
+  { key: "name", label: "Name", width: "30%" },
+  { key: "attributeName", label: "Attribute", width: "24%" },
+  { key: "createdByName", label: "Created By", width: "18%" },
+  { key: "createdAt", label: "Created", width: "18%" },
+  { key: "actions", label: "", width: "10%" },
+];
+
+function fmtSavedRunDate(iso: string): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
 
 const AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY = "kq_ai_assist_add_attribute_target";
 
@@ -270,11 +304,15 @@ function AttributeSuggestionEvidenceModal({
   ownerName,
   value,
   evidenceText,
+  openBusy,
+  onOpenEvidence,
   onClose,
 }: {
   ownerName: string;
   value: string;
   evidenceText: string;
+  openBusy: boolean;
+  onOpenEvidence: () => void;
   onClose: () => void;
 }) {
   return (
@@ -296,21 +334,196 @@ function AttributeSuggestionEvidenceModal({
         <div className="app-settings-modal-body">
           <div className="app-settings-stat-card">
             <strong>Suggested Value</strong>
-            <span>{value || "—"}</span>
+            <span>{value || "-"}</span>
           </div>
-          <div className="project-model-modal-copy">
-            <p>{evidenceText || "No supporting excerpt was returned for this suggestion."}</p>
-          </div>
+          {evidenceText ? (
+            <div className="ai-chat-citation-list">
+              <button
+                type="button"
+                className="ai-chat-citation-link ai-chat-citation-link--document"
+                onClick={onOpenEvidence}
+                disabled={openBusy}
+                title={evidenceText}
+              >
+                <span className="ai-chat-citation-number">[1]</span>
+                <span className="ai-chat-citation-kind">Text</span>
+                <span className="ai-chat-citation-line">
+                  <strong>Supporting Text Segment</strong>
+                  <small>{evidenceText}</small>
+                </span>
+              </button>
+            </div>
+          ) : (
+            <div className="project-model-modal-copy">
+              <p>No supporting excerpt was returned for this suggestion.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
-  const { pb, activeProject, setView, logAction, canCurrentUser } = useStore();
+function normalizeAttributeSuggestionSnapshot(raw: unknown): AttributeSuggestionSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const candidate = raw as Record<string, unknown>;
+  if (candidate.reportType !== "ai-attribute-suggestions") return null;
+  const kind = candidate.kind === "case" || candidate.kind === "document" ? candidate.kind : null;
+  if (!kind) return null;
+
+  const normalizeRowsByAttribute = (value: unknown): Record<string, AttributeSuggestionRow[]> => {
+    if (!value || typeof value !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([attributeId, rows]) => [
+        attributeId,
+        Array.isArray(rows)
+          ? rows
+              .map((row) => {
+                if (!row || typeof row !== "object") return null;
+                const candidateRow = row as Record<string, unknown>;
+                return {
+                  ownerId: typeof candidateRow.ownerId === "string" ? candidateRow.ownerId : "",
+                  ownerName: typeof candidateRow.ownerName === "string" ? candidateRow.ownerName : "",
+                  suggestedValue: typeof candidateRow.suggestedValue === "string" ? candidateRow.suggestedValue : "",
+                  evidenceText: typeof candidateRow.evidenceText === "string" ? candidateRow.evidenceText : "",
+                };
+              })
+              .filter((row): row is AttributeSuggestionRow => !!row && !!row.ownerId)
+          : [],
+      ]),
+    );
+  };
+
+  const normalizeModelByAttribute = (value: unknown): Record<string, string> => {
+    if (!value || typeof value !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, model]) => typeof model === "string")
+        .map(([attributeId, model]) => [attributeId, model as string]),
+    );
+  };
+
+  return {
+    reportType: "ai-attribute-suggestions",
+    kind,
+    selectedAttributeId: typeof candidate.selectedAttributeId === "string" ? candidate.selectedAttributeId : null,
+    suggestionRowsByAttribute: normalizeRowsByAttribute(candidate.suggestionRowsByAttribute),
+    suggestionModelByAttribute: normalizeModelByAttribute(candidate.suggestionModelByAttribute),
+  };
+}
+
+function parseSavedAttributeSuggestionRow(record: {
+  id: string;
+  name?: string;
+  target_kind?: string;
+  attribute_id?: string;
+  attribute_name?: string;
+  created?: string;
+  snapshot?: string;
+  expand?: { created_by?: { name?: string; email?: string } };
+}): SavedAttributeSuggestionRow | null {
+  if (!record.snapshot) return null;
+  try {
+    const snapshot = normalizeAttributeSuggestionSnapshot(JSON.parse(record.snapshot));
+    if (!snapshot) return null;
+    return {
+      id: record.id,
+      name: record.name ?? "",
+      targetKind: record.target_kind === "case" ? "case" : "document",
+      attributeId: typeof record.attribute_id === "string" && record.attribute_id.trim() ? record.attribute_id : null,
+      attributeName: record.attribute_name ?? "",
+      createdByName: record.expand?.created_by?.name || record.expand?.created_by?.email || "-",
+      createdAt: record.created ?? "",
+      snapshot,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function SaveAttributeSuggestionsModal({
+  initialName,
+  loading,
+  error,
+  onClose,
+  onSave,
+}: {
+  initialName: string;
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: (name: string) => void;
+}) {
+  const [name, setName] = useState(initialName);
+
+  useEffect(() => {
+    setName(initialName);
+  }, [initialName]);
+
+  return (
+    <div className="modal-overlay" onClick={() => !loading && onClose()}>
+      <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <h2>Save Suggestions</h2>
+        <p style={{ marginBottom: 16, lineHeight: 1.5 }}>
+          Save this suggestion set so it can be reopened from the saved suggestions list.
+        </p>
+        <label className="form-label">
+          Suggestion set name
+          <input
+            className="form-input"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Suggestion set name..."
+            autoFocus
+            disabled={loading}
+          />
+        </label>
+        {error && <div className="form-error" style={{ marginTop: 12 }}>{error}</div>}
+        <div className="form-actions" style={{ marginTop: 24 }}>
+          <button type="button" className="btn" onClick={onClose} disabled={loading}>Cancel</button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => onSave(name)}
+            disabled={loading || !name.trim()}
+          >
+            {loading ? "Saving..." : "Save Suggestions"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AIAssistAttributeWorkspace({
+  kind,
+  onBack,
+  initialRow,
+  onSaved,
+}: {
+  kind: "case" | "document";
+  onBack?: () => void;
+  initialRow?: SavedAttributeSuggestionRow | null;
+  onSaved?: (row: SavedAttributeSuggestionRow) => void;
+}) {
+  const {
+    pb,
+    activeProject,
+    documents,
+    setView,
+    setActiveDocument,
+    setPendingTextCitation,
+    logAction,
+    canCurrentUser,
+    projectAiAssistSettings,
+    isLocalWorkspace,
+    runAttributeSuggestions,
+    createAiAttributeSuggestionRun,
+    updateAiAttributeSuggestionRun,
+    cancelAttributeSuggestionRun,
+  } = useStore();
   const canUseAiAttributeTools = canCurrentUser("useAiAttributeTools");
-  const aiAssistEnabledForProject = activeProject ? readProjectAiAssistSettings(activeProject.id).enabled : false;
+  const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
   const canAddAttribute = kind === "case"
     ? canCurrentUser("createCaseAttributes")
     : canCurrentUser("createDocumentAttributes");
@@ -321,15 +534,22 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
   const [suggestionError, setSuggestionError] = useState("");
   const [suggestionBusy, setSuggestionBusy] = useState(false);
   const [suggestionRunState, setSuggestionRunState] = useState<AttributeSuggestionRunState | null>(null);
+  const [suggestionStopBusy, setSuggestionStopBusy] = useState(false);
+  const [suggestionJobId, setSuggestionJobId] = useState<string | null>(null);
   const [acceptingOwnerId, setAcceptingOwnerId] = useState<string | null>(null);
   const [evidenceModalRow, setEvidenceModalRow] = useState<AttributeSuggestionRow | null>(null);
+  const [openingEvidenceOwnerId, setOpeningEvidenceOwnerId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [savedRow, setSavedRow] = useState<SavedAttributeSuggestionRow | null>(initialRow ?? null);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const suggestionRunRef = useRef<AttributeSuggestionRunState | null>(null);
+  const leftColumnRef = useRef<HTMLDivElement | null>(null);
   const leftCardRef = useRef<HTMLElement | null>(null);
   const middleCardRef = useRef<HTMLElement | null>(null);
   const rightCardRef = useRef<HTMLElement | null>(null);
   const [leftDividerHeight, setLeftDividerHeight] = useState(0);
-  const [rightDividerHeight, setRightDividerHeight] = useState(0);
 
   useEffect(() => {
     setSelectedAttributeId((current) => {
@@ -354,20 +574,168 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
   const visibleSuggestionProgress = selectedAttributeId && suggestionRunState?.attributeId === selectedAttributeId
     ? suggestionRunState
     : null;
+  const hasGeneratedSuggestions = useMemo(
+    () => Object.values(suggestionRowsByAttribute).some((rows) => rows.length > 0),
+    [suggestionRowsByAttribute],
+  );
+  const snapshot = useMemo<AttributeSuggestionSnapshot>(() => ({
+    reportType: "ai-attribute-suggestions",
+    kind,
+    selectedAttributeId,
+    suggestionRowsByAttribute,
+    suggestionModelByAttribute,
+  }), [kind, selectedAttributeId, suggestionRowsByAttribute, suggestionModelByAttribute]);
+  const documentsById = useMemo(
+    () => new Map(documents.map((document) => [document.id, document])),
+    [documents],
+  );
 
   useEffect(() => {
+    setSavedRow(initialRow ?? null);
+    setShowSaveModal(false);
+    setSaveBusy(false);
+    setSaveError("");
+    if (initialRow) {
+      setSelectedAttributeId(initialRow.snapshot.selectedAttributeId);
+      setSuggestionRowsByAttribute(initialRow.snapshot.suggestionRowsByAttribute);
+      setSuggestionModelByAttribute(initialRow.snapshot.suggestionModelByAttribute);
+      setSuggestionError("");
+      setSuggestionBusy(false);
+      setSuggestionStopBusy(false);
+      setSuggestionJobId(null);
+      setSuggestionRunState(null);
+      setEvidenceModalRow(null);
+      setOpeningEvidenceOwnerId(null);
+      return;
+    }
+    setSelectedAttributeId(null);
+    setSuggestionRowsByAttribute({});
+    setSuggestionModelByAttribute({});
+    setSuggestionError("");
+    setSuggestionBusy(false);
+    setSuggestionStopBusy(false);
+    setSuggestionJobId(null);
+    setSuggestionRunState(null);
+    setEvidenceModalRow(null);
+    setOpeningEvidenceOwnerId(null);
+  }, [initialRow?.id, initialRow]);
+
+  function findEvidenceRangeInText(content: string, evidenceText: string): Omit<TextCitationTarget, "documentId"> | null {
+    const trimmedEvidence = evidenceText.trim();
+    if (!content || !trimmedEvidence) return null;
+
+    const exactIndex = content.indexOf(trimmedEvidence);
+    if (exactIndex >= 0) {
+      return {
+        startOffset: exactIndex,
+        endOffset: exactIndex + trimmedEvidence.length,
+      };
+    }
+
+    const normalizeWithMap = (value: string) => {
+      let normalized = "";
+      const indexMap: number[] = [];
+      let inWhitespace = false;
+      for (let index = 0; index < value.length; index += 1) {
+        const char = value[index];
+        if (/\s/.test(char)) {
+          if (!inWhitespace) {
+            normalized += " ";
+            indexMap.push(index);
+            inWhitespace = true;
+          }
+        } else {
+          normalized += char;
+          indexMap.push(index);
+          inWhitespace = false;
+        }
+      }
+      return { normalized: normalized.trim(), indexMap };
+    };
+
+    const normalizedContent = normalizeWithMap(content);
+    const normalizedEvidence = trimmedEvidence.replace(/\s+/g, " ").trim();
+    if (!normalizedContent.normalized || !normalizedEvidence) return null;
+    const normalizedIndex = normalizedContent.normalized.indexOf(normalizedEvidence);
+    if (normalizedIndex < 0) return null;
+
+    const startOffset = normalizedContent.indexMap[normalizedIndex];
+    const endMapIndex = normalizedIndex + normalizedEvidence.length - 1;
+    const endOffset = typeof startOffset === "number" && typeof normalizedContent.indexMap[endMapIndex] === "number"
+      ? normalizedContent.indexMap[endMapIndex] + 1
+      : NaN;
+    if (!Number.isFinite(startOffset) || !Number.isFinite(endOffset) || endOffset <= startOffset) return null;
+    return { startOffset, endOffset };
+  }
+
+  async function resolveEvidenceTarget(row: AttributeSuggestionRow): Promise<TextCitationTarget | null> {
+    const trimmedEvidence = row.evidenceText.trim();
+    if (!trimmedEvidence) return null;
+
+    if (kind === "document") {
+      const document = documentsById.get(row.ownerId);
+      if (!document) return null;
+      const range = findEvidenceRangeInText(document.content ?? "", trimmedEvidence);
+      return range ? { documentId: document.id, ...range } : null;
+    }
+
+    const links = await pb.collection("case_documents").getFullList({
+      filter: `case="${row.ownerId}"`,
+      fields: "document",
+    });
+    for (const link of links) {
+      const documentId = String(link.document ?? "");
+      const document = documentsById.get(documentId);
+      if (!document) continue;
+      const range = findEvidenceRangeInText(document.content ?? "", trimmedEvidence);
+      if (range) return { documentId: document.id, ...range };
+    }
+    return null;
+  }
+
+  async function handleOpenSuggestionEvidence(row: AttributeSuggestionRow) {
+    setOpeningEvidenceOwnerId(row.ownerId);
+    setSuggestionError("");
+    try {
+      const target = await resolveEvidenceTarget(row);
+      if (!target) {
+        throw new Error("Could not locate that evidence excerpt in the current project documents.");
+      }
+      const document = documentsById.get(target.documentId);
+      if (!document) {
+        throw new Error("Could not open the source document for that evidence excerpt.");
+      }
+      setActiveDocument(document);
+      setPendingTextCitation({
+        documentId: document.id,
+        startOffset: target.startOffset,
+        endOffset: target.endOffset,
+        label: row.ownerName,
+      });
+      setEvidenceModalRow(null);
+      setView("code-text");
+    } catch (error) {
+      console.error("Failed to open attribute suggestion evidence:", error);
+      setSuggestionError(error instanceof Error ? error.message : "Could not open the supporting text segment.");
+    } finally {
+      setOpeningEvidenceOwnerId(null);
+    }
+  }
+
+  useEffect(() => {
+    const leftColumnEl = leftColumnRef.current;
     const leftEl = leftCardRef.current;
     const middleEl = middleCardRef.current;
     const rightEl = rightCardRef.current;
-    if (!leftEl || !middleEl || !rightEl) return;
+    if (!leftColumnEl || !leftEl || !middleEl || !rightEl) return;
 
     const measure = () => {
-      setLeftDividerHeight(Math.max(leftEl.offsetHeight, middleEl.offsetHeight));
-      setRightDividerHeight(Math.max(middleEl.offsetHeight, rightEl.offsetHeight));
+      setLeftDividerHeight(Math.max(leftColumnEl.offsetHeight, rightEl.offsetHeight));
     };
 
     measure();
     const obs = new ResizeObserver(measure);
+    obs.observe(leftColumnEl);
     obs.observe(leftEl);
     obs.observe(middleEl);
     obs.observe(rightEl);
@@ -417,6 +785,8 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
       });
       if (payload.completedItems >= payload.totalItems) {
         setSuggestionBusy(false);
+        setSuggestionStopBusy(false);
+        setSuggestionJobId(null);
         setSuggestionRunState(null);
       }
     }).then((dispose) => {
@@ -498,6 +868,8 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
     if (!selectedAttribute || !activeProject) return;
     const runId = `${selectedAttribute.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setSuggestionBusy(true);
+    setSuggestionStopBusy(false);
+    setSuggestionJobId(null);
     setSuggestionError("");
     setSuggestionRowsByAttribute((current) => ({
       ...current,
@@ -508,12 +880,14 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
       [selectedAttribute.id]: "",
     }));
     try {
-      const llmSettings = readAppSettings().llm;
-      if (!llmSettings.ollamaEnabled) {
-        throw new Error("Enable Ollama in App Settings before generating AI suggestions.");
-      }
-      if (!llmSettings.ollamaSelectedModel) {
-        throw new Error("Choose an Ollama model in App Settings before generating AI suggestions.");
+      if (isLocalWorkspace) {
+        const llmSettings = readAppSettings().llm;
+        if (!llmSettings.ollamaEnabled) {
+          throw new Error("Enable Ollama in App Settings before generating AI suggestions.");
+        }
+        if (!llmSettings.ollamaSelectedModel) {
+          throw new Error("Choose an Ollama model in App Settings before generating AI suggestions.");
+        }
       }
       const items = await loadSuggestionInputItems();
       setSuggestionRunState({
@@ -522,23 +896,16 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
         completedItems: 0,
         totalItems: items.length,
       });
-      const response = await invoke<OllamaAttributeSuggestionResponse>("generate_attribute_value_suggestions_with_ollama", {
-        request: {
-          runId,
-          attributeName: selectedAttribute.name,
-          attributeDataType: selectedAttribute.dataType,
-          attributeDescription: selectedAttribute.description,
-          attributeOptions: selectedAttribute.options,
-          items,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
-        },
+      const response = await runAttributeSuggestions({
+        projectId: activeProject.id,
+        runId,
+        attributeName: selectedAttribute.name,
+        attributeDataType: selectedAttribute.dataType,
+        attributeDescription: selectedAttribute.description,
+        attributeOptions: selectedAttribute.options,
+        items,
+      }, undefined, (jobId) => {
+        setSuggestionJobId(jobId);
       });
       const nextRows = response.suggestions.map((suggestion) => ({
         ownerId: suggestion.itemId,
@@ -564,12 +931,30 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
         [selectedAttribute.id]: response.model,
       }));
       setSuggestionRunState((current) => current?.runId === runId ? null : current);
+      setSuggestionStopBusy(false);
+      setSuggestionJobId(null);
     } catch (nextError) {
       console.error("Failed to generate attribute suggestions:", nextError);
       setSuggestionError(nextError instanceof Error ? nextError.message : "Could not generate AI suggestions.");
       setSuggestionRunState((current) => current?.runId === runId ? null : current);
+      setSuggestionStopBusy(false);
+      setSuggestionJobId(null);
     } finally {
       setSuggestionBusy(false);
+    }
+  }
+
+  async function handleStopSuggestionGeneration() {
+    const activeRun = suggestionRunRef.current;
+    if (!activeRun || suggestionStopBusy) return;
+    setSuggestionStopBusy(true);
+    setSuggestionError("");
+    try {
+      await cancelAttributeSuggestionRun(activeRun.runId, suggestionJobId);
+    } catch (nextError) {
+      console.error("Failed to stop attribute suggestion generation:", nextError);
+      setSuggestionError(nextError instanceof Error ? nextError.message : "Could not stop AI suggestions.");
+      setSuggestionStopBusy(false);
     }
   }
 
@@ -626,6 +1011,57 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
     }
   }
 
+  async function handleSaveSuggestions(name: string) {
+    if (!activeProject || !hasGeneratedSuggestions) return;
+    setSaveBusy(true);
+    setSaveError("");
+    try {
+      const selectedAttributeName = definitions.find((definition) => definition.id === selectedAttributeId)?.name ?? "";
+      const snapshotJson = JSON.stringify(snapshot);
+      if (savedRow) {
+        await updateAiAttributeSuggestionRun(savedRow.id, {
+          name,
+          targetKind: kind,
+          attributeId: selectedAttributeId,
+          attributeName: selectedAttributeName,
+          snapshot: snapshotJson,
+        });
+        const nextRow: SavedAttributeSuggestionRow = {
+          ...savedRow,
+          name,
+          attributeId: selectedAttributeId,
+          attributeName: selectedAttributeName,
+          snapshot,
+        };
+        setSavedRow(nextRow);
+        onSaved?.(nextRow);
+      } else {
+        const record = await createAiAttributeSuggestionRun({
+          name,
+          targetKind: kind,
+          attributeId: selectedAttributeId,
+          attributeName: selectedAttributeName,
+          snapshot: snapshotJson,
+        });
+        if (!record) {
+          throw new Error("Could not save AI suggestions because no active project is open.");
+        }
+        const nextRow = parseSavedAttributeSuggestionRow(record);
+        if (!nextRow) {
+          throw new Error("Saved suggestions could not be reopened because the returned snapshot was invalid.");
+        }
+        setSavedRow(nextRow);
+        onSaved?.(nextRow);
+      }
+      setShowSaveModal(false);
+    } catch (nextError) {
+      console.error("Failed to save attribute suggestions:", nextError);
+      setSaveError(nextError instanceof Error ? nextError.message : "Could not save AI suggestions.");
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
   if (!activeProject) {
     return (
       <div className="view">
@@ -643,7 +1079,7 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Attributes</h1>
+          <h1>Identify Attributes</h1>
         </header>
         <div className="empty-state">
           <p>You do not have permission to use AI Assist attribute tools for this project.</p>
@@ -656,7 +1092,7 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Attributes</h1>
+          <h1>Identify Attributes</h1>
         </header>
         <div className="empty-state">
           <p>Enable AI Assist in Project Settings before using AI attribute tools.</p>
@@ -693,17 +1129,36 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
             <img src={helpIcon} alt="" className="users-help-icon" />
           </button>
         </div>
+        <div className="users-header-actions">
+          {onBack && (
+            <button type="button" className="btn" onClick={onBack}>
+              Back to Suggestions
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => setShowSaveModal(true)}
+            disabled={!hasGeneratedSuggestions || saveBusy}
+            title={!hasGeneratedSuggestions ? "Generate suggestions before saving this page" : undefined}
+          >
+            {saveBusy ? "Saving..." : savedRow ? "Save Changes" : "Save Suggestions"}
+          </button>
+        </div>
       </header>
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Identify Attributes Help</h2>
             <p className="users-guide-copy">
-              Use this page to review case or document attributes and inspect their current values across the project.
+              Switch between case and document attributes, choose an attribute, review AI suggestions, accept or edit suggested values, and inspect current stored values.
             </p>
             <p className="users-guide-copy">
-              Switch between <strong>Cases</strong> and <strong>Documents</strong> with the toggle, choose an attribute, and then review or accept AI-assisted suggestions for each item.
+              Use this page when AI Assist is helping you populate structured attributes. Pick an attribute and review suggestions item by item before saving accepted values.
+            </p>
+            <p className="users-guide-copy">
+              This workflow operates on shared project attributes. Your role may allow viewing but not editing, and suggestions should be reviewed before acceptance.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
@@ -714,18 +1169,27 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
         </div>
       )}
 
+      {(saveError || suggestionError) && (
+        <div className="form-error project-settings-error">{saveError || suggestionError}</div>
+      )}
+
       <section
         className="ai-attribute-layout"
         style={{
           ["--ai-attribute-left-divider-height" as string]: `${leftDividerHeight}px`,
-          ["--ai-attribute-right-divider-height" as string]: `${rightDividerHeight}px`,
         }}
       >
+        <div ref={leftColumnRef} className="ai-attribute-column-stack">
         <aside ref={leftCardRef} className="annotate-card ai-attribute-column">
           <div className="annotate-card-header">
             <span className="annotate-card-title">{pageTitle}</span>
             {canAddAttribute && (
-              <button type="button" className="btn btn--small" onClick={handleAddAttribute}>
+              <button
+                type="button"
+                className="btn btn--small"
+                onClick={handleAddAttribute}
+                disabled={suggestionBusy}
+              >
                 Add Attribute
               </button>
             )}
@@ -737,6 +1201,7 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
               aria-selected={isCaseMode}
               className={isCaseMode ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
               onClick={() => handleModeChange("case")}
+              disabled={suggestionBusy}
             >
               Cases
             </button>
@@ -746,6 +1211,7 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
               aria-selected={!isCaseMode}
               className={!isCaseMode ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
               onClick={() => handleModeChange("document")}
+              disabled={suggestionBusy}
             >
               Documents
             </button>
@@ -762,7 +1228,10 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
                   key={definition.id}
                   type="button"
                   className={`ai-attribute-list-item${definition.id === selectedAttributeId ? " ai-attribute-list-item--active" : ""}`}
-                  onClick={() => setSelectedAttributeId(definition.id)}
+                  onClick={() =>
+                    setSelectedAttributeId((current) => (current === definition.id ? null : definition.id))
+                  }
+                  disabled={suggestionBusy}
                 >
                   <strong>{definition.name}</strong>
                   <span>{definition.dataType}</span>
@@ -772,14 +1241,10 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
           </div>
         </aside>
 
-        <div className="ai-attribute-divider" aria-hidden="true">
-          <span className="ai-attribute-divider-line ai-attribute-divider-line--left" />
-        </div>
-
         <section ref={middleCardRef} className="annotate-card ai-attribute-column ai-attribute-column--placeholder">
           <div className="annotate-card-header">
             <span className="annotate-card-title">
-              {selectedAttribute ? `${selectedAttribute.name} Values` : "Attribute Values"}
+              {selectedAttribute ? `${selectedAttribute.name} Current Values` : "Current Attribute Values"}
             </span>
           </div>
           {valuesError && <div className="form-error project-settings-error">{valuesError}</div>}
@@ -822,14 +1287,24 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
             </div>
           )}
         </section>
+        </div>
 
         <div className="ai-attribute-divider" aria-hidden="true">
-          <span className="ai-attribute-divider-line ai-attribute-divider-line--right" />
+          <span className="ai-attribute-divider-line ai-attribute-divider-line--left" />
         </div>
 
         <section ref={rightCardRef} className="annotate-card ai-attribute-column ai-attribute-column--placeholder">
           <div className="annotate-card-header">
             <span className="annotate-card-title">AI Suggestions</span>
+            <div className="users-header-actions">
+              <button
+                type="button"
+                className="btn btn--small"
+                onClick={() => void handleStopSuggestionGeneration()}
+                disabled={!suggestionBusy || suggestionStopBusy}
+              >
+                {suggestionStopBusy ? "Stopping..." : "Stop"}
+              </button>
             <button
               type="button"
               className="btn btn--small btn--danger"
@@ -838,6 +1313,7 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
             >
               {suggestionBusy ? "Generating..." : "Generate Suggestions"}
             </button>
+            </div>
           </div>
           {selectedAttribute && suggestionBusy && (
             <div className="ai-segments-search-state">
@@ -850,7 +1326,6 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
               </div>
             </div>
           )}
-          {suggestionError && <div className="form-error project-settings-error">{suggestionError}</div>}
           {!selectedAttribute ? (
             <div className="ai-attribute-placeholder">
               <p>Select an attribute from the left column.</p>
@@ -922,8 +1397,286 @@ function AIAssistAttributeWorkspace({ kind }: { kind: "case" | "document" }) {
           ownerName={evidenceModalRow.ownerName}
           value={evidenceModalRow.suggestedValue}
           evidenceText={evidenceModalRow.evidenceText}
+          openBusy={openingEvidenceOwnerId === evidenceModalRow.ownerId}
+          onOpenEvidence={() => void handleOpenSuggestionEvidence(evidenceModalRow)}
           onClose={() => setEvidenceModalRow(null)}
         />
+      )}
+
+      {showSaveModal && (
+        <SaveAttributeSuggestionsModal
+          initialName={savedRow?.name ?? ""}
+          loading={saveBusy}
+          error={saveError}
+          onClose={() => {
+            if (saveBusy) return;
+            setShowSaveModal(false);
+            setSaveError("");
+          }}
+          onSave={(name) => void handleSaveSuggestions(name)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
+  const {
+    activeProject,
+    pb,
+    canCurrentUser,
+    projectAiAssistSettings,
+    deleteAiAttributeSuggestionRun,
+  } = useStore();
+  const [openRow, setOpenRow] = useState<SavedAttributeSuggestionRow | null>(null);
+  const [creatingNew, setCreatingNew] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [rows, setRows] = useState<SavedAttributeSuggestionRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<SavedAttributeSuggestionRow | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: SavedAttributeSuggestionRow } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
+
+  const canUseAiAttributeTools = canCurrentUser("useAiAttributeTools");
+  const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
+  const canStartSuggestions = !!activeProject && canUseAiAttributeTools && aiAssistEnabledForProject;
+  const canDeleteSavedSuggestions = canCurrentUser("deleteReports");
+  const title = kind === "case" ? "Identify Case Attributes" : "Identify Document Attributes";
+
+  const loadSuggestionRuns = useCallback(async () => {
+    if (!activeProject) {
+      setRows([]);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const records = await pb.collection("ai_attribute_suggestion_runs").getFullList({
+        filter: `project="${activeProject.id}"&&target_kind="${kind}"&&deleted_at=""`,
+        expand: "created_by",
+        sort: "-created",
+      });
+      const mappedRows = records
+        .map((record) => parseSavedAttributeSuggestionRow(record))
+        .filter(Boolean) as SavedAttributeSuggestionRow[];
+      setRows(mappedRows);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load saved suggestion runs.");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeProject, kind, pb]);
+
+  useEffect(() => {
+    void loadSuggestionRuns();
+  }, [loadSuggestionRuns]);
+
+  useEffect(() => {
+    function onPointerDown(event: MouseEvent) {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenu(null);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setContextMenu(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  async function handleDelete() {
+    if (!confirmDelete) return;
+    setDeleteBusy(true);
+    try {
+      await deleteAiAttributeSuggestionRun(confirmDelete.id, confirmDelete.name);
+      setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
+      setConfirmDelete(null);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete saved suggestions.");
+      setConfirmDelete(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  if (creatingNew || openRow) {
+    return (
+      <AIAssistAttributeWorkspace
+        kind={kind}
+        onBack={() => {
+          setOpenRow(null);
+          setCreatingNew(false);
+        }}
+        initialRow={openRow}
+        onSaved={(row) => {
+          setCreatingNew(false);
+          setOpenRow(row);
+          setRows((prev) => [row, ...prev.filter((item) => item.id !== row.id)]);
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="view users-view">
+      <header className="view-header">
+        <div className="users-title-wrap">
+          <h1>{title}</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            aria-label="Show attribute suggestions help"
+            title="Show Help"
+            onClick={() => setHelpOpen(true)}
+          >
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
+        </div>
+        <button
+          className="btn btn--primary"
+          onClick={() => {
+            setOpenRow(null);
+            setCreatingNew(true);
+          }}
+          disabled={!canStartSuggestions}
+          title={
+            !activeProject
+              ? "Open a project first"
+              : !canUseAiAttributeTools
+                ? "You do not have permission to use AI Assist attribute tools for this project"
+                : !aiAssistEnabledForProject
+                  ? "Enable AI Assist in Project Settings before using AI attribute tools"
+                  : undefined
+          }
+        >
+          + New Suggestions
+        </button>
+      </header>
+
+      {error && <p className="users-error">{error}</p>}
+
+      <div className="users-content">
+        <section className="users-layout-main">
+          <div className="users-table-wrap" style={{ maxHeight: 34 + (Math.max(loading || rows.length === 0 ? 1 : rows.length, 1) + 2) * 36 }}>
+            <table className="users-table">
+              <thead>
+                <tr>
+                  {ATTRIBUTE_SUGGESTION_COLS.map((col) => (
+                    <th key={col.key} style={{ width: col.width }} className="users-th">
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr>
+                    <td colSpan={ATTRIBUTE_SUGGESTION_COLS.length} className="users-td-msg">Loading...</td>
+                  </tr>
+                )}
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={ATTRIBUTE_SUGGESTION_COLS.length} className="users-td-msg">No saved suggestion runs yet.</td>
+                  </tr>
+                )}
+                {!loading && rows.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="users-row"
+                    onClick={() => setOpenRow(row)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContextMenu({ x: event.clientX, y: event.clientY, row });
+                    }}
+                  >
+                    <td className="users-td users-td--name">{row.name}</td>
+                    <td className="users-td users-td--muted">{row.attributeName || "No attribute selected"}</td>
+                    <td className="users-td users-td--muted">{row.createdByName}</td>
+                    <td className="users-td users-td--muted">{fmtSavedRunDate(row.createdAt)}</td>
+                    <td className="users-td users-td--muted">Right-click</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
+            <h2>Identify Attributes Help</h2>
+            <p className="users-guide-copy">
+              Start a new attribute suggestion run from here or reopen a saved run from the table.
+            </p>
+            <p className="users-guide-copy">
+              Saved runs keep the selected attribute and the generated AI suggestions so you can review or resume them later.
+            </p>
+            <p className="users-guide-copy">
+              Access depends on your role and whether AI Assist is enabled for the active project.
+            </p>
+            <div className="form-actions">
+              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {contextMenu && (
+        <div ref={contextMenuRef} className="context-menu" style={contextMenuStyle}>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setOpenRow(contextMenu.row);
+              setContextMenu(null);
+            }}
+          >
+            Open Suggestions
+          </button>
+          {canDeleteSavedSuggestions ? (
+            <button
+              className="context-menu-item context-menu-item--danger"
+              onClick={() => {
+                setConfirmDelete(contextMenu.row);
+                setContextMenu(null);
+              }}
+            >
+              Delete Suggestions
+            </button>
+          ) : (
+            <div className="context-menu-item context-menu-item--disabled" title="Only editors and owners can delete saved suggestion runs">
+              Delete Suggestions
+            </div>
+          )}
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => !deleteBusy && setConfirmDelete(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Delete Saved Suggestions</h2>
+            <p className="users-guide-copy">
+              Delete <strong>{confirmDelete.name}</strong>? This saved suggestion run will be removed from the project log and table.
+            </p>
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button type="button" className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteBusy}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn--danger" onClick={() => void handleDelete()} disabled={deleteBusy}>
+                {deleteBusy ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -940,6 +1693,8 @@ function useEmbeddingRunState() {
     annotations,
     memos,
     projectEmbeddingBuildStatus,
+    projectAiAssistRuntimeStatus,
+    isLocalWorkspace,
     startProjectEmbeddingBuild,
   } = useStore();
   const [indexStatus, setIndexStatus] = useState<ProjectEmbeddingIndexStatus | null>(null);
@@ -954,6 +1709,35 @@ function useEmbeddingRunState() {
     if (!projectId) {
       setIndexStatus(null);
       setModelStatus(null);
+      setError("");
+      return;
+    }
+
+    if (!isLocalWorkspace) {
+      setIndexStatus(
+        projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady == null
+          ? null
+          : {
+              exists: Boolean(projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady),
+              generatedAtMs: null,
+              itemCount: 0,
+              modelRepoId: null,
+              modelDisplayName: null,
+            },
+      );
+      setModelStatus(
+        projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled == null
+          ? null
+          : {
+              installed: Boolean(projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled),
+              repoId: "",
+              displayName: "",
+              modelDir: "",
+              files: 0,
+              bytes: 0,
+              downloadedAtMs: null,
+            },
+      );
       setError("");
       return;
     }
@@ -979,7 +1763,14 @@ function useEmbeddingRunState() {
     return () => {
       cancelled = true;
     };
-  }, [activeProject?.id, projectEmbeddingBuildStatus?.phase, projectEmbeddingBuildStatus?.projectId]);
+  }, [
+    activeProject?.id,
+    isLocalWorkspace,
+    projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled,
+    projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady,
+    projectEmbeddingBuildStatus?.phase,
+    projectEmbeddingBuildStatus?.projectId,
+  ]);
 
   function openBuildModal() {
     setError("");
@@ -991,31 +1782,54 @@ function useEmbeddingRunState() {
     setError("");
 
     try {
-      const latestModelStatus = await invoke<EmbeddingModelStatus>("get_multilingual_e5_status");
-      setModelStatus(latestModelStatus);
-      if (!latestModelStatus.installed) {
-        sessionStorage.setItem("kanqual:open-app-settings-modal", "llm");
-        setView("app-settings");
-        return false;
-      }
+      if (isLocalWorkspace) {
+        const latestModelStatus = await invoke<EmbeddingModelStatus>("get_multilingual_e5_status");
+        setModelStatus(latestModelStatus);
+        if (!latestModelStatus.installed) {
+          sessionStorage.setItem("kanqual:open-app-settings-modal", "llm");
+          setView("app-settings");
+          return false;
+        }
 
-      const llmSettings = readAppSettings().llm;
-      const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, llmSettings);
-      if (items.length === 0) {
-        setError("There is no project content available to embed yet.");
-        return false;
-      }
+        const llmSettings = readAppSettings().llm;
+        const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, llmSettings);
+        if (items.length === 0) {
+          setError("There is no project content available to embed yet.");
+          return false;
+        }
 
-      await startProjectEmbeddingBuild({
-        projectId: activeProject.id,
-        llmSettings,
-        items,
-        successLog: {
+        await startProjectEmbeddingBuild({
           projectId: activeProject.id,
-          action: "ai_assist.reindex",
-          label: "Rebuilt local AI Assist embeddings",
-        },
-      });
+          llmSettings,
+          items,
+          successLog: {
+            projectId: activeProject.id,
+            action: "ai_assist.reindex",
+            label: "Rebuilt local AI Assist embeddings",
+          },
+        });
+      } else {
+        if (projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled === false) {
+          setError("The host device still needs the multilingual-e5 embedding model before it can build project embeddings.");
+          return false;
+        }
+        await startProjectEmbeddingBuild({
+          projectId: activeProject.id,
+          llmSettings: {
+            batchSize: 0,
+            chunkSize: 0,
+            overlapSize: 0,
+            prefixPassages: false,
+            normalizeWhitespace: true,
+          },
+          items: [],
+          successLog: {
+            projectId: activeProject.id,
+            action: "ai_assist.reindex",
+            label: "Rebuilt host AI Assist embeddings",
+          },
+        });
+      }
       return true;
     } catch (nextError) {
       console.error("Failed to rerun project embeddings:", nextError);
@@ -1083,7 +1897,7 @@ function EmbeddingBuildModal({
 }
 
 export function AIAssistView() {
-  const { canCurrentUser } = useStore();
+  const { canCurrentUser, isLocalWorkspace, projectAiAssistRuntimeStatus } = useStore();
   const {
     activeProject,
     setView,
@@ -1094,16 +1908,15 @@ export function AIAssistView() {
     setBuildModalOpen,
     handleRunEmbedding,
   } = useEmbeddingRunState();
+  const { projectAiAssistSettings } = useStore();
   const llmSettings = readAppSettings().llm;
-  const aiAssistProjectSettings = activeProject ? readProjectAiAssistSettings(activeProject.id) : null;
+  const aiAssistProjectSettings = activeProject ? projectAiAssistSettings : null;
   const [llmConnectionStatus, setLlmConnectionStatus] = useState<"checking" | "live" | "offline" | "disabled">(
-    llmSettings.ollamaEnabled ? "checking" : "disabled",
+    isLocalWorkspace
+      ? (llmSettings.ollamaEnabled ? "checking" : "disabled")
+      : "checking",
   );
   const [helpOpen, setHelpOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
-  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const canViewAiAssistHome = canCurrentUser("viewAiAssistHome");
   const canManageLlmSettings = canCurrentUser("manageLlmSettings");
   const canDownloadEmbeddingModel = canCurrentUser("downloadEmbeddingModel");
@@ -1111,12 +1924,19 @@ export function AIAssistView() {
     canCurrentUser("enableProjectAiAssist")
     || canCurrentUser("buildEmbeddings")
     || canCurrentUser("deleteEmbeddings");
-  const canOpenAiAssistSettings = canManageLlmSettings || canDownloadEmbeddingModel || canManageProjectAiAssist;
+  const remoteEmbeddingModelInstalled = projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled;
+  const remoteEmbeddingsReady = projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady;
   const aiAssistRequirements = [
     {
       label: "Embeddings model download",
-      met: Boolean(modelStatus?.installed),
-      value: modelStatus?.installed ? "Ready" : "Missing",
+      met: isLocalWorkspace ? Boolean(modelStatus?.installed) : remoteEmbeddingModelInstalled === true,
+      value: isLocalWorkspace
+        ? (modelStatus?.installed ? "Ready" : "Missing")
+        : remoteEmbeddingModelInstalled == null
+          ? "Checking..."
+          : remoteEmbeddingModelInstalled
+            ? "Ready"
+            : "Missing",
       disabled: !(canManageLlmSettings || canDownloadEmbeddingModel),
       onClick: () => {
         sessionStorage.setItem("kanqual:open-app-settings-modal", "llm");
@@ -1124,7 +1944,7 @@ export function AIAssistView() {
       },
     },
     {
-      label: "Local LLM connection",
+      label: isLocalWorkspace ? "Local LLM connection" : "Host LLM connection",
       met: llmConnectionStatus === "live",
       value:
         llmConnectionStatus === "checking"
@@ -1152,8 +1972,14 @@ export function AIAssistView() {
     },
     {
       label: "Embeddings built",
-      met: Boolean(indexStatus?.exists),
-      value: indexStatus?.exists ? "Ready" : "Not Built",
+      met: isLocalWorkspace ? Boolean(indexStatus?.exists) : remoteEmbeddingsReady === true,
+      value: isLocalWorkspace
+        ? (indexStatus?.exists ? "Ready" : "Not Built")
+        : remoteEmbeddingsReady == null
+          ? "Checking..."
+          : remoteEmbeddingsReady
+            ? "Ready"
+            : "Not Built",
       disabled: !canManageProjectAiAssist,
       onClick: () => {
         sessionStorage.setItem("kanqual:open-project-settings-modal", "ai-assist");
@@ -1163,6 +1989,22 @@ export function AIAssistView() {
   ];
 
   useEffect(() => {
+    if (!isLocalWorkspace) {
+      if (
+        projectAiAssistRuntimeStatus.hostLlmEnabled == null
+        || projectAiAssistRuntimeStatus.hostLlmModelSelected == null
+        || projectAiAssistRuntimeStatus.hostLlmConnectionLive == null
+      ) {
+        setLlmConnectionStatus("checking");
+        return;
+      }
+      if (!projectAiAssistRuntimeStatus.hostLlmEnabled || !projectAiAssistRuntimeStatus.hostLlmModelSelected) {
+        setLlmConnectionStatus("disabled");
+        return;
+      }
+      setLlmConnectionStatus(projectAiAssistRuntimeStatus.hostLlmConnectionLive ? "live" : "offline");
+      return;
+    }
     if (!llmSettings.ollamaEnabled) {
       setLlmConnectionStatus("disabled");
       return;
@@ -1184,50 +2026,15 @@ export function AIAssistView() {
     return () => {
       cancelled = true;
     };
-  }, [llmSettings.ollamaEnabled, llmSettings.ollamaHost, llmSettings.ollamaPort]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-
-    function syncMenuPosition() {
-      const rect = menuButtonRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setMenuPos({
-        top: rect.bottom + 8,
-        left: Math.max(12, rect.right - 180),
-      });
-    }
-
-    function onPointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
-      setMenuOpen(false);
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setMenuOpen(false);
-    }
-
-    syncMenuPosition();
-    window.addEventListener("resize", syncMenuPosition);
-    document.addEventListener("scroll", syncMenuPosition, true);
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      window.removeEventListener("resize", syncMenuPosition);
-      document.removeEventListener("scroll", syncMenuPosition, true);
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [menuOpen]);
-
-  function openAiAssistSettings() {
-    if (!canOpenAiAssistSettings) return;
-    sessionStorage.setItem("kanqual:open-app-settings-modal", "llm");
-    setMenuOpen(false);
-    setView("app-settings");
-  }
+  }, [
+    isLocalWorkspace,
+    llmSettings.ollamaEnabled,
+    llmSettings.ollamaHost,
+    llmSettings.ollamaPort,
+    projectAiAssistRuntimeStatus.hostLlmConnectionLive,
+    projectAiAssistRuntimeStatus.hostLlmEnabled,
+    projectAiAssistRuntimeStatus.hostLlmModelSelected,
+  ]);
 
   if (!activeProject) {
     return (
@@ -1270,39 +2077,7 @@ export function AIAssistView() {
             <img src={helpIcon} alt="" className="users-help-icon" />
           </button>
         </div>
-        <button
-          ref={menuButtonRef}
-          className="btn home-menu-btn"
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          aria-label="AI Assist actions"
-          disabled={!canOpenAiAssistSettings}
-          title={!canOpenAiAssistSettings ? "You do not have permission to change AI Assist settings" : undefined}
-          onClick={() => setMenuOpen((open) => !open)}
-        >
-          <span />
-          <span />
-          <span />
-        </button>
       </header>
-
-      {menuOpen && (
-        <div
-          ref={menuRef}
-          className="context-menu"
-          style={{ top: menuPos.top, left: menuPos.left, minWidth: 180 }}
-          role="menu"
-        >
-          <button
-            className="context-menu-item"
-            type="button"
-            onClick={openAiAssistSettings}
-          >
-            AI Assist Settings
-          </button>
-        </div>
-      )}
 
       {error && <div className="form-error project-settings-error">{error}</div>}
 
@@ -1340,13 +2115,16 @@ export function AIAssistView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>AI Assist Help</h2>
             <p className="users-guide-copy">
-              AI Assist uses your local embedding index to ground chat, coding, attribute identification, and code analysis in project materials already stored in Kanqual.
+              Open AI Assist tools, review which tools are available, jump to chat, coding, process-documents, analyze, or attribute workflows, and inspect host or runtime readiness indicators.
             </p>
             <p className="users-guide-copy">
-              Re-running embeddings refreshes the AI Assist index using the currently downloaded model.
+              Use AI Assist Home as the launch page for AI features. Review which tools are available for your role and current project, then choose the workflow you want to run.
+            </p>
+            <p className="users-guide-copy">
+              Remote users may be using host-executed AI rather than their own local runtime. Availability can change if the project disables AI Assist or if the host runtime is not ready.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
@@ -1373,9 +2151,9 @@ export function AIAssistView() {
 }
 
 export function AIAssistAttributeCaseView() {
-  return <AIAssistAttributeWorkspace kind="case" />;
+  return <AIAssistAttributeLandingView kind="case" />;
 }
 
 export function AIAssistAttributeDocumentView() {
-  return <AIAssistAttributeWorkspace kind="document" />;
+  return <AIAssistAttributeLandingView kind="document" />;
 }

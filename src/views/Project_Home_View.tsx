@@ -132,10 +132,11 @@ export function HomeView() {
     let cancelled = false;
 
     async function load() {
-      const [members, casesRes, reportsRes, annRes] = await Promise.all([
+      const [members, casesRes, reportsRes, analysesRes, annRes] = await Promise.all([
         pb.collection("project_members").getFullList({ filter: `project="${pid}"` }),
         pb.collection("cases").getList(1, 1, { filter: `project="${pid}"&&deleted_at=""` }),
         pb.collection("code_reports").getList(1, 1, { filter: `project="${pid}"&&deleted_at=""` }),
+        pb.collection("ai_analyses").getList(1, 1, { filter: `project="${pid}"&&deleted_at=""` }),
         pb.collection("annotations").getList(1, 1, { filter: `document.project="${pid}"&&deleted_at=""` }),
       ]);
       if (cancelled) return;
@@ -146,7 +147,7 @@ export function HomeView() {
         membersByRole,
         caseCount: casesRes.totalItems,
         annotationCount: annRes.totalItems,
-        reportCount: reportsRes.totalItems,
+        reportCount: reportsRes.totalItems + analysesRes.totalItems,
       });
     }
 
@@ -298,16 +299,6 @@ export function HomeView() {
             type="button"
             onClick={() => {
               setMenuOpen(false);
-              setView("project-settings");
-            }}
-          >
-            Project Settings
-          </button>
-          <button
-            className="context-menu-item"
-            type="button"
-            onClick={() => {
-              setMenuOpen(false);
               if (activeProject) closeProject(activeProject);
               setView("projects");
             }}
@@ -442,13 +433,16 @@ export function HomeView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Project Home Help</h2>
             <p className="users-guide-copy">
-              This page gives you a quick overview of the active project, including key project details and summary counts for the main analysis areas.
+              Review project summary cards, jump to Users, Cases, Documents, Codebook, Memos, and Reports, and open the project menu to edit details, switch projects, or delete the project if permitted.
             </p>
             <p className="users-guide-copy">
-              Use the summary cards to jump directly to Users, Cases, Documents, Codebook, Memos, and Reports. Project owners can also open the menu in the top right to edit project details, change settings, switch projects, or delete the project.
+              Use the Home page as the overview and navigation hub for the active project. Read the project summary, then use the cards or menu to move into the relevant work area.
+            </p>
+            <p className="users-guide-copy">
+              Project-home actions depend on your role. Administrative and destructive options are limited by project permissions.
             </p>
             <div className="form-actions">
               <button

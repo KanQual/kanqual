@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import { readProjectAiAssistSettings } from "../lib/projectAiAssistSettings";
 import { AIAssistedCodingAnnotateView } from "./AIAssist_Code_Annotate_View";
 import helpIcon from "../assets/ic_help_outline_24px.svg";
 
@@ -160,7 +159,8 @@ function CodeDocumentsLanding() {
     try {
       const records = await pb.collection("document_locks").getFullList({
         filter: `(${filterExpr})`,
-        fields: "id,document,user,user_name,expires_at_ms",
+        expand: "document",
+        fields: "id,document,user,user_name,expires_at_ms,expand.document.name",
       });
 
       const now = Date.now();
@@ -178,7 +178,7 @@ function CodeDocumentsLanding() {
           next[record.document] = {
             id: record.id,
             documentId: record.document,
-            documentName: documents.find((doc) => doc.id === record.document)?.name ?? "Document",
+            documentName: String(record.expand?.document?.name ?? "Document"),
             userId: String(record.user ?? ""),
             userName: String(record.user_name ?? "Another user"),
             expiresAtMs,
@@ -413,13 +413,16 @@ function CodeDocumentsLanding() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>AI Assisted Coding Help</h2>
             <p className="users-guide-copy">
-              Open a document in a separate AI-assisted coding workspace.
+              Review the document list, open a document in the AI-assisted coding workspace, inspect lock state, right-click a locked document, and kick a user from a lock if permitted.
             </p>
             <p className="users-guide-copy">
-              Locked documents are currently being annotated by another collaborator. Right-click a locked row to kick a user if needed.
+              Start here when you want AI-assisted coding rather than manual code-text coding. Choose a document and move into the dedicated AI Assist Coding View for that source.
+            </p>
+            <p className="users-guide-copy">
+              Locked documents are being used in another coding workspace. Lock ownership and kick actions are permission-sensitive.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
@@ -488,9 +491,9 @@ function CodeDocumentsLanding() {
 }
 
 export function AIAssistedCodingView() {
-  const { activeDocument, setActiveDocument, canCurrentUser, activeProject } = useStore();
+  const { activeDocument, setActiveDocument, canCurrentUser, activeProject, projectAiAssistSettings } = useStore();
   const canUseAiCodingTools = canCurrentUser("useAiCodingTools");
-  const aiAssistEnabledForProject = activeProject ? readProjectAiAssistSettings(activeProject.id).enabled : false;
+  const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
 
   if (!canUseAiCodingTools) {
     return (

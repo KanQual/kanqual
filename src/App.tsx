@@ -11,7 +11,6 @@ import { CasesView } from "./views/Project_Cases_View";
 import { DocumentsView } from "./views/Project_Documents_View";
 import { CodebookView } from "./views/Project_Codebook_View";
 import { AnnotationsView } from "./views/Project_Annotations_View";
-import { CollaborationView } from "./views/Project_Collaboration_View";
 import { CodeTextView } from "./views/Analysis_Code_View";
 import { AIAssistedCodingView } from "./views/AIAssist_Code_View";
 import { AIAnalyzeView } from "./views/AIAssist_Analyze_View";
@@ -24,8 +23,6 @@ import { AIAssistView } from "./views/AIAssist_Home_View";
 import { AIAssistChatView } from "./views/AIAssist_Chat_View";
 import { UserSettingsView } from "./views/User_Settings_View";
 import { AppSettingsView } from "./views/App_Settings_View";
-import { BlueprintView } from "./views/Blueprint_View";
-import { BlueprintTwoColumnLandingView } from "./views/Blueprint_TwoColumnLanding_View";
 import { ProjectLogView } from "./views/Project_Log_View";
 import { ProjectSettingsView } from "./views/Project_Settings_View";
 import { ReportsUsersView } from "./views/Reports_Users_View";
@@ -405,9 +402,6 @@ function AppShell() {
         <EmbeddingModelDownloadBanner />
 {view === "projects"      && <ProjectsView />}
         {view === "home"          && <HomeView />}
-        {view === "blueprint"     && <BlueprintView />}
-        {view === "blueprint-2-column-landing" && <BlueprintTwoColumnLandingView />}
-        {view === "collaboration" && <CollaborationView />}
         {view === "users"         && <UsersView />}
         {view === "cases"         && <CasesView />}
         {view === "documents"     && <DocumentsView />}

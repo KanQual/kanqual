@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../context/StoreContext";
 import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import { readProjectAiAssistSettings } from "../lib/projectAiAssistSettings";
 import helpIcon from "../assets/ic_help_outline_24px.svg";
 import {
-  createChatId,
-  createMessageId,
+  clearActiveProjectAiChatId,
+  createProjectAiChat,
+  createProjectAiChatMessage,
+  deleteProjectAiChat,
   getLastUserMessage,
+  loadProjectAiChats,
+  migrateLegacyProjectAiChatsToBackend,
   readActiveProjectAiChatId,
-  readProjectAiChats,
   saveActiveProjectAiChatId,
-  saveProjectAiChats,
   shortenChatLabel,
   sortProjectAiChats,
+  touchProjectAiChat,
   type ProjectAiChat,
 } from "../lib/projectAiChats";
 
@@ -32,15 +33,8 @@ type OllamaProjectChatCitation = {
   endOffset?: number | null;
 };
 
-type OllamaProjectChatResponse = {
-  content: string;
-  model: string;
-  baseUrl: string;
-  usedContextItems: number;
-  citations: OllamaProjectChatCitation[];
-};
-
 type ChatContextKind = "document" | "case" | "code" | "annotation" | "memo";
+type ChatContextMode = "prioritize" | "restrict";
 
 type SelectedChatContextState = {
   documentIds: string[];
@@ -76,17 +70,6 @@ type CitationKind =
   | "document"
   | "other";
 
-const CITATION_KIND_ORDER: CitationKind[] = [
-  "code",
-  "annotation",
-  "case",
-  "uncoded-text",
-  "memo",
-  "project-description",
-  "document",
-  "other",
-];
-
 function getCitationKind(citation: OllamaProjectChatCitation): CitationKind {
   if (citation.itemType === "code") return "code";
   if (citation.itemType === "annotation" || citation.annotationId) return "annotation";
@@ -111,16 +94,6 @@ function formatCitationKindLabel(kind: CitationKind): string {
   return "Source";
 }
 
-function sortCitations(citations: OllamaProjectChatCitation[]): OllamaProjectChatCitation[] {
-  return [...citations].sort((left, right) => {
-    const leftKind = getCitationKind(left);
-    const rightKind = getCitationKind(right);
-    const kindDiff = CITATION_KIND_ORDER.indexOf(leftKind) - CITATION_KIND_ORDER.indexOf(rightKind);
-    if (kindDiff !== 0) return kindDiff;
-    return formatCitationTitle(left.title).localeCompare(formatCitationTitle(right.title), undefined, { sensitivity: "base" });
-  });
-}
-
 function toggleString(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
 }
@@ -129,6 +102,45 @@ function annotationPreview(value: string, maxLength = 96): string {
   const clean = value.replace(/\s+/g, " ").trim();
   if (clean.length <= maxLength) return clean;
   return `${clean.slice(0, maxLength - 1)}...`;
+}
+
+function renderChatTextWithCitations(
+  text: string,
+  citations: OllamaProjectChatCitation[],
+  onClick: (citation: OllamaProjectChatCitation) => void,
+): React.ReactNode {
+  const paragraphs = text.split(/\n{2,}/).filter((part) => part.trim().length > 0);
+  return paragraphs.map((paragraph, paragraphIndex) => {
+    const parts: React.ReactNode[] = [];
+    const regex = /\[(\d+)\]/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let keyCounter = 0;
+    while ((match = regex.exec(paragraph)) !== null) {
+      const citationIndex = parseInt(match[1], 10) - 1;
+      const citation = citations[citationIndex];
+      if (!citation) continue;
+      if (match.index > lastIndex) {
+        parts.push(<span key={keyCounter++}>{paragraph.slice(lastIndex, match.index)}</span>);
+      }
+      parts.push(
+        <button
+          key={keyCounter++}
+          type="button"
+          className="ai-analyze-citation-link"
+          onClick={() => onClick(citation)}
+          title={citation.preview}
+        >
+          [{citationIndex + 1}]
+        </button>,
+      );
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < paragraph.length) {
+      parts.push(<span key={keyCounter++}>{paragraph.slice(lastIndex)}</span>);
+    }
+    return <p key={paragraphIndex}>{parts}</p>;
+  });
 }
 
 export function AIAssistChatView() {
@@ -147,9 +159,17 @@ export function AIAssistChatView() {
     setPendingCodeId,
     setPendingMemoId,
     setPendingTextCitation,
+    projectAiAssistSettings,
+    isLocalWorkspace,
+    runProjectChat,
+    pb,
+    userRole,
+    appRole,
+    isAdministrator,
+    logAction,
   } = useStore();
   const canUseAiChat = canCurrentUser("useAiChat");
-  const aiAssistEnabledForProject = activeProject ? readProjectAiAssistSettings(activeProject.id).enabled : false;
+  const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
   const [chats, setChats] = useState<ProjectAiChat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -166,21 +186,81 @@ export function AIAssistChatView() {
     annotationIds: [],
     memoIds: [],
   });
+  const [selectedContextMode, setSelectedContextMode] = useState<ChatContextMode>("prioritize");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; chatId: string } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
+  const currentUserId = pb.authStore.record?.id ?? "";
+  const currentUserIdentifier = pb.authStore.record?.user_identifier || "";
+  const currentUserName = pb.authStore.record?.name || pb.authStore.record?.email || "You";
+  const canSeeAllChats = isAdministrator || userRole === "owner" || userRole === "editor";
 
   useEffect(() => {
+    let cancelled = false;
+    let unsubChats: (() => void) | null = null;
+    let unsubMessages: (() => void) | null = null;
+
+    async function refreshChats() {
+      if (!activeProject || !currentUserId) {
+        if (!cancelled) {
+          setChats([]);
+          setActiveChatId(null);
+        }
+        return;
+      }
+
+      await migrateLegacyProjectAiChatsToBackend(pb, {
+        projectId: activeProject.id,
+        currentUserId,
+        currentUserIdentifier,
+        currentUserName,
+        appRole,
+        projectRole: userRole,
+      });
+
+      const savedChats = await loadProjectAiChats(pb, {
+        projectId: activeProject.id,
+        currentUserId,
+        appRole,
+        projectRole: userRole,
+      });
+      if (cancelled) return;
+      const savedActiveChatId = readActiveProjectAiChatId(activeProject.id);
+      const nextActiveChatId = savedChats.some((chat) => chat.id === savedActiveChatId)
+        ? savedActiveChatId
+        : savedChats[0]?.id ?? null;
+      setChats(savedChats);
+      setActiveChatId(nextActiveChatId);
+      if (nextActiveChatId) saveActiveProjectAiChatId(activeProject.id, nextActiveChatId);
+      else clearActiveProjectAiChatId(activeProject.id);
+    }
+
     if (!activeProject) {
       setChats([]);
       setActiveChatId(null);
       return;
     }
-    const savedChats = sortProjectAiChats(readProjectAiChats(activeProject.id));
-    const savedActiveChatId = readActiveProjectAiChatId(activeProject.id);
-    setChats(savedChats);
-    setActiveChatId(savedChats.some((chat) => chat.id === savedActiveChatId) ? savedActiveChatId : savedChats[0]?.id ?? null);
-  }, [activeProject?.id]);
+
+    void refreshChats();
+
+    void pb.collection("project_ai_chats").subscribe("*", (event) => {
+      if (event.record?.project === activeProject.id) void refreshChats();
+    }).then((unsub) => {
+      unsubChats = unsub;
+    });
+
+    void pb.collection("project_ai_chat_messages").subscribe("*", (event) => {
+      if (event.record?.project === activeProject.id) void refreshChats();
+    }).then((unsub) => {
+      unsubMessages = unsub;
+    });
+
+    return () => {
+      cancelled = true;
+      unsubChats?.();
+      unsubMessages?.();
+    };
+  }, [activeProject?.id, appRole, currentUserId, currentUserIdentifier, currentUserName, pb, userRole]);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -203,6 +283,7 @@ export function AIAssistChatView() {
 
   const sortedChats = useMemo(() => sortProjectAiChats(chats), [chats]);
   const activeChat = sortedChats.find((chat) => chat.id === activeChatId) ?? null;
+  const activeChatReadOnly = !!(activeChat && activeChat.createdById && activeChat.createdById !== currentUserId && canSeeAllChats);
   const documentById = useMemo(() => new Map(documents.map((document) => [document.id, document])), [documents]);
   const caseById = useMemo(() => new Map(cases.map((caseItem) => [caseItem.id, caseItem])), [cases]);
   const codeById = useMemo(() => new Map(codes.map((code) => [code.id, code])), [codes]);
@@ -326,21 +407,16 @@ export function AIAssistChatView() {
     setChats(sorted);
     const resolvedActiveChatId = nextActiveChatId ?? activeChatId ?? sorted[0]?.id ?? null;
     setActiveChatId(resolvedActiveChatId);
-    saveProjectAiChats(activeProject.id, sorted);
     if (resolvedActiveChatId) {
       saveActiveProjectAiChatId(activeProject.id, resolvedActiveChatId);
+    } else {
+      clearActiveProjectAiChatId(activeProject.id);
     }
   }
 
   function handleNewChat() {
-    const now = new Date().toISOString();
-    const nextChat: ProjectAiChat = {
-      id: createChatId(),
-      createdAt: now,
-      updatedAt: now,
-      messages: [],
-    };
-    updateChats([nextChat, ...chats], nextChat.id);
+    setActiveChatId(null);
+    if (activeProject) clearActiveProjectAiChatId(activeProject.id);
     setDraft("");
     setChatError("");
   }
@@ -353,7 +429,13 @@ export function AIAssistChatView() {
     setContextMenu(null);
   }
 
-  function handleDeleteChat(chatId: string) {
+  async function handleDeleteChat(chatId: string) {
+    const targetChat = chats.find((chat) => chat.id === chatId);
+    if (!targetChat || targetChat.createdById !== currentUserId) {
+      setContextMenu(null);
+      return;
+    }
+    await deleteProjectAiChat(pb, chatId);
     const remainingChats = chats.filter((chat) => chat.id !== chatId);
     const nextActiveChatId = activeChatId === chatId ? (remainingChats[0]?.id ?? null) : activeChatId;
     updateChats(remainingChats, nextActiveChatId);
@@ -486,97 +568,139 @@ export function AIAssistChatView() {
 
   async function handleSendMessage() {
     if (!activeProject) return;
-    const llmSettings = readAppSettings().llm;
+    if (!currentUserId) {
+      setChatError("You must be signed in to send project chat messages.");
+      return;
+    }
+    if (activeChatReadOnly) {
+      setChatError("This conversation is read-only for your role. Start your own chat to continue.");
+      return;
+    }
     const messageText = draft.trim();
     if (!messageText) return;
-    if (!llmSettings.ollamaEnabled) {
-      setChatError("Enable Ollama in App Settings before using project chat.");
-      return;
+    if (isLocalWorkspace) {
+      const llmSettings = readAppSettings().llm;
+      if (!llmSettings.ollamaEnabled) {
+        setChatError("Enable Ollama in App Settings before using project chat.");
+        return;
+      }
+      if (!llmSettings.ollamaSelectedModel) {
+        setChatError("Choose an Ollama model in App Settings before using project chat.");
+        return;
+      }
     }
-    if (!llmSettings.ollamaSelectedModel) {
-      setChatError("Choose an Ollama model in App Settings before using project chat.");
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const userMessage = {
-      id: createMessageId(),
-      role: "user" as const,
-      text: messageText,
-      createdAt: now,
-    };
 
     let nextChats = chats;
     let nextChatId = activeChatId;
     let conversationForRequest: Array<{ role: string; content: string }> = [];
-
-    if (!activeChat) {
-      const createdChat: ProjectAiChat = {
-        id: createChatId(),
-        createdAt: now,
-        updatedAt: userMessage.createdAt,
-        messages: [userMessage],
-      };
-      nextChats = [createdChat, ...chats];
-      nextChatId = createdChat.id;
-      conversationForRequest = [];
-    } else {
-      conversationForRequest = activeChat.messages.map((message) => ({
-        role: message.role,
-        content: message.text,
-      }));
-      nextChats = chats.map((chat) => (
-        chat.id === activeChat.id
-          ? {
-              ...chat,
-              updatedAt: userMessage.createdAt,
-              messages: [...chat.messages, userMessage],
-            }
-          : chat
-      ));
-      nextChatId = activeChat.id;
-    }
-
-    updateChats(nextChats, nextChatId);
-    setDraft("");
+    let targetChatTitle = shortenChatLabel(messageText);
+    let createdChatId: string | null = null;
     setSending(true);
     setChatError("");
 
     try {
-      const response = await invoke<OllamaProjectChatResponse>("chat_with_project_ollama", {
-        request: {
+      if (!activeChat) {
+        const createdChat = await createProjectAiChat(pb, {
           projectId: activeProject.id,
-          query: messageText,
-          conversation: conversationForRequest,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
-          prefixQueries: llmSettings.prefixQueries,
-          selectedDocumentIds: selectedContext.documentIds,
-          selectedCaseIds: selectedContext.caseIds,
-          selectedCodeIds: selectedContext.codeIds,
-          selectedAnnotationIds: selectedContext.annotationIds,
-          selectedMemoIds: selectedContext.memoIds,
-        },
+          createdById: currentUserId,
+          createdByIdentifier: currentUserIdentifier,
+          createdByName: currentUserName,
+          initialTitle: targetChatTitle,
+        });
+        createdChatId = createdChat.id;
+        const userMessage = await createProjectAiChatMessage(pb, {
+          chatId: createdChat.id,
+          projectId: activeProject.id,
+          role: "user",
+          text: messageText,
+          createdById: currentUserId,
+          createdByIdentifier: currentUserIdentifier,
+          createdByName: currentUserName,
+        });
+        nextChats = [createdChat, ...chats];
+        nextChats = nextChats.map((chat) => (
+          chat.id === createdChat.id
+            ? { ...chat, updatedAt: userMessage.createdAt, messages: [userMessage] }
+            : chat
+        ));
+        nextChatId = createdChat.id;
+        conversationForRequest = [];
+      } else {
+        targetChatTitle = activeChat.title || targetChatTitle;
+        conversationForRequest = activeChat.messages.map((message) => ({
+          role: message.role,
+          content: message.text,
+        }));
+        const userMessage = await createProjectAiChatMessage(pb, {
+          chatId: activeChat.id,
+          projectId: activeProject.id,
+          role: "user",
+          text: messageText,
+          createdById: currentUserId,
+          createdByIdentifier: currentUserIdentifier,
+          createdByName: currentUserName,
+        });
+        await touchProjectAiChat(pb, {
+          chatId: activeChat.id,
+          lastMessageAt: userMessage.createdAt,
+        });
+        nextChats = chats.map((chat) => (
+          chat.id === activeChat.id
+            ? {
+                ...chat,
+                updatedAt: userMessage.createdAt,
+                messages: [...chat.messages, userMessage],
+              }
+            : chat
+        ));
+        nextChatId = activeChat.id;
+      }
+
+      updateChats(nextChats, nextChatId);
+      await logAction(
+        activeProject.id,
+        "project.ai_chat.message",
+        `Sent AI chat message in "${targetChatTitle}"`,
+        nextChatId ?? createdChatId ?? undefined,
+      );
+      setDraft("");
+
+      const response = await runProjectChat({
+        projectId: activeProject.id,
+        query: messageText,
+        conversation: conversationForRequest,
+        selectedContextMode,
+        selectedDocumentIds: selectedContext.documentIds,
+        selectedCaseIds: selectedContext.caseIds,
+        selectedCodeIds: selectedContext.codeIds,
+        selectedAnnotationIds: selectedContext.annotationIds,
+        selectedMemoIds: selectedContext.memoIds,
+      }, (progressMessage) => {
+        setChatError(progressMessage);
       });
 
-      const assistantMessage = {
-        id: createMessageId(),
-        role: "assistant" as const,
+      const assistantMessage = await createProjectAiChatMessage(pb, {
+        chatId: nextChatId!,
+        projectId: activeProject.id,
+        role: "assistant",
         text: response.content,
-        createdAt: new Date().toISOString(),
         metadata: {
           model: response.model,
           usedContextItems: response.usedContextItems,
           source: "ollama",
           citations: response.citations,
         },
-      };
+      });
+      await touchProjectAiChat(pb, {
+        chatId: nextChatId!,
+        lastMessageAt: assistantMessage.createdAt,
+      });
+      await logAction(
+        activeProject.id,
+        "project.ai_chat.response",
+        `Received AI chat response in "${targetChatTitle}"`,
+        nextChatId ?? createdChatId ?? undefined,
+      );
 
       const refreshedChats = nextChats.map((chat) => (
         chat.id === nextChatId
@@ -588,6 +712,7 @@ export function AIAssistChatView() {
           : chat
       ));
       updateChats(refreshedChats, nextChatId);
+      setChatError("");
     } catch (error) {
       console.error("Project chat with Ollama failed:", error);
       setChatError(error instanceof Error ? error.message : "Could not get a response from Ollama.");
@@ -654,13 +779,16 @@ export function AIAssistChatView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>AI Assist Chat Help</h2>
             <p className="users-guide-copy">
-              Use chat to ask grounded questions about the current project using your local AI Assist index.
+              Create a chat, send a prompt, switch between chats, add context to a chat, review citations in responses, delete your own chats, and supervise other users' chats when your role allows it.
             </p>
             <p className="users-guide-copy">
-              Citations in responses let you jump back to the supporting project material, including documents, coded text, annotations, and memos.
+              Use chat to ask grounded questions about the current project. Choose or create a chat, send a prompt, and inspect cited responses that point back to project evidence.
+            </p>
+            <p className="users-guide-copy">
+              Owners, editors, and administrators can view all project chats; coders and viewers only see their own. Supervisors can view but should not reply inside another user's private thread. Chat activity is logged in the project log.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
@@ -689,6 +817,7 @@ export function AIAssistChatView() {
             ) : (
               sortedChats.map((chat) => {
                 const lastUserMessage = getLastUserMessage(chat);
+                const isReadOnlyThread = chat.createdById !== currentUserId && canSeeAllChats;
                 return (
                   <button
                     key={chat.id}
@@ -701,6 +830,7 @@ export function AIAssistChatView() {
                     }}
                   >
                     <strong>{shortenChatLabel(lastUserMessage?.text ?? "Untitled chat")}</strong>
+                    {isReadOnlyThread && <small>{chat.createdByName || "Project member"}'s chat</small>}
                     <span>{formatChatTimestamp(lastUserMessage?.createdAt ?? chat.updatedAt)}</span>
                   </button>
                 );
@@ -718,7 +848,8 @@ export function AIAssistChatView() {
             <button
               type="button"
               className="context-menu-item context-menu-item--danger"
-              onClick={() => handleDeleteChat(contextMenu.chatId)}
+              onClick={() => void handleDeleteChat(contextMenu.chatId)}
+              disabled={chats.find((chat) => chat.id === contextMenu.chatId)?.createdById !== currentUserId}
             >
               Delete Chat
             </button>
@@ -728,12 +859,15 @@ export function AIAssistChatView() {
         <div className="ai-chat-col-divider" aria-hidden="true" />
 
         <section className="ai-chat-main-panel">
-          <div className="ai-chat-thread-header">
-            <div>
-              <h2>{activeChat ? shortenChatLabel(getLastUserMessage(activeChat)?.text ?? "Untitled chat") : "New chat"}</h2>
-              <p>{activeChat ? `${activeChat.messages.length} messages in this conversation` : "Start a project chat on the right."}</p>
+            <div className="ai-chat-thread-header">
+              <div>
+                <h2>{activeChat ? shortenChatLabel(getLastUserMessage(activeChat)?.text ?? "Untitled chat") : "New chat"}</h2>
+                <p>{activeChat ? `${activeChat.messages.length} messages in this conversation` : "Start a project chat on the right."}</p>
+                {activeChatReadOnly && (
+                  <p>This conversation belongs to {activeChat?.createdByName || "another project member"} and is view-only for your role.</p>
+                )}
+              </div>
             </div>
-          </div>
 
           {chatError && <div className="form-error project-settings-error">{chatError}</div>}
 
@@ -749,10 +883,18 @@ export function AIAssistChatView() {
                   className={`ai-chat-message ${message.role === "assistant" ? "ai-chat-message--assistant" : "ai-chat-message--user"}`}
                 >
                   <div className="ai-chat-message-meta">
-                    <strong>{message.role === "assistant" ? "AI Assist" : "You"}</strong>
+                    <strong>
+                      {message.role === "assistant"
+                        ? "AI Assist"
+                        : message.createdById === currentUserId
+                          ? "You"
+                          : (message.createdByName || "Project member")}
+                    </strong>
                     <span>{formatChatTimestamp(message.createdAt)}</span>
                   </div>
-                  <p>{message.text}</p>
+                  {message.role === "assistant" && (message.metadata?.citations?.length ?? 0) > 0
+                    ? renderChatTextWithCitations(message.text, message.metadata?.citations ?? [], handleOpenCitation)
+                    : <p>{message.text}</p>}
                   {message.role === "assistant" && message.metadata && (
                     <div className="ai-chat-message-footnote">
                       {message.metadata.source === "ollama" && <span>Answered with Ollama</span>}
@@ -763,10 +905,13 @@ export function AIAssistChatView() {
                     </div>
                   )}
                   {message.role === "assistant" && (message.metadata?.citations?.length ?? 0) > 0 && (
-                    <div className="ai-chat-citations">
-                      <strong>Citations</strong>
+                    <details className="ai-chat-citations ai-chat-citations--collapsible">
+                      <summary className="ai-chat-citations-toggle">
+                        <strong>Citations</strong>
+                        <span>{message.metadata?.citations?.length ?? 0}</span>
+                      </summary>
                       <div className="ai-chat-citation-list">
-                        {sortCitations(message.metadata?.citations ?? []).map((citation) => {
+                        {(message.metadata?.citations ?? []).map((citation, index) => {
                           const kind = getCitationKind(citation);
                           return (
                             <button
@@ -776,6 +921,7 @@ export function AIAssistChatView() {
                               onClick={() => handleOpenCitation(citation)}
                               title={citation.preview}
                             >
+                              <span className="ai-chat-citation-number">[{index + 1}]</span>
                               <span className={`ai-chat-citation-kind ai-chat-citation-kind--${kind}`}>
                                 {formatCitationKindLabel(kind)}
                               </span>
@@ -787,7 +933,7 @@ export function AIAssistChatView() {
                           );
                         })}
                       </div>
-                    </div>
+                    </details>
                   )}
                 </div>
               ))
@@ -812,12 +958,20 @@ export function AIAssistChatView() {
                   <button
                     type="button"
                     className="btn"
-                    onClick={() => setSelectedContext({ documentIds: [], caseIds: [], codeIds: [], annotationIds: [], memoIds: [] })}
+                    onClick={() => {
+                      setSelectedContext({ documentIds: [], caseIds: [], codeIds: [], annotationIds: [], memoIds: [] });
+                      setSelectedContextMode("prioritize");
+                    }}
                   >
                     Clear Context
                   </button>
                 )}
               </div>
+              {selectedContextChips.length > 0 && (
+                <p className="backup-field-hint" style={{ margin: "4px 0 8px" }}>
+                  Context mode: {selectedContextMode === "restrict" ? "Restrict to selected context" : "Prioritize selected context"}
+                </p>
+              )}
               {selectedContextChips.length > 0 && (
                 <div className="ai-chat-context-chips">
                   {selectedContextChips.map((chip) => (
@@ -845,13 +999,14 @@ export function AIAssistChatView() {
                     void handleSendMessage();
                   }
                 }}
-                placeholder="Ask a question about this project..."
                 rows={5}
                 disabled={sending}
+                readOnly={activeChatReadOnly}
+                placeholder={activeChatReadOnly ? "This conversation is view-only for your role." : "Ask a question about this project..."}
               />
             </label>
             <div className="form-actions">
-              <button type="button" className="btn btn--primary" onClick={() => void handleSendMessage()} disabled={!draft.trim() || sending}>
+              <button type="button" className="btn btn--primary" onClick={() => void handleSendMessage()} disabled={!draft.trim() || sending || activeChatReadOnly}>
                 {sending ? "Waiting for Ollama..." : "Send Message"}
               </button>
             </div>
@@ -864,8 +1019,32 @@ export function AIAssistChatView() {
           <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
             <h2>Add Context</h2>
             <p className="users-guide-copy">
-              Selected cases, documents, codes, annotations, and memos will be prioritized when AI Assist retrieves context for your next messages.
+              Select cases, documents, codes, annotations, or memos for your next messages, then choose whether AI Assist should prioritize them or restrict retrieval to them.
             </p>
+            <div className="form-label" style={{ marginBottom: 16 }}>
+              <span style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>Context Mode</span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`btn${selectedContextMode === "prioritize" ? " btn--primary" : ""}`}
+                  onClick={() => setSelectedContextMode("prioritize")}
+                >
+                  Prioritize
+                </button>
+                <button
+                  type="button"
+                  className={`btn${selectedContextMode === "restrict" ? " btn--primary" : ""}`}
+                  onClick={() => setSelectedContextMode("restrict")}
+                >
+                  Restrict
+                </button>
+              </div>
+              <p className="users-guide-copy" style={{ marginTop: 8, marginBottom: 0 }}>
+                {selectedContextMode === "restrict"
+                  ? "Only the selected context will be retrieved and cited."
+                  : "Selected context will be preferred, but AI Assist may still use other project context if it is more relevant."}
+              </p>
+            </div>
             <div className="ai-chat-context-modal-tabs" role="tablist" aria-label="Context item types">
               {([
                 ["document", `Documents (${documents.length})`],

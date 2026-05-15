@@ -4,7 +4,7 @@
   "version": "0.9.0",
   "identifier": "com.kanqual.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/dev-with-cleanup.mjs",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "create": false,
         "label": "main",
         "title": "Kanqual",
         "width": 1280,
@@ -21,6 +22,7 @@
         "visible": false
       },
       {
+        "create": false,
         "label": "splashscreen",
         "url": "splashscreen.html",
         "width": 420,

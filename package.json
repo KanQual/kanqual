@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "prepare:pb-sidecar": "node scripts/prepare-pocketbase-sidecar.mjs",
     "validate:roles": "node scripts/validate-role-matrix.mjs"
   },
   "dependencies": {

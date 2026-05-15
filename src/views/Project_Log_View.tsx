@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useStore } from "../context/StoreContext";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 import type { ProjectLogEntry } from "../types";
 
 export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
@@ -15,7 +17,10 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "project.backup.create": "Project backup created",
   "project.backup.settings": "Project backup settings updated",
   "project.backup.delete": "Project backup deleted",
+  "project.network_mode.update": "Network mode updated",
   "project.ai_assist.update": "Project AI Assist updated",
+  "project.ai_chat.message": "AI chat message sent",
+  "project.ai_chat.response": "AI chat response received",
   "project.ai_assist.embeddings.delete": "Project AI Assist embeddings deleted",
   "codebook.export":     "Codebook exported",
   "codebook.import":     "Codebook imported",
@@ -139,18 +144,45 @@ export function ProjectLogTable() {
 }
 
 export function ProjectLogView() {
-  const { activeProject } = useStore();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   return (
     <div className="view project-log-view">
       <header className="view-header">
-        <h1>Project Log</h1>
-        {activeProject && (
-          <span className="view-header-sub">{activeProject.name}</span>
-        )}
+        <div>
+          <div className="view-title-with-help">
+            <h1>Project Log</h1>
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open project log help">
+              <img src={helpIcon} alt="" className="users-help-icon" />
+            </button>
+          </div>
+        </div>
       </header>
 
       <ProjectLogTable />
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
+            <h2>Project Log Help</h2>
+            <div className="app-settings-modal-body">
+                <p className="settings-section-desc">
+                  Review activity history, inspect who acted, when, and from local or remote access, read descriptive labels, and export the log from Project Settings if needed.
+                </p>
+                <ul className="settings-help-list">
+                  <li>Use the Project Log to audit important project events by time, user, access mode, and action category.</li>
+                  <li>The log records many project, backup, import, restore, AI, and management events, but not every UI click.</li>
+                  <li>The project-log export feature, access-mode recording, and shared project activity logging all affect what you see here.</li>
+                </ul>
+              <div className="form-actions">
+                <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

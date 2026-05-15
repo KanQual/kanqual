@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import localDeviceIcon from "../assets/computer-line.svg";
 import networkDeviceIcon from "../assets/network--2.svg";
 import startupLogo from "../assets/logo-outline.png";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 import {
   getLocalAccounts,
   getRemoteSessions,
@@ -35,38 +36,48 @@ function initials(name: string): string {
 }
 
 export function AuthView() {
-  const { login, register, error, status, serverUrl, setServerUrl, pb } = useAuth();
+  const { login, register, error, status, serverUrl, useLocalServer, useRemoteServer, testRemoteServer, returnToModeSelection, pb } = useAuth();
   const [panel, setPanel] = useState<Panel>("mode");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tempUrl, setTempUrl] = useState(serverUrl);
   const [submitting, setSubmitting] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [serverNotice, setServerNotice] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [localUserCount, setLocalUserCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getRegisteredUserCount()
-      .then((count) => {
-        if (!cancelled) {
-          setLocalUserCount(count);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLocalUserCount(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const isFirstLocalUser = localUserCount === 0;
   const isLocal = serverUrl === LOCAL_PB_URL;
   const showRegisterOnly = isLocal && isFirstLocalUser;
   const authMode: "login" | "register" = showRegisterOnly ? "register" : panel === "register" ? "register" : "login";
+
+  const helpModal = helpOpen ? (
+    <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+      <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
+        <h2>Sign In Help</h2>
+        <div className="app-settings-modal-body">
+          <p className="settings-section-desc">
+            KanQual starts by asking whether you want to work locally on this device or connect to a project hosted by someone else.
+          </p>
+          <ul className="settings-help-list">
+            <li>Work on your own device to start a local KanQual workspace on this machine.</li>
+            <li>Join a project on another device to connect to a host's shared KanQual server on your network.</li>
+            <li>Recent local accounts and remote connections are remembered on this device to make future sign-in faster.</li>
+            <li>The first local account created on a device becomes that device's KanQual administrator.</li>
+            <li>Returning to the mode chooser closes the current local workspace before switching modes.</li>
+          </ul>
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -91,17 +102,61 @@ export function AuthView() {
 
   function handleServerSave(e: React.FormEvent) {
     e.preventDefault();
-    setServerUrl(tempUrl.trim());
-    setPanel("login");
+    setLocalError(null);
+    setServerNotice(null);
+    setSubmitting(true);
+    void useRemoteServer(tempUrl.trim())
+      .then(() => {
+        setPanel("login");
+      })
+      .catch((serverError) => {
+        setLocalError(serverError instanceof Error ? serverError.message : "Could not connect to that server.");
+      })
+      .finally(() => {
+        setSubmitting(false);
+      });
+  }
+
+  function handleServerTest() {
+    setLocalError(null);
+    setServerNotice(null);
+    setTestingConnection(true);
+    void testRemoteServer(tempUrl.trim())
+      .then((normalizedUrl) => {
+        setServerNotice(`Reached ${normalizedUrl}. You can try connecting now.`);
+      })
+      .catch((serverError) => {
+        setLocalError(serverError instanceof Error ? serverError.message : "Could not reach that server.");
+      })
+      .finally(() => {
+        setTestingConnection(false);
+      });
+  }
+
+  async function handleReturnToMode() {
+    setLocalError(null);
+    setSubmitting(true);
+    try {
+      await returnToModeSelection();
+      setPanel("mode");
+      setTempUrl("");
+      setEmail("");
+      setPassword("");
+    } catch (modeError) {
+      setLocalError(modeError instanceof Error ? modeError.message : "Could not close the current workspace.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (status === "loading") {
     return (
       <div className="auth-screen">
-        <div className="auth-card">
+        <div className="auth-card auth-card--startup">
           <img src={startupLogo} alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
           <p className="auth-starting">Starting up...</p>
+          {helpModal}
         </div>
       </div>
     );
@@ -114,21 +169,32 @@ export function AuthView() {
           <div className="auth-mode-header">
             <img src="/logo.png" alt="KanQual" className="auth-logo auth-logo--mode" />
             <div className="auth-brand auth-brand--mode">KanQual</div>
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+              <img src={helpIcon} alt="" className="users-help-icon" />
+            </button>
           </div>
           <div className="mode-options">
             <button
               className="mode-option"
               onClick={async () => {
-                const count = localUserCount ?? await getRegisteredUserCount().catch(() => null);
-                if (count === 0) {
-                  setEmail("");
-                  setPassword("");
-                  setName("");
-                  setPanel("register");
-                  return;
+                try {
+                  setLocalError(null);
+                  setServerNotice(null);
+                  await useLocalServer();
+                  const count = await getRegisteredUserCount().catch(() => null);
+                  setLocalUserCount(count);
+                  if (count === 0) {
+                    setEmail("");
+                    setPassword("");
+                    setName("");
+                    setPanel("register");
+                    return;
+                  }
+                  const accounts = getLocalAccounts();
+                  setPanel(accounts.length > 0 ? "local-accounts" : "login");
+                } catch (modeError) {
+                  setLocalError(modeError instanceof Error ? modeError.message : "Could not start local workspace.");
                 }
-                const accounts = getLocalAccounts();
-                setPanel(accounts.length > 0 ? "local-accounts" : "login");
               }}
             >
               <img src={localDeviceIcon} alt="" className="mode-option-icon" aria-hidden="true" />
@@ -140,11 +206,13 @@ export function AuthView() {
             <button
               className="mode-option"
               onClick={() => {
+                setLocalError(null);
+                setServerNotice(null);
                 const sessions = getRemoteSessions();
                 if (sessions.length > 0) {
                   setPanel("remote-sessions");
                 } else {
-                  setTempUrl(serverUrl);
+                  setTempUrl(serverUrl === LOCAL_PB_URL ? "" : serverUrl);
                   setPanel("server");
                 }
               }}
@@ -156,7 +224,9 @@ export function AuthView() {
               </span>
             </button>
           </div>
+          {localError && <p className="auth-error">{localError}</p>}
         </div>
+        {helpModal}
       </div>
     );
   }
@@ -168,6 +238,11 @@ export function AuthView() {
         <div className="auth-card">
           <img src="/logo.png" alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
+          <div className="auth-help-row">
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+              <img src={helpIcon} alt="" className="users-help-icon" />
+            </button>
+          </div>
           <h2 className="auth-panel-title">Choose an account</h2>
           <ul className="account-list">
             {accounts.map((account) => (
@@ -200,11 +275,12 @@ export function AuthView() {
             >
               + Use a different account
             </button>
-            <button className="btn btn--sm" onClick={() => setPanel("mode")}>
+            <button className="btn btn--sm" onClick={() => void handleReturnToMode()} disabled={submitting}>
               &larr; Back
             </button>
           </div>
         </div>
+        {helpModal}
       </div>
     );
   }
@@ -216,17 +292,36 @@ export function AuthView() {
         <div className="auth-card">
           <img src="/logo.png" alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
+          <div className="auth-help-row">
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+              <img src={helpIcon} alt="" className="users-help-icon" />
+            </button>
+          </div>
           <h2 className="auth-panel-title">Recent connections</h2>
           <ul className="account-list">
             {sessions.map((session) => (
               <li
                 key={`${session.serverUrl}:${session.email}`}
                 className="account-item"
-                onClick={() => {
-                  setServerUrl(session.serverUrl);
-                  setEmail(session.email);
-                  setPassword("");
-                  setPanel("login");
+                onClick={async () => {
+                  try {
+                    setLocalError(null);
+                    setServerNotice(null);
+                    await useRemoteServer(session.serverUrl);
+                    setEmail(session.email);
+                    setPassword("");
+                    setPanel("login");
+                  } catch (sessionError) {
+                    setTempUrl(session.serverUrl);
+                    setEmail(session.email);
+                    setPassword("");
+                    setLocalError(
+                      sessionError instanceof Error
+                        ? `${sessionError.message} Review or test the saved address below.`
+                        : "Could not reach that saved server. Review or test the saved address below.",
+                    );
+                    setPanel("server");
+                  }
                 }}
               >
                 <div className="account-avatar">{initials(session.name)}</div>
@@ -243,17 +338,18 @@ export function AuthView() {
             <button
               className="btn btn--sm"
               onClick={() => {
-                setTempUrl(serverUrl);
+                setTempUrl(serverUrl === LOCAL_PB_URL ? "" : serverUrl);
                 setPanel("server");
               }}
             >
               + Connect to a new server
             </button>
-            <button className="btn btn--sm" onClick={() => setPanel("mode")}>
+            <button className="btn btn--sm" onClick={() => void handleReturnToMode()} disabled={submitting}>
               &larr; Back
             </button>
           </div>
         </div>
+        {helpModal}
       </div>
     );
   }
@@ -264,12 +360,20 @@ export function AuthView() {
         <div className="auth-card">
           <img src="/logo.png" alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
+          <div className="auth-help-row">
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+              <img src={helpIcon} alt="" className="users-help-icon" />
+            </button>
+          </div>
           <p className="auth-tagline">Text annotation for qualitative research</p>
           <form onSubmit={handleServerSave} className="form">
             <h2 className="auth-panel-title">Join a project on another device</h2>
             <p className="auth-hint">
               Ask the project host for their IP address and port, then sign in
               with your account on their server.
+            </p>
+            <p className="auth-hint">
+              If this fails, ask the host to open Kanqual and switch to network sharing mode.
             </p>
             <label className="form-label">
               Host IP address
@@ -287,15 +391,25 @@ export function AuthView() {
                 className="btn"
                 onClick={() => {
                   const sessions = getRemoteSessions();
-                  setPanel(sessions.length > 0 ? "remote-sessions" : "mode");
+                  if (sessions.length > 0) {
+                    setPanel("remote-sessions");
+                  } else {
+                    void handleReturnToMode();
+                  }
                 }}
               >
                 Back
               </button>
+              <button type="button" className="btn" onClick={handleServerTest} disabled={testingConnection || submitting}>
+                {testingConnection ? "Testing..." : "Test Connection"}
+              </button>
               <button type="submit" className="btn btn--primary">Connect</button>
             </div>
+            {serverNotice && <p className="settings-success">{serverNotice}</p>}
+            {localError && <p className="auth-error">{localError}</p>}
           </form>
         </div>
+        {helpModal}
       </div>
     );
   }
@@ -304,6 +418,11 @@ export function AuthView() {
     <div className="auth-screen">
       <div className="auth-card">
         <div className="auth-brand">Kanqual</div>
+        <div className="auth-help-row">
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
+        </div>
         <p className="auth-tagline">Text annotation for qualitative research</p>
 
         <form onSubmit={handleSubmit} className="form">
@@ -393,10 +512,18 @@ export function AuthView() {
             onClick={() => {
               if (isLocal) {
                 const accounts = getLocalAccounts();
-                setPanel(accounts.length > 0 ? "local-accounts" : "mode");
+                if (accounts.length > 0) {
+                  setPanel("local-accounts");
+                } else {
+                  void handleReturnToMode();
+                }
               } else {
                 const sessions = getRemoteSessions();
-                setPanel(sessions.length > 0 ? "remote-sessions" : "server");
+                if (sessions.length > 0) {
+                  setPanel("remote-sessions");
+                } else {
+                  void handleReturnToMode();
+                }
               }
             }}
           >
@@ -408,6 +535,7 @@ export function AuthView() {
           </p>
         </form>
       </div>
+      {helpModal}
     </div>
   );
 }

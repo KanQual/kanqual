@@ -10,6 +10,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use rand::RngCore;
 use tauri::Emitter;
 use tauri::Manager;
+use tauri::webview::WebviewWindowBuilder;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandChild;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,8 @@ use zeroize::Zeroizing;
 const PB_URL: &str = "http://127.0.0.1:8090";
 const BACKEND_IDENTITY_FILE: &str = "backend_identity.json";
 const APP_METADATA_COLLECTION: &str = "app_metadata";
+const BACKEND_IDENTIFIER_KEY: &str = "backend_identifier";
+const USERS_TABLE_IDENTIFIER_KEY: &str = "users_table_identifier";
 const PORTABLE_MODE_MARKER_FILE: &str = "portable-mode.json";
 const PORTABLE_DATA_DIR_NAME: &str = "data";
 const EMBEDDING_MODEL_REPO_ID: &str = "intfloat/multilingual-e5-large";
@@ -43,6 +46,8 @@ const ENCRYPTED_BACKUP_ARGON2_ITERATIONS: u32 = 3;
 const ENCRYPTED_BACKUP_ARGON2_PARALLELISM: u32 = 1;
 const ENCRYPTED_BACKUP_SALT_BYTES: usize = 16;
 const ENCRYPTED_BACKUP_NONCE_BYTES: usize = 12;
+const AUTH_RULE: &str = "@request.auth.id != ''";
+const LARGE_REPORT_SNAPSHOT_MAX: u64 = 2_000_000;
 
 /// Tracks the running PocketBase server process so it can be killed/restarted.
 struct PbProcess(Mutex<Option<CommandChild>>);
@@ -51,6 +56,7 @@ struct PbProcess(Mutex<Option<CommandChild>>);
 struct NetworkMode(Mutex<String>);
 
 struct ProjectEmbeddingBuildState(Mutex<ProjectEmbeddingBuildStatusState>);
+struct CancelledAttributeSuggestionRuns(Mutex<HashSet<String>>);
 
 /// Poll TCP port 8090 until PocketBase accepts connections or the deadline passes.
 async fn wait_for_pb_port(timeout: Duration) {
@@ -67,6 +73,29 @@ async fn wait_for_pb_port(timeout: Duration) {
     }
 }
 
+fn expected_pocketbase_sidecar_names() -> Vec<&'static str> {
+    if cfg!(target_os = "windows") {
+        vec!["pocketbase-x86_64-pc-windows-msvc.exe"]
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        vec!["pocketbase-aarch64-apple-darwin"]
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        vec!["pocketbase-x86_64-apple-darwin"]
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        vec!["pocketbase-x86_64-unknown-linux-gnu"]
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        vec!["pocketbase-aarch64-unknown-linux-gnu"]
+    } else {
+        vec!["pocketbase-<target-triple>"]
+    }
+}
+
+fn pocketbase_sidecar_error(err: impl std::fmt::Display) -> String {
+    let expected = expected_pocketbase_sidecar_names().join(", ");
+    format!(
+        "PocketBase sidecar is unavailable: {err}. Expected one of [{expected}] under src-tauri/binaries/local when packaging this platform."
+    )
+}
+
 /// Spawn a PocketBase serve process with the given bind address.
 /// Returns the child handle on success.
 fn spawn_pb_serve(app: &tauri::AppHandle, bind: &str, pb_dir_arg: &str, pb_migrations_arg: &str) -> Result<CommandChild, String> {
@@ -74,7 +103,7 @@ fn spawn_pb_serve(app: &tauri::AppHandle, bind: &str, pb_dir_arg: &str, pb_migra
     let (_, child) = app
         .shell()
         .sidecar("pocketbase")
-        .map_err(|e| e.to_string())?
+        .map_err(pocketbase_sidecar_error)?
         .args(["serve", &http_arg, pb_dir_arg, pb_migrations_arg])
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -86,6 +115,60 @@ fn kill_pocketbase_process(pb_process: &PbProcess) {
     if let Some(child) = guard.take() {
         let _ = child.kill();
     }
+}
+
+async fn start_local_pocketbase_runtime(
+    app: &tauri::AppHandle,
+    pb_process: &PbProcess,
+    network_mode: &NetworkMode,
+) -> Result<(), String> {
+    {
+        let guard = pb_process.0.lock().unwrap();
+        if guard.is_some() {
+            let mut mode_guard = network_mode.0.lock().unwrap();
+            *mode_guard = "local".to_string();
+            return Ok(());
+        }
+    }
+
+    let app_data_dir = kanqual_data_dir(app)?;
+    fs::create_dir_all(&app_data_dir).ok();
+    let pb_data_dir = app_data_dir.join("pb_data");
+    let pb_dir_arg = format!("--dir={}", pb_data_dir.to_string_lossy());
+    let pb_migrations_dir = pb_data_dir.join("pb_app_migrations");
+    fs::create_dir_all(&pb_migrations_dir).ok();
+    let pb_migrations_arg = format!("--migrationsDir={}", pb_migrations_dir.to_string_lossy());
+
+    let backend_identity = load_or_create_backend_identity(app)?;
+    let upsert = app
+        .shell()
+        .sidecar("pocketbase")
+        .map_err(pocketbase_sidecar_error)?
+        .args([
+            "superuser",
+            "upsert",
+            &backend_identity.superuser_email,
+            &backend_identity.superuser_password,
+            &pb_dir_arg,
+            &pb_migrations_arg,
+        ])
+        .output();
+    if tokio::time::timeout(Duration::from_secs(10), upsert).await.is_err() {
+        eprintln!("[kanqual] pocketbase superuser upsert timed out after 10 s");
+    }
+
+    let child = spawn_pb_serve(app, "127.0.0.1:8090", &pb_dir_arg, &pb_migrations_arg)?;
+    {
+        let mut guard = pb_process.0.lock().unwrap();
+        *guard = Some(child);
+    }
+
+    wait_for_pb_port(Duration::from_secs(30)).await;
+    {
+        let mut mode_guard = network_mode.0.lock().unwrap();
+        *mode_guard = "local".to_string();
+    }
+    Ok(())
 }
 
 fn kanqual_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -114,6 +197,31 @@ fn portable_data_dir() -> Result<Option<PathBuf>, String> {
 
 fn is_portable_mode() -> Result<bool, String> {
     Ok(portable_data_dir()?.is_some())
+}
+
+fn webview_data_dir(app: &tauri::AppHandle, label: &str) -> Result<PathBuf, String> {
+    Ok(kanqual_data_dir(app)?.join("webview").join(label))
+}
+
+fn create_configured_window(app: &mut tauri::App, label: &str) -> Result<(), String> {
+    let window_config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == label)
+        .ok_or_else(|| format!("Could not find window config for label `{label}`."))?;
+
+    let data_dir = webview_data_dir(&app.app_handle(), label)?;
+    fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+
+    WebviewWindowBuilder::from_config(app.handle(), window_config)
+        .map_err(|e| e.to_string())?
+        .data_directory(data_dir)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 fn current_time_ms() -> u64 {
@@ -193,13 +301,6 @@ struct BackendIdentity {
     created_at_ms: u64,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InternalBackendAuth {
-    superuser_email: String,
-    superuser_password: String,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateUserAccountCommandRequest {
@@ -231,6 +332,20 @@ struct EnsureImportedUserAccountCommandRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct AuthenticatedCreateUserAccountCommandRequest {
+    auth_token: String,
+    request: CreateUserAccountCommandRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthenticatedEnsureImportedUserAccountCommandRequest {
+    auth_token: String,
+    request: EnsureImportedUserAccountCommandRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateUserAccountRequest {
     user_id: String,
     name: Option<String>,
@@ -238,8 +353,23 @@ struct UpdateUserAccountRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthenticatedUpdateUserAccountRequest {
+    auth_token: String,
+    request: UpdateUserAccountRequest,
+}
+
+#[derive(Deserialize)]
 struct PocketBaseAdminAuthResponse {
     token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PocketBaseAuthRefreshResponse {
+    #[allow(dead_code)]
+    token: String,
+    record: Value,
 }
 
 #[derive(Serialize)]
@@ -544,6 +674,8 @@ struct OllamaProjectChatRequest {
     num_ctx: u32,
     keep_alive_minutes: u32,
     prefix_queries: bool,
+    #[serde(default = "default_chat_context_mode")]
+    selected_context_mode: String,
     #[serde(default)]
     selected_document_ids: Vec<String>,
     #[serde(default)]
@@ -554,6 +686,10 @@ struct OllamaProjectChatRequest {
     selected_annotation_ids: Vec<String>,
     #[serde(default)]
     selected_memo_ids: Vec<String>,
+}
+
+fn default_chat_context_mode() -> String {
+    "prioritize".to_string()
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -573,7 +709,7 @@ struct OllamaProjectChatResponse {
     citations: Vec<OllamaProjectChatCitation>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OllamaProjectChatCitation {
     id: String,
@@ -706,17 +842,24 @@ struct OllamaCodeSummaryResponse {
     base_url: String,
 }
 
-#[derive(Deserialize)]
-struct OllamaMostTypicalAnnotationModelResponse {
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OllamaMostTypicalAnnotationModelItem {
+    #[serde(alias = "annotationIndex", alias = "annotation_index", alias = "index", alias = "annotation")]
     annotation_index: u64,
     reasoning: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OllamaMostTypicalAnnotationModelResponse {
+    #[serde(alias = "annotations", alias = "items", alias = "results", alias = "typical_annotations", alias = "typicalAnnotations")]
+    annotations: Vec<OllamaMostTypicalAnnotationModelItem>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OllamaMostTypicalAnnotationResponse {
-    annotation_index: u64,
-    reasoning: String,
+    annotations: Vec<OllamaMostTypicalAnnotationModelItem>,
     model: String,
     base_url: String,
 }
@@ -807,12 +950,14 @@ struct OllamaCodePositionRequest {
 
 #[derive(Deserialize)]
 struct OllamaUniqueAnnotationModelItem {
+    #[serde(alias = "annotationIndex", alias = "annotation_index")]
     index: u64,
     reasoning: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct OllamaUniqueAnnotationsModelResponse {
+    #[serde(alias = "items", alias = "results", alias = "unique_annotations", alias = "uniqueAnnotations")]
     annotations: Vec<OllamaUniqueAnnotationModelItem>,
 }
 
@@ -1031,15 +1176,6 @@ fn get_pb_url() -> String {
 }
 
 #[tauri::command]
-fn get_internal_backend_auth(app: tauri::AppHandle) -> Result<InternalBackendAuth, String> {
-    let identity = load_or_create_backend_identity(&app)?;
-    Ok(InternalBackendAuth {
-        superuser_email: identity.superuser_email,
-        superuser_password: identity.superuser_password,
-    })
-}
-
-#[tauri::command]
 fn get_app_info(app: tauri::AppHandle) -> Result<AppInfo, String> {
     let app_data_dir = kanqual_data_dir(&app)?;
     Ok(AppInfo {
@@ -1136,6 +1272,40 @@ async fn find_user_by_email(
     Ok(payload.items.into_iter().next())
 }
 
+async fn find_project_role_for_user(
+    client: &reqwest::Client,
+    token: &str,
+    project_id: &str,
+    user_id: &str,
+) -> Result<Option<String>, String> {
+    let response = client
+        .get(format!("{PB_URL}/api/collections/project_members/records"))
+        .bearer_auth(token)
+        .query(&[
+            ("page", "1".to_string()),
+            ("perPage", "1".to_string()),
+            (
+                "filter",
+                format!(
+                    "project=\"{}\"&&user=\"{}\"",
+                    escape_filter_value(project_id),
+                    escape_filter_value(user_id)
+                ),
+            ),
+            ("fields", "role".to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    let payload: PocketBaseListResponse<Value> = response.json().await.map_err(|e| e.to_string())?;
+    Ok(payload
+        .items
+        .into_iter()
+        .next()
+        .and_then(|value| value.get("role").and_then(Value::as_str).map(ToString::to_string)))
+}
+
 fn normalized_app_role(role: Option<String>) -> String {
     match role.as_deref().map(str::trim) {
         Some("administrator") => "administrator".to_string(),
@@ -1143,14 +1313,1077 @@ fn normalized_app_role(role: Option<String>) -> String {
     }
 }
 
+fn normalized_project_role(role: Option<&str>) -> String {
+    match role.map(str::trim) {
+        Some("owner") => "owner".to_string(),
+        Some("editor") => "editor".to_string(),
+        Some("coder") => "coder".to_string(),
+        _ => "viewer".to_string(),
+    }
+}
+
+struct RequestingUserContext {
+    user_id: String,
+    app_role: String,
+}
+
+async fn authenticate_requesting_user(
+    client: &reqwest::Client,
+    user_token: &str,
+) -> Result<RequestingUserContext, String> {
+    let trimmed_token = user_token.trim();
+    if trimmed_token.is_empty() {
+        return Err("You must be signed in to perform this action.".to_string());
+    }
+
+    let response = client
+        .post(format!("{PB_URL}/api/collections/users/auth-refresh"))
+        .bearer_auth(trimmed_token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let response = response
+        .error_for_status()
+        .map_err(|_| "Your session is no longer valid. Please sign in again.".to_string())?;
+    let payload: PocketBaseAuthRefreshResponse = response.json().await.map_err(|e| e.to_string())?;
+    let user_id = payload
+        .record
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "PocketBase did not return a valid user record.".to_string())?
+        .to_string();
+    let app_role = payload
+        .record
+        .get("app_role")
+        .and_then(Value::as_str)
+        .unwrap_or("standard")
+        .trim()
+        .to_string();
+
+    Ok(RequestingUserContext { user_id, app_role })
+}
+
+async fn ensure_requesting_administrator(
+    client: &reqwest::Client,
+    user_token: &str,
+) -> Result<RequestingUserContext, String> {
+    let context = authenticate_requesting_user(client, user_token).await?;
+    if context.app_role != "administrator" {
+        return Err("Only a local administrator can perform this action.".to_string());
+    }
+    Ok(context)
+}
+
+fn escape_filter_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn app_role_allows_embedding_model_management(app_role: &str) -> bool {
+    app_role == "administrator"
+}
+
+fn project_role_allows_embedding_build(role: Option<&str>) -> bool {
+    matches!(role.map(str::trim), Some("owner") | Some("editor"))
+}
+
+fn open_rules_json() -> Value {
+    serde_json::json!({
+        "listRule": AUTH_RULE,
+        "viewRule": AUTH_RULE,
+        "createRule": AUTH_RULE,
+        "updateRule": AUTH_RULE,
+        "deleteRule": AUTH_RULE,
+    })
+}
+
+fn auto_date_fields_json() -> Vec<Value> {
+    vec![
+        serde_json::json!({
+            "name": "created",
+            "type": "autodate",
+            "system": true,
+            "hidden": false,
+            "presentable": false,
+            "onCreate": true,
+            "onUpdate": false
+        }),
+        serde_json::json!({
+            "name": "updated",
+            "type": "autodate",
+            "system": true,
+            "hidden": false,
+            "presentable": false,
+            "onCreate": true,
+            "onUpdate": true
+        }),
+    ]
+}
+
+fn json_object(value: Value) -> Result<serde_json::Map<String, Value>, String> {
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "PocketBase returned an unexpected JSON payload.".to_string())
+}
+
+fn value_id(value: &Value) -> Result<String, String> {
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| "PocketBase returned an object without an id.".to_string())
+}
+
+fn value_string(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(ToString::to_string)
+}
+
+fn field_name(field: &Value) -> Option<&str> {
+    field.get("name").and_then(Value::as_str)
+}
+
+fn field_exists(fields: &[Value], name: &str) -> bool {
+    fields.iter().any(|field| field_name(field) == Some(name))
+}
+
+fn merge_field_definition(existing: &Value, definition: &Value) -> Value {
+    let mut merged = existing.as_object().cloned().unwrap_or_default();
+    if let Some(def_object) = definition.as_object() {
+        for (key, value) in def_object {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(merged)
+}
+
+async fn pb_get_json(
+    client: &reqwest::Client,
+    token: &str,
+    path: &str,
+    query: Option<&[(&str, String)]>,
+) -> Result<Value, String> {
+    let mut request = client
+        .get(format!("{PB_URL}{path}"))
+        .bearer_auth(token);
+    if let Some(query_pairs) = query {
+        request = request.query(query_pairs);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    response.json().await.map_err(|e| e.to_string())
+}
+
+async fn pb_post_json(
+    client: &reqwest::Client,
+    token: &str,
+    path: &str,
+    payload: &Value,
+) -> Result<Value, String> {
+    let response = client
+        .post(format!("{PB_URL}{path}"))
+        .bearer_auth(token)
+        .json(payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    response.json().await.map_err(|e| e.to_string())
+}
+
+async fn pb_patch_json(
+    client: &reqwest::Client,
+    token: &str,
+    path: &str,
+    payload: &Value,
+) -> Result<Value, String> {
+    let response = client
+        .patch(format!("{PB_URL}{path}"))
+        .bearer_auth(token)
+        .json(payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    response.json().await.map_err(|e| e.to_string())
+}
+
+async fn get_collection_by_name(
+    client: &reqwest::Client,
+    token: &str,
+    name: &str,
+) -> Result<Option<Value>, String> {
+    let response = client
+        .get(format!("{PB_URL}/api/collections/{name}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    Ok(Some(response.json().await.map_err(|e| e.to_string())?))
+}
+
+async fn update_collection(
+    client: &reqwest::Client,
+    token: &str,
+    collection_id: &str,
+    payload: &Value,
+) -> Result<(), String> {
+    pb_patch_json(client, token, &format!("/api/collections/{collection_id}"), payload).await?;
+    Ok(())
+}
+
+async fn create_collection(
+    client: &reqwest::Client,
+    token: &str,
+    payload: &Value,
+) -> Result<(), String> {
+    pb_post_json(client, token, "/api/collections", payload).await?;
+    Ok(())
+}
+
+async fn get_first_record_by_filter(
+    client: &reqwest::Client,
+    token: &str,
+    collection_name: &str,
+    filter: &str,
+) -> Result<Option<Value>, String> {
+    let payload = pb_get_json(
+        client,
+        token,
+        &format!("/api/collections/{collection_name}/records"),
+        Some(&[
+            ("page", "1".to_string()),
+            ("perPage", "1".to_string()),
+            ("filter", filter.to_string()),
+        ]),
+    )
+    .await?;
+    let items = payload
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    Ok(items.into_iter().next())
+}
+
+async fn create_record(
+    client: &reqwest::Client,
+    token: &str,
+    collection_name: &str,
+    payload: &Value,
+) -> Result<Value, String> {
+    pb_post_json(
+        client,
+        token,
+        &format!("/api/collections/{collection_name}/records"),
+        payload,
+    )
+    .await
+}
+
+async fn update_record(
+    client: &reqwest::Client,
+    token: &str,
+    collection_name: &str,
+    record_id: &str,
+    payload: &Value,
+) -> Result<Value, String> {
+    pb_patch_json(
+        client,
+        token,
+        &format!("/api/collections/{collection_name}/records/{record_id}"),
+        payload,
+    )
+    .await
+}
+
+async fn list_records(
+    client: &reqwest::Client,
+    token: &str,
+    collection_name: &str,
+    query: &[(&str, String)],
+) -> Result<Vec<Value>, String> {
+    let payload = pb_get_json(
+        client,
+        token,
+        &format!("/api/collections/{collection_name}/records"),
+        Some(query),
+    )
+    .await?;
+    Ok(payload
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+async fn ensure_metadata_value_http(
+    client: &reqwest::Client,
+    token: &str,
+    key: &str,
+) -> Result<String, String> {
+    let filter = format!("key=\"{}\"", escape_filter_value(key));
+    if let Some(existing) = get_first_record_by_filter(client, token, APP_METADATA_COLLECTION, &filter).await? {
+        if let Some(value) = existing.get("value").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+            return Ok(value.to_string());
+        }
+        let generated = generate_identifier();
+        update_record(
+            client,
+            token,
+            APP_METADATA_COLLECTION,
+            &value_id(&existing)?,
+            &serde_json::json!({ "value": generated }),
+        )
+        .await?;
+        return Ok(generated);
+    }
+
+    let generated = generate_identifier();
+    create_record(
+        client,
+        token,
+        APP_METADATA_COLLECTION,
+        &serde_json::json!({ "key": key, "value": generated }),
+    )
+    .await?;
+    Ok(generated)
+}
+
+async fn backfill_user_identifiers_http(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(), String> {
+    let users = list_records(
+        client,
+        token,
+        "users",
+        &[("page", "1".to_string()), ("perPage", "500".to_string()), ("sort", "created".to_string())],
+    )
+    .await?;
+    for user in users {
+        let missing = value_string(&user, "user_identifier")
+            .map(|value| value.trim().is_empty())
+            .unwrap_or(true);
+        if missing {
+            update_record(
+                client,
+                token,
+                "users",
+                &value_id(&user)?,
+                &serde_json::json!({ "user_identifier": generate_identifier() }),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn backfill_user_app_roles_http(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(), String> {
+    let users = list_records(
+        client,
+        token,
+        "users",
+        &[("page", "1".to_string()), ("perPage", "500".to_string()), ("sort", "created".to_string())],
+    )
+    .await?;
+    if users.is_empty() {
+        return Ok(());
+    }
+
+    let has_administrator = users.iter().any(|user| value_string(user, "app_role").as_deref() == Some("administrator"));
+    let first_user_id = users.first().and_then(|user| value_string(user, "id")).unwrap_or_default();
+
+    for user in users {
+        let user_id = value_id(&user)?;
+        let current_role = value_string(&user, "app_role").unwrap_or_default();
+        let normalized_role = if !has_administrator && user_id == first_user_id {
+            "administrator".to_string()
+        } else {
+            normalized_app_role(Some(current_role.clone()))
+        };
+        if current_role.trim() != normalized_role {
+            update_record(
+                client,
+                token,
+                "users",
+                &user_id,
+                &serde_json::json!({ "app_role": normalized_role }),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn backfill_project_member_roles_http(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(), String> {
+    let memberships = list_records(
+        client,
+        token,
+        "project_members",
+        &[("page", "1".to_string()), ("perPage", "500".to_string()), ("sort", "created".to_string())],
+    )
+    .await?;
+    if memberships.is_empty() {
+        return Ok(());
+    }
+
+    let mut by_project: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for membership in memberships {
+        let id = value_id(&membership)?;
+        let project_id = value_string(&membership, "project").unwrap_or_default();
+        let current_role = value_string(&membership, "role").unwrap_or_default();
+        let normalized_role = normalized_project_role(Some(&current_role));
+        if current_role != normalized_role {
+            update_record(
+                client,
+                token,
+                "project_members",
+                &id,
+                &serde_json::json!({ "role": normalized_role }),
+            )
+            .await?;
+        }
+        by_project.entry(project_id).or_default().push((id, normalized_role));
+    }
+
+    for memberships in by_project.values() {
+        if !memberships.iter().any(|(_, role)| role == "owner") {
+            if let Some((membership_id, _)) = memberships.first() {
+                update_record(
+                    client,
+                    token,
+                    "project_members",
+                    membership_id,
+                    &serde_json::json!({ "role": "owner" }),
+                )
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn backfill_document_types_http(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(), String> {
+    let documents = list_records(
+        client,
+        token,
+        "documents",
+        &[
+            ("page", "1".to_string()),
+            ("perPage", "500".to_string()),
+            ("sort", "created".to_string()),
+            ("filter", "deleted_at=\"\"".to_string()),
+        ],
+    )
+    .await
+    .unwrap_or_default();
+
+    for document in documents {
+        let missing = value_string(&document, "type")
+            .map(|value| value.trim().is_empty())
+            .unwrap_or(true);
+        if missing {
+            update_record(
+                client,
+                token,
+                "documents",
+                &value_id(&document)?,
+                &serde_json::json!({ "type": "Text" }),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn upsert_collection_http(
+    client: &reqwest::Client,
+    token: &str,
+    name: &str,
+    definition: Value,
+    exact_fields: bool,
+) -> Result<(), String> {
+    let open_rules = open_rules_json();
+    let auto_date_fields = auto_date_fields_json();
+    let definition_object = json_object(definition)?;
+    let definition_fields = definition_object
+        .get("fields")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    if let Some(existing) = get_collection_by_name(client, token, name).await? {
+        let existing_id = value_id(&existing)?;
+        let existing_fields = existing
+            .get("fields")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        let needs_rule_update =
+            existing.get("listRule") != open_rules.get("listRule")
+                || existing.get("viewRule") != open_rules.get("viewRule")
+                || existing.get("createRule") != open_rules.get("createRule")
+                || existing.get("updateRule") != open_rules.get("updateRule")
+                || existing.get("deleteRule") != open_rules.get("deleteRule");
+
+        let missing_custom: Vec<Value> = definition_fields
+            .iter()
+            .filter(|field| !field_name(field).map(|name| field_exists(&existing_fields, name)).unwrap_or(false))
+            .cloned()
+            .collect();
+
+        let merged_existing: Vec<Value> = existing_fields
+            .iter()
+            .map(|existing_field| {
+                if let Some(name) = field_name(existing_field) {
+                    if let Some(definition_field) = definition_fields
+                        .iter()
+                        .find(|definition_field| field_name(definition_field) == Some(name))
+                    {
+                        return merge_field_definition(existing_field, definition_field);
+                    }
+                }
+                existing_field.clone()
+            })
+            .collect();
+
+        let existing_changed = merged_existing != existing_fields;
+        let pruned_fields: Vec<Value> = if exact_fields {
+            merged_existing
+                .iter()
+                .filter(|field| {
+                    field_name(field)
+                        .map(|name| {
+                            definition_fields.iter().any(|df| field_name(df) == Some(name))
+                                || auto_date_fields.iter().any(|df| field_name(df) == Some(name))
+                        })
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect()
+        } else {
+            merged_existing.clone()
+        };
+        let extra_fields_removed = exact_fields && pruned_fields.len() != merged_existing.len();
+
+        let missing_dates: Vec<Value> = auto_date_fields
+            .iter()
+            .filter(|field| !field_name(field).map(|name| field_exists(&existing_fields, name)).unwrap_or(false))
+            .cloned()
+            .collect();
+
+        if needs_rule_update || !missing_dates.is_empty() || !missing_custom.is_empty() || existing_changed || extra_fields_removed {
+            let mut patch = serde_json::Map::new();
+            if needs_rule_update {
+                if let Some(rules) = open_rules.as_object() {
+                    for (key, value) in rules {
+                        patch.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            if !missing_dates.is_empty() || !missing_custom.is_empty() || existing_changed || extra_fields_removed {
+                let mut fields = pruned_fields;
+                fields.extend(missing_custom);
+                fields.extend(missing_dates);
+                patch.insert("fields".to_string(), Value::Array(fields));
+            }
+            update_collection(client, token, &existing_id, &Value::Object(patch)).await?;
+        }
+        return Ok(());
+    }
+
+    let mut payload = serde_json::Map::new();
+    payload.insert("name".to_string(), Value::String(name.to_string()));
+    payload.insert("type".to_string(), Value::String("base".to_string()));
+    if let Some(rules) = open_rules.as_object() {
+        for (key, value) in rules {
+            payload.insert(key.clone(), value.clone());
+        }
+    }
+    for (key, value) in definition_object {
+        if key != "fields" {
+            payload.insert(key, value);
+        }
+    }
+    let mut fields = definition_fields;
+    fields.extend(auto_date_fields);
+    payload.insert("fields".to_string(), Value::Array(fields));
+    create_collection(client, token, &Value::Object(payload)).await
+}
+
+async fn ensure_backend_setup_http(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(), String> {
+    if let Some(users_collection) = get_collection_by_name(client, token, "users").await? {
+        let existing_fields = users_collection
+            .get("fields")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let has_user_identifier = field_exists(&existing_fields, "user_identifier");
+        let has_must_change_password = field_exists(&existing_fields, "must_change_password");
+        let has_app_role = field_exists(&existing_fields, "app_role");
+        let needs_user_patch =
+            users_collection.get("listRule") != Some(&Value::String(AUTH_RULE.to_string()))
+                || users_collection.get("viewRule") != Some(&Value::String(AUTH_RULE.to_string()))
+                || users_collection.get("createRule") != Some(&Value::String(String::new()))
+                || users_collection.get("updateRule") != Some(&Value::String(AUTH_RULE.to_string()))
+                || users_collection.get("deleteRule") != Some(&Value::String(AUTH_RULE.to_string()))
+                || users_collection.get("authRule") != Some(&Value::String(String::new()))
+                || !has_user_identifier
+                || !has_must_change_password
+                || !has_app_role;
+        if needs_user_patch {
+            let mut fields = existing_fields.clone();
+            if !has_user_identifier {
+                fields.push(serde_json::json!({ "name": "user_identifier", "type": "text" }));
+            }
+            if !has_must_change_password {
+                fields.push(serde_json::json!({ "name": "must_change_password", "type": "bool" }));
+            }
+            if !has_app_role {
+                fields.push(serde_json::json!({
+                    "name": "app_role",
+                    "type": "select",
+                    "required": true,
+                    "maxSelect": 1,
+                    "values": ["administrator", "standard"]
+                }));
+            }
+            update_collection(
+                client,
+                token,
+                &value_id(&users_collection)?,
+                &serde_json::json!({
+                    "listRule": AUTH_RULE,
+                    "viewRule": AUTH_RULE,
+                    "createRule": "",
+                    "updateRule": AUTH_RULE,
+                    "deleteRule": AUTH_RULE,
+                    "authRule": "",
+                    "fields": fields
+                }),
+            )
+            .await?;
+        }
+    }
+
+    upsert_collection_http(
+        client,
+        token,
+        APP_METADATA_COLLECTION,
+        serde_json::json!({
+            "fields": [
+                { "name": "key", "type": "text", "required": true },
+                { "name": "value", "type": "text", "required": true }
+            ]
+        }),
+        false,
+    )
+    .await?;
+
+    ensure_metadata_value_http(client, token, BACKEND_IDENTIFIER_KEY).await?;
+    ensure_metadata_value_http(client, token, USERS_TABLE_IDENTIFIER_KEY).await?;
+    backfill_user_identifiers_http(client, token).await?;
+    backfill_user_app_roles_http(client, token).await?;
+
+    upsert_collection_http(client, token, "projects", serde_json::json!({
+        "fields": [
+            { "name": "name", "type": "text", "required": true },
+            { "name": "description", "type": "text" },
+            { "name": "backend_identifier", "type": "text" },
+            { "name": "users_table_identifier", "type": "text" }
+        ]
+    }), false).await?;
+
+    let projects = get_collection_by_name(client, token, "projects").await?
+        .ok_or_else(|| "The projects collection is missing after setup.".to_string())?;
+    let projects_id = value_id(&projects)?;
+
+    upsert_collection_http(client, token, "project_settings", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "ai_assist_enabled", "type": "bool" },
+            { "name": "ai_semantic_search_allowed", "type": "bool" },
+            { "name": "ai_question_answering_allowed", "type": "bool" },
+            { "name": "ai_summaries_allowed", "type": "bool" },
+            { "name": "ai_code_suggestions_allowed", "type": "bool" },
+            { "name": "ai_draft_reports_allowed", "type": "bool" },
+            { "name": "ai_host_embedding_model_installed", "type": "bool" },
+            { "name": "ai_host_llm_enabled", "type": "bool" },
+            { "name": "ai_host_llm_model_selected", "type": "bool" },
+            { "name": "ai_host_llm_connection_live", "type": "bool" },
+            { "name": "ai_host_project_embeddings_ready", "type": "bool" },
+            { "name": "ai_host_runtime_checked_at", "type": "text" },
+            { "name": "backup_hourly_hours", "type": "number" },
+            { "name": "backup_daily_days", "type": "number" },
+            { "name": "backup_weekly_weeks", "type": "number" },
+            { "name": "backup_automatic_interval_minutes", "type": "number" },
+            { "name": "document_import_store_original_file_name", "type": "bool" }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "ai_jobs", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "job_type", "type": "select", "required": true, "maxSelect": 1, "values": ["project_chat", "document_processing", "attribute_suggestions", "embedding_build", "relevant_segments_search", "code_conceptual_summary", "most_typical_annotation", "code_decomposition", "code_position", "code_unique_annotations"] },
+            { "name": "status", "type": "select", "required": true, "maxSelect": 1, "values": ["queued", "running", "completed", "error"] },
+            { "name": "request_json", "type": "json" },
+            { "name": "result_json", "type": "json" },
+            { "name": "error_message", "type": "text" },
+            { "name": "host_message", "type": "text" }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "project_ai_chats", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "created_by_name", "type": "text" },
+            { "name": "participant_users", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 100 },
+            { "name": "participant_identifiers_json", "type": "text" },
+            { "name": "title", "type": "text", "required": true },
+            { "name": "last_message_at", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    let project_ai_chats = get_collection_by_name(client, token, "project_ai_chats").await?
+        .ok_or_else(|| "The project_ai_chats collection is missing after setup.".to_string())?;
+    let project_ai_chats_id = value_id(&project_ai_chats)?;
+
+    upsert_collection_http(client, token, "project_ai_chat_messages", serde_json::json!({
+        "fields": [
+            { "name": "chat", "type": "relation", "collectionId": project_ai_chats_id, "required": true, "maxSelect": 1 },
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "role", "type": "select", "required": true, "maxSelect": 1, "values": ["user", "assistant"] },
+            { "name": "text", "type": "text", "required": true, "max": 10000000 },
+            { "name": "metadata_json", "type": "text", "max": 10000000 },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "created_by_name", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "project_members", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "user", "type": "relation", "collectionId": "_pb_users_auth_", "required": true, "maxSelect": 1 },
+            { "name": "user_identifier", "type": "text" },
+            { "name": "role", "type": "select", "required": true, "maxSelect": 1, "values": ["owner", "editor", "coder", "viewer"] },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "last_active", "type": "text" }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "documents", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "type", "type": "text", "required": true },
+            { "name": "file_path", "type": "text" },
+            { "name": "content", "type": "text", "max": 10000000, "required": false },
+            { "name": "structured_content_json", "type": "text", "max": 10000000 },
+            { "name": "notes", "type": "text" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), true).await?;
+    backfill_document_types_http(client, token).await?;
+
+    upsert_collection_http(client, token, "codes", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "label", "type": "text", "required": true },
+            { "name": "color", "type": "text", "required": true },
+            { "name": "description", "type": "text" },
+            { "name": "shortcut", "type": "text" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" }
+        ]
+    }), false).await?;
+    let codes = get_collection_by_name(client, token, "codes").await?
+        .ok_or_else(|| "The codes collection is missing after setup.".to_string())?;
+    let codes_id = value_id(&codes)?;
+    upsert_collection_http(client, token, "codes", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "label", "type": "text", "required": true },
+            { "name": "color", "type": "text", "required": true },
+            { "name": "description", "type": "text" },
+            { "name": "shortcut", "type": "text" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "parent", "type": "relation", "collectionId": codes_id, "maxSelect": 1 },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+
+    let documents = get_collection_by_name(client, token, "documents").await?
+        .ok_or_else(|| "The documents collection is missing after setup.".to_string())?;
+    let documents_id = value_id(&documents)?;
+
+    upsert_collection_http(client, token, "document_locks", serde_json::json!({
+        "fields": [
+            { "name": "document", "type": "relation", "collectionId": documents_id, "required": true, "maxSelect": 1 },
+            { "name": "user", "type": "relation", "collectionId": "_pb_users_auth_", "required": true, "maxSelect": 1 },
+            { "name": "user_name", "type": "text", "required": true },
+            { "name": "expires_at_ms", "type": "number", "required": true }
+        ]
+    }), false).await?;
+    upsert_collection_http(client, token, "document_lock_kicks", serde_json::json!({
+        "fields": [
+            { "name": "document", "type": "relation", "collectionId": documents_id, "required": true, "maxSelect": 1 },
+            { "name": "user", "type": "relation", "collectionId": "_pb_users_auth_", "required": true, "maxSelect": 1 },
+            { "name": "kicked_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "kicked_by_name", "type": "text", "required": true },
+            { "name": "expires_at_ms", "type": "number", "required": true }
+        ]
+    }), false).await?;
+    upsert_collection_http(client, token, "annotations", serde_json::json!({
+        "fields": [
+            { "name": "document", "type": "relation", "collectionId": documents_id, "required": true, "maxSelect": 1 },
+            { "name": "code", "type": "relation", "collectionId": codes_id, "required": true, "maxSelect": 1 },
+            { "name": "start_offset", "type": "number", "required": false },
+            { "name": "end_offset", "type": "number", "required": false },
+            { "name": "quote", "type": "text", "required": true },
+            { "name": "note", "type": "text" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), true).await?;
+
+    let annotations = get_collection_by_name(client, token, "annotations").await?
+        .ok_or_else(|| "The annotations collection is missing after setup.".to_string())?;
+    let annotations_id = value_id(&annotations)?;
+    upsert_collection_http(client, token, "memos", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "document", "type": "relation", "collectionId": documents_id, "maxSelect": 9999 },
+            { "name": "annotation", "type": "relation", "collectionId": annotations_id, "maxSelect": 9999 },
+            { "name": "title", "type": "text", "required": true },
+            { "name": "body", "type": "text" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    backfill_project_member_roles_http(client, token).await?;
+
+    upsert_collection_http(client, token, "processed_document_reviews", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "document", "type": "relation", "collectionId": documents_id, "required": true, "maxSelect": 1 },
+            { "name": "document_name", "type": "text", "required": true },
+            { "name": "file_path", "type": "text" },
+            { "name": "status", "type": "select", "required": true, "maxSelect": 1, "values": ["pending_review", "reviewed"] },
+            { "name": "model", "type": "text" },
+            { "name": "base_url", "type": "text" },
+            { "name": "chunk_count", "type": "number" },
+            { "name": "processed_content", "type": "text", "max": 10000000 },
+            { "name": "segments_json", "type": "text", "max": 10000000 },
+            { "name": "proper_name_candidates_json", "type": "text", "max": 1000000 },
+            { "name": "enabled_review_lenses_json", "type": "text" },
+            { "name": "exported_to_project", "type": "bool" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), true).await?;
+
+    upsert_collection_http(client, token, "cases", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "notes", "type": "text" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    let cases = get_collection_by_name(client, token, "cases").await?
+        .ok_or_else(|| "The cases collection is missing after setup.".to_string())?;
+    let cases_id = value_id(&cases)?;
+    upsert_collection_http(client, token, "case_documents", serde_json::json!({
+        "fields": [
+            { "name": "case", "type": "relation", "collectionId": cases_id, "required": true, "maxSelect": 1 },
+            { "name": "document", "type": "relation", "collectionId": documents_id, "required": true, "maxSelect": 1 }
+        ]
+    }), false).await?;
+    upsert_collection_http(client, token, "case_attributes", serde_json::json!({
+        "fields": [
+            { "name": "case", "type": "relation", "collectionId": cases_id, "required": true, "maxSelect": 1 },
+            { "name": "key", "type": "text", "required": true },
+            { "name": "value", "type": "text" },
+            { "name": "sort_order", "type": "number" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    upsert_collection_http(client, token, "case_attribute_definitions", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "data_type", "type": "select", "required": true, "values": ["text", "number", "datetime", "categorical"] },
+            { "name": "description", "type": "text" },
+            { "name": "options_json", "type": "text" },
+            { "name": "sort_order", "type": "number" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    let case_attribute_definitions = get_collection_by_name(client, token, "case_attribute_definitions").await?
+        .ok_or_else(|| "The case_attribute_definitions collection is missing after setup.".to_string())?;
+    let case_attribute_definitions_id = value_id(&case_attribute_definitions)?;
+    upsert_collection_http(client, token, "case_attribute_values", serde_json::json!({
+        "fields": [
+            { "name": "case", "type": "relation", "collectionId": cases_id, "required": true, "maxSelect": 1 },
+            { "name": "attribute", "type": "relation", "collectionId": case_attribute_definitions_id, "required": true, "maxSelect": 1 },
+            { "name": "value", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "document_attribute_definitions", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "data_type", "type": "select", "required": true, "values": ["text", "number", "datetime", "categorical"] },
+            { "name": "description", "type": "text" },
+            { "name": "options_json", "type": "text" },
+            { "name": "sort_order", "type": "number" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    let document_attribute_definitions = get_collection_by_name(client, token, "document_attribute_definitions").await?
+        .ok_or_else(|| "The document_attribute_definitions collection is missing after setup.".to_string())?;
+    let document_attribute_definitions_id = value_id(&document_attribute_definitions)?;
+    upsert_collection_http(client, token, "document_attribute_values", serde_json::json!({
+        "fields": [
+            { "name": "document", "type": "relation", "collectionId": documents_id, "required": true, "maxSelect": 1 },
+            { "name": "attribute", "type": "relation", "collectionId": document_attribute_definitions_id, "required": true, "maxSelect": 1 },
+            { "name": "value", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "memos", serde_json::json!({
+        "fields": [
+            { "name": "cases", "type": "relation", "collectionId": cases_id, "maxSelect": 9999 },
+            { "name": "codes", "type": "relation", "collectionId": codes_id, "maxSelect": 9999 },
+            { "name": "case_attribute_defs", "type": "relation", "collectionId": case_attribute_definitions_id, "maxSelect": 9999 },
+            { "name": "document_attribute_defs", "type": "relation", "collectionId": document_attribute_definitions_id, "maxSelect": 9999 }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "project_log", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "user", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "user_identifier", "type": "text" },
+            { "name": "user_name", "type": "text" },
+            { "name": "access_mode", "type": "select", "values": ["local", "remote"], "maxSelect": 1 },
+            { "name": "action", "type": "text", "required": true },
+            { "name": "label", "type": "text", "required": true },
+            { "name": "record_id", "type": "text" },
+            { "name": "occurred_at", "type": "autodate", "system": false, "hidden": false, "presentable": false, "onCreate": true, "onUpdate": false },
+            { "name": "restored_at", "type": "text" }
+        ]
+    }), false).await?;
+
+    upsert_collection_http(client, token, "code_reports", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "cases", "type": "relation", "collectionId": cases_id, "maxSelect": 100 },
+            { "name": "documents", "type": "relation", "collectionId": documents_id, "maxSelect": 100 },
+            { "name": "codes", "type": "relation", "collectionId": codes_id, "maxSelect": 100 },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "snapshot", "type": "text", "max": LARGE_REPORT_SNAPSHOT_MAX },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    upsert_collection_http(client, token, "coder_reports", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "coders", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 100 },
+            { "name": "cases", "type": "relation", "collectionId": cases_id, "maxSelect": 100 },
+            { "name": "documents", "type": "relation", "collectionId": documents_id, "maxSelect": 100 },
+            { "name": "codes", "type": "relation", "collectionId": codes_id, "maxSelect": 100 },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "coder_identifiers", "type": "text" },
+            { "name": "snapshot", "type": "text", "max": LARGE_REPORT_SNAPSHOT_MAX },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    upsert_collection_http(client, token, "ai_analyses", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "code", "type": "relation", "collectionId": codes_id, "maxSelect": 1 },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "snapshot", "type": "text", "max": LARGE_REPORT_SNAPSHOT_MAX },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+    upsert_collection_http(client, token, "ai_attribute_suggestion_runs", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "name", "type": "text", "required": true },
+            { "name": "target_kind", "type": "select", "required": true, "maxSelect": 1, "values": ["case", "document"] },
+            { "name": "attribute_id", "type": "text" },
+            { "name": "attribute_name", "type": "text" },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "snapshot", "type": "text", "max": LARGE_REPORT_SNAPSHOT_MAX },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
+
+    Ok(())
+}
+
 #[tauri::command]
-async fn delete_user_account_command(app: tauri::AppHandle, user_id: String) -> Result<(), String> {
+async fn delete_user_account_command(
+    app: tauri::AppHandle,
+    auth_token: String,
+    user_id: String,
+) -> Result<(), String> {
     let trimmed_user_id = user_id.trim();
     if trimmed_user_id.is_empty() {
         return Err("A user id is required.".to_string());
     }
 
     let client = reqwest::Client::new();
+    let requester = ensure_requesting_administrator(&client, &auth_token).await?;
+    if requester.user_id == trimmed_user_id {
+        return Err("Administrators cannot delete their own active account from this action.".to_string());
+    }
     let token = authenticate_internal_superuser(&app, &client).await?;
     client
         .delete(format!("{PB_URL}/api/collections/users/records/{trimmed_user_id}"))
@@ -1166,24 +2399,25 @@ async fn delete_user_account_command(app: tauri::AppHandle, user_id: String) -> 
 #[tauri::command]
 async fn create_user_account_command(
     app: tauri::AppHandle,
-    request: CreateUserAccountCommandRequest,
+    request: AuthenticatedCreateUserAccountCommandRequest,
 ) -> Result<String, String> {
     let client = reqwest::Client::new();
+    ensure_requesting_administrator(&client, &request.auth_token).await?;
     let token = authenticate_internal_superuser(&app, &client).await?;
     let payload = serde_json::json!({
-        "name": request.name,
-        "email": request.email,
-        "password": request.password,
-        "passwordConfirm": request.password_confirm,
+        "name": request.request.name,
+        "email": request.request.email,
+        "password": request.request.password,
+        "passwordConfirm": request.request.password_confirm,
         "emailVisibility": true,
-        "user_identifier": request.user_identifier
+        "user_identifier": request.request.user_identifier
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
             .unwrap_or_else(generate_identifier),
-        "must_change_password": request.must_change_password.unwrap_or(false),
-        "app_role": normalized_app_role(request.app_role),
+        "must_change_password": request.request.must_change_password.unwrap_or(false),
+        "app_role": normalized_app_role(request.request.app_role),
     });
     let response = client
         .post(format!("{PB_URL}/api/collections/users/records"))
@@ -1256,13 +2490,14 @@ async fn register_user_account_command(
 #[tauri::command]
 async fn ensure_imported_user_account_command(
     app: tauri::AppHandle,
-    request: EnsureImportedUserAccountCommandRequest,
+    request: AuthenticatedEnsureImportedUserAccountCommandRequest,
 ) -> Result<EnsureImportedUserAccountCommandResponse, String> {
     let client = reqwest::Client::new();
+    ensure_requesting_administrator(&client, &request.auth_token).await?;
     let token = authenticate_internal_superuser(&app, &client).await?;
-    let email = request.email.trim().to_lowercase();
+    let email = request.request.email.trim().to_lowercase();
     let name = {
-        let trimmed = request.name.trim();
+        let trimmed = request.request.name.trim();
         if trimmed.is_empty() {
             email.split('@').next().unwrap_or("Imported User").to_string()
         } else {
@@ -1295,7 +2530,7 @@ async fn ensure_imported_user_account_command(
         });
     }
 
-    let provided_password = request.password.unwrap_or_default();
+    let provided_password = request.request.password.unwrap_or_default();
     let using_generated_password = provided_password.trim().is_empty();
     let final_password = if using_generated_password {
         generate_temporary_password()
@@ -1340,25 +2575,31 @@ async fn ensure_imported_user_account_command(
 #[tauri::command]
 async fn update_user_account_command(
     app: tauri::AppHandle,
-    request: UpdateUserAccountRequest,
+    request: AuthenticatedUpdateUserAccountRequest,
 ) -> Result<(), String> {
-    let trimmed_user_id = request.user_id.trim();
+    let trimmed_user_id = request.request.user_id.trim();
     if trimmed_user_id.is_empty() {
         return Err("A user id is required.".to_string());
     }
 
+    let client = reqwest::Client::new();
+    let requester = ensure_requesting_administrator(&client, &request.auth_token).await?;
+
     let mut payload = serde_json::Map::new();
-    if let Some(name) = request.name {
+    if let Some(name) = request.request.name {
         payload.insert("name".to_string(), Value::String(name));
     }
-    if let Some(email) = request.email {
+    if let Some(email) = request.request.email {
         payload.insert("email".to_string(), Value::String(email));
     }
     if payload.is_empty() {
         return Ok(());
     }
 
-    let client = reqwest::Client::new();
+    if requester.user_id == trimmed_user_id && payload.contains_key("email") {
+        return Err("Administrators cannot change their own account email from this action.".to_string());
+    }
+
     let token = authenticate_internal_superuser(&app, &client).await?;
     client
         .patch(format!("{PB_URL}/api/collections/users/records/{trimmed_user_id}"))
@@ -1373,8 +2614,9 @@ async fn update_user_account_command(
 }
 
 #[tauri::command]
-async fn clear_app_data_records_command(app: tauri::AppHandle) -> Result<(), String> {
+async fn clear_app_data_records_command(app: tauri::AppHandle, auth_token: String) -> Result<(), String> {
     let client = reqwest::Client::new();
+    ensure_requesting_administrator(&client, &auth_token).await?;
     let token = authenticate_internal_superuser(&app, &client).await?;
 
     let response = client
@@ -1429,6 +2671,14 @@ async fn get_registered_user_count_command(app: tauri::AppHandle) -> Result<u32,
         .and_then(Value::as_u64)
         .ok_or_else(|| "PocketBase did not return a valid user count.".to_string())?;
     u32::try_from(total_items).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn ensure_backend_setup_command(_app: tauri::AppHandle) -> Result<bool, String> {
+    let client = reqwest::Client::new();
+    let token = authenticate_internal_superuser(&_app, &client).await?;
+    ensure_backend_setup_http(&client, &token).await?;
+    Ok(true)
 }
 
 fn build_encrypted_backup_argon2() -> Result<Argon2<'static>, String> {
@@ -2220,6 +3470,108 @@ fn extract_json_object(text: &str) -> Option<&str> {
     (end > start).then_some(&text[start..=end])
 }
 
+fn parse_u64_from_value(value: &Value, keys: &[&str]) -> Option<u64> {
+    for key in keys {
+        if let Some(number) = value.get(*key).and_then(Value::as_u64) {
+            return Some(number);
+        }
+        if let Some(text) = value.get(*key).and_then(Value::as_str) {
+            if let Ok(parsed) = text.trim().parse::<u64>() {
+                return Some(parsed);
+            }
+        }
+    }
+    None
+}
+
+fn parse_string_from_value(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn parse_most_typical_annotation_payload(json_content: &str) -> Result<OllamaMostTypicalAnnotationModelResponse, String> {
+    if let Ok(parsed) = serde_json::from_str::<OllamaMostTypicalAnnotationModelResponse>(json_content) {
+        return Ok(parsed);
+    }
+
+    let value: Value = serde_json::from_str(json_content)
+        .map_err(|e| format!("Could not parse Ollama's response: {e}"))?;
+
+    let items_value = if let Some(array) = value.as_array() {
+        Some(array)
+    } else {
+        value.get("annotations")
+            .or_else(|| value.get("items"))
+            .or_else(|| value.get("results"))
+            .or_else(|| value.get("typical_annotations"))
+            .or_else(|| value.get("typicalAnnotations"))
+            .and_then(Value::as_array)
+    };
+
+    if let Some(items) = items_value {
+        let annotations = items
+            .iter()
+            .filter_map(|item| {
+                let annotation_index = parse_u64_from_value(item, &["annotation_index", "annotationIndex", "index", "annotation"])?;
+                let reasoning = parse_string_from_value(item, &["reasoning", "reason", "explanation"]);
+                Some(OllamaMostTypicalAnnotationModelItem {
+                    annotation_index,
+                    reasoning,
+                })
+            })
+            .collect::<Vec<_>>();
+        if !annotations.is_empty() {
+            return Ok(OllamaMostTypicalAnnotationModelResponse { annotations });
+        }
+    }
+
+    let annotation_index = parse_u64_from_value(&value, &["annotation_index", "annotationIndex", "index", "annotation"])
+        .ok_or_else(|| "Could not find an annotation index in Ollama's response.".to_string())?;
+    let reasoning = parse_string_from_value(&value, &["reasoning", "reason", "explanation"]);
+
+    Ok(OllamaMostTypicalAnnotationModelResponse {
+        annotations: vec![OllamaMostTypicalAnnotationModelItem {
+            annotation_index,
+            reasoning,
+        }],
+    })
+}
+
+fn parse_unique_annotations_payload(json_content: &str) -> Result<OllamaUniqueAnnotationsModelResponse, String> {
+    if let Ok(parsed) = serde_json::from_str::<OllamaUniqueAnnotationsModelResponse>(json_content) {
+        return Ok(parsed);
+    }
+
+    let value: Value = serde_json::from_str(json_content)
+        .map_err(|e| format!("Could not parse Ollama's response: {e}"))?;
+
+    let items_value = if let Some(array) = value.as_array() {
+        Some(array)
+    } else {
+        value.get("annotations")
+            .or_else(|| value.get("items"))
+            .or_else(|| value.get("results"))
+            .or_else(|| value.get("unique_annotations"))
+            .or_else(|| value.get("uniqueAnnotations"))
+            .and_then(Value::as_array)
+    }
+    .ok_or_else(|| "Could not find an annotations array in Ollama's response.".to_string())?;
+
+    let annotations = items_value
+        .iter()
+        .filter_map(|item| {
+            let index = parse_u64_from_value(item, &["index", "annotation_index", "annotationIndex"])?;
+            let reasoning = parse_string_from_value(item, &["reasoning", "reason", "explanation"]);
+            Some(OllamaUniqueAnnotationModelItem { index, reasoning })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(OllamaUniqueAnnotationsModelResponse { annotations })
+}
+
 fn truncate_for_ollama_prompt(text: &str, max_chars: usize) -> String {
     let trimmed = text.trim();
     if trimmed.chars().count() <= max_chars {
@@ -2425,8 +3777,14 @@ fn get_multilingual_e5_download_status(
 
 #[tauri::command]
 fn cancel_multilingual_e5_download(
+    auth_token: String,
     state: tauri::State<'_, EmbeddingModelDownloadState>,
-) -> EmbeddingModelDownloadStatus {
+) -> Result<EmbeddingModelDownloadStatus, String> {
+    let client = reqwest::Client::new();
+    let requester = tauri::async_runtime::block_on(ensure_requesting_administrator(&client, &auth_token))?;
+    if !app_role_allows_embedding_model_management(&requester.app_role) {
+        return Err("You do not have permission to manage embedding models on this device.".to_string());
+    }
     update_embedding_download_status(&state, |status| {
         if status.phase == "downloading" {
             status.cancel_requested = true;
@@ -2434,14 +3792,20 @@ fn cancel_multilingual_e5_download(
             status.message = Some("Cancelling download...".to_string());
         }
     });
-    state.0.lock().unwrap().clone().into()
+    Ok(state.0.lock().unwrap().clone().into())
 }
 
 #[tauri::command]
 fn clear_multilingual_e5_model(
+    auth_token: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, EmbeddingModelDownloadState>,
 ) -> Result<EmbeddingModelStatus, String> {
+    let client = reqwest::Client::new();
+    let requester = tauri::async_runtime::block_on(ensure_requesting_administrator(&client, &auth_token))?;
+    if !app_role_allows_embedding_model_management(&requester.app_role) {
+        return Err("You do not have permission to manage embedding models on this device.".to_string());
+    }
     let current = state.0.lock().unwrap().clone();
     if current.phase == "downloading" || current.phase == "cancelling" {
         return Err("Cancel the current download before clearing local model files.".to_string());
@@ -2468,9 +3832,15 @@ fn clear_multilingual_e5_model(
 
 #[tauri::command]
 async fn download_multilingual_e5_model(
+    auth_token: String,
     app: tauri::AppHandle,
     download_state: tauri::State<'_, EmbeddingModelDownloadState>,
 ) -> Result<EmbeddingModelStatus, String> {
+    let client = reqwest::Client::new();
+    let requester = ensure_requesting_administrator(&client, &auth_token).await?;
+    if !app_role_allows_embedding_model_management(&requester.app_role) {
+        return Err("You do not have permission to manage embedding models on this device.".to_string());
+    }
     let initial_status = embedding_model_status(&app)?;
     if initial_status.installed {
         set_embedding_download_status(&download_state, EmbeddingModelDownloadStatusState {
@@ -2704,6 +4074,36 @@ async fn chat_with_project_ollama(
         .next()
         .ok_or_else(|| "Could not generate a query embedding for this message.".to_string())?;
 
+    let has_selected_context = !request.selected_document_ids.is_empty()
+        || !request.selected_case_ids.is_empty()
+        || !request.selected_code_ids.is_empty()
+        || !request.selected_annotation_ids.is_empty()
+        || !request.selected_memo_ids.is_empty();
+    let restrict_to_selected_context = request.selected_context_mode.trim().eq_ignore_ascii_case("restrict");
+
+    let matches_selected_context = |item: &ProjectEmbeddingIndexItem| {
+        request
+            .selected_document_ids
+            .iter()
+            .any(|selected_id| item.document_id.as_deref() == Some(selected_id.as_str()))
+            || request
+                .selected_case_ids
+                .iter()
+                .any(|selected_id| item.case_id.as_deref() == Some(selected_id.as_str()))
+            || request
+                .selected_code_ids
+                .iter()
+                .any(|selected_id| item.code_id.as_deref() == Some(selected_id.as_str()))
+            || request
+                .selected_annotation_ids
+                .iter()
+                .any(|selected_id| item.annotation_id.as_deref() == Some(selected_id.as_str()))
+            || request
+                .selected_memo_ids
+                .iter()
+                .any(|selected_id| item.memo_id.as_deref() == Some(selected_id.as_str()))
+    };
+
     let mut ranked_items = index
         .items
         .iter()
@@ -2761,8 +4161,18 @@ async fn chat_with_project_ollama(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    if has_selected_context && restrict_to_selected_context {
+        ranked_items = ranked_items
+            .into_iter()
+            .filter(|(_, item)| matches_selected_context(item))
+            .collect::<Vec<_>>();
+        if ranked_items.is_empty() {
+            return Err("No indexed content matched the selected chat context. Try choosing different context items or rebuilding project embeddings.".to_string());
+        }
+    }
+
     let top_items = ranked_items.into_iter().take(6).collect::<Vec<_>>();
-    let citations = top_items
+    let cited_items = top_items
         .iter()
         .filter_map(|(_, item)| {
             if item.annotation_id.is_none()
@@ -2774,7 +4184,7 @@ async fn chat_with_project_ollama(
                 return None;
             }
 
-            Some(OllamaProjectChatCitation {
+            Some((item, OllamaProjectChatCitation {
                 id: item.id.clone(),
                 item_type: item.item_type.clone(),
                 title: item.title.clone(),
@@ -2786,16 +4196,20 @@ async fn chat_with_project_ollama(
                 memo_id: item.memo_id.clone(),
                 start_offset: item.start_offset,
                 end_offset: item.end_offset,
-            })
+            }))
         })
         .take(4)
         .collect::<Vec<_>>();
-    let context_block = top_items
+    let citations = cited_items
+        .iter()
+        .map(|(_, citation)| citation.clone())
+        .collect::<Vec<_>>();
+    let context_block = cited_items
         .iter()
         .enumerate()
-        .map(|(index, (_, item))| {
+        .map(|(index, (item, _))| {
             format!(
-                "[Context {}]\nTitle: {}\nType: {}\nContent: {}",
+                "[{}]\nTitle: {}\nType: {}\nContent: {}",
                 index + 1,
                 item.title,
                 item.item_type,
@@ -2805,8 +4219,17 @@ async fn chat_with_project_ollama(
         .collect::<Vec<_>>()
         .join("\n\n");
 
+    let context_rule = if has_selected_context && restrict_to_selected_context {
+        "The retrieved context below has already been restricted to the user's selected chat context. Treat that restriction as mandatory: answer only from this selected context, and if it does not contain the answer, say that you do not know."
+    } else if has_selected_context {
+        "The user selected preferred chat context. Prioritize the retrieved context below when answering, stay grounded in it, and say that you do not know if it does not support a claim."
+    } else {
+        "Answer the user's question about this project using the retrieved project context below."
+    };
+
     let system_prompt = format!(
-        "You are Kanqual AI Assist. Answer the user's question about this project using the retrieved project context below. If the context does not support a claim, say that you do not know. Be concise and grounded.\n\nRetrieved project context:\n{}",
+        "You are Kanqual AI Assist. {} If the context does not support a claim, say that you do not know. Be concise and grounded. When you use retrieved context, add inline citation markers like [1] or [2] that refer to the numbered context blocks below. Only cite numbers that appear in the retrieved context, and place citations immediately after the supported claim.\n\nRetrieved project context:\n{}",
+        context_rule,
         context_block
     );
 
@@ -2869,7 +4292,7 @@ async fn chat_with_project_ollama(
         content,
         model: request.model,
         base_url,
-        used_context_items: top_items.len() as u64,
+        used_context_items: cited_items.len() as u64,
         citations,
     })
 }
@@ -3059,6 +4482,7 @@ async fn find_relevant_project_segments_with_ollama(
 async fn generate_attribute_value_suggestions_with_ollama(
     app: tauri::AppHandle,
     request: OllamaAttributeSuggestionRequest,
+    cancelled_runs: tauri::State<'_, CancelledAttributeSuggestionRuns>,
 ) -> Result<OllamaAttributeSuggestionResponse, String> {
     if request.model.trim().is_empty() {
         return Err("Choose an Ollama model in App Settings before generating attribute suggestions.".to_string());
@@ -3105,6 +4529,10 @@ async fn generate_attribute_value_suggestions_with_ollama(
     let mut suggestions = Vec::with_capacity(request.items.len());
     let total_items = request.items.len() as u64;
     for (index, item) in request.items.into_iter().enumerate() {
+        if cancelled_runs.0.lock().unwrap().contains(request.run_id.as_str()) {
+            cancelled_runs.0.lock().unwrap().remove(request.run_id.as_str());
+            return Err("Attribute suggestion generation was stopped.".to_string());
+        }
         let item_id = item.id.trim().to_string();
         let item_name = item.name.trim().to_string();
         if item_id.is_empty() || item_name.is_empty() {
@@ -3172,6 +4600,11 @@ async fn generate_attribute_value_suggestions_with_ollama(
             .error_for_status()
             .map_err(|e| format!("Ollama returned an error: {e}"))?;
 
+        if cancelled_runs.0.lock().unwrap().contains(request.run_id.as_str()) {
+            cancelled_runs.0.lock().unwrap().remove(request.run_id.as_str());
+            return Err("Attribute suggestion generation was stopped.".to_string());
+        }
+
         let payload: Value = response.json().await.map_err(|e| e.to_string())?;
         let content = payload
             .get("message")
@@ -3223,6 +4656,19 @@ async fn generate_attribute_value_suggestions_with_ollama(
         base_url,
         suggestions,
     })
+}
+
+#[tauri::command]
+fn cancel_attribute_suggestion_run(
+    run_id: String,
+    cancelled_runs: tauri::State<'_, CancelledAttributeSuggestionRuns>,
+) -> Result<(), String> {
+    let trimmed = run_id.trim();
+    if trimmed.is_empty() {
+        return Err("No attribute suggestion run is active.".to_string());
+    }
+    cancelled_runs.0.lock().unwrap().insert(trimmed.to_string());
+    Ok(())
 }
 
 #[tauri::command]
@@ -3367,21 +4813,24 @@ async fn generate_most_typical_annotation_with_ollama(
     }
 
     let total = request.annotations.len();
+    let return_count = total.min(5);
 
-    let system_prompt =
+    let system_prompt = format!(
         "You are a qualitative research assistant. Given a code and its annotations, identify the \
-        single annotation that best exemplifies the core meaning of this code — the most canonical, \
-        representative example a researcher would use to illustrate it.\n\n\
+        {return_count} annotations that best exemplify the core meaning of this code - the most canonical, \
+        representative examples a researcher would use to illustrate it.\n\n\
         Return strict JSON only in this exact shape (no markdown fences, no extra keys):\n\
-        {\"annotation_index\": N, \"reasoning\": \"2-3 sentence explanation\"}\n\
-        N must be a number between 1 and the total number of annotations provided.";
+        {{\"annotations\": [{{\"annotation_index\": N, \"reasoning\": \"1-2 sentence explanation\"}}]}}\n\
+        Return exactly {return_count} items. N must be a number between 1 and the total number of annotations provided."
+    );
 
     let user_message = format!(
-        "Code: {}\nDescription: {}\n\nTotal annotations: {}\n\nAnnotations:\n{}\n\nWhich single annotation (by number) best exemplifies this code?",
+        "Code: {}\nDescription: {}\n\nTotal annotations: {}\n\nAnnotations:\n{}\n\nWhich {} annotations (by number) best exemplify this code?",
         request.code_label.trim(),
         description,
         total,
         annotations_text,
+        return_count,
     );
 
     let response = client
@@ -3416,17 +4865,21 @@ async fn generate_most_typical_annotation_with_ollama(
         .ok_or_else(|| "Ollama returned an empty response.".to_string())?;
 
     let json_content = extract_json_object(content).unwrap_or(content);
-    let parsed: OllamaMostTypicalAnnotationModelResponse = serde_json::from_str(json_content)
-        .map_err(|e| format!("Could not parse Ollama's response: {e}"))?;
+    let parsed = parse_most_typical_annotation_payload(json_content)?;
 
-    let idx = parsed.annotation_index;
-    if idx < 1 || idx > total as u64 {
-        return Err(format!("Ollama returned an out-of-range annotation index ({idx})."));
+    let annotations = parsed
+        .annotations
+        .into_iter()
+        .filter(|item| item.annotation_index >= 1 && item.annotation_index <= total as u64)
+        .take(return_count)
+        .collect::<Vec<_>>();
+
+    if annotations.is_empty() {
+        return Err("Ollama did not return any valid typical annotation indexes.".to_string());
     }
 
     Ok(OllamaMostTypicalAnnotationResponse {
-        annotation_index: idx,
-        reasoning: parsed.reasoning.unwrap_or_default().trim().to_string(),
+        annotations,
         model: request.model,
         base_url,
     })
@@ -3814,31 +5267,32 @@ async fn generate_code_unique_annotations_with_ollama(
 
     let description = request.code_description.as_deref().map(str::trim).filter(|v| !v.is_empty()).unwrap_or("No description provided");
     let total = request.annotations.len();
-    let return_count = total.min(3);
+    let return_count = total.min(5);
 
     let mut annotations_text = String::new();
     for (i, ann) in request.annotations.iter().enumerate() {
         let line = format!("[{}] [{}] \"{}\"\n", i + 1, ann.document_name.trim(), ann.quote.trim());
-        if annotations_text.len() + line.len() > 16_000 { annotations_text.push_str("... (truncated)\n"); break; }
+        if annotations_text.len() + line.len() > 16_000 {
+            annotations_text.push_str("... (truncated)\n");
+            break;
+        }
         annotations_text.push_str(&line);
     }
 
     let system_prompt = format!(
-        "You are a qualitative research assistant. Identify the {} annotations that are most \
-        semantically unique — the ones most distinct from all others for this code, capturing edge \
+        "You are a qualitative research assistant. Identify the {return_count} annotations that are most \
+        semantically unique - the ones most distinct from all others for this code, capturing edge \
         cases, unusual dimensions, or aspects underrepresented by the rest.\n\n\
-        Return strict JSON only (no markdown fences, no extra keys):\n\
-        {{\"annotations\": [\
-          {{\"index\": N, \"reasoning\": \"one sentence\"}},\
-          ...\
-        ]}}\n\
-        Return exactly {} items. N is the 1-based index of the annotation.",
-        return_count, return_count
+        Return strict JSON only in this exact shape (no markdown fences, no extra keys):\n\
+        {{\"annotations\": [{{\"annotation_index\": N, \"reasoning\": \"1-2 sentence explanation\"}}]}}\n\
+        Return exactly {return_count} items. N must be a number between 1 and the total number of annotations provided."
     );
 
     let user_message = format!(
         "Code: {}\nDescription: {}\n\nAnnotations:\n{}",
-        request.code_label.trim(), description, annotations_text
+        request.code_label.trim(),
+        description,
+        annotations_text
     );
 
     let response = client.post(format!("{base_url}/api/chat"))
@@ -3858,16 +5312,20 @@ async fn generate_code_unique_annotations_with_ollama(
         .ok_or_else(|| "Ollama returned an empty response.".to_string())?;
 
     let json_content = extract_json_object(content).unwrap_or(content);
-    let parsed: OllamaUniqueAnnotationsModelResponse = serde_json::from_str(json_content)
-        .map_err(|e| format!("Could not parse Ollama's response: {e}"))?;
+    let parsed = parse_unique_annotations_payload(json_content)?;
 
     let annotations = parsed.annotations.into_iter()
         .filter(|item| item.index >= 1 && item.index <= total as u64)
+        .take(return_count)
         .map(|item| OllamaUniqueAnnotationItem {
             annotation_index: item.index,
             reasoning: item.reasoning.unwrap_or_default().trim().to_string(),
         })
-        .collect();
+        .collect::<Vec<_>>();
+
+    if annotations.is_empty() {
+        return Err("Ollama did not return any valid unique annotation indexes.".to_string());
+    }
 
     Ok(OllamaUniqueAnnotationsResponse { annotations, model: request.model, base_url })
 }
@@ -3882,10 +5340,25 @@ fn get_project_embedding_index_status(
 
 #[tauri::command]
 fn delete_project_embedding_index(
+    auth_token: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
     project_id: String,
 ) -> Result<ProjectEmbeddingIndexStatus, String> {
+    let client = reqwest::Client::new();
+    let requester = tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
+    if requester.app_role != "administrator" {
+        let superuser_token = tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
+        let project_role = tauri::async_runtime::block_on(find_project_role_for_user(
+            &client,
+            &superuser_token,
+            &project_id,
+            &requester.user_id,
+        ))?;
+        if !project_role_allows_embedding_build(project_role.as_deref()) {
+            return Err("You do not have permission to delete project embeddings.".to_string());
+        }
+    }
     let current = state.0.lock().unwrap().clone();
     if (current.phase == "running" || current.phase == "cancelling")
         && current.project_id.as_deref() == Some(project_id.as_str())
@@ -3909,23 +5382,57 @@ fn get_project_embedding_build_status(
 
 #[tauri::command]
 fn cancel_project_embedding_build(
+    auth_token: String,
+    app: tauri::AppHandle,
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
-) -> ProjectEmbeddingBuildStatus {
+) -> Result<ProjectEmbeddingBuildStatus, String> {
+    let client = reqwest::Client::new();
+    let requester = tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
+    let current = state.0.lock().unwrap().clone();
+    if requester.app_role != "administrator" {
+        if let Some(project_id) = current.project_id.clone() {
+            let superuser_token = tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
+            let project_role = tauri::async_runtime::block_on(find_project_role_for_user(
+                &client,
+                &superuser_token,
+                &project_id,
+                &requester.user_id,
+            ))?;
+            if !project_role_allows_embedding_build(project_role.as_deref()) {
+                return Err("You do not have permission to cancel this embedding build.".to_string());
+            }
+        }
+    }
     let mut guard = state.0.lock().unwrap();
     if guard.phase == "running" {
         guard.cancel_requested = true;
         guard.phase = "cancelling".to_string();
         guard.message = Some("Cancelling embedding build...".to_string());
     }
-    guard.clone().into()
+    Ok(guard.clone().into())
 }
 
 #[tauri::command]
 fn build_project_embedding_index_command(
+    auth_token: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
     request: ProjectEmbeddingBuildRequest,
 ) -> Result<ProjectEmbeddingBuildStatus, String> {
+    let client = reqwest::Client::new();
+    let requester = tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
+    if requester.app_role != "administrator" {
+        let superuser_token = tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
+        let project_role = tauri::async_runtime::block_on(find_project_role_for_user(
+            &client,
+            &superuser_token,
+            &request.project_id,
+            &requester.user_id,
+        ))?;
+        if !project_role_allows_embedding_build(project_role.as_deref()) {
+            return Err("You do not have permission to build project embeddings.".to_string());
+        }
+    }
     let current = state.0.lock().unwrap().clone();
     if current.phase == "running" || current.phase == "cancelling" {
         return Err("A project embedding build is already in progress.".to_string());
@@ -4030,11 +5537,14 @@ fn get_network_mode(state: tauri::State<'_, NetworkMode>) -> String {
 /// mode: "local" → binds to 127.0.0.1:8090, "lan" → binds to 0.0.0.0:8090
 #[tauri::command]
 async fn set_network_mode(
+    auth_token: String,
     mode: String,
     app: tauri::AppHandle,
     pb_process: tauri::State<'_, PbProcess>,
     network_mode: tauri::State<'_, NetworkMode>,
 ) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    authenticate_requesting_user(&client, &auth_token).await?;
     let bind = match mode.as_str() {
         "lan"   => "0.0.0.0:8090",
         _       => "127.0.0.1:8090",
@@ -4074,6 +5584,29 @@ async fn set_network_mode(
     Ok(())
 }
 
+#[tauri::command]
+async fn start_local_pocketbase_command(
+    app: tauri::AppHandle,
+    pb_process: tauri::State<'_, PbProcess>,
+    network_mode: tauri::State<'_, NetworkMode>,
+) -> Result<String, String> {
+    start_local_pocketbase_runtime(&app, &pb_process, &network_mode).await?;
+    Ok(PB_URL.to_string())
+}
+
+#[tauri::command]
+fn stop_local_pocketbase_command(
+    pb_process: tauri::State<'_, PbProcess>,
+    network_mode: tauri::State<'_, NetworkMode>,
+) -> Result<(), String> {
+    kill_pocketbase_process(&pb_process);
+    {
+        let mut guard = network_mode.0.lock().unwrap();
+        *guard = "local".to_string();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -4084,56 +5617,18 @@ pub fn run() {
         .manage(PbProcess(Mutex::new(None)))
         .manage(EmbeddingModelDownloadState(Mutex::new(EmbeddingModelDownloadStatusState::idle())))
         .manage(ProjectEmbeddingBuildState(Mutex::new(ProjectEmbeddingBuildStatusState::idle())))
+        .manage(CancelledAttributeSuggestionRuns(Mutex::new(HashSet::new())))
         .manage(NetworkMode(Mutex::new("local".to_string())))
         .setup(|app| {
+            create_configured_window(app, "main").expect("could not create main window");
+            create_configured_window(app, "splashscreen").expect("could not create splashscreen window");
+
             let app_data_dir = kanqual_data_dir(&app.app_handle())
                 .expect("could not resolve app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
-            let pb_data_dir = app_data_dir.join("pb_data");
-            let pb_dir_arg = format!("--dir={}", pb_data_dir.to_string_lossy());
-            // Point PocketBase at an app-controlled (empty) migrations directory so it
-            // never picks up stale auto-generated JS migrations from the sibling folder.
-            let pb_migrations_dir = pb_data_dir.join("pb_app_migrations");
-            std::fs::create_dir_all(&pb_migrations_dir).ok();
-            let pb_migrations_arg = format!("--migrationsDir={}", pb_migrations_dir.to_string_lossy());
-
             let handle = app.app_handle().clone();
-            let backend_identity = load_or_create_backend_identity(&handle)
-                .expect("could not prepare backend identity");
             tauri::async_runtime::spawn(async move {
-                // Step 1: Run `pocketbase superuser upsert` as a one-shot command.
-                let upsert = handle
-                    .shell()
-                    .sidecar("pocketbase")
-                    .expect("pocketbase sidecar not found")
-                    .args([
-                        "superuser",
-                        "upsert",
-                        &backend_identity.superuser_email,
-                        &backend_identity.superuser_password,
-                        &pb_dir_arg,
-                        &pb_migrations_arg,
-                    ])
-                    .output();
-                if let Err(_) = tokio::time::timeout(Duration::from_secs(10), upsert).await {
-                    eprintln!("[kanqual] pocketbase superuser upsert timed out after 10 s");
-                }
-
-                // Step 2: Start PocketBase server on 127.0.0.1 (local-only, always).
-                match spawn_pb_serve(&handle, "127.0.0.1:8090", &pb_dir_arg, &pb_migrations_arg) {
-                    Ok(child) => {
-                        let pb_state = handle.state::<PbProcess>();
-                        let mut guard = pb_state.0.lock().unwrap();
-                        *guard = Some(child);
-                    }
-                    Err(e) => {
-                        eprintln!("[kanqual] failed to spawn pocketbase: {e}");
-                    }
-                }
-
-                // Step 3: Wait until PocketBase accepts connections.
-                wait_for_pb_port(Duration::from_secs(30)).await;
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(Duration::from_millis(250)).await;
 
                 if let Some(splash) = handle.get_webview_window("splashscreen") {
                     splash.close().ok();
@@ -4148,7 +5643,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             get_pb_url,
-            get_internal_backend_auth,
             get_app_info,
             create_user_account_command,
             register_user_account_command,
@@ -4157,6 +5651,7 @@ pub fn run() {
             update_user_account_command,
             clear_app_data_records_command,
             get_registered_user_count_command,
+            ensure_backend_setup_command,
             encrypt_project_backup,
             decrypt_project_backup_payload,
             decrypt_project_backup_preview,
@@ -4173,6 +5668,7 @@ pub fn run() {
             chat_with_project_ollama,
             find_relevant_project_segments_with_ollama,
             generate_attribute_value_suggestions_with_ollama,
+            cancel_attribute_suggestion_run,
             process_document_with_ollama,
             generate_code_conceptual_summary_with_ollama,
             generate_most_typical_annotation_with_ollama,
@@ -4186,6 +5682,8 @@ pub fn run() {
             download_multilingual_e5_model,
             get_network_mode,
             set_network_mode,
+            start_local_pocketbase_command,
+            stop_local_pocketbase_command,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -4206,5 +5704,40 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        app_role_allows_embedding_model_management,
+        normalized_project_role,
+        project_role_allows_embedding_build,
+    };
+
+    #[test]
+    fn embedding_model_management_is_administrator_only() {
+        assert!(app_role_allows_embedding_model_management("administrator"));
+        assert!(!app_role_allows_embedding_model_management("standard"));
+        assert!(!app_role_allows_embedding_model_management("owner"));
+    }
+
+    #[test]
+    fn embedding_build_allows_owner_and_editor_project_roles() {
+        assert!(project_role_allows_embedding_build(Some("owner")));
+        assert!(project_role_allows_embedding_build(Some("editor")));
+        assert!(!project_role_allows_embedding_build(Some("coder")));
+        assert!(!project_role_allows_embedding_build(Some("viewer")));
+        assert!(!project_role_allows_embedding_build(None));
+    }
+
+    #[test]
+    fn project_role_normalization_matches_current_permission_model() {
+        assert_eq!(normalized_project_role(Some("owner")), "owner");
+        assert_eq!(normalized_project_role(Some("editor")), "editor");
+        assert_eq!(normalized_project_role(Some("coder")), "coder");
+        assert_eq!(normalized_project_role(Some("viewer")), "viewer");
+        assert_eq!(normalized_project_role(Some("unexpected")), "viewer");
+        assert_eq!(normalized_project_role(None), "viewer");
+    }
 }
 

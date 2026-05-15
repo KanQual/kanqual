@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { importProjectBackupIntoProject, importRefiQdaIntoProject, parseProjectBackupJson, parseRefiQdaProject } from "../lib/projectExport";
 import { htmlToPlainText } from "../lib/htmlText";
 import type { PendingImportedUser, Project } from "../types";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 const LOCAL_PB_URL = "http://127.0.0.1:8090";
 type NewProjectMode = "choice" | "create" | "import" | "import-encrypted" | "import-refi" | null;
@@ -93,6 +94,7 @@ export function ProjectsView() {
   const [encryptedImportPreview, setEncryptedImportPreview] = useState<EncryptedBackupPreview | null>(null);
   const [importCompleteProject, setImportCompleteProject] = useState<Project | null>(null);
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [resolutionIntro, setResolutionIntro] = useState<{
     project: Project;
     users: PendingImportedUser[];
@@ -354,7 +356,12 @@ export function ProjectsView() {
   return (
     <div className="view projects-view">
       <header className="view-header">
-        <h1>Projects</h1>
+        <div className="view-title-with-help">
+          <h1>Projects</h1>
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open projects help">
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
+        </div>
         {isLocal && (
           <button className="btn btn--primary" onClick={() => goToMode("choice")}>
             + New Project
@@ -366,7 +373,7 @@ export function ProjectsView() {
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>New Project</h2>
-            <div className="new-project-options">
+              <div className="mode-options">
               <button className="mode-option" onClick={() => goToMode("create")}>
                 <span className="mode-option-title">Create Empty Project</span>
                 <span className="mode-option-desc">Start from scratch with a blank Kanqual project.</span>
@@ -456,7 +463,7 @@ export function ProjectsView() {
 
       {mode === "import-encrypted" && (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Import Encrypted Backup</h2>
             <div className="form">
               {!encryptedImportPreview ? (
@@ -669,6 +676,30 @@ export function ProjectsView() {
               >
                 Configure Users
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Projects Help</h2>
+            <div className="app-settings-modal-body">
+              <p className="settings-section-desc">
+                The Projects page is where you open, create, import, and manage projects available in the current workspace.
+              </p>
+              <ul className="settings-help-list">
+                <li>On a local workspace, use New Project to create an empty project or import an existing one.</li>
+                <li>KanQual can import plain JSON backups, encrypted backups, and REFI-QDA .qdpx projects.</li>
+                <li>Project deletion is limited to project owners and requires typing the project name to confirm.</li>
+                <li>When imports include users that do not match this workspace, KanQual will pause and ask you to resolve those accounts.</li>
+              </ul>
+              <div className="form-actions">
+                <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -29,16 +29,61 @@ import {
   normalizeProjectRole,
   type Permission,
 } from "../lib/permissions";
+import {
+  AI_JOB_COLLECTION,
+  cancelAiJob,
+  createAttributeSuggestionAiJob,
+  createCodeConceptualSummaryAiJob,
+  createCodeDecompositionAiJob,
+  createCodePositionAiJob,
+  createCodeUniqueAnnotationsAiJob,
+  createDocumentProcessingAiJob,
+  createEmbeddingBuildAiJob,
+  createMostTypicalAnnotationAiJob,
+  createProjectChatAiJob,
+  createRelevantSegmentsAiJob,
+  isLocalBackendUrl,
+  toAiJobRecord,
+  waitForAiJobTerminalState,
+  type AttributeSuggestionAiJobRequest,
+  type AttributeSuggestionAiJobResult,
+  type CodeAnalysisBaseAiJobRequest,
+  type CodeConceptualSummaryAiJobResult,
+  type CodeDecompositionAiJobResult,
+  type CodePositionAiJobRequest,
+  type CodePositionAiJobResult,
+  type CodeUniqueAnnotationsAiJobResult,
+  type DocumentProcessingAiJobRequest,
+  type EmbeddingBuildAiJobRequest,
+  type MostTypicalAnnotationAiJobResult,
+  type ProjectChatAiJobRequest,
+  type ProjectChatAiJobResult,
+  type RelevantSegmentsAiJobRequest,
+  type RelevantSegmentsAiJobResult,
+} from "../lib/aiJobs";
 import { ensureSetup, getBackendIdentitySnapshot } from "../lib/pb";
 import { createProjectBackup } from "../lib/projectBackups";
 import type {
   ProjectEmbeddingBuildItem,
   ProjectEmbeddingBuildStatus,
 } from "../lib/projectEmbeddings";
+import { buildProjectEmbeddingItems } from "../lib/projectEmbeddings";
 import {
+  DEFAULT_PROJECT_AI_ASSIST_SETTINGS,
+  DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS,
+  DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS,
+  loadProjectAiAssistSettings,
+  loadProjectSettingsSnapshot,
+  projectAiAssistSettingsFromRecord,
+  projectAiAssistRuntimeStatusFromRecord,
+  projectDocumentImportSettingsFromRecord,
   saveProjectAiAssistSettings,
+  saveProjectAiAssistRuntimeStatus,
+  saveProjectDocumentImportSettings,
+  type ProjectDocumentImportSettings,
   type ProjectAiAssistSettings,
-} from "../lib/projectAiAssistSettings";
+  type ProjectAiAssistRuntimeStatus,
+} from "../lib/projectSettings";
 
 const RECENT_PROJECTS_KEY = "kq_recent_projects";
 
@@ -76,6 +121,81 @@ function isSnapshotTooLongError(error: unknown): boolean {
   const snapshotError = maybe.response?.data?.snapshot;
   const message = `${snapshotError?.message || ""} ${snapshotError?.code || ""}`.toLowerCase();
   return message.includes("no more than 5000") || message.includes("validation_max_text_constraint");
+}
+
+function sameProjectAiAssistRuntimeStatus(
+  left: ProjectAiAssistRuntimeStatus,
+  right: ProjectAiAssistRuntimeStatus,
+): boolean {
+  return (
+    left.hostEmbeddingModelInstalled === right.hostEmbeddingModelInstalled
+    && left.hostLlmEnabled === right.hostLlmEnabled
+    && left.hostLlmModelSelected === right.hostLlmModelSelected
+    && left.hostLlmConnectionLive === right.hostLlmConnectionLive
+    && left.hostProjectEmbeddingsReady === right.hostProjectEmbeddingsReady
+  );
+}
+
+function normalizeAnnotationIndexListResult(
+  raw: unknown,
+): Array<{ annotationIndex: number; reasoning: string }> {
+  if (!raw || typeof raw !== "object") return [];
+  const candidate = raw as Record<string, unknown>;
+  const rows = Array.isArray(candidate.annotations)
+    ? candidate.annotations
+    : Array.isArray(candidate.items)
+      ? candidate.items
+      : Array.isArray(candidate.results)
+        ? candidate.results
+        : null;
+
+  if (rows) {
+    return rows
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const rawIndex = row.annotationIndex ?? row.annotation_index ?? row.index ?? row.annotation;
+        const annotationIndex = typeof rawIndex === "number"
+          ? rawIndex
+          : typeof rawIndex === "string"
+            ? Number(rawIndex)
+            : NaN;
+        if (!Number.isFinite(annotationIndex)) return null;
+        return {
+          annotationIndex,
+          reasoning: typeof row.reasoning === "string" ? row.reasoning : typeof row.reason === "string" ? row.reason : "",
+        };
+      })
+      .filter((item): item is { annotationIndex: number; reasoning: string } => item !== null);
+  }
+
+  const rawIndex = candidate.annotationIndex ?? candidate.annotation_index ?? candidate.index ?? candidate.annotation;
+  const annotationIndex = typeof rawIndex === "number"
+    ? rawIndex
+    : typeof rawIndex === "string"
+      ? Number(rawIndex)
+      : NaN;
+  if (!Number.isFinite(annotationIndex)) return [];
+  return [{
+    annotationIndex,
+    reasoning: typeof candidate.reasoning === "string" ? candidate.reasoning : typeof candidate.reason === "string" ? candidate.reason : "",
+  }];
+}
+
+function normalizeMostTypicalAnnotationAiJobResult(raw: unknown): MostTypicalAnnotationAiJobResult {
+  const candidate = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  return {
+    annotations: normalizeAnnotationIndexListResult(raw),
+    model: typeof candidate.model === "string" ? candidate.model : "",
+  };
+}
+
+function normalizeCodeUniqueAnnotationsAiJobResult(raw: unknown): CodeUniqueAnnotationsAiJobResult {
+  const candidate = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  return {
+    annotations: normalizeAnnotationIndexListResult(raw),
+    model: typeof candidate.model === "string" ? candidate.model : "",
+  };
 }
 
 // ─── Map PocketBase records to our typed model ───────────────────────────────
@@ -230,6 +350,19 @@ type BackgroundDocumentProcessingStatus = {
   }>;
 };
 
+type PendingNewMemoContext = {
+  annotationIds?: string[];
+};
+
+type AiCodingRelevantSegmentsSession = {
+  searching: boolean;
+  lockedCodeId: string | null;
+  results: RelevantSegmentsAiJobResult["segments"];
+  lastModel: string;
+  searchError: string;
+  searchNotice: string;
+};
+
 type EmbeddingModelDownloadStatus = {
   phase: "idle" | "downloading" | "cancelling" | "cancelled" | "completed" | "error";
   downloadedBytes: number;
@@ -309,7 +442,10 @@ export function useAppStore(pb: PocketBase) {
     endOffset: number;
     label?: string;
   } | null>(null);
+  const [aiCodingRelevantSegmentsSessions, setAiCodingRelevantSegmentsSessions] =
+    useState<Record<string, AiCodingRelevantSegmentsSession>>({});
   const [pendingMemoId, setPendingMemoId] = useState<string | null>(null);
+  const [pendingNewMemoContext, setPendingNewMemoContext] = useState<PendingNewMemoContext | null>(null);
   const [pendingCaseId, setPendingCaseId] = useState<string | null>(null);
   const [pendingImportedUserResolution, setPendingImportedUserResolution] =
     useState<PendingImportedUserResolution | null>(null);
@@ -318,6 +454,18 @@ export function useAppStore(pb: PocketBase) {
   const [projectEmbeddingBuildStatus, setProjectEmbeddingBuildStatus] =
     useState<ProjectEmbeddingBuildStatus | null>(null);
   const [projectEmbeddingBuildBannerOpen, setProjectEmbeddingBuildBannerOpen] = useState(false);
+  const projectEmbeddingRemoteJobRef = useRef<Promise<void> | null>(null);
+  const [projectAiAssistSettings, setProjectAiAssistSettings] = useState<ProjectAiAssistSettings>(
+    DEFAULT_PROJECT_AI_ASSIST_SETTINGS,
+  );
+  const [projectAiAssistRuntimeStatus, setProjectAiAssistRuntimeStatus] = useState<ProjectAiAssistRuntimeStatus>(
+    DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS,
+  );
+  const projectAiAssistRuntimeStatusRef = useRef<ProjectAiAssistRuntimeStatus>(DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS);
+  const [projectAiAssistSettingsLoading, setProjectAiAssistSettingsLoading] = useState(false);
+  const [projectDocumentImportSettings, setProjectDocumentImportSettings] = useState<ProjectDocumentImportSettings>(
+    DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS,
+  );
   const [documentProcessingStatus, setDocumentProcessingStatus] =
     useState<BackgroundDocumentProcessingStatus | null>(null);
   const [documentProcessingBannerOpen, setDocumentProcessingBannerOpen] = useState(false);
@@ -332,6 +480,7 @@ export function useAppStore(pb: PocketBase) {
   const embeddingModelDownloadLastPhaseRef = useRef<EmbeddingModelDownloadStatus["phase"] | null>(null);
   const embeddingModelDownloadJobRef = useRef<Promise<void> | null>(null);
   const documentProcessingJobRef = useRef<Promise<void> | null>(null);
+  const aiJobWorkerRunningRef = useRef(false);
   const startupRestoreAttempted = useRef(false);
   const appRole = normalizeAppRole(pb.authStore.record?.app_role);
   const isAdministrator = appRole === "administrator";
@@ -346,6 +495,10 @@ export function useAppStore(pb: PocketBase) {
   useEffect(() => {
     activeDocumentLockRef.current = activeDocumentLock;
   }, [activeDocumentLock]);
+
+  useEffect(() => {
+    projectAiAssistRuntimeStatusRef.current = projectAiAssistRuntimeStatus;
+  }, [projectAiAssistRuntimeStatus]);
 
   // ── Logging ───────────────────────────────────────────────────────────────
 
@@ -373,7 +526,925 @@ export function useAppStore(pb: PocketBase) {
     [pb]
   );
 
+  const runProjectChatRequestLocally = useCallback(
+    async (request: ProjectChatAiJobRequest): Promise<ProjectChatAiJobResult> => {
+      const llmSettings = readAppSettings().llm;
+      if (!llmSettings.ollamaEnabled) {
+        throw new Error("Enable Ollama in App Settings before using project chat.");
+      }
+      if (!llmSettings.ollamaSelectedModel) {
+        throw new Error("Choose an Ollama model in App Settings before using project chat.");
+      }
+      return invoke<ProjectChatAiJobResult>("chat_with_project_ollama", {
+        request: {
+          projectId: request.projectId,
+          query: request.query,
+          conversation: request.conversation,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          prefixQueries: llmSettings.prefixQueries,
+          selectedContextMode: request.selectedContextMode,
+          selectedDocumentIds: request.selectedDocumentIds,
+          selectedCaseIds: request.selectedCaseIds,
+          selectedCodeIds: request.selectedCodeIds,
+          selectedAnnotationIds: request.selectedAnnotationIds,
+          selectedMemoIds: request.selectedMemoIds,
+        },
+      });
+    },
+    [],
+  );
+
+  const getHostLlmSettingsOrThrow = useCallback((): LlmSettings => {
+    const llmSettings = readAppSettings().llm;
+    if (!llmSettings.ollamaEnabled) {
+      throw new Error("Enable Ollama in App Settings on the host device before using AI Assist.");
+    }
+    if (!llmSettings.ollamaSelectedModel) {
+      throw new Error("Choose an Ollama model in App Settings on the host device before using AI Assist.");
+    }
+    return llmSettings;
+  }, []);
+
+  const processDocumentsWithHostRuntime = useCallback(
+    async (
+      request: DocumentProcessingAiJobRequest,
+      onProgress?: (status: {
+        completedDocuments: number;
+        totalDocuments: number;
+        currentDocumentName: string;
+        message: string;
+        failures: Array<{ documentName: string; message: string }>;
+      }) => Promise<void> | void,
+    ) => {
+      const llmSettings = readAppSettings().llm;
+      if (!llmSettings.ollamaEnabled) {
+        throw new Error("Enable Ollama in App Settings before processing documents.");
+      }
+      if (!llmSettings.ollamaSelectedModel) {
+        throw new Error("Choose an Ollama model in App Settings before processing documents.");
+      }
+
+      const selectedDocuments = (
+        await Promise.all(
+          request.documentIds.map(async (documentId) => {
+            try {
+              const record = await pb.collection("documents").getOne(documentId);
+              if (record.project !== request.projectId || record.deleted_at) return null;
+              return {
+                id: record.id,
+                name: String(record.name ?? "Untitled document"),
+                filePath: String(record.file_path ?? ""),
+                content: String(record.content ?? ""),
+              };
+            } catch {
+              return null;
+            }
+          }),
+        )
+      ).filter((document): document is { id: string; name: string; filePath: string; content: string } => Boolean(document));
+
+      if (selectedDocuments.length === 0) {
+        throw new Error("Select at least one document to process.");
+      }
+
+      const interDocumentCooldownMs = 10_000;
+      const failures: Array<{ documentName: string; message: string }> = [];
+      for (let index = 0; index < selectedDocuments.length; index += 1) {
+        const document = selectedDocuments[index];
+        await onProgress?.({
+          completedDocuments: index,
+          totalDocuments: selectedDocuments.length,
+          currentDocumentName: document.name,
+          message: `Processing ${document.name} (${index + 1} of ${selectedDocuments.length}).`,
+          failures: [...failures],
+        });
+
+        try {
+          const response = await invoke<{
+            processedContent: string;
+            segments: unknown[];
+            properNameCandidates: unknown[];
+            model: string;
+            baseUrl: string;
+            chunkCount: number;
+          }>("process_document_with_ollama", {
+            request: {
+              documentContent: document.content,
+              protocol: llmSettings.ollamaProtocol,
+              host: llmSettings.ollamaHost,
+              port: llmSettings.ollamaPort,
+              model: llmSettings.ollamaSelectedModel,
+              timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+              temperature: llmSettings.ollamaTemperature,
+              numCtx: llmSettings.ollamaNumCtx,
+              keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+            },
+          });
+
+          const payload = {
+            project: request.projectId,
+            document: document.id,
+            document_name: document.name,
+            file_path: document.filePath,
+            status: "pending_review",
+            model: response.model,
+            base_url: response.baseUrl,
+            chunk_count: response.chunkCount,
+            processed_content: response.processedContent,
+            segments_json: JSON.stringify(response.segments),
+            proper_name_candidates_json: JSON.stringify(response.properNameCandidates),
+            enabled_review_lenses_json: JSON.stringify(request.reviewLenses),
+            exported_to_project: false,
+            created_by: pb.authStore.record?.id ?? "",
+            created_by_identifier: String(pb.authStore.record?.user_identifier ?? ""),
+            deleted_at: "",
+          };
+
+          try {
+            const existing = await pb.collection("processed_document_reviews").getFirstListItem(
+              `project="${request.projectId}"&&document="${document.id}"&&deleted_at=""`,
+            );
+            await pb.collection("processed_document_reviews").update(existing.id, payload);
+          } catch {
+            await pb.collection("processed_document_reviews").create(payload);
+          }
+        } catch (error) {
+          failures.push({
+            documentName: document.name,
+            message: error instanceof Error && error.message.trim()
+              ? error.message
+              : typeof error === "string" && error.trim()
+                ? error
+                : "Could not process this document.",
+          });
+        }
+
+        await onProgress?.({
+          completedDocuments: index + 1,
+          totalDocuments: selectedDocuments.length,
+          currentDocumentName: document.name,
+          message: `Processed ${index + 1} of ${selectedDocuments.length} document${selectedDocuments.length === 1 ? "" : "s"}.`,
+          failures: [...failures],
+        });
+
+        if (index < selectedDocuments.length - 1) {
+          const nextDocument = selectedDocuments[index + 1];
+          await onProgress?.({
+            completedDocuments: index + 1,
+            totalDocuments: selectedDocuments.length,
+            currentDocumentName: nextDocument.name,
+            message: `Cooling down for 10 seconds before processing ${nextDocument.name} (${index + 2} of ${selectedDocuments.length}).`,
+            failures: [...failures],
+          });
+          await new Promise((resolve) => window.setTimeout(resolve, interDocumentCooldownMs));
+        }
+      }
+
+      return {
+        totalDocuments: selectedDocuments.length,
+        processedDocuments: selectedDocuments.length - failures.length,
+        failures,
+      };
+    },
+    [pb],
+  );
+
+  const runProjectChat = useCallback(
+    async (request: ProjectChatAiJobRequest, onProgress?: (message: string) => void): Promise<ProjectChatAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runProjectChatRequestLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createProjectChatAiJob(pb, request);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") {
+        throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      }
+      return JSON.parse(terminal.resultJson) as ProjectChatAiJobResult;
+    },
+    [pb, runProjectChatRequestLocally],
+  );
+
+  const runAttributeSuggestionsLocally = useCallback(
+    async (request: AttributeSuggestionAiJobRequest): Promise<AttributeSuggestionAiJobResult> => {
+      const llmSettings = getHostLlmSettingsOrThrow();
+      return invoke<AttributeSuggestionAiJobResult>("generate_attribute_value_suggestions_with_ollama", {
+        request: {
+          runId: request.runId,
+          attributeName: request.attributeName,
+          attributeDataType: request.attributeDataType,
+          attributeDescription: request.attributeDescription,
+          attributeOptions: request.attributeOptions,
+          items: request.items,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+        },
+      });
+    },
+    [getHostLlmSettingsOrThrow],
+  );
+
+  const runAttributeSuggestions = useCallback(
+    async (
+      request: AttributeSuggestionAiJobRequest,
+      onProgress?: (message: string) => void,
+      onJobQueued?: (jobId: string) => void,
+    ): Promise<AttributeSuggestionAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runAttributeSuggestionsLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createAttributeSuggestionAiJob(pb, request);
+      onJobQueued?.(job.id);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 20 * 60 * 1000,
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") {
+        throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      }
+      return JSON.parse(terminal.resultJson) as AttributeSuggestionAiJobResult;
+    },
+    [pb, runAttributeSuggestionsLocally],
+  );
+
+  const cancelAttributeSuggestionRun = useCallback(
+    async (runId: string, jobId?: string | null) => {
+      const message = "Attribute suggestion generation was stopped.";
+      if (isLocalBackendUrl(pb.baseURL)) {
+        await invoke("cancel_attribute_suggestion_run", { runId });
+        return;
+      }
+      if (!jobId) return;
+      await cancelAiJob(pb, jobId, message);
+    },
+    [pb],
+  );
+
+  const runRelevantSegmentSearchLocally = useCallback(
+    async (request: RelevantSegmentsAiJobRequest): Promise<RelevantSegmentsAiJobResult> => {
+      const llmSettings = getHostLlmSettingsOrThrow();
+      return invoke<RelevantSegmentsAiJobResult>("find_relevant_project_segments_with_ollama", {
+        request: {
+          projectId: request.projectId,
+          activeDocumentId: request.activeDocumentId,
+          codeId: request.codeId,
+          codeLabel: request.codeLabel,
+          codeDescription: request.codeDescription,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          candidateLimit: llmSettings.ollamaRelevantSegmentsCandidateLimit,
+          maxResults: llmSettings.ollamaRelevantSegmentsMaxResults,
+          prefixQueries: llmSettings.prefixQueries,
+        },
+      });
+    },
+    [getHostLlmSettingsOrThrow],
+  );
+
+  const runRelevantSegmentSearch = useCallback(
+    async (request: RelevantSegmentsAiJobRequest, onProgress?: (message: string) => void): Promise<RelevantSegmentsAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runRelevantSegmentSearchLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createRelevantSegmentsAiJob(pb, request);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 20 * 60 * 1000,
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") {
+        throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      }
+      return JSON.parse(terminal.resultJson) as RelevantSegmentsAiJobResult;
+    },
+    [pb, runRelevantSegmentSearchLocally],
+  );
+
+  const startAiCodingRelevantSegmentsSearch = useCallback(
+    async (request: RelevantSegmentsAiJobRequest & { documentName?: string | null }) => {
+      const documentId = request.activeDocumentId;
+      const codeLabel = request.codeLabel;
+      setAiCodingRelevantSegmentsSessions((prev) => ({
+        ...prev,
+        [documentId]: {
+          searching: true,
+          lockedCodeId: request.codeId,
+          results: prev[documentId]?.results ?? [],
+          lastModel: prev[documentId]?.lastModel ?? "",
+          searchError: "",
+          searchNotice: `Ollama is reviewing indexed segments from the open document for "${codeLabel}".`,
+        },
+      }));
+
+      try {
+        const response = await runRelevantSegmentSearch(request, (message) => {
+          setAiCodingRelevantSegmentsSessions((prev) => {
+            const existing = prev[documentId];
+            if (!existing) return prev;
+            return {
+              ...prev,
+              [documentId]: {
+                ...existing,
+                searching: true,
+                searchNotice: message,
+              },
+            };
+          });
+        });
+
+        setAiCodingRelevantSegmentsSessions((prev) => ({
+          ...prev,
+          [documentId]: {
+            searching: false,
+            lockedCodeId: request.codeId,
+            results: response.segments,
+            lastModel: response.model,
+            searchError: "",
+            searchNotice:
+              response.segments.length > 0
+                ? `Ollama reviewed ${response.searchedItems} indexed candidates and returned ${response.segments.length} relevant segments.`
+                : `Ollama reviewed ${response.searchedItems} indexed candidates but did not identify any strong matches yet.`,
+          },
+        }));
+      } catch (error) {
+        setAiCodingRelevantSegmentsSessions((prev) => ({
+          ...prev,
+          [documentId]: {
+            searching: false,
+            lockedCodeId: request.codeId,
+            results: [],
+            lastModel: "",
+            searchError: error instanceof Error ? error.message : "Could not search for relevant segments.",
+            searchNotice: "",
+          },
+        }));
+        throw error;
+      }
+    },
+    [runRelevantSegmentSearch],
+  );
+
+  const clearAiCodingRelevantSegmentsSearch = useCallback((documentId: string) => {
+    setAiCodingRelevantSegmentsSessions((prev) => {
+      if (!prev[documentId]) return prev;
+      const next = { ...prev };
+      delete next[documentId];
+      return next;
+    });
+  }, []);
+
+  const runCodeConceptualSummaryLocally = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest): Promise<CodeConceptualSummaryAiJobResult> => {
+      const llmSettings = getHostLlmSettingsOrThrow();
+      return invoke<CodeConceptualSummaryAiJobResult>("generate_code_conceptual_summary_with_ollama", {
+        request: {
+          ...request,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+        },
+      });
+    },
+    [getHostLlmSettingsOrThrow],
+  );
+
+  const runCodeConceptualSummary = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest, onProgress?: (message: string) => void): Promise<CodeConceptualSummaryAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runCodeConceptualSummaryLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createCodeConceptualSummaryAiJob(pb, request);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 20 * 60 * 1000,
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      return JSON.parse(terminal.resultJson) as CodeConceptualSummaryAiJobResult;
+    },
+    [pb, runCodeConceptualSummaryLocally],
+  );
+
+  const runMostTypicalAnnotationLocally = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest): Promise<MostTypicalAnnotationAiJobResult> => {
+      const llmSettings = getHostLlmSettingsOrThrow();
+      const result = await invoke<unknown>("generate_most_typical_annotation_with_ollama", {
+        request: {
+          ...request,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+        },
+      });
+      return normalizeMostTypicalAnnotationAiJobResult(result);
+    },
+    [getHostLlmSettingsOrThrow],
+  );
+
+  const runMostTypicalAnnotation = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest, onProgress?: (message: string) => void): Promise<MostTypicalAnnotationAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runMostTypicalAnnotationLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createMostTypicalAnnotationAiJob(pb, request);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 20 * 60 * 1000,
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      return normalizeMostTypicalAnnotationAiJobResult(JSON.parse(terminal.resultJson));
+    },
+    [pb, runMostTypicalAnnotationLocally],
+  );
+
+  const runCodeDecompositionLocally = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest): Promise<CodeDecompositionAiJobResult> => {
+      const llmSettings = getHostLlmSettingsOrThrow();
+      return invoke<CodeDecompositionAiJobResult>("generate_code_decomposition_with_ollama", {
+        request: {
+          ...request,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+        },
+      });
+    },
+    [getHostLlmSettingsOrThrow],
+  );
+
+  const runCodeDecomposition = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest, onProgress?: (message: string) => void): Promise<CodeDecompositionAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runCodeDecompositionLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createCodeDecompositionAiJob(pb, request);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 20 * 60 * 1000,
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      return JSON.parse(terminal.resultJson) as CodeDecompositionAiJobResult;
+    },
+    [pb, runCodeDecompositionLocally],
+  );
+
+  const runCodePositionLocally = useCallback(
+    async (request: CodePositionAiJobRequest): Promise<CodePositionAiJobResult> => {
+      const llmSettings = getHostLlmSettingsOrThrow();
+      return invoke<CodePositionAiJobResult>("generate_code_position_with_ollama", {
+        request: {
+          ...request,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+        },
+      });
+    },
+    [getHostLlmSettingsOrThrow],
+  );
+
+  const runCodePosition = useCallback(
+    async (request: CodePositionAiJobRequest, onProgress?: (message: string) => void): Promise<CodePositionAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runCodePositionLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createCodePositionAiJob(pb, request);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 20 * 60 * 1000,
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      return JSON.parse(terminal.resultJson) as CodePositionAiJobResult;
+    },
+    [pb, runCodePositionLocally],
+  );
+
+  const runCodeUniqueAnnotationsLocally = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest): Promise<CodeUniqueAnnotationsAiJobResult> => {
+      const llmSettings = getHostLlmSettingsOrThrow();
+      const result = await invoke<unknown>("generate_code_unique_annotations_with_ollama", {
+        request: {
+          ...request,
+          protocol: llmSettings.ollamaProtocol,
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+          model: llmSettings.ollamaSelectedModel,
+          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
+          temperature: llmSettings.ollamaTemperature,
+          numCtx: llmSettings.ollamaNumCtx,
+          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+        },
+      });
+      return normalizeCodeUniqueAnnotationsAiJobResult(result);
+    },
+    [getHostLlmSettingsOrThrow],
+  );
+
+  const runCodeUniqueAnnotations = useCallback(
+    async (request: CodeAnalysisBaseAiJobRequest, onProgress?: (message: string) => void): Promise<CodeUniqueAnnotationsAiJobResult> => {
+      if (isLocalBackendUrl(pb.baseURL)) {
+        return runCodeUniqueAnnotationsLocally(request);
+      }
+      onProgress?.("Queued for host AI processing...");
+      const job = await createCodeUniqueAnnotationsAiJob(pb, request);
+      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 20 * 60 * 1000,
+        onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
+      });
+      if (terminal.status === "error") throw new Error(terminal.errorMessage || "Host AI processing failed.");
+      return normalizeCodeUniqueAnnotationsAiJobResult(JSON.parse(terminal.resultJson));
+    },
+    [pb, runCodeUniqueAnnotationsLocally],
+  );
+
+  async function loadPermissionContextForUser(projectId: string, userId: string) {
+    const userRecord = await pb.collection("users").getOne(userId);
+    const appRole = normalizeAppRole(userRecord.app_role);
+    let projectRole: Role | null = null;
+    if (appRole === "administrator") {
+      projectRole = "owner";
+    } else {
+      try {
+        const membership = await pb.collection("project_members").getFirstListItem(
+          `project="${projectId}"&&user="${userId}"`,
+        );
+        projectRole = normalizeProjectRole(membership.role);
+      } catch {
+        projectRole = null;
+      }
+    }
+    return { appRole, projectRole };
+  }
+
+  async function buildHostEmbeddingRequestForProject(projectId: string): Promise<EmbeddingBuildStartRequest> {
+    const llmSettings = readAppSettings().llm;
+    const [documentRecords, caseRecords, codeRecords, annotationRecords, memoRecords] = await Promise.all([
+      pb.collection("documents").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "created" }),
+      pb.collection("cases").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "created" }),
+      pb.collection("codes").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "created" }),
+      pb.collection("annotations").getFullList({ filter: `deleted_at=""`, sort: "created" }),
+      pb.collection("memos").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "-created" }),
+    ]);
+    const documents = documentRecords.map(toDocument);
+    const cases = caseRecords.map(toCase);
+    const codes = codeRecords.map(toCode);
+    const documentIds = new Set(documents.map((document) => document.id));
+    const codeIds = new Set(codes.map((code) => code.id));
+    const annotations = annotationRecords
+      .map(toAnnotation)
+      .filter((annotation) => documentIds.has(annotation.documentId) && codeIds.has(annotation.codeId));
+    const memos = memoRecords.map(toMemo);
+    const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, llmSettings);
+    return {
+      projectId,
+      llmSettings: {
+        batchSize: llmSettings.batchSize,
+        chunkSize: llmSettings.chunkSize,
+        overlapSize: llmSettings.overlapSize,
+        prefixPassages: llmSettings.prefixPassages,
+        normalizeWhitespace: llmSettings.normalizeWhitespace,
+      },
+      items,
+    };
+  }
+
+  const processQueuedAiJobs = useCallback(async () => {
+    if (!isLocalBackendUrl(pb.baseURL) || aiJobWorkerRunningRef.current || !pb.authStore.record?.id) return;
+    aiJobWorkerRunningRef.current = true;
+    try {
+      const queuedJobs = await pb.collection(AI_JOB_COLLECTION).getFullList({
+        filter: `status="queued"`,
+        sort: "+created",
+      });
+      for (const queuedRecord of queuedJobs) {
+        const currentRecord = await pb.collection(AI_JOB_COLLECTION).getOne(String((queuedRecord as { id?: unknown }).id ?? ""));
+        const job = toAiJobRecord(currentRecord as unknown as Record<string, unknown>);
+        if (job.status !== "queued") continue;
+        if (!job.id || !job.projectId) continue;
+
+        try {
+          await syncHostAiAssistRuntimeStatusForProject(job.projectId);
+          const aiSettings = await loadProjectAiAssistSettings(pb, job.projectId);
+          if (!aiSettings.enabled) {
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "error",
+              error_message: "AI Assist is disabled for this project.",
+              host_message: "Host rejected this request because AI Assist is disabled for the project.",
+            });
+            continue;
+          }
+          const permissionContext = await loadPermissionContextForUser(job.projectId, job.createdBy);
+          const requiredPermission: Permission =
+            job.jobType === "document_processing"
+              ? "useAiProcessDocuments"
+              : job.jobType === "attribute_suggestions"
+                ? "useAiAttributeTools"
+                : job.jobType === "embedding_build"
+                  ? "buildEmbeddings"
+                : job.jobType === "relevant_segments_search"
+                  ? "useAiCodingTools"
+                  : job.jobType === "code_conceptual_summary"
+                    || job.jobType === "most_typical_annotation"
+                    || job.jobType === "code_decomposition"
+                    || job.jobType === "code_position"
+                    || job.jobType === "code_unique_annotations"
+                    ? "useAiAnalyzeTools"
+                    : "useAiChat";
+          if (!hasPermission({ ...permissionContext, permission: requiredPermission })) {
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "error",
+              error_message: "You do not have permission to run this AI request for the project.",
+              host_message: "Host rejected this request because the requesting user lacks permission.",
+            });
+            continue;
+          }
+
+          await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+            status: "running",
+            error_message: "",
+            host_message:
+              job.jobType === "document_processing"
+                ? "Host AI is preparing document processing."
+                : job.jobType === "attribute_suggestions"
+                  ? "Host AI is preparing attribute suggestions."
+                  : job.jobType === "embedding_build"
+                    ? "Host AI is preparing a project embedding build."
+                  : job.jobType === "relevant_segments_search"
+                    ? "Host AI is searching for relevant project segments."
+                    : job.jobType === "code_conceptual_summary"
+                      || job.jobType === "most_typical_annotation"
+                      || job.jobType === "code_decomposition"
+                      || job.jobType === "code_position"
+                      || job.jobType === "code_unique_annotations"
+                      ? "Host AI is preparing analysis results."
+                : "Host AI is preparing a response.",
+          });
+
+          if (job.jobType === "project_chat") {
+            const request = JSON.parse(job.requestJson) as ProjectChatAiJobRequest;
+            const result = await runProjectChatRequestLocally(request);
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI response is ready.",
+            });
+            continue;
+          }
+
+          if (job.jobType === "attribute_suggestions") {
+            const request = JSON.parse(job.requestJson) as AttributeSuggestionAiJobRequest;
+            const result = await runAttributeSuggestionsLocally(request);
+            const latestRecord = await pb.collection(AI_JOB_COLLECTION).getOne(job.id);
+            const latestJob = toAiJobRecord(latestRecord as unknown as Record<string, unknown>);
+            if (
+              latestJob.status === "error"
+              && latestJob.errorMessage === "Attribute suggestion generation was stopped."
+            ) {
+              continue;
+            }
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI attribute suggestions are ready.",
+            });
+            continue;
+          }
+
+          if (job.jobType === "embedding_build") {
+            const request = JSON.parse(job.requestJson) as EmbeddingBuildAiJobRequest;
+            const embeddingRequest = await buildHostEmbeddingRequestForProject(request.projectId);
+            if (embeddingRequest.items.length === 0) {
+              await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+                status: "error",
+                error_message: "There is no project content available to embed yet.",
+                host_message: "Host AI could not build embeddings because the project has no content to index.",
+              });
+              await syncHostAiAssistRuntimeStatusForProject(request.projectId);
+              continue;
+            }
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              host_message: "Host AI is starting the project embedding build.",
+            });
+            await invoke<ProjectEmbeddingBuildStatus>("build_project_embedding_index_command", {
+              authToken: pb.authStore.token,
+              request: {
+                projectId: embeddingRequest.projectId,
+                batchSize: embeddingRequest.llmSettings.batchSize,
+                chunkSize: embeddingRequest.llmSettings.chunkSize,
+                overlapSize: embeddingRequest.llmSettings.overlapSize,
+                prefixPassages: embeddingRequest.llmSettings.prefixPassages,
+                normalizeWhitespace: embeddingRequest.llmSettings.normalizeWhitespace,
+                items: embeddingRequest.items,
+              },
+            });
+
+            for (;;) {
+              const buildStatus = await invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_build_status");
+              await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+                status: buildStatus.phase === "error" || buildStatus.phase === "cancelled" ? "error" : "running",
+                result_json: JSON.stringify({
+                  completedItems: buildStatus.completedItems,
+                  totalItems: buildStatus.totalItems,
+                  progressPercent: buildStatus.progressPercent,
+                }),
+                host_message: buildStatus.message || "Host AI is building project embeddings.",
+              });
+              if (buildStatus.phase === "completed") {
+                await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+                  status: "completed",
+                  host_message: buildStatus.message || "Host AI Assist embeddings are ready for this project.",
+                });
+                await syncHostAiAssistRuntimeStatusForProject(request.projectId);
+                break;
+              }
+              if (buildStatus.phase === "error" || buildStatus.phase === "cancelled") {
+                await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+                  status: "error",
+                  error_message: buildStatus.message || "Host embedding build failed.",
+                  host_message: buildStatus.message || "Host embedding build failed.",
+                });
+                await syncHostAiAssistRuntimeStatusForProject(request.projectId);
+                break;
+              }
+              await new Promise((resolve) => window.setTimeout(resolve, 700));
+            }
+            continue;
+          }
+
+          if (job.jobType === "relevant_segments_search") {
+            const request = JSON.parse(job.requestJson) as RelevantSegmentsAiJobRequest;
+            const result = await runRelevantSegmentSearchLocally(request);
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI relevant segment search is ready.",
+            });
+            continue;
+          }
+
+          if (job.jobType === "code_conceptual_summary") {
+            const request = JSON.parse(job.requestJson) as CodeAnalysisBaseAiJobRequest;
+            const result = await runCodeConceptualSummaryLocally(request);
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI conceptual summary is ready.",
+            });
+            continue;
+          }
+
+          if (job.jobType === "most_typical_annotation") {
+            const request = JSON.parse(job.requestJson) as CodeAnalysisBaseAiJobRequest;
+            const result = await runMostTypicalAnnotationLocally(request);
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI typical annotation analysis is ready.",
+            });
+            continue;
+          }
+
+          if (job.jobType === "code_decomposition") {
+            const request = JSON.parse(job.requestJson) as CodeAnalysisBaseAiJobRequest;
+            const result = await runCodeDecompositionLocally(request);
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI decomposition analysis is ready.",
+            });
+            continue;
+          }
+
+          if (job.jobType === "code_position") {
+            const request = JSON.parse(job.requestJson) as CodePositionAiJobRequest;
+            const result = await runCodePositionLocally(request);
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI code position analysis is ready.",
+            });
+            continue;
+          }
+
+          if (job.jobType === "code_unique_annotations") {
+            const request = JSON.parse(job.requestJson) as CodeAnalysisBaseAiJobRequest;
+            const result = await runCodeUniqueAnnotationsLocally(request);
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "completed",
+              result_json: JSON.stringify(result),
+              host_message: "Host AI unique annotation analysis is ready.",
+            });
+            continue;
+          }
+
+          const request = JSON.parse(job.requestJson) as DocumentProcessingAiJobRequest;
+          const result = await processDocumentsWithHostRuntime(request, async (progress) => {
+            await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+              status: "running",
+              host_message: progress.message,
+              result_json: JSON.stringify({
+                completedDocuments: progress.completedDocuments,
+                totalDocuments: progress.totalDocuments,
+                failures: progress.failures,
+              }),
+            });
+          });
+          await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+            status: "completed",
+            result_json: JSON.stringify(result),
+            host_message:
+              result.failures.length > 0
+                ? `Host AI processed ${result.processedDocuments} of ${result.totalDocuments} document(s).`
+                : `Host AI processed ${result.totalDocuments} document(s).`,
+          });
+        } catch (error) {
+          console.error("Failed to process queued AI job:", error);
+          await pb.collection(AI_JOB_COLLECTION).update(job.id, {
+            status: "error",
+            error_message:
+              error instanceof Error && error.message.trim()
+                ? error.message
+                : typeof error === "string" && error.trim()
+                  ? error
+                  : "Host AI processing failed.",
+            host_message: "Host AI processing failed.",
+          }).catch(() => {});
+          void syncHostAiAssistRuntimeStatusForProject(job.projectId).catch(() => {});
+        }
+      }
+    } finally {
+      aiJobWorkerRunningRef.current = false;
+    }
+  }, [
+    pb,
+    processDocumentsWithHostRuntime,
+    runAttributeSuggestionsLocally,
+    runCodeConceptualSummaryLocally,
+    runCodeDecompositionLocally,
+    runCodePositionLocally,
+    runCodeUniqueAnnotationsLocally,
+    runMostTypicalAnnotationLocally,
+    runProjectChatRequestLocally,
+    runRelevantSegmentSearchLocally,
+  ]);
+
   const syncProjectEmbeddingBuildStatus = useCallback(async () => {
+    if (!isLocalBackendUrl(pb.baseURL)) {
+      return projectEmbeddingBuildStatus ?? {
+        phase: "idle",
+        projectId: null,
+        totalItems: 0,
+        completedItems: 0,
+        progressPercent: null,
+        currentLabel: null,
+        message: null,
+      };
+    }
     const status = await invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_build_status");
     const previousPhase = projectEmbeddingLastPhaseRef.current;
     projectEmbeddingLastPhaseRef.current = status.phase;
@@ -387,10 +1458,11 @@ export function useAppStore(pb: PocketBase) {
     if (status.phase === "completed" && previousPhase !== "completed") {
       const pendingEnable = projectEmbeddingPendingEnableRef.current;
       if (pendingEnable && pendingEnable.projectId === status.projectId) {
-        saveProjectAiAssistSettings(pendingEnable.projectId, {
+        const nextSettings = await saveProjectAiAssistSettings(pb, pendingEnable.projectId, {
           ...pendingEnable.settings,
           enabled: true,
         });
+        setProjectAiAssistSettings(nextSettings);
         projectEmbeddingPendingEnableRef.current = null;
       }
       const successLog = projectEmbeddingSuccessLogRef.current;
@@ -406,13 +1478,91 @@ export function useAppStore(pb: PocketBase) {
     }
 
     return status;
-  }, [logAction]);
+  }, [logAction, pb, projectEmbeddingBuildStatus]);
 
   const startProjectEmbeddingBuild = useCallback(async (request: EmbeddingBuildStartRequest) => {
     projectEmbeddingPendingEnableRef.current = request.pendingAiAssistEnable ?? null;
     projectEmbeddingSuccessLogRef.current = request.successLog ?? null;
     setProjectEmbeddingBuildBannerOpen(true);
+    if (!isLocalBackendUrl(pb.baseURL)) {
+      if (projectEmbeddingRemoteJobRef.current) {
+        throw new Error("A host embedding build is already in progress.");
+      }
+      const initialStatus: ProjectEmbeddingBuildStatus = {
+        phase: "running",
+        projectId: request.projectId,
+        totalItems: 0,
+        completedItems: 0,
+        progressPercent: null,
+        currentLabel: null,
+        message: "Queued for host embedding build...",
+      };
+      projectEmbeddingLastPhaseRef.current = initialStatus.phase;
+      setProjectEmbeddingBuildStatus(initialStatus);
+      const job = await createEmbeddingBuildAiJob(pb, { projectId: request.projectId });
+      const run = waitForAiJobTerminalState(pb, job.id, {
+        timeoutMs: 60 * 60 * 1000,
+        onProgress: (currentJob) => {
+          setProjectEmbeddingBuildStatus((current) => ({
+            phase: currentJob.status === "error" ? "error" : currentJob.status === "completed" ? "completed" : "running",
+            projectId: request.projectId,
+            totalItems: current?.totalItems ?? 0,
+            completedItems: current?.completedItems ?? 0,
+            progressPercent: current?.progressPercent ?? null,
+            currentLabel: null,
+            message: currentJob.hostMessage || "Waiting for host embedding build...",
+          }));
+        },
+      })
+        .then(async (terminal) => {
+          if (terminal.status === "error") {
+            const nextStatus: ProjectEmbeddingBuildStatus = {
+              phase: "error",
+              projectId: request.projectId,
+              totalItems: 0,
+              completedItems: 0,
+              progressPercent: null,
+              currentLabel: null,
+              message: terminal.errorMessage || "Host embedding build failed.",
+            };
+            projectEmbeddingLastPhaseRef.current = nextStatus.phase;
+            setProjectEmbeddingBuildStatus(nextStatus);
+            setProjectEmbeddingBuildBannerOpen(true);
+            return;
+          }
+          await syncProjectEmbeddingBuildStatus();
+          const nextStatus: ProjectEmbeddingBuildStatus = {
+            phase: "completed",
+            projectId: request.projectId,
+            totalItems: 0,
+            completedItems: 0,
+            progressPercent: 100,
+            currentLabel: null,
+            message: terminal.hostMessage || "Host AI Assist embeddings are ready for this project.",
+          };
+          projectEmbeddingLastPhaseRef.current = nextStatus.phase;
+          setProjectEmbeddingBuildStatus(nextStatus);
+          setProjectEmbeddingBuildBannerOpen(true);
+          if (request.successLog) {
+            await logAction(request.successLog.projectId, request.successLog.action, request.successLog.label);
+          }
+          if (request.pendingAiAssistEnable) {
+            const nextSettings = await saveProjectAiAssistSettings(
+              pb,
+              request.pendingAiAssistEnable.projectId,
+              request.pendingAiAssistEnable.settings,
+            );
+            setProjectAiAssistSettings(nextSettings);
+          }
+        })
+        .finally(() => {
+          projectEmbeddingRemoteJobRef.current = null;
+        });
+      projectEmbeddingRemoteJobRef.current = run;
+      return initialStatus;
+    }
     const status = await invoke<ProjectEmbeddingBuildStatus>("build_project_embedding_index_command", {
+      authToken: pb.authStore.token,
       request: {
         projectId: request.projectId,
         batchSize: request.llmSettings.batchSize,
@@ -426,19 +1576,39 @@ export function useAppStore(pb: PocketBase) {
     projectEmbeddingLastPhaseRef.current = status.phase;
     setProjectEmbeddingBuildStatus(status);
     return status;
-  }, []);
+  }, [logAction, pb, syncProjectEmbeddingBuildStatus]);
 
   const cancelProjectEmbeddingBuild = useCallback(async () => {
-    const status = await invoke<ProjectEmbeddingBuildStatus>("cancel_project_embedding_build");
+    const status = await invoke<ProjectEmbeddingBuildStatus>("cancel_project_embedding_build", {
+      authToken: pb.authStore.token,
+    });
     projectEmbeddingLastPhaseRef.current = status.phase;
     setProjectEmbeddingBuildStatus(status);
     setProjectEmbeddingBuildBannerOpen(true);
     return status;
-  }, []);
+  }, [pb]);
 
   const dismissProjectEmbeddingBanner = useCallback(() => {
     setProjectEmbeddingBuildBannerOpen(false);
   }, []);
+
+  const updateProjectAiAssistSettings = useCallback(
+    async (projectId: string, settings: ProjectAiAssistSettings) => {
+      const nextSettings = await saveProjectAiAssistSettings(pb, projectId, settings);
+      setProjectAiAssistSettings(nextSettings);
+      return nextSettings;
+    },
+    [pb],
+  );
+
+  const updateProjectDocumentImportSettings = useCallback(
+    async (projectId: string, settings: ProjectDocumentImportSettings) => {
+      const nextSettings = await saveProjectDocumentImportSettings(pb, projectId, settings);
+      setProjectDocumentImportSettings(nextSettings);
+      return nextSettings;
+    },
+    [pb],
+  );
 
   const ensureProjectSafetyBackup = useCallback(
     async (sourceAction: string, sourceLabel: string) => {
@@ -464,155 +1634,112 @@ export function useAppStore(pb: PocketBase) {
         throw new Error("Document processing is already running.");
       }
 
-      const llmSettings = readAppSettings().llm;
-      if (!llmSettings.ollamaEnabled || !llmSettings.ollamaSelectedModel) {
-        throw new Error("AI Assist settings are incomplete. Enable the local LLM and select a model in App Settings.");
-      }
-
-      const selectedDocuments = documents.filter((document) => request.documentIds.includes(document.id));
-      if (selectedDocuments.length === 0) {
-        throw new Error("Select at least one document to process.");
-      }
-
       setDocumentProcessingBannerOpen(true);
       setDocumentProcessingStatus({
         phase: "running",
         projectId: request.projectId,
         completedDocuments: 0,
-        totalDocuments: selectedDocuments.length,
-        currentDocumentName: selectedDocuments[0]?.name || "Untitled document",
-        message: `Preparing to process ${selectedDocuments.length} document${selectedDocuments.length === 1 ? "" : "s"}.`,
+        totalDocuments: request.documentIds.length,
+        currentDocumentName: "",
+        message: isLocalBackendUrl(pb.baseURL)
+          ? `Preparing to process ${request.documentIds.length} document${request.documentIds.length === 1 ? "" : "s"}.`
+          : `Submitting ${request.documentIds.length} document${request.documentIds.length === 1 ? "" : "s"} to the host AI runtime.`,
         failures: [],
       });
 
       const run = (async () => {
-        let failedDocumentName = "";
         try {
-          const interDocumentCooldownMs = 10_000;
-          const failures: Array<{ documentName: string; message: string }> = [];
-          for (let index = 0; index < selectedDocuments.length; index += 1) {
-            const document = selectedDocuments[index];
-            failedDocumentName = document.name || "Untitled document";
-            setDocumentProcessingStatus({
-              phase: "running",
-              projectId: request.projectId,
-              completedDocuments: index,
-              totalDocuments: selectedDocuments.length,
-              currentDocumentName: failedDocumentName,
-              message: `Processing ${failedDocumentName} (${index + 1} of ${selectedDocuments.length}).`,
-              failures: [...failures],
+          if (isLocalBackendUrl(pb.baseURL)) {
+            const result = await processDocumentsWithHostRuntime(request, async (progress) => {
+              setDocumentProcessingStatus({
+                phase: "running",
+                projectId: request.projectId,
+                completedDocuments: progress.completedDocuments,
+                totalDocuments: progress.totalDocuments,
+                currentDocumentName: progress.currentDocumentName,
+                message: progress.message,
+                failures: [...progress.failures],
+              });
             });
-
-            try {
-              const response = await invoke<{
-                processedContent: string;
-                segments: unknown[];
-                properNameCandidates: unknown[];
-                model: string;
-                baseUrl: string;
-                chunkCount: number;
-              }>("process_document_with_ollama", {
-                request: {
-                  documentContent: document.content,
-                  protocol: llmSettings.ollamaProtocol,
-                  host: llmSettings.ollamaHost,
-                  port: llmSettings.ollamaPort,
-                  model: llmSettings.ollamaSelectedModel,
-                  timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-                  temperature: llmSettings.ollamaTemperature,
-                  numCtx: llmSettings.ollamaNumCtx,
-                  keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
-                },
-              });
-
-              const payload = {
-                project: request.projectId,
-                document: document.id,
-                document_name: document.name,
-                file_path: document.filePath,
-                status: "pending_review",
-                model: response.model,
-                base_url: response.baseUrl,
-                chunk_count: response.chunkCount,
-                processed_content: response.processedContent,
-                segments_json: JSON.stringify(response.segments),
-                proper_name_candidates_json: JSON.stringify(response.properNameCandidates),
-                enabled_review_lenses_json: JSON.stringify(request.reviewLenses),
-                exported_to_project: false,
-                created_by: pb.authStore.record?.id ?? "",
-                created_by_identifier: String(pb.authStore.record?.user_identifier ?? ""),
-                deleted_at: "",
-              };
-
-              try {
-                const existing = await pb.collection("processed_document_reviews").getFirstListItem(
-                  `project="${request.projectId}"&&document="${document.id}"&&deleted_at=""`,
-                );
-                await pb.collection("processed_document_reviews").update(existing.id, payload);
-              } catch {
-                await pb.collection("processed_document_reviews").create(payload);
-              }
-
+            setDocumentProcessingStatus({
+              phase: "completed",
+              projectId: request.projectId,
+              completedDocuments: result.totalDocuments,
+              totalDocuments: result.totalDocuments,
+              currentDocumentName: "",
+              message:
+                result.failures.length > 0
+                  ? `Processed ${result.processedDocuments} of ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added the successful ones to the review queue.`
+                  : `Processed ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added them to the review queue.`,
+              failures: [...result.failures],
+            });
+          } else {
+            const job = await createDocumentProcessingAiJob(pb, {
+              projectId: request.projectId,
+              documentIds: request.documentIds,
+              reviewLenses: request.reviewLenses,
+            });
+            const terminal = await waitForAiJobTerminalState(pb, job.id, {
+              onProgress: (currentJob) => {
+                let progressResult:
+                  | { completedDocuments?: number; totalDocuments?: number; failures?: Array<{ documentName: string; message: string }> }
+                  | null = null;
+                if (currentJob.resultJson) {
+                  try {
+                    progressResult = JSON.parse(currentJob.resultJson) as {
+                      completedDocuments?: number;
+                      totalDocuments?: number;
+                      failures?: Array<{ documentName: string; message: string }>;
+                    };
+                  } catch {
+                    progressResult = null;
+                  }
+                }
+                setDocumentProcessingStatus({
+                  phase: currentJob.status === "error" ? "error" : currentJob.status === "completed" ? "completed" : "running",
+                  projectId: request.projectId,
+                  completedDocuments: progressResult?.completedDocuments ?? 0,
+                  totalDocuments: progressResult?.totalDocuments ?? request.documentIds.length,
+                  currentDocumentName: "",
+                  message: currentJob.hostMessage || "Waiting for host AI processing...",
+                  failures: progressResult?.failures ?? [],
+                  error: currentJob.status === "error" ? currentJob.errorMessage : undefined,
+                });
+              },
+            });
+            if (terminal.status === "error") {
               setDocumentProcessingStatus({
-                phase: "running",
+                phase: "error",
                 projectId: request.projectId,
-                completedDocuments: index + 1,
-                totalDocuments: selectedDocuments.length,
-                currentDocumentName: document.name || "Untitled document",
-                message: `Processed ${index + 1} of ${selectedDocuments.length} document${selectedDocuments.length === 1 ? "" : "s"}.`,
-                failures: [...failures],
+                completedDocuments: 0,
+                totalDocuments: request.documentIds.length,
+                currentDocumentName: "",
+                message: terminal.errorMessage || "Host AI processing failed.",
+                error: terminal.errorMessage || "Host AI processing failed.",
+                failures: [],
               });
-            } catch (error) {
-              const documentMessage = error instanceof Error && error.message.trim()
-                ? error.message
-                : typeof error === "string" && error.trim()
-                  ? error
-                  : "Could not process this document.";
-              failures.push({
-                documentName: failedDocumentName,
-                message: documentMessage,
-              });
-              const remainingDocuments = selectedDocuments.length - (index + 1);
+            } else {
+              const result = terminal.resultJson
+                ? JSON.parse(terminal.resultJson) as {
+                    totalDocuments: number;
+                    processedDocuments: number;
+                    failures: Array<{ documentName: string; message: string }>;
+                  }
+                : { totalDocuments: request.documentIds.length, processedDocuments: request.documentIds.length, failures: [] };
               setDocumentProcessingStatus({
-                phase: "running",
+                phase: "completed",
                 projectId: request.projectId,
-                completedDocuments: index + 1,
-                totalDocuments: selectedDocuments.length,
-                currentDocumentName: failedDocumentName,
-                message: remainingDocuments > 0
-                  ? `Skipped ${failedDocumentName} after an error. Continuing with the remaining documents.`
-                  : `Skipped ${failedDocumentName} after an error.`,
-                failures: [...failures],
+                completedDocuments: result.totalDocuments,
+                totalDocuments: result.totalDocuments,
+                currentDocumentName: "",
+                message:
+                  result.failures.length > 0
+                    ? `Host AI processed ${result.processedDocuments} of ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added the successful ones to the review queue.`
+                    : `Host AI processed ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added them to the review queue.`,
+                failures: [...result.failures],
               });
-            }
-
-            if (index < selectedDocuments.length - 1) {
-              const nextDocument = selectedDocuments[index + 1];
-              setDocumentProcessingStatus({
-                phase: "running",
-                projectId: request.projectId,
-                completedDocuments: index + 1,
-                totalDocuments: selectedDocuments.length,
-                currentDocumentName: nextDocument.name || "Untitled document",
-                message: `Cooling down for 10 seconds before processing ${nextDocument.name || "the next document"} (${index + 2} of ${selectedDocuments.length}).`,
-                failures: [...failures],
-              });
-              await new Promise((resolve) => window.setTimeout(resolve, interDocumentCooldownMs));
             }
           }
-
-          setDocumentProcessingStatus({
-            phase: "completed",
-            projectId: request.projectId,
-            completedDocuments: selectedDocuments.length,
-            totalDocuments: selectedDocuments.length,
-            currentDocumentName: "",
-            message:
-              failures.length > 0
-                ? `Processed ${selectedDocuments.length - failures.length} of ${selectedDocuments.length} document${selectedDocuments.length === 1 ? "" : "s"} and added the successful ones to the review queue.`
-                : `Processed ${selectedDocuments.length} document${selectedDocuments.length === 1 ? "" : "s"} and added them to the review queue.`,
-            failures: [...failures],
-          });
           setDocumentProcessingBannerOpen(true);
         } catch (error) {
           const message = error instanceof Error && error.message.trim()
@@ -624,11 +1751,9 @@ export function useAppStore(pb: PocketBase) {
             phase: "error",
             projectId: request.projectId,
             completedDocuments: 0,
-            totalDocuments: selectedDocuments.length,
-            currentDocumentName: failedDocumentName,
-            message: failedDocumentName
-              ? `${message} Document: ${failedDocumentName}.`
-              : message,
+            totalDocuments: request.documentIds.length,
+            currentDocumentName: "",
+            message,
             error: message,
             failures: [],
           });
@@ -640,7 +1765,7 @@ export function useAppStore(pb: PocketBase) {
 
       documentProcessingJobRef.current = run;
     },
-    [documents, pb],
+    [pb, processDocumentsWithHostRuntime],
   );
 
   const dismissDocumentProcessingBanner = useCallback(() => {
@@ -693,7 +1818,9 @@ export function useAppStore(pb: PocketBase) {
     embeddingModelDownloadLastPhaseRef.current = nextStatus.phase;
     setEmbeddingModelDownloadStatus(nextStatus);
 
-    const run: Promise<void> = invoke("download_multilingual_e5_model")
+    const run: Promise<void> = invoke("download_multilingual_e5_model", {
+      authToken: pb.authStore.token,
+    })
       .then(() => undefined)
       .catch(() => {})
       .finally(() => {
@@ -703,19 +1830,81 @@ export function useAppStore(pb: PocketBase) {
       });
 
     embeddingModelDownloadJobRef.current = run;
-  }, [refreshEmbeddingModelDownloadPreflight, syncEmbeddingModelDownloadStatus]);
+  }, [pb, refreshEmbeddingModelDownloadPreflight, syncEmbeddingModelDownloadStatus]);
 
   const cancelEmbeddingModelDownload = useCallback(async () => {
-    const status = await invoke<EmbeddingModelDownloadStatus>("cancel_multilingual_e5_download");
+    const status = await invoke<EmbeddingModelDownloadStatus>("cancel_multilingual_e5_download", {
+      authToken: pb.authStore.token,
+    });
     embeddingModelDownloadLastPhaseRef.current = status.phase;
     setEmbeddingModelDownloadStatus(status);
     setEmbeddingModelDownloadBannerOpen(true);
     return status;
-  }, []);
+  }, [pb]);
 
   const dismissEmbeddingModelDownloadBanner = useCallback(() => {
     setEmbeddingModelDownloadBannerOpen(false);
   }, []);
+
+  async function syncHostAiAssistRuntimeStatusForProject(projectId: string) {
+    if (!isLocalBackendUrl(pb.baseURL)) {
+      return projectAiAssistRuntimeStatusRef.current;
+    }
+
+    const llmSettings = readAppSettings().llm;
+    let hostLlmConnectionLive = false;
+
+    if (llmSettings.ollamaEnabled && llmSettings.ollamaSelectedModel) {
+      try {
+        await invoke<number>("ping_address", {
+          host: llmSettings.ollamaHost,
+          port: llmSettings.ollamaPort,
+        });
+        hostLlmConnectionLive = true;
+      } catch {
+        hostLlmConnectionLive = false;
+      }
+    }
+
+    let hostEmbeddingModelInstalled = false;
+    try {
+      const embeddingStatus = await invoke<{ installed: boolean }>("get_multilingual_e5_status");
+      hostEmbeddingModelInstalled = Boolean(embeddingStatus.installed);
+    } catch {
+      hostEmbeddingModelInstalled = false;
+    }
+
+    let hostProjectEmbeddingsReady = false;
+    try {
+      const indexStatus = await invoke<{ exists: boolean }>("get_project_embedding_index_status", { projectId });
+      hostProjectEmbeddingsReady = Boolean(indexStatus.exists);
+    } catch {
+      hostProjectEmbeddingsReady = false;
+    }
+
+    const nextStatus: ProjectAiAssistRuntimeStatus = {
+      hostEmbeddingModelInstalled,
+      hostLlmEnabled: llmSettings.ollamaEnabled,
+      hostLlmModelSelected: Boolean(llmSettings.ollamaSelectedModel),
+      hostLlmConnectionLive,
+      hostProjectEmbeddingsReady,
+      hostCheckedAt: new Date().toISOString(),
+    };
+
+    setProjectAiAssistRuntimeStatus((current) => (
+      sameProjectAiAssistRuntimeStatus(current, nextStatus)
+        ? current
+        : nextStatus
+    ));
+
+    if (sameProjectAiAssistRuntimeStatus(projectAiAssistRuntimeStatusRef.current, nextStatus)) {
+      return nextStatus;
+    }
+
+    const saved = await saveProjectAiAssistRuntimeStatus(pb, projectId, nextStatus);
+    setProjectAiAssistRuntimeStatus(saved);
+    return saved;
+  }
 
   useEffect(() => {
     void syncProjectEmbeddingBuildStatus().catch(() => {});
@@ -956,6 +2145,24 @@ export function useAppStore(pb: PocketBase) {
     if (!activeProject) return;
     const pid = activeProject.id;
     const uid = pb.authStore.record?.id;
+    setProjectAiAssistSettingsLoading(true);
+    void loadProjectSettingsSnapshot(pb, pid, {
+      documentImportSettings: {
+        storeOriginalFileName: readAppSettings().documentImport.storeOriginalFileName,
+      },
+    })
+      .then((snapshot) => {
+        setProjectAiAssistSettings(snapshot.aiAssistSettings);
+        setProjectAiAssistRuntimeStatus(snapshot.aiAssistRuntimeStatus);
+        setProjectDocumentImportSettings(snapshot.documentImportSettings);
+      })
+      .catch((error) => {
+        console.error("Failed to load shared project settings:", error);
+        setProjectAiAssistSettings(DEFAULT_PROJECT_AI_ASSIST_SETTINGS);
+        setProjectAiAssistRuntimeStatus(DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS);
+        setProjectDocumentImportSettings(DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS);
+      })
+      .finally(() => setProjectAiAssistSettingsLoading(false));
 
     // Load user's role for this project
     if (isAdministrator) {
@@ -1064,22 +2271,133 @@ export function useAppStore(pb: PocketBase) {
       }
     });
 
+    const unsubProjectSettings = pb.collection("project_settings").subscribe("*", (e) => {
+      if (e.record.project !== pid) return;
+      if (e.action === "delete") {
+        void loadProjectSettingsSnapshot(pb, pid, {
+          documentImportSettings: {
+            storeOriginalFileName: readAppSettings().documentImport.storeOriginalFileName,
+          },
+        })
+          .then((snapshot) => {
+            setProjectAiAssistSettings(snapshot.aiAssistSettings);
+            setProjectAiAssistRuntimeStatus(snapshot.aiAssistRuntimeStatus);
+            setProjectDocumentImportSettings(snapshot.documentImportSettings);
+          })
+          .catch((error) => {
+            console.error("Failed to reload shared project settings:", error);
+            setProjectAiAssistSettings(DEFAULT_PROJECT_AI_ASSIST_SETTINGS);
+            setProjectAiAssistRuntimeStatus(DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS);
+            setProjectDocumentImportSettings(DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS);
+          });
+        return;
+      }
+      setProjectAiAssistSettings(projectAiAssistSettingsFromRecord(e.record));
+      setProjectAiAssistRuntimeStatus(projectAiAssistRuntimeStatusFromRecord(e.record));
+      setProjectDocumentImportSettings(projectDocumentImportSettingsFromRecord(e.record));
+    });
+
       return () => {
         unsubDocs.then((fn) => fn()).catch(() => {});
         unsubCases.then((fn) => fn()).catch(() => {});
         unsubCodes.then((fn) => fn()).catch(() => {});
         unsubMemos.then((fn) => fn()).catch(() => {});
         unsubLog.then((fn) => fn()).catch(() => {});
+        unsubProjectSettings.then((fn) => fn()).catch(() => {});
         setDocuments([]);
         setCases([]);
         setCodes([]);
         setMemos([]);
         setAnnotations([]);
-      setLogEntries([]);
-      setActiveDocument(null);
-      setUserRole(null);
-    };
+        setLogEntries([]);
+        setActiveDocument(null);
+        setUserRole(null);
+        setProjectAiAssistSettings(DEFAULT_PROJECT_AI_ASSIST_SETTINGS);
+        setProjectAiAssistRuntimeStatus(DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS);
+        setProjectAiAssistSettingsLoading(false);
+        setProjectDocumentImportSettings(DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS);
+      };
   }, [pb, activeProject, isAdministrator]);
+
+  useEffect(() => {
+    if (!activeProject || !isLocalBackendUrl(pb.baseURL)) {
+      return;
+    }
+    const projectId = activeProject.id;
+
+    let cancelled = false;
+    let intervalId = 0;
+
+    async function syncHostAiAssistRuntimeStatus() {
+      if (cancelled) return;
+      try {
+        await syncHostAiAssistRuntimeStatusForProject(projectId);
+      } catch (error) {
+        console.error("Failed to sync host AI Assist runtime status:", error);
+      }
+    }
+
+    void syncHostAiAssistRuntimeStatus();
+
+    function refreshOnFocus() {
+      void syncHostAiAssistRuntimeStatus();
+    }
+
+    intervalId = window.setInterval(() => {
+      void syncHostAiAssistRuntimeStatus();
+    }, 15000);
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [activeProject?.id, pb, projectEmbeddingBuildStatus?.phase]);
+
+  useEffect(() => {
+    if (!isLocalBackendUrl(pb.baseURL) || !pb.authStore.record?.id) {
+      return;
+    }
+
+    void processQueuedAiJobs();
+    const intervalId = window.setInterval(() => {
+      void processQueuedAiJobs();
+    }, 4000);
+
+    const subscription = pb.collection(AI_JOB_COLLECTION).subscribe("*", (event) => {
+      const status = String((event.record as { status?: unknown }).status ?? "");
+      const jobType = String((event.record as { job_type?: unknown }).job_type ?? "");
+      const errorMessage = String((event.record as { error_message?: unknown }).error_message ?? "");
+      if (status === "queued") {
+        void processQueuedAiJobs();
+      }
+      if (
+        jobType === "attribute_suggestions"
+        && status === "error"
+        && errorMessage === "Attribute suggestion generation was stopped."
+      ) {
+        try {
+          const rawRequest = (event.record as { request_json?: unknown }).request_json;
+          const request = JSON.parse(
+            typeof rawRequest === "string" ? rawRequest : JSON.stringify(rawRequest ?? {}),
+          ) as AttributeSuggestionAiJobRequest;
+          if (request.runId) {
+            void invoke("cancel_attribute_suggestion_run", { runId: request.runId }).catch(() => {});
+          }
+        } catch {
+          // Ignore malformed request payloads during best-effort cancellation.
+        }
+      }
+    });
+
+    return () => {
+      window.clearInterval(intervalId);
+      subscription.then((dispose) => dispose()).catch(() => {});
+    };
+  }, [pb, processQueuedAiJobs]);
 
   useEffect(() => {
     if (!activeDocument) {
@@ -1177,6 +2495,8 @@ export function useAppStore(pb: PocketBase) {
         user_identifier: pb.authStore.record?.user_identifier || "",
         role: "owner",
       });
+      await saveProjectAiAssistSettings(pb, project.id, DEFAULT_PROJECT_AI_ASSIST_SETTINGS);
+      await saveProjectDocumentImportSettings(pb, project.id, DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS);
       await logAction(project.id, "project.create", `Created project "${name}"`);
       return project;
     },
@@ -1284,6 +2604,8 @@ export function useAppStore(pb: PocketBase) {
         deleteAll("project_log", `project="${project.id}"`),
         deleteAll("code_reports", `project="${project.id}"`),
         deleteAll("coder_reports", `project="${project.id}"`),
+        deleteAll("ai_analyses", `project="${project.id}"`),
+        deleteAll("ai_attribute_suggestion_runs", `project="${project.id}"`),
       ]);
 
       await Promise.all([
@@ -1818,13 +3140,146 @@ export function useAppStore(pb: PocketBase) {
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
 
+  const createAiAnalysis = useCallback(
+    async (data: { name: string; codeId?: string | null; createdBy?: string; snapshot?: string }) => {
+      if (!activeProject) return;
+      const payload: Record<string, unknown> = {
+        project: activeProject.id,
+        name: data.name,
+      };
+      if (data.codeId) payload.code = data.codeId;
+      const createdBy = data.createdBy || pb.authStore.record?.id;
+      if (createdBy) payload.created_by = createdBy;
+      payload.created_by_identifier = createdBy === pb.authStore.record?.id
+        ? pb.authStore.record?.user_identifier || ""
+        : "";
+      if (data.snapshot) payload.snapshot = data.snapshot;
+
+      let record;
+      try {
+        record = await pb.collection("ai_analyses").create(payload);
+      } catch (error) {
+        if (!isSnapshotTooLongError(error)) throw error;
+        await ensureSetup(pb);
+        record = await pb.collection("ai_analyses").create(payload);
+      }
+      await logAction(activeProject.id, "ai_analysis.create", `Created analysis "${data.name}"`);
+      return record;
+    },
+    [pb, activeProject, logAction]
+  );
+
+  const updateAiAnalysis = useCallback(
+    async (id: string, data: { name: string; codeId?: string | null; snapshot?: string }) => {
+      const payload: Record<string, unknown> = {
+        name: data.name,
+        code: data.codeId || null,
+      };
+      if (typeof data.snapshot === "string") payload.snapshot = data.snapshot;
+      try {
+        await pb.collection("ai_analyses").update(id, payload);
+      } catch (error) {
+        if (!isSnapshotTooLongError(error)) throw error;
+        await ensureSetup(pb);
+        await pb.collection("ai_analyses").update(id, payload);
+      }
+      if (activeProject) await logAction(activeProject.id, "ai_analysis.update", `Updated analysis "${data.name}"`, id);
+    },
+    [pb, activeProject, logAction]
+  );
+
+  const deleteAiAnalysis = useCallback(
+    async (id: string, name?: string) => {
+      await ensureProjectSafetyBackup("ai_analysis.delete", `Deleted analysis${name ? ` "${name}"` : ""}`);
+      await pb.collection("ai_analyses").update(id, { deleted_at: new Date().toISOString() });
+      if (activeProject) await logAction(activeProject.id, "ai_analysis.delete", `Deleted analysis${name ? ` "${name}"` : ""}`, id);
+    },
+    [pb, activeProject, logAction, ensureProjectSafetyBackup]
+  );
+
+  const createAiAttributeSuggestionRun = useCallback(
+    async (data: { name: string; targetKind: "case" | "document"; attributeId?: string | null; attributeName?: string; createdBy?: string; snapshot?: string }) => {
+      if (!activeProject) return;
+      const payload: Record<string, unknown> = {
+        project: activeProject.id,
+        name: data.name,
+        target_kind: data.targetKind,
+        attribute_id: data.attributeId || "",
+        attribute_name: data.attributeName || "",
+      };
+      const createdBy = data.createdBy || pb.authStore.record?.id;
+      if (createdBy) payload.created_by = createdBy;
+      payload.created_by_identifier = createdBy === pb.authStore.record?.id
+        ? pb.authStore.record?.user_identifier || ""
+        : "";
+      if (data.snapshot) payload.snapshot = data.snapshot;
+
+      let record;
+      try {
+        record = await pb.collection("ai_attribute_suggestion_runs").create(payload);
+      } catch (error) {
+        if (!isSnapshotTooLongError(error)) throw error;
+        await ensureSetup(pb);
+        record = await pb.collection("ai_attribute_suggestion_runs").create(payload);
+      }
+      await logAction(activeProject.id, "ai_attribute_suggestion_run.create", `Created saved suggestions "${data.name}"`);
+      return record;
+    },
+    [pb, activeProject, logAction]
+  );
+
+  const updateAiAttributeSuggestionRun = useCallback(
+    async (id: string, data: { name: string; targetKind: "case" | "document"; attributeId?: string | null; attributeName?: string; snapshot?: string }) => {
+      const payload: Record<string, unknown> = {
+        name: data.name,
+        target_kind: data.targetKind,
+        attribute_id: data.attributeId || "",
+        attribute_name: data.attributeName || "",
+      };
+      if (typeof data.snapshot === "string") payload.snapshot = data.snapshot;
+      try {
+        await pb.collection("ai_attribute_suggestion_runs").update(id, payload);
+      } catch (error) {
+        if (!isSnapshotTooLongError(error)) throw error;
+        await ensureSetup(pb);
+        await pb.collection("ai_attribute_suggestion_runs").update(id, payload);
+      }
+      if (activeProject) await logAction(activeProject.id, "ai_attribute_suggestion_run.update", `Updated saved suggestions "${data.name}"`, id);
+    },
+    [pb, activeProject, logAction]
+  );
+
+  const deleteAiAttributeSuggestionRun = useCallback(
+    async (id: string, name?: string) => {
+      await ensureProjectSafetyBackup("ai_attribute_suggestion_run.delete", `Deleted saved suggestions${name ? ` "${name}"` : ""}`);
+      await pb.collection("ai_attribute_suggestion_runs").update(id, { deleted_at: new Date().toISOString() });
+      if (activeProject) await logAction(activeProject.id, "ai_attribute_suggestion_run.delete", `Deleted saved suggestions${name ? ` "${name}"` : ""}`, id);
+    },
+    [pb, activeProject, logAction, ensureProjectSafetyBackup]
+  );
+
   const setNetworkMode = useCallback(async (mode: "local" | "lan") => {
-    await invoke("set_network_mode", { mode });
+    const previousMode = networkMode;
+    await invoke("set_network_mode", { authToken: pb.authStore.token, mode });
     setNetworkModeState(mode);
-  }, []);
+    if (activeProject && previousMode !== mode) {
+      await logAction(
+        activeProject.id,
+        "project.network_mode.update",
+        mode === "lan"
+          ? "Enabled LAN collaboration mode for this session"
+          : "Returned app network mode to local-only for this session",
+      );
+    }
+  }, [activeProject, logAction, networkMode, pb]);
+
+  useEffect(() => {
+    setAiCodingRelevantSegmentsSessions({});
+  }, [activeProject?.id]);
 
   return {
     pb,
+    isLocalWorkspace: isLocalBackendUrl(pb.baseURL),
     view, setView,
     projects, projectsLoading,
     activeProject,
@@ -1856,9 +3311,29 @@ export function useAppStore(pb: PocketBase) {
     addMemo, updateMemo, deleteMemo,
     createCodeReport, updateCodeReport, deleteCodeReport,
     createCoderReport, updateCoderReport, deleteCoderReport,
+    createAiAnalysis, updateAiAnalysis, deleteAiAnalysis,
+    createAiAttributeSuggestionRun, updateAiAttributeSuggestionRun, deleteAiAttributeSuggestionRun,
+    cancelAttributeSuggestionRun,
     networkMode, setNetworkMode,
     projectEmbeddingBuildStatus,
     projectEmbeddingBuildBannerOpen,
+    projectAiAssistSettings,
+    projectAiAssistRuntimeStatus,
+    projectAiAssistSettingsLoading,
+    projectDocumentImportSettings,
+    updateProjectAiAssistSettings,
+    updateProjectDocumentImportSettings,
+    runProjectChat,
+    runAttributeSuggestions,
+    runRelevantSegmentSearch,
+    aiCodingRelevantSegmentsSessions,
+    startAiCodingRelevantSegmentsSearch,
+    clearAiCodingRelevantSegmentsSearch,
+    runCodeConceptualSummary,
+    runMostTypicalAnnotation,
+    runCodeDecomposition,
+    runCodePosition,
+    runCodeUniqueAnnotations,
     startProjectEmbeddingBuild,
     cancelProjectEmbeddingBuild,
     dismissProjectEmbeddingBanner,
@@ -1879,6 +3354,7 @@ export function useAppStore(pb: PocketBase) {
     pendingCodeId, setPendingCodeId,
     pendingTextCitation, setPendingTextCitation,
     pendingMemoId, setPendingMemoId,
+    pendingNewMemoContext, setPendingNewMemoContext,
     pendingCaseId, setPendingCaseId,
     pendingImportedUserResolution, setPendingImportedUserResolution,
   };

@@ -1,29 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../types";
 import type { View } from "../types";
-import { readAppSettings } from "../lib/appSettings";
-import {
-  PROJECT_AI_ASSIST_SETTINGS_CHANGED_EVENT,
-  readProjectAiAssistSettings,
-} from "../lib/projectAiAssistSettings";
+import { LOCAL_PB_URL } from "../lib/authHistory";
 import computerLineIcon from "../assets/computer-line.svg";
 import networkIcon from "../assets/network--2.svg";
+import remoteWorkIcon from "../assets/link-45deg.svg";
 import aiAssistReadyIcon from "../assets/cog-line.svg";
 import aiAssistUnavailableIcon from "../assets/cog-outline-alerted.svg";
 import sidebarLogo from "../assets/logo-no-background.png";
-
-type EmbeddingModelStatus = {
-  installed: boolean;
-  repoId: string;
-  displayName: string;
-  modelDir: string;
-  files: number;
-  bytes: number;
-  downloadedAtMs: number | null;
-};
 
 const NAV_SECTIONS: {
   key: string;
@@ -71,32 +57,36 @@ const NAV_SECTIONS: {
       { view: "ai-analyze", label: "Analyze" },
     ],
   },
+  {
+    key: "settings",
+    label: "Settings",
+    items: [
+      { view: "app-settings", label: "App Settings" },
+      { view: "project-settings", label: "Project Settings" },
+      { view: "user-settings", label: "User Settings" },
+    ],
+  },
 ];
 
+function createDefaultSidebarOpenState() {
+  return Object.fromEntries(NAV_SECTIONS.map((section) => [section.key, false])) as Record<string, boolean>;
+}
+
 export function Sidebar() {
-  const { view, setView, activeProject, userRole, networkMode, canCurrentUser } = useStore();
-  const { user, logout } = useAuth();
+  const {
+    view,
+    setView,
+    activeProject,
+    userRole,
+    networkMode,
+    canCurrentUser,
+    projectAiAssistSettings,
+    projectAiAssistRuntimeStatus,
+    isLocalWorkspace,
+  } = useStore();
+  const { user, logout, serverUrl } = useAuth();
   const [aiAssistStatus, setAiAssistStatus] = useState<"checking" | "ready" | "unavailable">("checking");
-  const [aiAssistEnabledForProject, setAiAssistEnabledForProject] = useState(
-    () => (activeProject ? readProjectAiAssistSettings(activeProject.id).enabled : false),
-  );
-
-  useEffect(() => {
-    setAiAssistEnabledForProject(activeProject ? readProjectAiAssistSettings(activeProject.id).enabled : false);
-  }, [activeProject?.id]);
-
-  useEffect(() => {
-    function handleProjectAiAssistSettingsChanged(event: Event) {
-      const detail = (event as CustomEvent<{ projectId?: string; settings?: { enabled?: boolean } }>).detail;
-      if (!activeProject || detail?.projectId !== activeProject.id) return;
-      setAiAssistEnabledForProject(Boolean(detail?.settings?.enabled));
-    }
-
-    window.addEventListener(PROJECT_AI_ASSIST_SETTINGS_CHANGED_EVENT, handleProjectAiAssistSettingsChanged);
-    return () => {
-      window.removeEventListener(PROJECT_AI_ASSIST_SETTINGS_CHANGED_EVENT, handleProjectAiAssistSettingsChanged);
-    };
-  }, [activeProject?.id]);
+  const aiAssistEnabledForProject = projectAiAssistSettings.enabled;
 
   const projectNameFontSize = useMemo(() => {
     if (!activeProject) return 22;
@@ -120,16 +110,47 @@ export function Sidebar() {
     return minPx;
   }, [activeProject]);
 
-  const [open, setOpen] = useState<Record<string, boolean>>({
-    project: true,
-    analysis: true,
-    "ai-assist": true,
-    reports: true,
-  });
+  const [open, setOpen] = useState<Record<string, boolean>>(() => createDefaultSidebarOpenState());
+
+  const isRemoteBackendSession = serverUrl !== LOCAL_PB_URL;
+  const networkBadgeState = isRemoteBackendSession ? "remote" : networkMode;
+  const networkBadgeTitle = isRemoteBackendSession
+    ? `Remote workspace session - connected to ${serverUrl}`
+    : networkMode === "lan"
+      ? "Network mode - other devices on your local network can connect to this instance"
+      : "Local only - data is not accessible from other devices";
+  const networkBadgeIcon = isRemoteBackendSession
+    ? remoteWorkIcon
+    : networkMode === "lan"
+      ? networkIcon
+      : computerLineIcon;
+  const networkBadgeAlt = isRemoteBackendSession
+    ? "Remote workspace session"
+    : networkMode === "lan"
+      ? "Network enabled"
+      : "Local only";
+
+  function openAppSettingsModal(modalId: "network" | "llm") {
+    sessionStorage.setItem("kanqual:open-app-settings-modal", modalId);
+    window.dispatchEvent(new CustomEvent("kanqual:open-app-settings-modal"));
+    setView("app-settings");
+  }
 
   function toggleSection(key: string) {
     setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   }
+
+  useEffect(() => {
+    setOpen((prev) => {
+      const next = { ...createDefaultSidebarOpenState(), ...prev };
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length === nextKeys.length && prevKeys.every((key) => prev[key] === next[key])) {
+        return prev;
+      }
+      return next;
+    });
+  }, []);
 
   function isNavItemActive(targetView: View): boolean {
     return view === targetView;
@@ -146,85 +167,74 @@ export function Sidebar() {
   }
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function refreshAiAssistStatus() {
-      const llmSettings = readAppSettings().llm;
-      if (!llmSettings.ollamaEnabled || !llmSettings.ollamaSelectedModel) {
-        if (!cancelled) setAiAssistStatus("unavailable");
-        return;
-      }
-
-      try {
-        const [modelStatus] = await Promise.all([
-          invoke<EmbeddingModelStatus>("get_multilingual_e5_status"),
-          invoke<number>("ping_address", {
-            host: llmSettings.ollamaHost,
-            port: llmSettings.ollamaPort,
-          }),
-        ]);
-
-        if (cancelled) return;
-        setAiAssistStatus(modelStatus.installed ? "ready" : "unavailable");
-      } catch {
-        if (!cancelled) setAiAssistStatus("unavailable");
-      }
+    if (!activeProject) {
+      setAiAssistStatus("checking");
+      return;
     }
 
-    setAiAssistStatus("checking");
-    void refreshAiAssistStatus();
-
-    function handleFocus() {
-      void refreshAiAssistStatus();
+    if (isLocalWorkspace) {
+      const ready =
+        projectAiAssistRuntimeStatus.hostLlmEnabled
+        && projectAiAssistRuntimeStatus.hostLlmModelSelected
+        && projectAiAssistRuntimeStatus.hostLlmConnectionLive
+        && projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled;
+      setAiAssistStatus(ready ? "ready" : "unavailable");
+      return;
     }
 
-    window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", handleFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", handleFocus);
-      document.removeEventListener("visibilitychange", handleFocus);
-    };
-  }, [view]);
+    if (
+      projectAiAssistRuntimeStatus.hostLlmEnabled == null
+      || projectAiAssistRuntimeStatus.hostLlmModelSelected == null
+      || projectAiAssistRuntimeStatus.hostLlmConnectionLive == null
+      || projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled == null
+    ) {
+      setAiAssistStatus("checking");
+      return;
+    }
+
+    const ready =
+      projectAiAssistRuntimeStatus.hostLlmEnabled
+      && projectAiAssistRuntimeStatus.hostLlmModelSelected
+      && projectAiAssistRuntimeStatus.hostLlmConnectionLive
+      && projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled;
+    setAiAssistStatus(ready ? "ready" : "unavailable");
+  }, [activeProject, isLocalWorkspace, projectAiAssistRuntimeStatus, view]);
 
   return (
     <aside className="sidebar">
-      <button
-        type="button"
-        className="sidebar-brand sidebar-brand--clickable"
-        onClick={() => setView("app-settings")}
-        title="App settings"
-      >
+      <div className="sidebar-brand" title="KanQual">
         <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
-        <span
-          className={`brand-network-badge brand-network-badge--${networkMode}`}
-          title={
-            networkMode === "lan"
-              ? "Network mode - other devices on your local network can connect to this instance"
-              : "Local only - data is not accessible from other devices"
-          }
+        <button
+          type="button"
+          className={`brand-network-badge brand-network-badge--${networkBadgeState}`}
+          title={networkBadgeTitle}
+          aria-label="Open network and collaboration settings"
+          onClick={() => openAppSettingsModal("network")}
         >
           <img
-            src={networkMode === "lan" ? networkIcon : computerLineIcon}
-            alt={networkMode === "lan" ? "Network enabled" : "Local only"}
+            src={networkBadgeIcon}
+            alt={networkBadgeAlt}
             className="brand-network-icon"
           />
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
           className={`brand-ai-badge brand-ai-badge--${aiAssistStatus === "ready" ? "ready" : "unavailable"}`}
           title={
             aiAssistStatus === "ready"
               ? "AI Assist ready"
               : "AI Assist not available, check app settings"
           }
+          aria-label="Open AI Assist settings"
+          onClick={() => openAppSettingsModal("llm")}
         >
           <img
             src={aiAssistStatus === "ready" ? aiAssistReadyIcon : aiAssistUnavailableIcon}
             alt={aiAssistStatus === "ready" ? "AI Assist ready" : "AI Assist not available"}
             className="brand-ai-icon"
           />
-        </span>
-      </button>
+        </button>
+      </div>
 
       {activeProject ? (
         <div className="sidebar-project-badge">
@@ -271,6 +281,25 @@ export function Sidebar() {
                     Boolean(activeProject) &&
                     !aiAssistEnabledForProject &&
                     nextView !== "ai-assist";
+                  const settingsItemDisabled =
+                    section.key === "settings" &&
+                    nextView === "project-settings" &&
+                    !activeProject;
+                  const itemDisabled =
+                    (section.key !== "settings" && !activeProject)
+                    || aiAssistItemDisabled
+                    || aiAssistPermissionDenied
+                    || settingsItemDisabled;
+                  const itemTitle =
+                    settingsItemDisabled
+                      ? "Open a project first"
+                      : section.key !== "settings" && !activeProject
+                        ? "Open a project first"
+                        : aiAssistPermissionDenied
+                          ? "You do not have permission to use this AI Assist tool"
+                          : aiAssistItemDisabled
+                            ? "Enable AI Assist in Project Settings"
+                            : undefined;
 
                   return (
                     <button
@@ -278,16 +307,8 @@ export function Sidebar() {
                       type="button"
                       className={`nav-item ${isNavItemActive(nextView) ? "nav-item--active" : ""}`}
                       onClick={() => setView(nextView)}
-                      disabled={!activeProject || aiAssistItemDisabled || aiAssistPermissionDenied}
-                      title={
-                        !activeProject
-                          ? "Open a project first"
-                          : aiAssistPermissionDenied
-                            ? "You do not have permission to use this AI Assist tool"
-                          : aiAssistItemDisabled
-                            ? "Enable AI Assist in Project Settings"
-                            : undefined
-                      }
+                      disabled={itemDisabled}
+                      title={itemTitle}
                     >
                       {label}
                     </button>
@@ -301,14 +322,9 @@ export function Sidebar() {
 
       <div className="sidebar-user">
         <div className="sidebar-user-info">
-          <button
-            type="button"
-            className="sidebar-user-name"
-            onClick={() => setView("user-settings")}
-            title="User settings"
-          >
+          <div className="sidebar-user-name" title={user?.email ?? undefined}>
             {user?.name || user?.email}
-          </button>
+          </div>
           {userRole && (
             <span className={`role-badge role-badge--${userRole}`}>
               {ROLE_LABELS[userRole]}

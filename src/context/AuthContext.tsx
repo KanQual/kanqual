@@ -4,22 +4,36 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
-import { waitForPb, ensureSetup, registerUserAccount } from "../lib/pb";
+import {
+  waitForPb,
+  ensureSetup,
+  registerUserAccount,
+  startLocalPocketBase,
+  stopLocalPocketBase,
+} from "../lib/pb";
 import { clearRecentProjects, readAppSettings } from "../lib/appSettings";
-import { clearLocalAccounts, clearRemoteSessions } from "../lib/authHistory";
+import { clearLocalAccounts, clearRemoteSessions, LOCAL_PB_URL } from "../lib/authHistory";
 
 type AuthStatus = "loading" | "ready" | "authenticated";
+const LAST_SERVER_URL_KEY = "kq_last_server_url";
+const REMOTE_CONNECT_TIMEOUT_MS = 7000;
+const REMOTE_TEST_TIMEOUT_MS = 5000;
+const REMOTE_AUTO_RECONNECT_TIMEOUT_MS = 3000;
 
 interface AuthContextValue {
   pb: PocketBase | null;
   user: RecordModel | null;
   status: AuthStatus;
   serverUrl: string;
-  setServerUrl: (url: string) => void;
+  useLocalServer: () => Promise<void>;
+  useRemoteServer: (url: string) => Promise<void>;
+  testRemoteServer: (url: string) => Promise<string>;
+  returnToModeSelection: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   updateProfile: (data: { name: string; email: string }) => Promise<void>;
@@ -34,45 +48,120 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pb, setPb] = useState<PocketBase | null>(null);
   const [user, setUser] = useState<RecordModel | null>(null);
   const [status, setStatus] = useState<AuthStatus>("loading");
-  const [serverUrl, setServerUrl] = useState("http://127.0.0.1:8090");
+  const [serverUrl, setServerUrlState] = useState(LOCAL_PB_URL);
   const [error, setError] = useState<string | null>(null);
+  const authUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Boot: wait for PocketBase, run first-time setup, restore session
+  const bindAuthStore = useCallback((instance: PocketBase) => {
+    authUnsubscribeRef.current?.();
+    authUnsubscribeRef.current = instance.authStore.onChange((token, record) => {
+      if (!token) {
+        setUser(null);
+        setStatus("ready");
+        return;
+      }
+      if (record) {
+        setUser(record);
+      }
+    });
+  }, []);
+
+  const normalizeServerUrl = useCallback((url: string) => {
+    const trimmed = url.trim().replace(/\/+$/, "");
+    if (!trimmed) return LOCAL_PB_URL;
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  }, []);
+
+  const activateServer = useCallback(
+    async (
+      nextUrl: string,
+      options?: {
+        ensureLocalSetup?: boolean;
+        stopLocalBeforeConnect?: boolean;
+        allowAutoLogin?: boolean;
+        waitTimeoutMs?: number;
+      },
+    ) => {
+      const normalizedUrl = normalizeServerUrl(nextUrl);
+      if (options?.stopLocalBeforeConnect && normalizedUrl !== LOCAL_PB_URL) {
+        await stopLocalPocketBase().catch(() => undefined);
+      }
+
+      const resolvedUrl = normalizedUrl === LOCAL_PB_URL
+        ? await startLocalPocketBase()
+        : normalizedUrl;
+      const instance = await waitForPb(resolvedUrl, options?.waitTimeoutMs);
+
+      if (resolvedUrl === LOCAL_PB_URL && options?.ensureLocalSetup) {
+        await ensureSetup(instance);
+      }
+
+      const settings = readAppSettings();
+      let nextUser: RecordModel | null = null;
+      let nextStatus: AuthStatus = "ready";
+
+      if (instance.authStore.isValid && options?.allowAutoLogin && settings.startup.autoLoginLastUser) {
+        try {
+          await instance.collection("users").authRefresh();
+          nextUser = instance.authStore.record;
+          nextStatus = "authenticated";
+        } catch {
+          instance.authStore.clear();
+          nextStatus = "ready";
+        }
+      } else if (instance.authStore.isValid && !settings.startup.autoLoginLastUser) {
+        instance.authStore.clear();
+      }
+
+      setPb(instance);
+      setUser(nextUser);
+      setStatus(nextStatus);
+      setError(null);
+      setServerUrlState(resolvedUrl);
+      bindAuthStore(instance);
+
+      try {
+        localStorage.setItem(LAST_SERVER_URL_KEY, resolvedUrl);
+      } catch {
+        // Convenience only.
+      }
+    },
+    [bindAuthStore, normalizeServerUrl],
+  );
+
+  // Boot without starting local PocketBase automatically. If auto-login is enabled
+  // and the last session was remote, try to reconnect to that remote server.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const instance = await waitForPb();
-        if (cancelled) return;
-
-        await ensureSetup(instance);
-        if (cancelled) return;
-
         const settings = readAppSettings();
-
-        // Restore persisted auth token only when startup auto-login is enabled.
-        if (instance.authStore.isValid && settings.startup.autoLoginLastUser) {
-          try {
-            await instance.collection("users").authRefresh();
-            setUser(instance.authStore.record);
-            setStatus("authenticated");
-          } catch {
-            instance.authStore.clear();
-            setStatus("ready");
-          }
-        } else {
-          if (instance.authStore.isValid && !settings.startup.autoLoginLastUser) {
-            instance.authStore.clear();
-          }
-          setStatus("ready");
+        let lastServerUrl: string | null = null;
+        try {
+          lastServerUrl = localStorage.getItem(LAST_SERVER_URL_KEY);
+        } catch {
+          lastServerUrl = null;
         }
 
-        setPb(instance);
-
-        // Clear user on logout; do not overwrite on auth changes (login sets it explicitly)
-        instance.authStore.onChange((token) => {
-          if (!token) setUser(null);
-        });
+        if (
+          settings.startup.autoLoginLastUser
+          && lastServerUrl
+          && lastServerUrl !== LOCAL_PB_URL
+        ) {
+          try {
+            await activateServer(lastServerUrl, {
+              allowAutoLogin: true,
+              stopLocalBeforeConnect: true,
+              waitTimeoutMs: REMOTE_AUTO_RECONNECT_TIMEOUT_MS,
+            });
+            return;
+          } catch {
+            // Fall through to normal ready state.
+          }
+        }
+        if (!cancelled) {
+          setStatus("ready");
+        }
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e));
@@ -80,29 +169,87 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
     })();
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+      authUnsubscribeRef.current?.();
+      authUnsubscribeRef.current = null;
+    };
+  }, [activateServer]);
+
+  const useLocalServer = useCallback(async () => {
+    setStatus("loading");
+    try {
+      await activateServer(LOCAL_PB_URL, { ensureLocalSetup: true, allowAutoLogin: true });
+    } catch (error) {
+      setStatus("ready");
+      throw error;
+    }
+  }, [activateServer]);
+
+  const useRemoteServer = useCallback(async (url: string) => {
+    setStatus("loading");
+    try {
+      await activateServer(url, {
+        allowAutoLogin: true,
+        stopLocalBeforeConnect: true,
+        waitTimeoutMs: REMOTE_CONNECT_TIMEOUT_MS,
+      });
+    } catch (error) {
+      setStatus("ready");
+      throw error;
+    }
+  }, [activateServer]);
+
+  const testRemoteServer = useCallback(async (url: string) => {
+    const normalizedUrl = normalizeServerUrl(url);
+    if (normalizedUrl === LOCAL_PB_URL) {
+      throw new Error("Enter a remote host address to test the connection.");
+    }
+    await waitForPb(normalizedUrl, REMOTE_TEST_TIMEOUT_MS);
+    return normalizedUrl;
+  }, [normalizeServerUrl]);
+
+  const returnToModeSelection = useCallback(async () => {
+    pb?.authStore.clear();
+    authUnsubscribeRef.current?.();
+    authUnsubscribeRef.current = null;
+
+    if (serverUrl === LOCAL_PB_URL) {
+      await stopLocalPocketBase().catch(() => undefined);
+    }
+
+    setPb(null);
+    setUser(null);
+    setStatus("ready");
+    setError(null);
+    setServerUrlState(LOCAL_PB_URL);
+  }, [pb, serverUrl]);
 
   const login = useCallback(
     async (email: string, password: string) => {
-      if (!pb) return;
+      if (!pb) throw new Error("Choose a local or remote workspace before signing in.");
       setError(null);
       try {
         const result = await pb.collection("users").authWithPassword(email, password);
         setUser(result.record);
         setStatus("authenticated");
+        try {
+          localStorage.setItem(LAST_SERVER_URL_KEY, serverUrl);
+        } catch {
+          // Convenience only.
+        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Login failed";
         setError(msg);
         throw e;
       }
     },
-    [pb]
+    [pb, serverUrl]
   );
 
   const register = useCallback(
     async (name: string, email: string, password: string) => {
-      if (!pb) return;
+      if (!pb) throw new Error("Choose local device work before creating a local account.");
       setError(null);
       try {
         await registerUserAccount({
@@ -114,13 +261,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await pb.collection("users").authWithPassword(email, password);
         setUser(pb.authStore.record);
         setStatus("authenticated");
+        try {
+          localStorage.setItem(LAST_SERVER_URL_KEY, serverUrl);
+        } catch {
+          // Convenience only.
+        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Registration failed";
         setError(msg);
         throw e;
       }
     },
-    [pb]
+    [pb, serverUrl]
   );
 
   const updateProfile = useCallback(
@@ -164,7 +316,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ pb, user, status, serverUrl, setServerUrl, login, register, updateProfile, changePassword, logout, error }}
+      value={{
+        pb,
+        user,
+        status,
+        serverUrl,
+        useLocalServer,
+        useRemoteServer,
+        testRemoteServer,
+        returnToModeSelection,
+        login,
+        register,
+        updateProfile,
+        changePassword,
+        logout,
+        error,
+      }}
     >
       {children}
     </AuthContext.Provider>

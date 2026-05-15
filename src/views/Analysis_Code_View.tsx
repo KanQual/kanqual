@@ -159,7 +159,8 @@ function CodeDocumentsLanding() {
     try {
       const records = await pb.collection("document_locks").getFullList({
         filter: `(${filterExpr})`,
-        fields: "id,document,user,user_name,expires_at_ms",
+        expand: "document",
+        fields: "id,document,user,user_name,expires_at_ms,expand.document.name",
       });
 
       const now = Date.now();
@@ -177,7 +178,7 @@ function CodeDocumentsLanding() {
           next[record.document] = {
             id: record.id,
             documentId: record.document,
-            documentName: documents.find((doc) => doc.id === record.document)?.name ?? "Document",
+            documentName: String(record.expand?.document?.name ?? "Document"),
             userId: String(record.user ?? ""),
             userName: String(record.user_name ?? "Another user"),
             expiresAtMs,
@@ -413,13 +414,19 @@ function CodeDocumentsLanding() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Code Help</h2>
             <p className="users-guide-copy">
-              Select a document to open it in the annotation workspace.
+              Choose a document to code, inspect document-level coding statistics, open the annotation workspace, right-click a locked row, and kick a user from a locked document if permitted.
             </p>
             <p className="users-guide-copy">
-              Locked documents are currently being annotated by another collaborator. Right-click a locked row to kick a user if needed.
+              Start here when you want to code documents manually. Select a document from the list to open the coding workspace for that document.
+            </p>
+            <p className="users-guide-copy">
+              Locked documents are being edited in another coding workspace. Lock resolution depends on permissions, and only one collaborator should edit the same document at a time.
+            </p>
+            <p className="users-guide-copy">
+              Project role permissions for coding and document-lock behavior affect what you can do on this page.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>

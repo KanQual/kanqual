@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RecordModel } from "pocketbase";
 import { useStore } from "../context/StoreContext";
-import { readProjectAiAssistSettings } from "../lib/projectAiAssistSettings";
 import helpIcon from "../assets/ic_help_outline_24px.svg";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
 
@@ -344,14 +343,14 @@ function ReviewResultsPanel({
 }
 
 export function AIAssistProcessDocumentsReviewView() {
-  const { activeProject, pb, setView, deleteDocument, logAction, canCurrentUser } = useStore();
+  const { activeProject, pb, setView, deleteDocument, logAction, canCurrentUser, projectAiAssistSettings } = useStore();
   const canReviewProcessedDocuments = canCurrentUser("reviewProcessedDocuments");
   const canEditAiOutputs = canCurrentUser("editAiOutputs");
   const canSaveAiOutputs = canCurrentUser("saveAiOutputs");
   const canExportAiOutputsToProject = canCurrentUser("exportAiOutputsToProject");
   const canDeleteOriginalDocument = canCurrentUser("deleteDocument");
   const canModifyReview = canEditAiOutputs || canSaveAiOutputs;
-  const aiAssistEnabledForProject = activeProject ? readProjectAiAssistSettings(activeProject.id).enabled : false;
+  const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
   const [helpOpen, setHelpOpen] = useState(false);
   const [reviewRecords, setReviewRecords] = useState<ProcessedDocumentReviewRecord[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
@@ -690,11 +689,16 @@ export function AIAssistProcessDocumentsReviewView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help modal--wide" onClick={(e) => e.stopPropagation()}>
             <h2>Processed Document Review Help</h2>
             <p className="users-guide-copy">
-              Select a processed document from the left to review extracted elements and named entities.
-              You can edit tags, speakers, and text before saving the reviewed output.
+              Choose a processed document, inspect extracted entities and segments, edit tags, speakers, and text, save the reviewed output, and export reviewed results back into the project.
+            </p>
+            <p className="users-guide-copy">
+              Use this page after processing completes. Pick a saved review record from the list, correct anything that needs cleanup, then save or export the reviewed version.
+            </p>
+            <p className="users-guide-copy">
+              Processed results are saved in a project review queue so they can be revisited later. Exporting reviewed output changes shared project content.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>

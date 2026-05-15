@@ -32,12 +32,10 @@ import {
 } from "../lib/projectExport";
 import { hasHtmlText } from "../lib/htmlText";
 import {
-  DEFAULT_PROJECT_AI_ASSIST_SETTINGS,
-  PROJECT_AI_ASSIST_SETTINGS_CHANGED_EVENT,
-  readProjectAiAssistSettings,
-  saveProjectAiAssistSettings,
+  loadProjectBackupPolicy,
+  type ProjectDocumentImportSettings,
   type ProjectAiAssistSettings,
-} from "../lib/projectAiAssistSettings";
+} from "../lib/projectSettings";
 import {
   buildProjectEmbeddingItems,
   type ProjectEmbeddingBuildPreflight,
@@ -52,6 +50,7 @@ import {
   PROJECT_LOG_ACTION_LABELS,
 } from "./Project_Log_View";
 import type { PendingImportedUser, Project, ProjectLogEntry } from "../types";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 
 const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
   { cmd: "bold", label: "B", title: "Bold" },
@@ -265,7 +264,13 @@ export function ProjectSettingsView() {
     logEntries,
     setPendingImportedUserResolution,
     projectEmbeddingBuildStatus,
+    projectAiAssistSettings,
+    projectAiAssistRuntimeStatus,
+    projectDocumentImportSettings,
+    updateProjectAiAssistSettings,
+    updateProjectDocumentImportSettings,
     startProjectEmbeddingBuild,
+    isLocalWorkspace,
   } = useStore();
   const [exporting, setExporting] = useState<"json" | "xlsx" | "qdpx" | "encrypted" | null>(null);
   const [projectLogExporting, setProjectLogExporting] = useState(false);
@@ -301,14 +306,16 @@ export function ProjectSettingsView() {
   const [backupContextMenu, setBackupContextMenu] = useState<{ x: number; y: number; backup: ProjectBackupEntry } | null>(null);
   const backupContextMenuRef = useRef<HTMLDivElement | null>(null);
   const backupContextMenuStyle = useViewportContextMenuStyle(backupContextMenu, backupContextMenuRef);
-  const [aiAssistSettings, setAiAssistSettings] = useState<ProjectAiAssistSettings>(DEFAULT_PROJECT_AI_ASSIST_SETTINGS);
   const [aiAssistNotice, setAiAssistNotice] = useState("");
   const [aiAssistError, setAiAssistError] = useState("");
+  const [documentImportNotice, setDocumentImportNotice] = useState("");
+  const [documentImportError, setDocumentImportError] = useState("");
   const [aiAssistIndexStatus, setAiAssistIndexStatus] = useState<ProjectEmbeddingIndexStatus | null>(null);
   const [aiAssistBuildPreflight, setAiAssistBuildPreflight] = useState<ProjectEmbeddingBuildPreflight | null>(null);
   const [aiAssistDeletingIndex, setAiAssistDeletingIndex] = useState(false);
   const [aiAssistRequirementOpen, setAiAssistRequirementOpen] = useState(false);
   const [aiAssistBuildOpen, setAiAssistBuildOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const aiAssistBuildBusy =
     projectEmbeddingBuildStatus?.phase === "running" || projectEmbeddingBuildStatus?.phase === "cancelling";
   const canEditProjectMetadata = canCurrentUser("editProjectMetadata");
@@ -338,12 +345,23 @@ export function ProjectSettingsView() {
       setBackupManifest(null);
       return;
     }
-    loadProjectBackupManifest(activeProject)
-      .then((manifest) => {
+    Promise.all([
+      loadProjectBackupManifest(activeProject),
+      loadProjectBackupPolicy(pb, activeProject.id, {
+        retention: DEFAULT_BACKUP_RETENTION,
+        automaticIntervalMinutes: DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES,
+      }),
+    ])
+      .then(([manifest, backupPolicy]) => {
         if (cancelled) return;
-        setBackupManifest(manifest);
-        setRetentionDraft(manifest.retention);
-        setAutomaticIntervalDraft(manifest.automaticIntervalMinutes);
+        const mergedManifest = {
+          ...manifest,
+          retention: backupPolicy.retention,
+          automaticIntervalMinutes: backupPolicy.automaticIntervalMinutes,
+        };
+        setBackupManifest(mergedManifest);
+        setRetentionDraft(backupPolicy.retention);
+        setAutomaticIntervalDraft(backupPolicy.automaticIntervalMinutes);
       })
       .catch((error) => {
         console.error("Failed to load project backups:", error);
@@ -352,11 +370,10 @@ export function ProjectSettingsView() {
     return () => {
       cancelled = true;
     };
-  }, [activeProject?.id, canManageBackups]);
+  }, [activeProject?.id, canManageBackups, pb]);
 
   useEffect(() => {
     if (!activeProject || !canManageProjectAiAssist) {
-      setAiAssistSettings(DEFAULT_PROJECT_AI_ASSIST_SETTINGS);
       setAiAssistNotice("");
       setAiAssistError("");
       setAiAssistIndexStatus(null);
@@ -364,7 +381,6 @@ export function ProjectSettingsView() {
       setAiAssistBuildOpen(false);
       return;
     }
-    setAiAssistSettings(readProjectAiAssistSettings(activeProject.id));
     setAiAssistNotice("");
     setAiAssistError("");
     setAiAssistDeletingIndex(false);
@@ -373,6 +389,16 @@ export function ProjectSettingsView() {
 
   useEffect(() => {
     if (!activeProject || !canManageProjectAiAssist) return;
+    if (!isLocalWorkspace) {
+      setAiAssistIndexStatus({
+        exists: projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady === true,
+        generatedAtMs: null,
+        itemCount: 0,
+        modelRepoId: null,
+        modelDisplayName: null,
+      });
+      return;
+    }
     let cancelled = false;
     void invoke<ProjectEmbeddingIndexStatus>("get_project_embedding_index_status", {
       projectId: activeProject.id,
@@ -387,10 +413,20 @@ export function ProjectSettingsView() {
     return () => {
       cancelled = true;
     };
-  }, [activeProject?.id, canManageProjectAiAssist, projectEmbeddingBuildStatus?.phase]);
+  }, [
+    activeProject?.id,
+    canManageProjectAiAssist,
+    isLocalWorkspace,
+    projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady,
+    projectEmbeddingBuildStatus?.phase,
+  ]);
 
   useEffect(() => {
     if (!activeProject || !canManageProjectAiAssist) {
+      setAiAssistBuildPreflight(null);
+      return;
+    }
+    if (!isLocalWorkspace) {
       setAiAssistBuildPreflight(null);
       return;
     }
@@ -426,20 +462,9 @@ export function ProjectSettingsView() {
     codes,
     annotations,
     memos,
+    isLocalWorkspace,
     projectEmbeddingBuildStatus?.phase,
   ]);
-
-  useEffect(() => {
-    const projectId = activeProject?.id;
-    if (!projectId) return;
-    function handleSettingsChanged(event: Event) {
-      const detail = (event as CustomEvent<{ projectId?: string; settings?: ProjectAiAssistSettings }>).detail;
-      if (!detail || detail.projectId !== projectId || !detail.settings) return;
-      setAiAssistSettings(detail.settings);
-    }
-    window.addEventListener(PROJECT_AI_ASSIST_SETTINGS_CHANGED_EVENT, handleSettingsChanged);
-    return () => window.removeEventListener(PROJECT_AI_ASSIST_SETTINGS_CHANGED_EVENT, handleSettingsChanged);
-  }, [activeProject?.id]);
 
   useEffect(() => {
     const requestedModal = sessionStorage.getItem("kanqual:open-project-settings-modal");
@@ -627,8 +652,6 @@ export function ProjectSettingsView() {
     try {
       const { manifest } = await createProjectBackup(pb, activeProject, "manual", logEntries[0]?.occurredAt ?? "");
       setBackupManifest(manifest);
-      setRetentionDraft(manifest.retention);
-      setAutomaticIntervalDraft(manifest.automaticIntervalMinutes);
       await logAction(activeProject.id, "project.backup.create", "Created a manual project backup");
       setBackupNotice("Manual backup created. It will be retained indefinitely.");
     } catch (error) {
@@ -639,12 +662,19 @@ export function ProjectSettingsView() {
     }
   }
 
-  function openBackupSettings() {
-    if (!canManageBackups) return;
+  async function openBackupSettings() {
+    if (!activeProject || !canManageBackups) return;
     setBackupError("");
-    if (backupManifest) {
-      setRetentionDraft(backupManifest.retention);
-      setAutomaticIntervalDraft(backupManifest.automaticIntervalMinutes);
+    try {
+      const backupPolicy = await loadProjectBackupPolicy(pb, activeProject.id, {
+        retention: retentionDraft,
+        automaticIntervalMinutes: automaticIntervalDraft,
+      });
+      setRetentionDraft(backupPolicy.retention);
+      setAutomaticIntervalDraft(backupPolicy.automaticIntervalMinutes);
+    } catch (error) {
+      console.error("Failed to load backup policy:", error);
+      setBackupError("Could not load backup settings.");
     }
     setBackupSettingsOpen(true);
   }
@@ -656,13 +686,11 @@ export function ProjectSettingsView() {
     setBackupError("");
     setBackupNotice("");
     try {
-      const manifest = await saveProjectBackupSettings(activeProject, {
+      const manifest = await saveProjectBackupSettings(pb, activeProject, {
         retention: retentionDraft,
         automaticIntervalMinutes: automaticIntervalDraft,
       });
       setBackupManifest(manifest);
-      setRetentionDraft(manifest.retention);
-      setAutomaticIntervalDraft(manifest.automaticIntervalMinutes);
       await logAction(
         activeProject.id,
         "project.backup.settings",
@@ -783,17 +811,16 @@ export function ProjectSettingsView() {
     }
   }
 
-  function persistAiAssistSettings(nextSettings: ProjectAiAssistSettings, notice = "AI Assist settings saved.") {
+  async function persistAiAssistSettings(nextSettings: ProjectAiAssistSettings, notice = "AI Assist settings saved.") {
     if (!activeProject || !canManageProjectAiAssist) return;
-    setAiAssistSettings(nextSettings);
-    saveProjectAiAssistSettings(activeProject.id, nextSettings);
+    await updateProjectAiAssistSettings(activeProject.id, nextSettings);
     setAiAssistNotice(notice);
     setAiAssistError("");
   }
 
   async function handleAiAssistEnabledChange(enabled: boolean) {
     if (!enabled) {
-      persistAiAssistSettings({ ...aiAssistSettings, enabled: false });
+      await persistAiAssistSettings({ ...projectAiAssistSettings, enabled: false });
       if (activeProject) {
         await logAction(activeProject.id, "project.ai_assist.update", "Disabled AI Assist for this project");
       }
@@ -801,14 +828,31 @@ export function ProjectSettingsView() {
     }
 
     if (!activeProject || !canManageProjectAiAssist) return;
-    const nextSettings = { ...aiAssistSettings, enabled: true };
-    persistAiAssistSettings(
+    const nextSettings = { ...projectAiAssistSettings, enabled: true };
+    await persistAiAssistSettings(
       nextSettings,
       "AI Assist enabled. Finish the remaining setup steps to make all AI Assist tools ready.",
     );
     setAiAssistError("");
     await logAction(activeProject.id, "project.ai_assist.update", "Enabled AI Assist for this project");
     try {
+      if (!isLocalWorkspace) {
+        if (projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled !== true) {
+          setAiAssistRequirementOpen(true);
+          return;
+        }
+        if (projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady === true) {
+          await persistAiAssistSettings(
+            nextSettings,
+            "AI Assist enabled. Existing host project embeddings will be reused.",
+          );
+          return;
+        }
+
+        setAiAssistBuildOpen(true);
+        return;
+      }
+
       const status = await invoke<EmbeddingModelStatus>("get_multilingual_e5_status");
       if (!status.installed) {
         setAiAssistRequirementOpen(true);
@@ -819,7 +863,7 @@ export function ProjectSettingsView() {
       });
       if (indexStatus.exists) {
         setAiAssistIndexStatus(indexStatus);
-        persistAiAssistSettings(
+        await persistAiAssistSettings(
           nextSettings,
           "AI Assist enabled. Existing local project embeddings will be reused.",
         );
@@ -828,7 +872,7 @@ export function ProjectSettingsView() {
 
       const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos);
       if (items.length === 0) {
-        persistAiAssistSettings(
+        await persistAiAssistSettings(
           nextSettings,
           "AI Assist enabled. No project content was available to index yet.",
         );
@@ -847,6 +891,34 @@ export function ProjectSettingsView() {
     if (!activeProject || !canManageProjectAiAssist) return;
     setAiAssistError("");
     try {
+      if (!isLocalWorkspace) {
+        if (projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled !== true) {
+          setAiAssistBuildOpen(false);
+          setAiAssistRequirementOpen(true);
+          return;
+        }
+
+        await startProjectEmbeddingBuild({
+          projectId: activeProject.id,
+          llmSettings: {
+            batchSize: 0,
+            chunkSize: 0,
+            overlapSize: 0,
+            prefixPassages: false,
+            normalizeWhitespace: true,
+          },
+          items: [],
+          successLog: {
+            projectId: activeProject.id,
+            action: "ai_assist.index",
+            label: "Built host AI Assist embeddings",
+          },
+        });
+        setAiAssistNotice("Host AI Assist is preparing in the background.");
+        setAiAssistBuildOpen(false);
+        return;
+      }
+
       const modelStatus = await invoke<EmbeddingModelStatus>("get_multilingual_e5_status");
       if (!modelStatus.installed) {
         setAiAssistBuildOpen(false);
@@ -858,7 +930,7 @@ export function ProjectSettingsView() {
       const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, appSettings.llm);
       if (items.length === 0) {
         persistAiAssistSettings(
-          { ...aiAssistSettings, enabled: true },
+          { ...projectAiAssistSettings, enabled: true },
           "AI Assist enabled. No project content was available to index yet.",
         );
         setAiAssistBuildOpen(false);
@@ -891,12 +963,12 @@ export function ProjectSettingsView() {
     setAiAssistNotice("");
     try {
       const nextStatus = await invoke<ProjectEmbeddingIndexStatus>("delete_project_embedding_index", {
+        authToken: pb.authStore.token,
         projectId: activeProject.id,
       });
       setAiAssistIndexStatus(nextStatus);
-      const nextSettings = { ...aiAssistSettings, enabled: false };
-      setAiAssistSettings(nextSettings);
-      saveProjectAiAssistSettings(activeProject.id, nextSettings);
+      const nextSettings = { ...projectAiAssistSettings, enabled: false };
+      await updateProjectAiAssistSettings(activeProject.id, nextSettings);
       await logAction(
         activeProject.id,
         "project.ai_assist.embeddings.delete",
@@ -908,6 +980,28 @@ export function ProjectSettingsView() {
       setAiAssistError(error instanceof Error ? error.message : "Could not delete local embeddings for this project.");
     } finally {
       setAiAssistDeletingIndex(false);
+    }
+  }
+
+  async function handleProjectDocumentImportSettingsChange(
+    nextSettings: ProjectDocumentImportSettings,
+  ) {
+    if (!activeProject || !canEditProjectMetadata) return;
+    setDocumentImportError("");
+    setDocumentImportNotice("");
+    try {
+      await updateProjectDocumentImportSettings(activeProject.id, nextSettings);
+      await logAction(
+        activeProject.id,
+        "project.document_import.settings",
+        nextSettings.storeOriginalFileName
+          ? "Enabled original filename storage for imported documents"
+          : "Disabled original filename storage for imported documents",
+      );
+      setDocumentImportNotice("Document import defaults saved.");
+    } catch (error) {
+      console.error("Failed to update project document import defaults:", error);
+      setDocumentImportError("Could not save document import defaults.");
     }
   }
 
@@ -929,6 +1023,12 @@ export function ProjectSettingsView() {
       id: "details",
       title: "Project Details",
       description: "Update the project name and read-only description shown on Project Home.",
+      visible: canEditProjectMetadata,
+    },
+    {
+      id: "document-import",
+      title: "Document Import",
+      description: "Set shared defaults for how newly imported documents are saved into this project.",
       visible: canEditProjectMetadata,
     },
     {
@@ -992,7 +1092,9 @@ export function ProjectSettingsView() {
                         ? `Last generated ${new Date(aiAssistIndexStatus.generatedAtMs).toLocaleString()}`
                         : "",
                     ].filter(Boolean).join(" • ")
-                  : "No local project embeddings have been built yet.";
+                  : isLocalWorkspace
+                    ? "No local project embeddings have been built yet."
+                    : "No host project embeddings have been built yet.";
         return (
           <>
             {aiAssistError && <div className="form-error project-settings-error">{aiAssistError}</div>}
@@ -1000,11 +1102,11 @@ export function ProjectSettingsView() {
             <label className="settings-toggle-row">
               <span>
                 <strong>Enable AI assistance</strong>
-                <small>Turn project-level AI help on or off for this device.</small>
+                <small>Turn project-level AI help on or off for everyone working in this project.</small>
               </span>
               <input
                 type="checkbox"
-                checked={aiAssistSettings.enabled}
+                checked={projectAiAssistSettings.enabled}
                 disabled={aiAssistBuildBusy || !canEnableProjectAiAssist}
                 onChange={(event) => void handleAiAssistEnabledChange(event.target.checked)}
               />
@@ -1015,7 +1117,9 @@ export function ProjectSettingsView() {
                 <div>
                   <h2 className="settings-section-title">Project Embeddings</h2>
                   <p className="settings-section-desc">
-                    Status of this project&apos;s local embeddings for AI Assist retrieval.
+                    {isLocalWorkspace
+                      ? "Status of this project's local embeddings for AI Assist retrieval."
+                      : "Status of this project's host embeddings for AI Assist retrieval."}
                   </p>
                 </div>
               </div>
@@ -1103,6 +1207,26 @@ export function ProjectSettingsView() {
               Edit Project Details
             </button>
           </div>
+        );
+      case "document-import":
+        return (
+          <>
+            {documentImportError && <div className="form-error project-settings-error">{documentImportError}</div>}
+            {documentImportNotice && <div className="settings-success project-settings-success">{documentImportNotice}</div>}
+            <label className="settings-toggle-row">
+              <span>
+                <strong>Store original filename</strong>
+                <small>Use the uploaded filename as stored document metadata by default for everyone importing into this project.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={projectDocumentImportSettings.storeOriginalFileName}
+                onChange={(event) => void handleProjectDocumentImportSettingsChange({
+                  storeOriginalFileName: event.target.checked,
+                })}
+              />
+            </label>
+          </>
         );
       case "log":
         return (
@@ -1221,6 +1345,11 @@ export function ProjectSettingsView() {
             <p className="import-project-copy">
               Choose the export format that best fits your next step.
             </p>
+            <div className="settings-warning settings-warning--danger">
+              <strong>Standard exports are not encrypted.</strong>
+              <br />
+              JSON backups, Excel workbooks, and REFI-QDA project exports can contain project content, coding, memos, and user-linked metadata in readable form. Store them only in trusted locations.
+            </div>
             {exportError && <p className="auth-error">{exportError}</p>}
             <div className="project-export-actions project-export-actions--modal">
               <button className="btn" onClick={() => handleExport("json")} disabled={!!exporting}>
@@ -1238,6 +1367,11 @@ export function ProjectSettingsView() {
               <p className="import-project-copy">
                 Create an encrypted off-site backup protected by a password. This password is not recoverable.
               </p>
+              <div className="settings-warning">
+                <strong>Recommended for cloud or off-site storage</strong>
+                <br />
+                Use encrypted backups for file sharing, cloud storage, USB transfer, or any storage location outside this device. Keep the password in a secure password manager because Kanqual cannot recover it later.
+              </div>
               <label className="form-label">
                 Backup password
                 <input
@@ -1325,8 +1459,12 @@ export function ProjectSettingsView() {
     <div className="view project-settings-view">
       <header className="view-header">
         <div>
-          <h1>Project Settings</h1>
-          <span className="view-header-sub">{activeProject.name}</span>
+          <div className="view-title-with-help">
+            <h1>Project Settings</h1>
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open project settings help">
+              <img src={helpIcon} alt="" className="users-help-icon" />
+            </button>
+          </div>
         </div>
         <button className="btn" onClick={() => setView("home")}>Back to Home</button>
       </header>
@@ -1721,6 +1859,28 @@ export function ProjectSettingsView() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
+            <h2>Project Settings Help</h2>
+            <div className="app-settings-modal-body">
+                <p className="settings-section-desc">
+                  Open shared settings cards, export the project, manage backups, restore backups, configure AI Assist at the project level, review the project log, exchange codebooks, and edit project details.
+                </p>
+                <ul className="settings-help-list">
+                  <li>Use this page to manage settings and maintenance tasks that belong to the project as a whole. Open a card, complete the action in the modal, and close when finished.</li>
+                  <li>Many actions here are permission-gated, and some are sensitive or destructive. Backup, restore, and AI Assist operations may depend on host-side capabilities.</li>
+                </ul>
+              <div className="form-actions">
+                <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

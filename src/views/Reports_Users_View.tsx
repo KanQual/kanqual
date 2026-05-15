@@ -137,7 +137,10 @@ const ACTION_LABELS: Record<string, string> = {
   "project.backup.create": "Project backup created",
   "project.backup.settings": "Project backup settings updated",
   "project.backup.delete": "Project backup deleted",
+  "project.network_mode.update": "Network mode updated",
   "project.ai_assist.update": "Project AI Assist updated",
+  "project.ai_chat.message": "AI chat message sent",
+  "project.ai_chat.response": "AI chat response received",
   "project.ai_assist.embeddings.delete": "Project AI Assist embeddings deleted",
   "codebook.export": "Codebook exported",
   "codebook.import": "Codebook imported",
@@ -1882,13 +1885,6 @@ export function ReportsUsersView() {
       </header>
 
       {error && <div className="settings-error">{error}</div>}
-      {!error && (
-        <p className="users-permission-note">
-          {canCreateReports
-            ? "Create a new user report or open a saved one."
-            : "Saved user reports are available to view, but creating new reports is restricted with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
         <section className="users-layout-main">
@@ -1936,16 +1932,16 @@ export function ReportsUsersView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>User Reports Help</h2>
             <p className="users-guide-copy">
-              User reports help you compare coding patterns between users across the project.
+              Create or open a user report, compare coding by user, review report sections, and delete a report when permitted.
             </p>
             <p className="users-guide-copy">
-              Select a report to open it, or right-click a row for quick actions. Use <strong>New Report</strong> to create a fresh analysis.
+              Use user reports to compare how different collaborators are coding across the project. Open a report or create a new one, then inspect the comparative output.
             </p>
             <p className="users-guide-copy">
-              Report creation, deletion, and export options depend on your project role.
+              Report creation and deletion depend on your role. Reports summarize existing project activity rather than changing it.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>

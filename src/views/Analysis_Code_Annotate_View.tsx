@@ -107,6 +107,28 @@ function getChildSuggestions(parentColor: string, count = 8): string[] {
   ].slice(0, count);
 }
 
+function withHexAlpha(color: string, alpha: string): string {
+  return /^#[0-9a-f]{6}$/i.test(color) ? `${color}${alpha}` : color;
+}
+
+function buildMultiAnnotationBackground(colors: string[], isSelected: boolean): string {
+  const uniqueColors = [...new Set(colors.filter(Boolean))];
+  if (uniqueColors.length === 0) {
+    return isSelected ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.07)";
+  }
+
+  const stripeWidth = 8;
+  const alpha = isSelected ? "88" : "55";
+  const stops = uniqueColors.flatMap((color, index) => {
+    const start = index * stripeWidth;
+    const end = start + stripeWidth;
+    const tinted = withHexAlpha(color, alpha);
+    return [`${tinted} ${start}px`, `${tinted} ${end}px`];
+  });
+
+  return `repeating-linear-gradient(135deg, ${stops.join(", ")})`;
+}
+
 // ─── ColorSuggestions ────────────────────────────────────────────────────────
 
 function ColorSuggestions({
@@ -617,9 +639,18 @@ function AnnotationDetailsPanel({
   hiddenUserIds: Set<string>;
   hiddenCodeIds: Set<string>;
 }) {
-  const { annotations: allAnnotations, codes, deleteAnnotation, updateAnnotationNote, canCurrentUser } = useStore();
+  const {
+    annotations: allAnnotations,
+    codes,
+    deleteAnnotation,
+    updateAnnotationNote,
+    canCurrentUser,
+    setPendingNewMemoContext,
+    setView,
+  } = useStore();
   const canEditAnnotationNotes = canCurrentUser("editAnnotationNotes");
   const canDeleteAnnotations = canCurrentUser("deleteAnnotations");
+  const canCreateMemos = canCurrentUser("createMemo");
   const annotations = useMemo(
     () => allAnnotations.filter((a) => {
       if (hiddenUserIds.size > 0 && hiddenUserIds.has(a.createdById)) return false;
@@ -639,6 +670,13 @@ function AnnotationDetailsPanel({
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
   const codeMap = Object.fromEntries(codes.map((c) => [c.id, c]));
+
+  function handleMemoAboutAnnotation(ann: Annotation) {
+    if (!canCreateMemos) return;
+    setPendingNewMemoContext({ annotationIds: [ann.id] });
+    setView("memos");
+    setContextMenu(null);
+  }
 
   async function handleSaveNote() {
     if (!editingNoteAnn) return;
@@ -786,7 +824,11 @@ function AnnotationDetailsPanel({
               Delete Note
             </button>
           )}
-          <button className="context-menu-item" onClick={() => setContextMenu(null)}>
+          <button
+            className="context-menu-item"
+            onClick={() => handleMemoAboutAnnotation(contextMenu.ann)}
+            disabled={!canCreateMemos}
+          >
             Memo About Annotation
           </button>
           {canDeleteAnnotations && (
@@ -851,16 +893,34 @@ interface StripeHover {
   color: string;
 }
 
-function getStripeTooltipStyle(x: number, y: number) {
+interface AnnotationTooltipItem {
+  annId: string;
+  label: string;
+  color: string;
+  quote: string;
+}
+
+interface AnnotationHover {
+  x: number;
+  y: number;
+  items: AnnotationTooltipItem[];
+}
+
+function getFloatingTooltipStyle(x: number, y: number, tooltipWidth = 280, tooltipHeight = 180) {
   const offset = 12;
-  const tooltipWidth = 280;
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1280;
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 800;
-  const prefersLeft = x + offset + tooltipWidth > viewportWidth - 16;
+  const fitsRight = x + offset + tooltipWidth <= viewportWidth - 16;
+  const fitsBelow = y + offset + tooltipHeight <= viewportHeight - 16;
+  const left = fitsRight
+    ? x + offset
+    : Math.max(16, x - offset - tooltipWidth);
+  const top = fitsBelow
+    ? y + offset
+    : Math.max(16, y - offset - tooltipHeight);
   return {
-    left: prefersLeft ? Math.max(16, x - offset) : x + offset,
-    top: Math.max(16, Math.min(y - 8, viewportHeight - 120)),
-    transform: prefersLeft ? "translateX(-100%)" : undefined,
+    left: Math.max(16, Math.min(left, viewportWidth - tooltipWidth - 16)),
+    top: Math.max(16, Math.min(top, viewportHeight - tooltipHeight - 16)),
   };
 }
 
@@ -892,9 +952,16 @@ function DocumentViewer({
     annotations: allAnnotations,
     activeProject,
     canCurrentUser,
+    deleteAnnotation,
+    updateAnnotationNote,
+    setPendingNewMemoContext,
+    setView,
   } = useStore();
   const canImportDocuments = canCurrentUser("createDocument") || canCurrentUser("uploadDocument");
   const canCreateAnnotations = canCurrentUser("createAnnotations");
+  const canEditAnnotationNotes = canCurrentUser("editAnnotationNotes");
+  const canDeleteAnnotations = canCurrentUser("deleteAnnotations");
+  const canCreateMemos = canCurrentUser("createMemo");
   const annotations = useMemo(
     () => allAnnotations.filter((a) => {
       if (hiddenUserIds.size > 0 && hiddenUserIds.has(a.createdById)) return false;
@@ -905,9 +972,66 @@ function DocumentViewer({
   );
   const [stripeBars,  setStripeBars]  = useState<StripeBar[]>([]);
   const [stripeHover, setStripeHover] = useState<StripeHover | null>(null);
+  const [annotationHover, setAnnotationHover] = useState<AnnotationHover | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ann: Annotation } | null>(null);
+  const [confirmDeleteAnn, setConfirmDeleteAnn] = useState<Annotation | null>(null);
+  const [deletingAnn, setDeletingAnn] = useState(false);
+  const [editingNoteAnn, setEditingNoteAnn] = useState<Annotation | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const viewerRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [selectedOutlineSortOrder, setSelectedOutlineSortOrder] = useState<number | null>(null);
+
+  function handleMemoAboutAnnotation(ann: Annotation) {
+    if (!canCreateMemos) return;
+    setPendingNewMemoContext({ annotationIds: [ann.id] });
+    setView("memos");
+    setContextMenu(null);
+  }
+
+  async function handleSaveNote() {
+    if (!editingNoteAnn) return;
+    setSavingNote(true);
+    try {
+      await updateAnnotationNote(editingNoteAnn.id, noteDraft.trim());
+      setEditingNoteAnn(null);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
+  async function handleDeleteAnn() {
+    if (!confirmDeleteAnn) return;
+    setDeletingAnn(true);
+    try {
+      await deleteAnnotation(confirmDeleteAnn.id);
+      setConfirmDeleteAnn(null);
+    } finally {
+      setDeletingAnn(false);
+    }
+  }
+
+  useEffect(() => {
+    function onPointerDown(event: MouseEvent) {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenu(null);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setContextMenu(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
 
   async function handleImport() {
@@ -956,6 +1080,10 @@ function DocumentViewer({
     const timer = setTimeout(() => el.classList.remove("annotation-flash"), 1400);
     return () => clearTimeout(timer);
   }, [selectedOutlineSortOrder]);
+
+  useEffect(() => {
+    setAnnotationHover(null);
+  }, [activeDocument?.id]);
 
   // ── Stripe measurement ──────────────────────────────────────────────────────
 
@@ -1048,6 +1176,35 @@ function DocumentViewer({
         : [];
     const codeMap = Object.fromEntries(codes.map((c) => [c.id, c]));
 
+    function makeAnnotationTooltipItems(covering: Annotation[]): AnnotationTooltipItem[] {
+      return covering.map((ann) => {
+        const code = codeMap[ann.codeId];
+        return {
+          annId: ann.id,
+          label: code?.label ?? "Annotation",
+          color: code?.color ?? "#94a3b8",
+          quote: ann.quote,
+        };
+      });
+    }
+
+    function setAnnotationHoverFromEvent(event: React.MouseEvent<HTMLElement>, covering: Annotation[]) {
+      setAnnotationHover({
+        x: event.clientX,
+        y: event.clientY,
+        items: makeAnnotationTooltipItems(covering),
+      });
+    }
+
+    function openAnnotationContextMenu(event: React.MouseEvent<HTMLElement>, covering: Annotation[]) {
+      event.preventDefault();
+      setAnnotationHover(null);
+      const target = covering.find((ann) => ann.id === selectedAnnId) ?? covering[0];
+      if (!target) return;
+      onAnnotationClick(target.id);
+      setContextMenu({ x: event.clientX, y: event.clientY, ann: target });
+    }
+
     function renderSpans(
       rangeStart: number,
       rangeEnd: number,
@@ -1099,22 +1256,33 @@ function DocumentViewer({
                     ? `${code.color}${isSelected ? "88" : "44"}`
                     : "#ffff0044",
               }}
-              title={isCitation ? (scrollToCitationRange?.label ?? `${code?.label ?? "Annotation"}${ann.note ? ": " + ann.note : ""}`) : `${code?.label ?? "Annotation"}${ann.note ? ": " + ann.note : ""}`}
-              onClick={() => onAnnotationClick(ann.id)}>
+              onClick={() => onAnnotationClick(ann.id)}
+              onContextMenu={(event) => openAnnotationContextMenu(event, covering)}
+              onMouseEnter={(event) => setAnnotationHoverFromEvent(event, covering)}
+              onMouseMove={(event) => setAnnotationHover((hover) => hover ? { ...hover, x: event.clientX, y: event.clientY } : hover)}
+              onMouseLeave={() => setAnnotationHover(null)}>
               {seg}
             </mark>,
           );
         } else {
           const codelist  = covering.map((a) => codeMap[a.codeId]).filter(Boolean);
+          const stripeColors = codelist.map((code) => code.color).filter(Boolean);
           const firstId   = covering[0].id;
           const isSelected = covering.some((a) => a.id === selectedAnnId);
           parts.push(
             <mark key={start} data-anns={covering.map((a) => a.id).join(" ")}
               data-citation-highlight={isCitation ? "true" : undefined}
               className={`annotation-highlight annotation-highlight--multi${isSelected ? " annotation-highlight--selected" : ""}${isCitation ? " citation-highlight" : ""}`}
-              style={{ background: isCitation ? "transparent" : (isSelected ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.07)") }}
-              title={isCitation ? (scrollToCitationRange?.label ?? codelist.map((c) => c.label).join(", ")) : codelist.map((c) => c.label).join(", ")}
-              onClick={() => onAnnotationClick(firstId)}>
+              style={{
+                background: isCitation
+                  ? "transparent"
+                  : buildMultiAnnotationBackground(stripeColors, isSelected),
+              }}
+              onClick={() => onAnnotationClick(firstId)}
+              onContextMenu={(event) => openAnnotationContextMenu(event, covering)}
+              onMouseEnter={(event) => setAnnotationHoverFromEvent(event, covering)}
+              onMouseMove={(event) => setAnnotationHover((hover) => hover ? { ...hover, x: event.clientX, y: event.clientY } : hover)}
+              onMouseLeave={() => setAnnotationHover(null)}>
               {seg}
             </mark>,
           );
@@ -1251,10 +1419,108 @@ function DocumentViewer({
         ))}
       </div>
 
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="context-menu"
+          style={contextMenuStyle}
+        >
+          {canEditAnnotationNotes && (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                setNoteDraft(contextMenu.ann.note ?? "");
+                setEditingNoteAnn(contextMenu.ann);
+                setContextMenu(null);
+              }}
+            >
+              {contextMenu.ann.note ? "Edit Note" : "Add Note"}
+            </button>
+          )}
+          {canEditAnnotationNotes && contextMenu.ann.note && (
+            <button
+              className="context-menu-item context-menu-item--danger"
+              onClick={() => {
+                void updateAnnotationNote(contextMenu.ann.id, "");
+                setContextMenu(null);
+              }}
+            >
+              Delete Note
+            </button>
+          )}
+          <button
+            className="context-menu-item"
+            onClick={() => handleMemoAboutAnnotation(contextMenu.ann)}
+            disabled={!canCreateMemos}
+          >
+            Memo About Annotation
+          </button>
+          {canDeleteAnnotations && (
+            <button
+              className="context-menu-item context-menu-item--danger"
+              onClick={() => {
+                setConfirmDeleteAnn(contextMenu.ann);
+                setContextMenu(null);
+              }}
+            >
+              Delete Annotation
+            </button>
+          )}
+        </div>
+      )}
+
+      {editingNoteAnn && (
+        <div className="modal-overlay" onClick={() => !savingNote && setEditingNoteAnn(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2>{editingNoteAnn.note ? "Edit Annotation Note" : "Add Annotation Note"}</h2>
+            <textarea
+              className="form-input"
+              value={noteDraft}
+              onChange={(event) => setNoteDraft(event.target.value)}
+              placeholder="Add a note..."
+              autoFocus
+              rows={5}
+              style={{ width: "100%", resize: "vertical" }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setEditingNoteAnn(null);
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void handleSaveNote();
+              }}
+            />
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button className="btn" onClick={() => setEditingNoteAnn(null)} disabled={savingNote}>Cancel</button>
+              <button className="btn btn--primary" onClick={() => void handleSaveNote()} disabled={savingNote}>
+                {savingNote ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteAnn && (
+        <div className="modal-overlay" onClick={() => !deletingAnn && setConfirmDeleteAnn(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Delete Annotation</h2>
+            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+              Are you sure you want to delete this annotation?
+            </p>
+            <blockquote className="annotation-quote" style={{ margin: "0 0 16px" }}>
+              "{confirmDeleteAnn.quote}"
+            </blockquote>
+            <p className="modal-warning-text">This cannot be undone.</p>
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>Cancel</button>
+              <button className="btn btn--danger" onClick={() => void handleDeleteAnn()} disabled={deletingAnn}>
+                {deletingAnn ? "Deleting..." : "Delete Annotation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {stripeHover && (
         <div
           className="stripe-tooltip"
-          style={getStripeTooltipStyle(stripeHover.x, stripeHover.y)}
+          style={getFloatingTooltipStyle(stripeHover.x, stripeHover.y, 280, 160)}
         >
           <div className="stripe-tooltip-code">
             <span
@@ -1264,6 +1530,31 @@ function DocumentViewer({
             {stripeHover.label}
           </div>
           <div className="stripe-tooltip-quote">"{stripeHover.quote}"</div>
+        </div>
+      )}
+
+      {annotationHover && (
+        <div
+          className="annotation-hover-tooltip"
+          style={getFloatingTooltipStyle(
+            annotationHover.x,
+            annotationHover.y,
+            340,
+            Math.min(420, 48 + annotationHover.items.length * 104),
+          )}
+        >
+          {annotationHover.items.map((item) => (
+            <div key={item.annId} className="annotation-hover-tooltip-section">
+              <div className="annotation-hover-tooltip-code">
+                <span
+                  className="annotation-hover-tooltip-swatch"
+                  style={{ background: item.color }}
+                />
+                {item.label}
+              </div>
+              <div className="annotation-hover-tooltip-quote">"{item.quote}"</div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -1490,7 +1781,7 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
     <div className="view annotate-view">
       <div className="annotate-back-bar">
         <div className="users-title-wrap">
-          <h1 className="annotate-title">Coding View</h1>
+          <h1 className="annotate-title">Code Text</h1>
           <button
             type="button"
             className="users-help-icon-btn"
@@ -1567,16 +1858,19 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Coding View Help</h2>
             <p className="users-guide-copy">
-              To create an annotation, select a span of text in the document viewer and then choose a code from the codebook in the left column.
+              Select text, apply a code, create, edit, or delete codes, edit or delete annotations, filter visible annotations by code or user, review annotation details, and navigate within the document.
             </p>
             <p className="users-guide-copy">
-              New annotations appear in the document immediately and in the annotation details panel, where you can review them and jump back to their location.
+              Use this page to code text directly. Highlight a span in the document, choose a code from the codebook panel, and review the resulting annotation in the details area.
             </p>
             <p className="users-guide-copy">
-              Use the filter button in the document viewer if you want to temporarily hide annotations by code or by user while you work.
+              This page uses document locking so collaborators do not code the same document simultaneously. Filters only affect visibility, not the underlying annotation data.
+            </p>
+            <p className="users-guide-copy">
+              Project permissions for coding and code management, document-lock behavior, and the current filter state affect how this page behaves.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>

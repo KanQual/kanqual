@@ -946,13 +946,6 @@ export function CodebookView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {!error && (
-        <p className="users-permission-note">
-          {canCreateCodes
-            ? "Create and organize project codes here."
-            : "The codebook is view-only with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
       <div
@@ -1031,16 +1024,16 @@ export function CodebookView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Codebook Help</h2>
             <p className="users-guide-copy">
-              The codebook organizes the codes available across the project, including hierarchy, usage, and metadata.
+              Create codes, edit code labels, descriptions, colors, and hierarchy, delete codes, review code usage, open code details, and manage nested codes.
             </p>
             <p className="users-guide-copy">
-              Select a row to open details, or right-click for quick actions. Codes can be nested, memoed, and reused across documents and cases.
+              Use the Codebook page to maintain the project's coding structure. Open a code to inspect or edit it, and build hierarchy by nesting codes under parents.
             </p>
             <p className="users-guide-copy">
-              Code creation and management options depend on your project role.
+              Code creation, editing, and deletion are role-limited. Deleting codes can affect existing annotations that depend on them.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>

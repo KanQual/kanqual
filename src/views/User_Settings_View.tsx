@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
 import { ThemeManagerModal } from "./App_Settings_View";
+import helpIcon from "../assets/ic_help_outline_24px.svg";
 import {
   applyDensity,
   applyFontSize,
@@ -71,6 +72,7 @@ export function UserSettingsView() {
   const [recentLimit, setRecentLimit] = useState(readRecentLimit);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(readRecentProjects);
   const [activeModal, setActiveModal] = useState<UserSettingsModal>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     setName(user?.name ?? "");
@@ -182,7 +184,12 @@ export function UserSettingsView() {
   return (
     <div className="view user-settings-view">
       <header className="view-header">
-        <h1>User Settings</h1>
+        <div className="view-title-with-help">
+          <h1>User Settings</h1>
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open user settings help">
+            <img src={helpIcon} alt="" className="users-help-icon" />
+          </button>
+        </div>
       </header>
 
       <div className="app-settings-overview-shell user-settings-overview-shell">
@@ -445,6 +452,28 @@ export function UserSettingsView() {
           onClose={() => setShowThemeManager(false)}
           onApplied={handleThemeManagerApplied}
         />
+      )}
+
+      {helpOpen && (
+        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
+            <h2>User Settings Help</h2>
+            <div className="app-settings-modal-body">
+                <p className="settings-section-desc">
+                  Update your profile, change your password, adjust personal appearance settings, and manage locally remembered recent projects.
+                </p>
+                <ul className="settings-help-list">
+                  <li>Use User Settings for personal account and preference changes that belong to the signed-in person rather than the shared project or host device.</li>
+                  <li>Changes here are personal unless they update your shared account identity, such as name or email.</li>
+                </ul>
+              <div className="form-actions">
+                <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -59,7 +59,7 @@ export function useAutomaticProjectBackups() {
     if (inFlightProjectId.current === project.id) return false;
     inFlightProjectId.current = project.id;
     try {
-      if (force || await shouldCreateAutomaticBackup(project, logStamp)) {
+      if (force || await shouldCreateAutomaticBackup(pb, project, logStamp)) {
         await createProjectBackup(pb, project, reason, logStamp, logEntry);
       }
       return true;

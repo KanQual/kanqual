@@ -3236,13 +3236,6 @@ export function CodeReportsView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {!error && (
-        <p className="users-permission-note">
-          {canCreateReports
-            ? "Create a new annotation report or open a saved one."
-            : "Saved annotation reports are available to view, but creating new reports is restricted with your current role."}
-        </p>
-      )}
 
       <div className="users-content">
         <section className="users-layout-main">
@@ -3282,16 +3275,16 @@ export function CodeReportsView() {
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Annotation Reports Help</h2>
             <p className="users-guide-copy">
-              Annotation reports let you filter and analyse annotations across cases, documents, codes, and coders.
+              Create a report, select an existing report, apply filters, review summaries, statistics, and annotation lists, and export or delete reports when permitted.
             </p>
             <p className="users-guide-copy">
-              Select a report to open it, or right-click to delete. Create a new report with the button above.
+              Use annotation reports to analyze annotations across codes, documents, cases, and coders. Create or open a report, apply filters, then inspect the resulting sections.
             </p>
             <p className="users-guide-copy">
-              Report creation, deletion, and export options depend on your project role.
+              Report visibility and management depend on role. Filters affect the report output, not the underlying annotation data.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>

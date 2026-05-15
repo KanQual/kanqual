@@ -16,6 +16,12 @@ import {
   type ProjectBackupReason,
   type ProjectExportData,
 } from "./projectExport";
+import {
+  DEFAULT_PROJECT_AUTO_BACKUP_INTERVAL_MINUTES,
+  DEFAULT_PROJECT_BACKUP_RETENTION,
+  loadProjectBackupPolicy,
+  saveProjectBackupPolicy,
+} from "./projectSettings";
 
 export type BackupRetentionSettings = {
   hourlyHours: number;
@@ -61,13 +67,8 @@ export type BackupRetentionStatus = {
   deletionDate: Date | null;
 };
 
-export const DEFAULT_BACKUP_RETENTION: BackupRetentionSettings = {
-  hourlyHours: 24,
-  dailyDays: 30,
-  weeklyWeeks: 12,
-};
-
-export const DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES = 15;
+export const DEFAULT_BACKUP_RETENTION: BackupRetentionSettings = DEFAULT_PROJECT_BACKUP_RETENTION;
+export const DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES = DEFAULT_PROJECT_AUTO_BACKUP_INTERVAL_MINUTES;
 export const AUTO_BACKUP_CHECK_INTERVAL_MS = 60 * 1000;
 const BACKUP_ROOT = "project_backups";
 const MANIFEST_FILE = "manifest.json";
@@ -184,14 +185,19 @@ async function saveProjectBackupManifest(manifest: ProjectBackupManifest): Promi
 }
 
 export async function saveProjectBackupSettings(
+  pb: PocketBase,
   project: Project,
   settings: ProjectBackupSettings,
 ): Promise<ProjectBackupManifest> {
   const manifest = await loadProjectBackupManifest(project);
-  manifest.retention = normalizeRetention(settings.retention);
-  manifest.automaticIntervalMinutes = normalizeIntervalMinutes(settings.automaticIntervalMinutes);
+  const policy = await saveProjectBackupPolicy(pb, project.id, {
+    retention: normalizeRetention(settings.retention),
+    automaticIntervalMinutes: normalizeIntervalMinutes(settings.automaticIntervalMinutes),
+  });
+  manifest.retention = policy.retention;
+  manifest.automaticIntervalMinutes = policy.automaticIntervalMinutes;
   await saveProjectBackupManifest(manifest);
-  return pruneProjectBackups(project, manifest);
+  return pruneProjectBackups(project, manifest, policy.retention);
 }
 
 function bucketKey(date: Date, bucket: "hour" | "day" | "week"): string {
@@ -259,8 +265,10 @@ function shouldKeepAutomaticBackup(
 export async function pruneProjectBackups(
   project: Project,
   currentManifest?: ProjectBackupManifest,
+  retentionOverride?: BackupRetentionSettings,
 ): Promise<ProjectBackupManifest> {
   const manifest = currentManifest ?? await loadProjectBackupManifest(project);
+  const retention = retentionOverride ?? manifest.retention;
   const now = new Date();
   const usedBuckets = new Set<string>();
   let keptNewestAutomatic = false;
@@ -277,7 +285,7 @@ export async function pruneProjectBackups(
       kept.push(entry);
       continue;
     }
-    if (shouldKeepAutomaticBackup(entry, now, manifest.retention, usedBuckets)) {
+    if (shouldKeepAutomaticBackup(entry, now, retention, usedBuckets)) {
       kept.push(entry);
     } else {
       removed.push(entry);
@@ -322,6 +330,10 @@ export async function createProjectBackup(
   }
 
   const manifest = await loadProjectBackupManifest(project);
+  const policy = await loadProjectBackupPolicy(pb, project.id, {
+    retention: manifest.retention,
+    automaticIntervalMinutes: manifest.automaticIntervalMinutes,
+  });
   const entry: ProjectBackupEntry = {
     file,
     createdAt,
@@ -336,26 +348,35 @@ export async function createProjectBackup(
   };
 
   manifest.projectName = project.name;
+  manifest.retention = policy.retention;
+  manifest.automaticIntervalMinutes = policy.automaticIntervalMinutes;
   manifest.backups = [entry, ...manifest.backups.filter((backup) => backup.file !== file)]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   manifest.latestBackupAt = manifest.backups[0]?.createdAt ?? createdAt;
   manifest.lastSourceLogAt = entry.sourceLogAt || manifest.lastSourceLogAt;
   await saveProjectBackupManifest(manifest);
 
-  const prunedManifest = reason === "manual" ? manifest : await pruneProjectBackups(project, manifest);
+  const prunedManifest = reason === "manual"
+    ? manifest
+    : await pruneProjectBackups(project, manifest, policy.retention);
   return { entry, manifest: prunedManifest };
 }
 
 export async function shouldCreateAutomaticBackup(
+  pb: PocketBase,
   project: Project,
   sourceLogAt: string,
 ): Promise<boolean> {
   const manifest = await loadProjectBackupManifest(project);
+  const policy = await loadProjectBackupPolicy(pb, project.id, {
+    retention: manifest.retention,
+    automaticIntervalMinutes: manifest.automaticIntervalMinutes,
+  });
   if (!manifest.latestBackupAt) return true;
   if (sourceLogAt && sourceLogAt === manifest.lastSourceLogAt) return false;
   const latest = new Date(manifest.latestBackupAt);
   if (Number.isNaN(latest.getTime())) return true;
-  return Date.now() - latest.getTime() >= manifest.automaticIntervalMinutes * 60 * 1000;
+  return Date.now() - latest.getTime() >= policy.automaticIntervalMinutes * 60 * 1000;
 }
 
 export async function readProjectBackup(
