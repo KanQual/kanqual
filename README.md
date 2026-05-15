@@ -1,2 +1,89 @@
-# kanqual
-Qualitative coding software - free, open-source, local-first, collaborative
+# Kanqual
+
+Kanqual is a free, open-source, local-first qualitative research application for coding, memoing, reporting, and AI-assisted analysis by Mehmet Cansoy, Associate Professor of Sociology at Fairfield University.
+
+It is built as a desktop app with Tauri, React, TypeScript, Rust, and an embedded PocketBase backend. It is built on Windows 11, but also confirmed to work on Windows 10, MacOS 13, and Ubuntu. 
+
+## What Kanqual Does
+
+Kanqual is designed for qualitative analysis that need to stay grounded in text data while still supporting collaboration, and the option to utilize local AI tools.
+
+Core capabilities include:
+
+- Project-based qualitative coding of text data
+- Detailed roles and permissions for collaboration
+- Local-first storage with optional collaboration
+- Extensive logs for auditing
+- Importing data from other software, exporting data out in multiple formats
+- Reporting across annotations, codes, and users
+- AI-assisted chat, coding, attribute identification, document processing, and code analysis
+
+## Licensing
+
+Kanqual is licensed under the Apache License 2.0.
+
+See:
+
+- [LICENSE](LICENSE)
+- [LICENSES.md](LICENSES.md)
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+
+## Status
+
+Current app version: `0.9.0`
+
+Kanqual is under active development. Interfaces, AI workflows, packaging details, and setup expectations may continue to evolve as the releases are refined for v1.0.
+
+## Key Product Principles
+
+- Local-first: your project data lives on the host device, not in a hosted cloud service
+- Collaborative when you want it: Kanqual can stay local-only or be shared across a trusted local network
+- Open source: the codebase is available under Apache 2.0
+- Grounded AI: AI Assist is designed around project content, embeddings, and traceable citations
+
+## AI Assist Overview
+
+AI Assist is optional and project-aware.
+
+Kanqual currently supports:
+
+- Project chat grounded in project content
+- AI-assisted coding workflows
+- Attribute identification for cases and documents
+- AI-assisted code analysis
+- Document processing and review workflows
+- Local embedding model download and project embedding builds
+
+AI Assist depends on local model/runtime setup in App Settings. In networked collaboration mode, remote clients use the host machine's AI runtime and project embeddings rather than their own local machine state.
+
+## Windows Distribution
+
+Kanqual currently ships Windows builds in two main forms:
+
+- Installer build
+  - Standard Windows installation
+  - Stores app data in the user profile by default
+
+- Portable build
+  - Runs without installation
+  - Can keep app data next to the executable when `portable-mode.json` is present
+  - Intended for removable drives, shared lab machines, and cases where users want a self-contained app folder
+
+Portable mode includes a `data` folder and keeps Kanqual-managed app data inside the portable directory. The portable build is intended to reduce machine-local residue compared with a normal installed build.
+
+## Tech Stack
+
+- Frontend: React 19, TypeScript, Vite
+- Desktop shell: Tauri v2
+- Native layer: Rust
+- Local backend/database: PocketBase
+- Optional AI runtime: Ollama
+- Local embeddings: Candle + multilingual-e5 workflow
+
+## Contributing
+
+Contributions, issue reports, and feedback are welcome.
+
+## Short Description
+
+Kanqual is qualitative coding software that is free, open-source, local-first, collaborative, and increasingly AI-assisted without requiring a hosted cloud backend.
