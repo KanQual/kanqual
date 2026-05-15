@@ -31,6 +31,7 @@ const BACKEND_IDENTIFIER_KEY: &str = "backend_identifier";
 const USERS_TABLE_IDENTIFIER_KEY: &str = "users_table_identifier";
 const PORTABLE_MODE_MARKER_FILE: &str = "portable-mode.json";
 const PORTABLE_DATA_DIR_NAME: &str = "data";
+const DEV_DATA_DIR_NAME: &str = "dev";
 const EMBEDDING_MODEL_REPO_ID: &str = "intfloat/multilingual-e5-large";
 const EMBEDDING_MODEL_DISPLAY_NAME: &str = "multilingual-e5-large";
 const EMBEDDING_MODEL_METADATA_FILE: &str = ".kanqual-model.json";
@@ -176,7 +177,12 @@ fn kanqual_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         fs::create_dir_all(&portable_dir).map_err(|e| e.to_string())?;
         return Ok(portable_dir);
     }
-    app.path().app_data_dir().map_err(|e| e.to_string())
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if cfg!(debug_assertions) {
+        Ok(base.join(DEV_DATA_DIR_NAME))
+    } else {
+        Ok(base)
+    }
 }
 
 fn executable_dir() -> Result<PathBuf, String> {
