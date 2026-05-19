@@ -322,18 +322,7 @@ body {
   height: 100%;
   display: block;
 }
-
-.brand-network-badge--local .brand-network-icon {
-  filter: brightness(0) saturate(100%) invert(100%) opacity(0.72);
-}
-
-.brand-network-badge--lan .brand-network-icon {
-  filter: brightness(0) saturate(100%) invert(76%) sepia(25%) saturate(898%) hue-rotate(82deg) brightness(96%) contrast(95%);
-}
-
-.brand-network-badge--remote .brand-network-icon {
-  filter: brightness(0) saturate(100%) invert(65%) sepia(57%) saturate(1205%) hue-rotate(187deg) brightness(100%) contrast(97%);
-}
+.brand-network-icon svg { width: 100%; height: 100%; fill: currentColor; }
 
 .brand-ai-badge {
   position: absolute;
@@ -352,14 +341,14 @@ body {
   height: 100%;
   display: block;
 }
+.brand-ai-icon svg { width: 100%; height: 100%; fill: currentColor; }
 
-.brand-ai-badge--ready .brand-ai-icon {
-  filter: brightness(0) saturate(100%) invert(67%) sepia(45%) saturate(720%) hue-rotate(79deg) brightness(95%) contrast(88%);
-}
+.brand-network-badge--local { color: rgba(255,255,255,0.35); }
+.brand-network-badge--lan { color: #4ade80; }
+.brand-network-badge--remote { color: #60a5fa; }
 
-.brand-ai-badge--unavailable .brand-ai-icon {
-  filter: brightness(0) saturate(100%) invert(73%) sepia(27%) saturate(6541%) hue-rotate(333deg) brightness(92%) contrast(93%);
-}
+.brand-ai-badge--ready { color: #a3e635; }
+.brand-ai-badge--unavailable { color: rgba(255,255,255,0.5); }
 
 .sidebar-project-badge {
   padding: 12px 16px;

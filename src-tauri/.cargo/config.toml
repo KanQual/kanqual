@@ -1,2 +1,2 @@
 [build]
-target-dir = "C:/cargo-target/kanqual"
+target-dir = "target"

@@ -4,11 +4,13 @@ import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../types";
 import type { View } from "../types";
 import { LOCAL_PB_URL } from "../lib/authHistory";
-import computerLineIcon from "../assets/computer-line.svg";
-import networkIcon from "../assets/network--2.svg";
-import remoteWorkIcon from "../assets/link-45deg.svg";
-import aiAssistReadyIcon from "../assets/cog-line.svg";
-import aiAssistUnavailableIcon from "../assets/cog-outline-alerted.svg";
+
+// inline SVG raw imports (avoid mask issues in WebView)
+import computerLineIconRaw from "../assets/computer-line.svg?raw";
+import networkIconRaw from "../assets/network--2.svg?raw";
+import remoteWorkIconRaw from "../assets/link-45deg.svg?raw";
+import aiAssistReadyIconRaw from "../assets/cog-line.svg?raw";
+import aiAssistUnavailableIconRaw from "../assets/cog-outline-alerted.svg?raw";
 import sidebarLogo from "../assets/logo-no-background.png";
 
 const NAV_SECTIONS: {
@@ -119,16 +121,7 @@ export function Sidebar() {
     : networkMode === "lan"
       ? "Network mode - other devices on your local network can connect to this instance"
       : "Local only - data is not accessible from other devices";
-  const networkBadgeIcon = isRemoteBackendSession
-    ? remoteWorkIcon
-    : networkMode === "lan"
-      ? networkIcon
-      : computerLineIcon;
-  const networkBadgeAlt = isRemoteBackendSession
-    ? "Remote workspace session"
-    : networkMode === "lan"
-      ? "Network enabled"
-      : "Local only";
+  
 
   function openAppSettingsModal(modalId: "network" | "llm") {
     sessionStorage.setItem("kanqual:open-app-settings-modal", modalId);
@@ -211,10 +204,16 @@ export function Sidebar() {
           aria-label="Open network and collaboration settings"
           onClick={() => openAppSettingsModal("network")}
         >
-          <img
-            src={networkBadgeIcon}
-            alt={networkBadgeAlt}
+          <span
+            aria-hidden="true"
             className="brand-network-icon"
+            dangerouslySetInnerHTML={{
+              __html: isRemoteBackendSession
+                ? remoteWorkIconRaw
+                : networkMode === "lan"
+                ? networkIconRaw
+                : computerLineIconRaw,
+            }}
           />
         </button>
         <button
@@ -228,10 +227,12 @@ export function Sidebar() {
           aria-label="Open AI Assist settings"
           onClick={() => openAppSettingsModal("llm")}
         >
-          <img
-            src={aiAssistStatus === "ready" ? aiAssistReadyIcon : aiAssistUnavailableIcon}
-            alt={aiAssistStatus === "ready" ? "AI Assist ready" : "AI Assist not available"}
+          <span
+            aria-hidden="true"
             className="brand-ai-icon"
+            dangerouslySetInnerHTML={{
+              __html: aiAssistStatus === "ready" ? aiAssistReadyIconRaw : aiAssistUnavailableIconRaw,
+            }}
           />
         </button>
       </div>

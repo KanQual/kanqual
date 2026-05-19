@@ -27,4 +27,5 @@ Examples:
 Notes:
 
 - Linux and macOS builds should be produced on those platforms, or via a properly configured cross-compilation CI setup.
+- During build, `src-tauri/build.rs` will copy the platform-specific sidecar into `src-tauri/binaries/local/pocketbase` (or `pocketbase.exe` on Windows) so the app can resolve the correct executable for the current OS.
 - If the matching sidecar is missing, local-mode startup and app packaging will warn or fail with a platform-specific message.

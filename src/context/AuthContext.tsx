@@ -252,12 +252,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!pb) throw new Error("Choose local device work before creating a local account.");
       setError(null);
       try {
-        await registerUserAccount({
-          name,
-          email,
-          password,
-          passwordConfirm: password,
-        });
+        if (serverUrl === LOCAL_PB_URL) {
+          // Local registrations use the native (trusted) command which performs
+          // the registration using an internal superuser on the host.
+          await registerUserAccount({
+            name,
+            email,
+            password,
+            passwordConfirm: password,
+          });
+        } else {
+          // Remote registrations should be performed via the PocketBase client
+          // so that web/remote clients can create accounts directly on the
+          // remote server instead of invoking local native commands.
+          await pb.collection("users").create({
+            name,
+            email,
+            password,
+            passwordConfirm: password,
+            emailVisibility: true,
+          });
+        }
         await pb.collection("users").authWithPassword(email, password);
         setUser(pb.authStore.record);
         setStatus("authenticated");
