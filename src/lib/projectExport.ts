@@ -278,13 +278,21 @@ function stripSystemFields(row: Record<string, unknown>): Record<string, unknown
   return payload;
 }
 
-function remapOne(value: unknown, idMap: Map<string, string>): unknown {
-  return typeof value === "string" && idMap.has(value) ? idMap.get(value) : value;
+function remapOptionalRelation(value: unknown, idMap: Map<string, string>): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return idMap.get(value);
 }
 
-function remapMany(value: unknown, idMap: Map<string, string>): unknown {
-  if (Array.isArray(value)) return value.map((v) => remapOne(v, idMap)).filter(Boolean);
-  return remapOne(value, idMap);
+function remapRequiredRelation(value: unknown, idMap: Map<string, string>): string | null {
+  if (typeof value !== "string") return null;
+  return idMap.get(value) ?? null;
+}
+
+function remapRelationList(value: unknown, idMap: Map<string, string>): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? idMap.get(item) : undefined))
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
 }
 
 function currentUserId(pb: PocketBase): string {
@@ -388,11 +396,339 @@ async function createMappedRecord(
   idMap: Map<string, string>,
   tableCounts: Record<string, number>,
 ): Promise<RecordModel> {
-  const record = await pb.collection(collection).create(payload);
+  let record: RecordModel;
+  try {
+    record = await pb.collection(collection).create(payload);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? "Unknown error");
+    const sourceId = typeof row.id === "string" ? row.id : "";
+    throw new Error(
+      `Failed to import ${collection}${sourceId ? ` record ${sourceId}` : ""}: ${detail}`,
+    );
+  }
   if (typeof row.id === "string") idMap.set(row.id, record.id);
   tableCounts[collection] = (tableCounts[collection] ?? 0) + 1;
   return record;
 }
+
+async function importProjectSettingsRecord(
+  pb: PocketBase,
+  row: Record<string, unknown>,
+  projectId: string,
+  idMap: Map<string, string>,
+  tableCounts: Record<string, number>,
+): Promise<RecordModel> {
+  const payload = {
+    ...stripSystemFields(row),
+    project: projectId,
+  };
+  const existing = await pb.collection("project_settings").getFirstListItem(`project="${projectId}"`).catch(() => null);
+  if (existing) {
+    const updated = await pb.collection("project_settings").update(existing.id, payload);
+    if (typeof row.id === "string") idMap.set(row.id, updated.id);
+    tableCounts.project_settings = (tableCounts.project_settings ?? 0) + 1;
+    return updated;
+  }
+  return createMappedRecord(pb, "project_settings", row, payload, idMap, tableCounts);
+}
+
+type ImportContext = {
+  pb: PocketBase;
+  projectId: string;
+  idMap: Map<string, string>;
+  tableCounts: Record<string, number>;
+  userId: string;
+  canReassociateUsers: boolean;
+  sourceIdentifier: (value: unknown) => string;
+};
+
+type ImportStep = {
+  table: string;
+  when?: (context: ImportContext) => boolean;
+  importRow: (row: Record<string, unknown>, context: ImportContext) => Promise<void>;
+};
+
+function importedCreatedBy(context: ImportContext, value: unknown): string | undefined {
+  if (!context.canReassociateUsers) return context.userId || undefined;
+  return remapOptionalRelation(value, context.idMap) || context.userId || undefined;
+}
+
+async function createScheduledRecord(
+  collection: string,
+  row: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  context: ImportContext,
+): Promise<RecordModel> {
+  return createMappedRecord(
+    context.pb,
+    collection,
+    row,
+    payload,
+    context.idMap,
+    context.tableCounts,
+  );
+}
+
+const IMPORT_SCHEDULE: ImportStep[] = [
+  {
+    table: "project_settings",
+    importRow: async (row, context) => {
+      await importProjectSettingsRecord(
+        context.pb,
+        row,
+        context.projectId,
+        context.idMap,
+        context.tableCounts,
+      );
+    },
+  },
+  {
+    table: "project_ai_chats",
+    when: (context) => context.canReassociateUsers,
+    importRow: async (row, context) => {
+      await createScheduledRecord("project_ai_chats", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+        participant_users: remapRelationList(row.participant_users, context.idMap),
+        participant_identifiers_json: typeof row.participant_identifiers_json === "string" ? row.participant_identifiers_json : "[]",
+      }, context);
+    },
+  },
+  {
+    table: "project_ai_chat_messages",
+    when: (context) => context.canReassociateUsers,
+    importRow: async (row, context) => {
+      const chatId = remapRequiredRelation(row.chat, context.idMap);
+      if (!chatId) return;
+      await createScheduledRecord("project_ai_chat_messages", row, {
+        ...stripSystemFields(row),
+        chat: chatId,
+        project: context.projectId,
+        created_by: remapOptionalRelation(row.created_by, context.idMap),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "project_members",
+    when: (context) => context.canReassociateUsers,
+    importRow: async (row, context) => {
+      const mappedUser = remapRequiredRelation(row.user, context.idMap);
+      if (!mappedUser || mappedUser === context.userId) return;
+      await createScheduledRecord("project_members", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        user: mappedUser,
+        user_identifier: typeof row.user_identifier === "string" ? row.user_identifier : context.sourceIdentifier(row.user),
+        created_by: remapOptionalRelation(row.created_by, context.idMap) || context.userId || undefined,
+      }, context);
+    },
+  },
+  {
+    table: "documents",
+    importRow: async (row, context) => {
+      await createScheduledRecord("documents", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        type: textValue(row.type).trim() || "Text",
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "cases",
+    importRow: async (row, context) => {
+      await createScheduledRecord("cases", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "case_attribute_definitions",
+    importRow: async (row, context) => {
+      await createScheduledRecord("case_attribute_definitions", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+      }, context);
+    },
+  },
+  {
+    table: "document_attribute_definitions",
+    importRow: async (row, context) => {
+      await createScheduledRecord("document_attribute_definitions", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+      }, context);
+    },
+  },
+  {
+    table: "codes",
+    importRow: async (row, context) => {
+      await createScheduledRecord("codes", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        parent: null,
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "codes",
+    importRow: async (row, context) => {
+      if (typeof row.id !== "string" || typeof row.parent !== "string") return;
+      const nextId = context.idMap.get(row.id);
+      const nextParent = context.idMap.get(row.parent);
+      if (!nextId || !nextParent) return;
+      await context.pb.collection("codes").update(nextId, { parent: nextParent });
+    },
+  },
+  {
+    table: "case_documents",
+    importRow: async (row, context) => {
+      const caseId = remapRequiredRelation(row.case, context.idMap);
+      const documentId = remapRequiredRelation(row.document, context.idMap);
+      if (!caseId || !documentId) return;
+      await createScheduledRecord("case_documents", row, {
+        ...stripSystemFields(row),
+        case: caseId,
+        document: documentId,
+      }, context);
+    },
+  },
+  {
+    table: "case_attributes",
+    importRow: async (row, context) => {
+      const caseId = remapRequiredRelation(row.case, context.idMap);
+      if (!caseId) return;
+      await createScheduledRecord("case_attributes", row, {
+        ...stripSystemFields(row),
+        case: caseId,
+      }, context);
+    },
+  },
+  {
+    table: "case_attribute_values",
+    importRow: async (row, context) => {
+      const caseId = remapRequiredRelation(row.case, context.idMap);
+      const attributeId = remapRequiredRelation(row.attribute, context.idMap);
+      if (!caseId || !attributeId) return;
+      await createScheduledRecord("case_attribute_values", row, {
+        ...stripSystemFields(row),
+        case: caseId,
+        attribute: attributeId,
+      }, context);
+    },
+  },
+  {
+    table: "document_attribute_values",
+    importRow: async (row, context) => {
+      const documentId = remapRequiredRelation(row.document, context.idMap);
+      const attributeId = remapRequiredRelation(row.attribute, context.idMap);
+      if (!documentId || !attributeId) return;
+      await createScheduledRecord("document_attribute_values", row, {
+        ...stripSystemFields(row),
+        document: documentId,
+        attribute: attributeId,
+      }, context);
+    },
+  },
+  {
+    table: "annotations",
+    importRow: async (row, context) => {
+      const documentId = remapRequiredRelation(row.document, context.idMap);
+      const codeId = remapRequiredRelation(row.code, context.idMap);
+      if (!documentId || !codeId) return;
+      await createScheduledRecord("annotations", row, {
+        ...stripSystemFields(row),
+        document: documentId,
+        code: codeId,
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "memos",
+    importRow: async (row, context) => {
+      await createScheduledRecord("memos", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        document: remapRelationList(row.document, context.idMap),
+        annotation: remapRelationList(row.annotation, context.idMap),
+        cases: remapRelationList(row.cases, context.idMap),
+        codes: remapRelationList(row.codes, context.idMap),
+        case_attribute_defs: remapRelationList(row.case_attribute_defs, context.idMap),
+        document_attribute_defs: remapRelationList(row.document_attribute_defs, context.idMap),
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "code_reports",
+    importRow: async (row, context) => {
+      await createScheduledRecord("code_reports", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        cases: remapRelationList(row.cases, context.idMap),
+        documents: remapRelationList(row.documents, context.idMap),
+        codes: remapRelationList(row.codes, context.idMap),
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "coder_reports",
+    importRow: async (row, context) => {
+      await createScheduledRecord("coder_reports", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        cases: remapRelationList(row.cases, context.idMap),
+        documents: remapRelationList(row.documents, context.idMap),
+        codes: remapRelationList(row.codes, context.idMap),
+        coders: context.canReassociateUsers ? remapRelationList(row.coders, context.idMap) : [],
+        coder_identifiers: JSON.stringify(
+          stringArray(row.coders).map((value) => context.sourceIdentifier(value)).filter(Boolean),
+        ),
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "ai_analyses",
+    importRow: async (row, context) => {
+      await createScheduledRecord("ai_analyses", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        code: remapOptionalRelation(row.code, context.idMap) ?? null,
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "project_log",
+    importRow: async (row, context) => {
+      await createScheduledRecord("project_log", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        user: context.canReassociateUsers ? remapOptionalRelation(row.user, context.idMap) || context.userId || undefined : context.userId || undefined,
+        user_identifier: context.sourceIdentifier(row.user),
+        user_name: typeof row.user_name === "string" ? row.user_name : context.pb.authStore.record?.name || context.pb.authStore.record?.email || "",
+        record_id: typeof row.record_id === "string" ? context.idMap.get(row.record_id) ?? row.record_id : "",
+      }, context);
+    },
+  },
+];
 
 export function parseProjectBackupJson(text: string): ProjectExportData {
   const parsed = JSON.parse(text);
@@ -418,224 +754,21 @@ export async function importProjectBackupIntoProject(
   const importedUsers = validation.importedUsers;
   const canReassociateUsers = !validation.requiresUserResolution;
   const importedUsersBySourceId = new Map(importedUsers.map((user) => [user.sourceUserId, user]));
-  const sourceIdentifier = (value: unknown) => importedUsersBySourceId.get(textValue(value))?.userIdentifier || "";
+  const context: ImportContext = {
+    pb,
+    projectId,
+    idMap,
+    tableCounts,
+    userId,
+    canReassociateUsers,
+    sourceIdentifier: (value: unknown) => importedUsersBySourceId.get(textValue(value))?.userIdentifier || "",
+  };
 
-  if (canReassociateUsers) {
-  for (const row of findTable(data, "project_settings")) {
-      const payload = {
-        ...stripSystemFields(row),
-        project: projectId,
-      };
-      await createMappedRecord(pb, "project_settings", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "project_ai_chats")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-      participant_users: canReassociateUsers ? remapMany(row.participant_users, idMap) : [],
-      participant_identifiers_json: typeof row.participant_identifiers_json === "string" ? row.participant_identifiers_json : "[]",
-    };
-    await createMappedRecord(pb, "project_ai_chats", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "project_ai_chat_messages")) {
-    const payload = {
-      ...stripSystemFields(row),
-      chat: remapOne(row.chat, idMap),
-      project: projectId,
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || undefined : undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "project_ai_chat_messages", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "project_members")) {
-      const mappedUser = remapOne(row.user, idMap);
-      if (!mappedUser || mappedUser === userId) continue;
-      const payload = {
-        ...stripSystemFields(row),
-        project: projectId,
-        user: mappedUser,
-        user_identifier: typeof row.user_identifier === "string" ? row.user_identifier : sourceIdentifier(row.user),
-        created_by: remapOne(row.created_by, idMap) || userId || undefined,
-      };
-      await createMappedRecord(pb, "project_members", row, payload, idMap, tableCounts);
+  for (const step of IMPORT_SCHEDULE) {
+    if (step.when && !step.when(context)) continue;
+    for (const row of findTable(data, step.table)) {
+      await step.importRow(row, context);
     }
-  } else {
-    for (const row of findTable(data, "project_settings")) {
-      const payload = {
-        ...stripSystemFields(row),
-        project: projectId,
-      };
-      await createMappedRecord(pb, "project_settings", row, payload, idMap, tableCounts);
-    }
-  }
-
-  for (const row of findTable(data, "documents")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "documents", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "cases")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "cases", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "codes")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      parent: null,
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "codes", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "codes")) {
-    if (typeof row.id !== "string" || typeof row.parent !== "string") continue;
-    const nextId = idMap.get(row.id);
-    const nextParent = idMap.get(row.parent);
-    if (nextId && nextParent) await pb.collection("codes").update(nextId, { parent: nextParent });
-  }
-
-  for (const row of findTable(data, "case_documents")) {
-    const payload = stripSystemFields(row);
-    payload.case = remapOne(payload.case, idMap);
-    payload.document = remapOne(payload.document, idMap);
-    if (!payload.case || !payload.document) continue;
-    await createMappedRecord(pb, "case_documents", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "case_attributes")) {
-    const payload = stripSystemFields(row);
-    payload.case = remapOne(payload.case, idMap);
-    if (!payload.case) continue;
-    await createMappedRecord(pb, "case_attributes", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "case_attribute_definitions")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-    };
-    await createMappedRecord(pb, "case_attribute_definitions", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "case_attribute_values")) {
-    const payload = stripSystemFields(row);
-    payload.case = remapOne(payload.case, idMap);
-    payload.attribute = remapOne(payload.attribute, idMap);
-    if (!payload.case || !payload.attribute) continue;
-    await createMappedRecord(pb, "case_attribute_values", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "document_attribute_definitions")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-    };
-    await createMappedRecord(pb, "document_attribute_definitions", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "document_attribute_values")) {
-    const payload = stripSystemFields(row);
-    payload.document = remapOne(payload.document, idMap);
-    payload.attribute = remapOne(payload.attribute, idMap);
-    if (!payload.document || !payload.attribute) continue;
-    await createMappedRecord(pb, "document_attribute_values", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "annotations")) {
-    const payload = {
-      ...stripSystemFields(row),
-      document: remapOne(row.document, idMap),
-      code: remapOne(row.code, idMap),
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    if (!payload.document || !payload.code) continue;
-    await createMappedRecord(pb, "annotations", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "memos")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      document: remapMany(row.document, idMap),
-      annotation: remapMany(row.annotation, idMap),
-      cases: remapMany(row.cases, idMap),
-      codes: remapMany(row.codes, idMap),
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "memos", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "code_reports")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      cases: remapMany(row.cases, idMap),
-      documents: remapMany(row.documents, idMap),
-      codes: remapMany(row.codes, idMap),
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "code_reports", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "coder_reports")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      cases: remapMany(row.cases, idMap),
-      documents: remapMany(row.documents, idMap),
-      codes: remapMany(row.codes, idMap),
-      coders: canReassociateUsers ? remapMany(row.coders, idMap) : [],
-      coder_identifiers: JSON.stringify(
-        stringArray(row.coders).map((value) => sourceIdentifier(value)).filter(Boolean),
-      ),
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "coder_reports", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "ai_analyses")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      code: remapOne(row.code, idMap),
-      created_by: canReassociateUsers ? remapOne(row.created_by, idMap) || userId || undefined : userId || undefined,
-      created_by_identifier: sourceIdentifier(row.created_by),
-    };
-    await createMappedRecord(pb, "ai_analyses", row, payload, idMap, tableCounts);
-  }
-
-  for (const row of findTable(data, "project_log")) {
-    const payload = {
-      ...stripSystemFields(row),
-      project: projectId,
-      user: canReassociateUsers ? remapOne(row.user, idMap) || userId || undefined : userId || undefined,
-      user_identifier: sourceIdentifier(row.user),
-      user_name: typeof row.user_name === "string" ? row.user_name : pb.authStore.record?.name || pb.authStore.record?.email || "",
-      record_id: typeof row.record_id === "string" ? idMap.get(row.record_id) ?? row.record_id : "",
-    };
-    await createMappedRecord(pb, "project_log", row, payload, idMap, tableCounts);
   }
 
   return {
