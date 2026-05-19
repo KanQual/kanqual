@@ -7,7 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { importProjectBackupIntoProject, importRefiQdaIntoProject, parseProjectBackupJson, parseRefiQdaProject } from "../lib/projectExport";
 import { htmlToPlainText } from "../lib/htmlText";
 import type { PendingImportedUser, Project } from "../types";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 const LOCAL_PB_URL = "http://127.0.0.1:8090";
 type NewProjectMode = "choice" | "create" | "import" | "import-encrypted" | "import-refi" | null;
@@ -359,7 +359,7 @@ export function ProjectsView() {
         <div className="view-title-with-help">
           <h1>Projects</h1>
           <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open projects help">
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         {isLocal && (

@@ -849,9 +849,9 @@ body {
 .mode-option-icon {
   width: 36px;
   height: 36px;
-  object-fit: contain;
   margin-bottom: 4px;
-  filter: brightness(0) saturate(100%) invert(19%) sepia(14%) saturate(1169%) hue-rotate(169deg) brightness(93%) contrast(88%);
+  color: var(--color-text);
+  flex-shrink: 0;
 }
 
 .mode-option-title {
@@ -1052,7 +1052,8 @@ body {
   width: 24px;
   height: 24px;
   display: block;
-  filter: brightness(0) saturate(100%) invert(46%) sepia(12%) saturate(368%) hue-rotate(140deg) brightness(92%) contrast(89%);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .home-menu-btn {
@@ -3516,7 +3517,8 @@ body {
   width: 24px;
   height: 24px;
   display: block;
-  filter: brightness(0) saturate(100%) invert(46%) sepia(12%) saturate(368%) hue-rotate(140deg) brightness(92%) contrast(89%);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .view-title-with-help {

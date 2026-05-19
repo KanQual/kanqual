@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import localDeviceIcon from "../assets/computer-line.svg";
-import networkDeviceIcon from "../assets/network--2.svg";
 import startupLogo from "../assets/logo-outline.png";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { ComputerIcon, HelpIcon, NetworkIcon } from "../components/AppIcons";
 import {
   getLocalAccounts,
   getRemoteSessions,
@@ -170,7 +168,7 @@ export function AuthView() {
             <img src="/logo.png" alt="KanQual" className="auth-logo auth-logo--mode" />
             <div className="auth-brand auth-brand--mode">KanQual</div>
             <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
-              <img src={helpIcon} alt="" className="users-help-icon" />
+              <HelpIcon className="users-help-icon" />
             </button>
           </div>
           <div className="mode-options">
@@ -197,7 +195,7 @@ export function AuthView() {
                 }
               }}
             >
-              <img src={localDeviceIcon} alt="" className="mode-option-icon" aria-hidden="true" />
+              <ComputerIcon className="mode-option-icon" />
               <span className="mode-option-title">Work on my own device</span>
               <span className="mode-option-desc">
                 Store and analyse your data locally - nothing leaves this computer.
@@ -217,7 +215,7 @@ export function AuthView() {
                 }
               }}
             >
-              <img src={networkDeviceIcon} alt="" className="mode-option-icon" aria-hidden="true" />
+              <NetworkIcon className="mode-option-icon" />
               <span className="mode-option-title">Join a project on another device</span>
               <span className="mode-option-desc">
                 Connect to a project hosted by someone else on your network.
@@ -240,7 +238,7 @@ export function AuthView() {
           <div className="auth-brand">Kanqual</div>
           <div className="auth-help-row">
             <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
-              <img src={helpIcon} alt="" className="users-help-icon" />
+              <HelpIcon className="users-help-icon" />
             </button>
           </div>
           <h2 className="auth-panel-title">Choose an account</h2>
@@ -294,7 +292,7 @@ export function AuthView() {
           <div className="auth-brand">Kanqual</div>
           <div className="auth-help-row">
             <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
-              <img src={helpIcon} alt="" className="users-help-icon" />
+              <HelpIcon className="users-help-icon" />
             </button>
           </div>
           <h2 className="auth-panel-title">Recent connections</h2>
@@ -362,7 +360,7 @@ export function AuthView() {
           <div className="auth-brand">Kanqual</div>
           <div className="auth-help-row">
             <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
-              <img src={helpIcon} alt="" className="users-help-icon" />
+              <HelpIcon className="users-help-icon" />
             </button>
           </div>
           <p className="auth-tagline">Text annotation for qualitative research</p>
@@ -420,7 +418,7 @@ export function AuthView() {
         <div className="auth-brand">Kanqual</div>
         <div className="auth-help-row">
           <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <p className="auth-tagline">Text annotation for qualitative research</p>

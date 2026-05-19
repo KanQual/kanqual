@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
 import { ThemeManagerModal } from "./App_Settings_View";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 import {
   applyDensity,
   applyFontSize,
@@ -187,7 +187,7 @@ export function UserSettingsView() {
         <div className="view-title-with-help">
           <h1>User Settings</h1>
           <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open user settings help">
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </header>

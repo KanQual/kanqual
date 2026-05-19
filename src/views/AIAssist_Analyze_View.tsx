@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { AIAnalyzeView as AIAnalyzeWorkspaceView, parseAiAnalysisRowRecord, type AiAnalysisRow } from "./AIAssist_Code_Annotate_View";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 
 const ANALYSIS_COLS: Array<{ key: "name" | "createdByName" | "createdAt" | "actions"; label: string; width: string }> = [
@@ -129,7 +129,7 @@ export function AIAnalyzeView() {
             title="Show Help"
             onClick={() => setHelpOpen(true)}
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <button

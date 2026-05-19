@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { AIAssistedCodingAnnotateView } from "./AIAssist_Code_Annotate_View";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 interface DocCodeRow {
   id: string;
@@ -291,7 +291,7 @@ function CodeDocumentsLanding() {
             title="Show Help"
             aria-label="Show Help"
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </header>

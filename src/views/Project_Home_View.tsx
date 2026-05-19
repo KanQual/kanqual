@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "../context/StoreContext";
 import type { Project, View } from "../types";
 import { hasHtmlText } from "../lib/htmlText";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 interface RemoteStats {
   memberCount: number;
@@ -260,7 +260,7 @@ export function HomeView() {
             title="Show Help"
             aria-label="Show Help"
           >
-            <img src={helpIcon} alt="" className="home-help-icon" />
+            <HelpIcon className="home-help-icon" />
           </button>
         </div>
         {userRole === "owner" && (

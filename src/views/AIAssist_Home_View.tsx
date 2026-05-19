@@ -8,7 +8,7 @@ import {
   type ProjectEmbeddingIndexStatus,
 } from "../lib/projectEmbeddings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 type EmbeddingModelStatus = {
   installed: boolean;
@@ -1126,7 +1126,7 @@ function AIAssistAttributeWorkspace({
             title="Show Help"
             aria-label="Show Help"
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <div className="users-header-actions">
@@ -1536,7 +1536,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
             title="Show Help"
             onClick={() => setHelpOpen(true)}
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <button
@@ -2074,7 +2074,7 @@ export function AIAssistView() {
             title="Show Help"
             onClick={() => setHelpOpen(true)}
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </header>

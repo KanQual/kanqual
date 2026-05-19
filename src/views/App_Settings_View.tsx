@@ -34,7 +34,7 @@ import { getAppRuntimeInfo, joinFsPath, type AppRuntimeInfo } from "../lib/dataR
 import { clearAppDataRecords, deleteUserAccount } from "../lib/pb";
 import { permissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
 import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -2306,7 +2306,7 @@ export function AppSettingsView() {
             title="Show Help"
             onClick={() => setHelpOpen(true)}
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </header>

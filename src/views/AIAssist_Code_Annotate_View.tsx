@@ -20,7 +20,7 @@ import {
   parseProcessedTranscriptSegments,
 } from "../components/ProcessedTranscriptView";
 import { FilterIcon } from "../components/FilterIcon";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -4344,7 +4344,7 @@ export function AIAnalyzeView({
           title="Show Help"
           aria-label="Show Help"
         >
-          <img src={helpIcon} alt="" className="users-help-icon" />
+          <HelpIcon className="users-help-icon" />
         </button>
       </div>
       {onBack && (
@@ -4395,7 +4395,7 @@ export function AIAnalyzeView({
               title="Show Help"
               aria-label="Show Help"
             >
-              <img src={helpIcon} alt="" className="users-help-icon" />
+              <HelpIcon className="users-help-icon" />
             </button>
           </div>
           {onBack && (
@@ -4639,7 +4639,7 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
             title="Show Help"
             aria-label="Show Help"
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         {onBack && (

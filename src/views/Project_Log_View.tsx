@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../context/StoreContext";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 import type { ProjectLogEntry } from "../types";
 
 export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
@@ -153,7 +153,7 @@ export function ProjectLogView() {
           <div className="view-title-with-help">
             <h1>Project Log</h1>
             <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open project log help">
-              <img src={helpIcon} alt="" className="users-help-icon" />
+              <HelpIcon className="users-help-icon" />
             </button>
           </div>
         </div>

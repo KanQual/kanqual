@@ -3,7 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 type CoderReportKind = "activity" | "comparison" | "agreement";
 type CoderReportSortCol = "name" | "kind" | "createdByName" | "createdAt";
@@ -1871,7 +1871,7 @@ export function ReportsUsersView() {
             title="Show Help"
             onClick={() => setHelpOpen(true)}
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <button

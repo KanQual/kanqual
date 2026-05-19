@@ -50,7 +50,7 @@ import {
   PROJECT_LOG_ACTION_LABELS,
 } from "./Project_Log_View";
 import type { PendingImportedUser, Project, ProjectLogEntry } from "../types";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
   { cmd: "bold", label: "B", title: "Bold" },
@@ -1462,7 +1462,7 @@ export function ProjectSettingsView() {
           <div className="view-title-with-help">
             <h1>Project Settings</h1>
             <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open project settings help">
-              <img src={helpIcon} alt="" className="users-help-icon" />
+              <HelpIcon className="users-help-icon" />
             </button>
           </div>
         </div>

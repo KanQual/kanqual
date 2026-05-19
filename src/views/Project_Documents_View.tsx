@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
 import { readAppSettings } from "../lib/appSettings";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 import {
   ProcessedTranscriptView,
   getProcessedTranscriptQuestionOutline,
@@ -2592,7 +2592,7 @@ export function DocumentsView() {
             title="Show Help"
             aria-label="Show Help"
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <div className="view-header-actions">

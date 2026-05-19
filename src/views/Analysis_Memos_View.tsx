@@ -13,7 +13,7 @@ import {
   TextRun,
 } from "docx";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 // ─── Rich text editor ─────────────────────────────────────────────────────────
 
@@ -1540,7 +1540,7 @@ export function MemosView() {
             title="Show Help"
             onClick={() => setHelpOpen(true)}
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <button

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RecordModel } from "pocketbase";
 import { useStore } from "../context/StoreContext";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
 
 type TranscriptProcessingSegment = {
@@ -557,7 +557,7 @@ export function AIAssistProcessDocumentsReviewView() {
             title="Show Help"
             aria-label="Show Help"
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </header>

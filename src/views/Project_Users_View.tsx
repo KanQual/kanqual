@@ -6,7 +6,7 @@ import { ROLE_LABELS } from "../types";
 import type { PendingImportedUser, Role } from "../types";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { createUserAccount } from "../lib/pb";
-import helpIcon from "../assets/ic_help_outline_24px.svg";
+import { HelpIcon } from "../components/AppIcons";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -999,7 +999,7 @@ export function UsersView() {
             title="Show Help"
             aria-label="Show Help"
           >
-            <img src={helpIcon} alt="" className="users-help-icon" />
+            <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <div className="view-header-actions">
