@@ -44,6 +44,13 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function generateUserIdentifier(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `u_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [pb, setPb] = useState<PocketBase | null>(null);
   const [user, setUser] = useState<RecordModel | null>(null);
@@ -263,14 +270,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
         } else {
           // Remote registrations should be performed via the PocketBase client
-          // so that web/remote clients can create accounts directly on the
-          // remote server instead of invoking local native commands.
+          // so that remote clients can create users against the host server.
           await pb.collection("users").create({
             name,
             email,
             password,
             passwordConfirm: password,
             emailVisibility: true,
+            must_change_password: false,
+            app_role: "standard",
+            user_identifier: generateUserIdentifier(),
           });
         }
         await pb.collection("users").authWithPassword(email, password);
