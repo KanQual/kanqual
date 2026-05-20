@@ -1,5 +1,8 @@
 # Kanqual
 
+![AI-Generated License Badge](vibe-coded-badge.svg)
+
+
 Kanqual is a free, open-source, local-first qualitative research application for coding, memoing, reporting, and AI-assisted analysis by Mehmet Cansoy, Associate Professor of Sociology at Fairfield University.
 
 It is built as a desktop app with Tauri, React, TypeScript, Rust, and an embedded PocketBase backend. It is built on Windows 11, but also confirmed to work on Windows 10, MacOS 13, and Ubuntu. 
@@ -87,3 +90,13 @@ Contributions, issue reports, and feedback are welcome.
 ## Short Description
 
 Kanqual is qualitative coding software that is free, open-source, local-first, collaborative, and increasingly AI-assisted without requiring a hosted cloud backend.
+
+## 🤖 AI Transparency
+
+This project human + ai collaboration.
+
+- **AI Model**: OpenAI and Anthropic GPT 5.4 and Claude Opus 4.5
+- **License**: Apache-2.0
+- **Human Contributor**: Mehmet Cansoy
+
+We believe in transparency about AI usage in software development.
