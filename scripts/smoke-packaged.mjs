@@ -142,11 +142,17 @@ async function validateMacosBundle(bundleRoot, expectedSidecar) {
   const infoPlist = path.join(appDir, "Contents", "Info.plist");
   const macOsDir = path.join(appDir, "Contents", "MacOS");
   const macOsEntries = await fs.readdir(macOsDir, { withFileTypes: true });
+  const bundledSidecarName = expectedSidecar
+    ? (expectedSidecar.toLowerCase().endsWith(".exe") ? "pocketbase.exe" : "pocketbase")
+    : null;
 
   assert(await pathExists(infoPlist), "macOS smoke test failed: Info.plist is missing from the app bundle.");
   assert(macOsEntries.some((entry) => entry.isFile() && entry.name.toLowerCase().includes("kanqual")), "macOS smoke test failed: app executable is missing from Contents/MacOS.");
-  if (expectedSidecar) {
-    assert(macOsEntries.some((entry) => entry.isFile() && entry.name === expectedSidecar), `macOS smoke test failed: expected PocketBase sidecar ${expectedSidecar} is missing from Contents/MacOS.`);
+  if (bundledSidecarName) {
+    assert(
+      macOsEntries.some((entry) => entry.isFile() && entry.name === bundledSidecarName),
+      `macOS smoke test failed: expected bundled PocketBase sidecar ${bundledSidecarName} is missing from Contents/MacOS.`,
+    );
   } else {
     assert(macOsEntries.some((entry) => entry.isFile() && entry.name.startsWith("pocketbase")), "macOS smoke test failed: PocketBase sidecar is missing from Contents/MacOS.");
   }
@@ -154,7 +160,9 @@ async function validateMacosBundle(bundleRoot, expectedSidecar) {
   return [
     `App bundle: ${baseName(appDir)}`,
     `DMG: ${baseName(dmgs[0])}`,
-    expectedSidecar ? `Sidecar: ${expectedSidecar}` : "Sidecar: detected",
+    bundledSidecarName
+      ? `Sidecar: ${bundledSidecarName} (from source ${expectedSidecar})`
+      : "Sidecar: detected",
   ];
 }
 

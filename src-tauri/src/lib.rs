@@ -97,9 +97,31 @@ fn pocketbase_sidecar_error(err: impl std::fmt::Display) -> String {
     )
 }
 
+#[cfg(unix)]
+fn ensure_packaged_sidecar_executable() -> Result<(), String> {
+    let sidecar_path = executable_dir()?.join("pocketbase");
+    if !sidecar_path.exists() {
+        return Ok(());
+    }
+
+    let mut permissions = fs::metadata(&sidecar_path)
+        .map_err(|e| format!("Could not read PocketBase sidecar metadata at {}: {e}", sidecar_path.display()))?
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&sidecar_path, permissions)
+        .map_err(|e| format!("Could not mark PocketBase sidecar as executable at {}: {e}", sidecar_path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_packaged_sidecar_executable() -> Result<(), String> {
+    Ok(())
+}
+
 /// Spawn a PocketBase serve process with the given bind address.
 /// Returns the child handle on success.
 fn spawn_pb_serve(app: &tauri::AppHandle, bind: &str, pb_dir_arg: &str, pb_migrations_arg: &str) -> Result<CommandChild, String> {
+    ensure_packaged_sidecar_executable()?;
     let http_arg = format!("--http={}", bind);
     let (_, child) = app
         .shell()
@@ -139,6 +161,7 @@ async fn start_local_pocketbase_runtime(
     let pb_migrations_dir = pb_data_dir.join("pb_app_migrations");
     fs::create_dir_all(&pb_migrations_dir).ok();
     let pb_migrations_arg = format!("--migrationsDir={}", pb_migrations_dir.to_string_lossy());
+    ensure_packaged_sidecar_executable()?;
 
     let backend_identity = load_or_create_backend_identity(app)?;
     let upsert = app
