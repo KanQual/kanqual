@@ -23,8 +23,9 @@ This checklist covers the release path for Windows, macOS, and Linux builds of K
 
 ## Signing And Platform Trust
 
-- Windows signing certificate configured and tested.
-- macOS certificate, signing identity, and notarization credentials configured and tested.
+- Initial release lane is unsigned on Windows and macOS; release notes should say so explicitly.
+- Windows signing certificate configured and tested before moving to a signed release lane.
+- macOS certificate, signing identity, and notarization credentials configured and tested before moving to a signed release lane.
 - Linux artifact trust model decided and documented.
 - Tauri signing key configured if updater or signed release metadata is introduced later.
 
@@ -66,6 +67,7 @@ This checklist covers the release path for Windows, macOS, and Linux builds of K
 
 - Call out supported platforms for this release.
 - Note any platform-specific caveats such as portable mode limitations or notarization expectations.
+- Note clearly when a release is unsigned so macOS Gatekeeper and Windows reputation prompts are expected.
 - Include upgrade notes if database, backup, or AI features changed.
 
 ## After Publishing

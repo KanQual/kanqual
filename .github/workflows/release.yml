@@ -31,7 +31,7 @@ jobs:
             artifact_glob: "src-tauri/target/release/bundle/**/*"
             sidecar_check: "pocketbase-aarch64-apple-darwin"
             runtime_smoke_command: "npm run smoke:runtime -- --platform macos --hold-ms 3000 --timeout-ms 150000"
-          - os: macos-13
+          - os: macos-15-intel
             platform_label: macos-intel
             smoke_platform: macos
             smoke_packaged_args: "--expected-sidecar pocketbase-x86_64-apple-darwin"
@@ -51,22 +51,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CI: true
-
-      # Tauri release signing
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      # Windows signing placeholders
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-
-      # macOS signing/notarization placeholders
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - name: Check out repository

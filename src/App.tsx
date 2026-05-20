@@ -12,6 +12,16 @@ function lazyView<T extends ComponentType<unknown>>(loader: () => Promise<{ defa
   return lazy(loader);
 }
 
+function describeUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
 const ProjectsViewLazy = lazyView(() => import("./views/Projects_View").then((m) => ({ default: m.ProjectsView })));
 const HomeViewLazy = lazyView(() => import("./views/Project_Home_View").then((m) => ({ default: m.HomeView })));
 const UsersViewLazy = lazyView(() => import("./views/Project_Users_View").then((m) => ({ default: m.UsersView })));
@@ -549,7 +559,7 @@ function SmokeTestAuthRunner() {
         if (unmountedRef.current) return;
         await updateSmokeTestState({
           phase: "failed",
-          failure: error instanceof Error ? error.message : "Smoke auth flow failed.",
+          failure: describeUnknownError(error) || "Smoke auth flow failed.",
           success: false,
           userEmail,
           appDataDir: config.appDataDir,
@@ -639,7 +649,7 @@ function SmokeTestStoreRunner() {
         if (unmountedRef.current) return;
         await updateSmokeTestState({
           phase: "failed",
-          failure: error instanceof Error ? error.message : "Smoke project flow failed.",
+          failure: describeUnknownError(error) || "Smoke project flow failed.",
           success: false,
           userEmail: config.userEmail,
           appDataDir: config.appDataDir,

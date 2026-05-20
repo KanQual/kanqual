@@ -25,6 +25,8 @@ const LAST_SERVER_URL_KEY = "kq_last_server_url";
 const REMOTE_CONNECT_TIMEOUT_MS = 7000;
 const REMOTE_TEST_TIMEOUT_MS = 5000;
 const REMOTE_AUTO_RECONNECT_TIMEOUT_MS = 3000;
+const LOCAL_AUTH_RETRY_ATTEMPTS = 5;
+const LOCAL_AUTH_RETRY_DELAY_MS = 500;
 
 interface AuthContextValue {
   pb: PocketBase | null;
@@ -60,6 +62,20 @@ async function reportSmokeStep(phase: string, message: string): Promise<void> {
   } catch {
     // Smoke breadcrumbs are best-effort only.
   }
+}
+
+function describeUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function generateUserIdentifier(): string {
@@ -319,12 +335,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (serverUrl === LOCAL_PB_URL) {
           // Local registrations use the native (trusted) command which performs
           // the registration using an internal superuser on the host.
-          await registerUserAccount({
-            name,
-            email,
-            password,
-            passwordConfirm: password,
-          });
+          let registerError: unknown = null;
+          for (let attempt = 1; attempt <= LOCAL_AUTH_RETRY_ATTEMPTS; attempt += 1) {
+            try {
+              await registerUserAccount({
+                name,
+                email,
+                password,
+                passwordConfirm: password,
+              });
+              registerError = null;
+              break;
+            } catch (error) {
+              registerError = error;
+              if (attempt >= LOCAL_AUTH_RETRY_ATTEMPTS) {
+                throw new Error(describeUnknownError(error));
+              }
+              await reportSmokeStep(
+                "frontend-register-retry",
+                `Local account creation attempt ${attempt} failed: ${describeUnknownError(error)}. Retrying...`,
+              );
+              await delay(LOCAL_AUTH_RETRY_DELAY_MS);
+            }
+          }
+          if (registerError) {
+            throw new Error(describeUnknownError(registerError));
+          }
         } else {
           // Remote registrations should be performed via the PocketBase client
           // so that remote clients can create users against the host server.
@@ -339,7 +375,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             user_identifier: generateUserIdentifier(),
           });
         }
-        await activePb.collection("users").authWithPassword(email, password);
+        let authError: unknown = null;
+        for (let attempt = 1; attempt <= LOCAL_AUTH_RETRY_ATTEMPTS; attempt += 1) {
+          try {
+            await activePb.collection("users").authWithPassword(email, password);
+            authError = null;
+            break;
+          } catch (error) {
+            authError = error;
+            if (attempt >= LOCAL_AUTH_RETRY_ATTEMPTS || serverUrl !== LOCAL_PB_URL) {
+              throw new Error(describeUnknownError(error));
+            }
+            await reportSmokeStep(
+              "frontend-auth-retry",
+              `Local login attempt ${attempt} after registration failed: ${describeUnknownError(error)}. Retrying...`,
+            );
+            await delay(LOCAL_AUTH_RETRY_DELAY_MS);
+          }
+        }
+        if (authError) {
+          throw new Error(describeUnknownError(authError));
+        }
         setUser(activePb.authStore.record);
         setStatus("authenticated");
         try {
@@ -348,9 +404,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Convenience only.
         }
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Registration failed";
+        const msg = describeUnknownError(e) || "Registration failed";
         setError(msg);
-        throw e;
+        throw new Error(msg);
       }
     },
     [serverUrl]
