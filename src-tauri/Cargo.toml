@@ -1,6 +1,6 @@
 [package]
 name = "kanqual"
-version = "0.9.0"
+version = "0.9.1"
 license = "Apache-2.0"
 description = "Text annotation tool for social science research"
 authors = []

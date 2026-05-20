@@ -15,6 +15,8 @@ This checklist covers the release path for Windows, macOS, and Linux builds of K
   `pocketbase-x86_64-pc-windows-msvc.exe`
 - macOS sidecar present:
   `pocketbase-x86_64-apple-darwin` and/or `pocketbase-aarch64-apple-darwin`
+  The default macOS release lane should target Apple Silicon (`aarch64-apple-darwin`).
+  The separate `macos-intel` release lane should default to the Intel sidecar (`x86_64-apple-darwin`).
 - Linux sidecar present:
   `pocketbase-x86_64-unknown-linux-gnu` and/or `pocketbase-aarch64-unknown-linux-gnu`
 - Verify `src-tauri/build.rs` resolves the correct sidecar name for each packaged target.
@@ -32,6 +34,7 @@ This checklist covers the release path for Windows, macOS, and Linux builds of K
   installer launches
 - Windows:
   portable build launches and keeps data in the portable directory when `portable-mode.json` is present
+  The release workflow should generate both the unpacked portable directory and the portable ZIP before smoke tests run.
 - macOS:
   packaged app launches outside dev mode
 - Linux:
@@ -54,6 +57,7 @@ This checklist covers the release path for Windows, macOS, and Linux builds of K
 
 - Windows artifacts generated and named consistently.
 - macOS artifacts generated and named consistently.
+- Apple Silicon and Intel macOS artifacts are uploaded as separate release workflow artifacts.
 - Linux artifacts generated and named consistently.
 - SHA256 checksum files generated for each platform.
 - Release artifacts attached to the GitHub release draft.

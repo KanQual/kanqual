@@ -2360,7 +2360,7 @@ export function AppSettingsView() {
                 <div className="about-kanqual-meta-grid">
                   <div className="about-kanqual-meta-card">
                     <span className="about-kanqual-meta-label">Version</span>
-                    <strong>{appInfo?.appVersion ?? "0.9.0"}</strong>
+                    <strong>{appInfo?.appVersion ?? "0.9.1"}</strong>
                   </div>
                   <div className="about-kanqual-meta-card">
                     <span className="about-kanqual-meta-label">Release date</span>
@@ -2387,7 +2387,7 @@ export function AppSettingsView() {
                   includes the author, year, software title, version, and institution.
                 </p>
                 <div className="about-kanqual-citation">
-                  Cansoy, M. (2026). <em>KanQual</em> (Version {appInfo?.appVersion ?? "0.9.0"}){" "}
+                  Cansoy, M. (2026). <em>KanQual</em> (Version {appInfo?.appVersion ?? "0.9.1"}){" "}
                   [Computer software]. https://github.com/KanQual/kanqual
                 </div>
               </section>

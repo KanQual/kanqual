@@ -5,6 +5,7 @@ function parseArgs(argv) {
   const args = {
     platform: "",
     bundleRoot: path.resolve("src-tauri", "target", "release", "bundle"),
+    expectedSidecar: "",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -13,6 +14,8 @@ function parseArgs(argv) {
       args.platform = String(argv[++i] ?? "").trim().toLowerCase();
     } else if (arg === "--bundle-root") {
       args.bundleRoot = path.resolve(String(argv[++i] ?? ""));
+    } else if (arg === "--expected-sidecar") {
+      args.expectedSidecar = String(argv[++i] ?? "").trim();
     } else if (arg === "--help" || arg === "-h") {
       args.help = true;
     } else {
@@ -25,7 +28,7 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log(`Usage:
-  node scripts/smoke-packaged.mjs --platform <windows|macos|linux> [--bundle-root <path>]
+  node scripts/smoke-packaged.mjs --platform <windows|macos|linux> [--bundle-root <path>] [--expected-sidecar <filename>]
 `);
 }
 
@@ -88,19 +91,16 @@ async function findPaths(bundleRoot, predicate) {
 async function validateWindowsBundle(bundleRoot) {
   const files = await findPaths(bundleRoot, (fullPath, entry) => entry.isFile() && (
     matchesExtension(fullPath, ".exe")
-    || matchesExtension(fullPath, ".msi")
     || matchesExtension(fullPath, ".zip")
     || matchesExtension(fullPath, ".json")
   ));
   const dirs = await findPaths(bundleRoot, (_fullPath, entry) => entry.isDirectory());
 
   const installer = files.find((filePath) => baseName(filePath).endsWith("-setup.exe"));
-  const msi = files.find((filePath) => matchesExtension(filePath, ".msi"));
   const portableZip = files.find((filePath) => baseName(filePath).includes("_portable") && matchesExtension(filePath, ".zip"));
   const portableDir = dirs.find((dirPath) => baseName(dirPath).includes("_portable"));
 
   assert(installer, "Windows smoke test failed: NSIS installer was not found.");
-  assert(msi, "Windows smoke test failed: MSI installer was not found.");
   assert(portableZip, "Windows smoke test failed: portable ZIP artifact was not found.");
   assert(portableDir, "Windows smoke test failed: unpacked portable directory was not found.");
 
@@ -126,13 +126,12 @@ async function validateWindowsBundle(bundleRoot) {
 
   return [
     `Installer: ${baseName(installer)}`,
-    `MSI: ${baseName(msi)}`,
     `Portable ZIP: ${baseName(portableZip)}`,
     `Portable dir: ${baseName(portableDir)}`,
   ];
 }
 
-async function validateMacosBundle(bundleRoot) {
+async function validateMacosBundle(bundleRoot, expectedSidecar) {
   const appDirs = await findPaths(bundleRoot, (fullPath, entry) => entry.isDirectory() && baseName(fullPath).endsWith(".app"));
   const dmgs = await findPaths(bundleRoot, (fullPath, entry) => entry.isFile() && matchesExtension(fullPath, ".dmg"));
 
@@ -146,11 +145,16 @@ async function validateMacosBundle(bundleRoot) {
 
   assert(await pathExists(infoPlist), "macOS smoke test failed: Info.plist is missing from the app bundle.");
   assert(macOsEntries.some((entry) => entry.isFile() && entry.name.toLowerCase().includes("kanqual")), "macOS smoke test failed: app executable is missing from Contents/MacOS.");
-  assert(macOsEntries.some((entry) => entry.isFile() && entry.name.startsWith("pocketbase")), "macOS smoke test failed: PocketBase sidecar is missing from Contents/MacOS.");
+  if (expectedSidecar) {
+    assert(macOsEntries.some((entry) => entry.isFile() && entry.name === expectedSidecar), `macOS smoke test failed: expected PocketBase sidecar ${expectedSidecar} is missing from Contents/MacOS.`);
+  } else {
+    assert(macOsEntries.some((entry) => entry.isFile() && entry.name.startsWith("pocketbase")), "macOS smoke test failed: PocketBase sidecar is missing from Contents/MacOS.");
+  }
 
   return [
     `App bundle: ${baseName(appDir)}`,
     `DMG: ${baseName(dmgs[0])}`,
+    expectedSidecar ? `Sidecar: ${expectedSidecar}` : "Sidecar: detected",
   ];
 }
 
@@ -186,7 +190,7 @@ async function main() {
   if (args.platform === "windows") {
     details = await validateWindowsBundle(args.bundleRoot);
   } else if (args.platform === "macos") {
-    details = await validateMacosBundle(args.bundleRoot);
+    details = await validateMacosBundle(args.bundleRoot, args.expectedSidecar);
   } else if (args.platform === "linux") {
     details = await validateLinuxBundle(args.bundleRoot);
   } else {

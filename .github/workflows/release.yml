@@ -17,21 +17,35 @@ jobs:
         include:
           - os: windows-latest
             platform_label: windows
-            bundle_targets: "nsis,msi"
+            smoke_platform: windows
+            smoke_packaged_args: ""
+            bundle_targets: "nsis"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
             sidecar_check: "pocketbase-x86_64-pc-windows-msvc.exe"
             runtime_smoke_command: "npm run smoke:runtime -- --platform windows --hold-ms 2000 --timeout-ms 120000"
           - os: macos-latest
             platform_label: macos
+            smoke_platform: macos
+            smoke_packaged_args: "--expected-sidecar pocketbase-aarch64-apple-darwin"
             bundle_targets: "app,dmg"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
-            sidecar_check: "pocketbase-aarch64-apple-darwin,pocketbase-x86_64-apple-darwin"
+            sidecar_check: "pocketbase-aarch64-apple-darwin"
+            runtime_smoke_command: "npm run smoke:runtime -- --platform macos --hold-ms 3000 --timeout-ms 150000"
+          - os: macos-13
+            platform_label: macos-intel
+            smoke_platform: macos
+            smoke_packaged_args: "--expected-sidecar pocketbase-x86_64-apple-darwin"
+            bundle_targets: "app,dmg"
+            artifact_glob: "src-tauri/target/release/bundle/**/*"
+            sidecar_check: "pocketbase-x86_64-apple-darwin"
             runtime_smoke_command: "npm run smoke:runtime -- --platform macos --hold-ms 3000 --timeout-ms 150000"
           - os: ubuntu-22.04
             platform_label: linux
+            smoke_platform: linux
+            smoke_packaged_args: ""
             bundle_targets: "appimage,deb"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
-            sidecar_check: "pocketbase-x86_64-unknown-linux-gnu,pocketbase-aarch64-unknown-linux-gnu"
+            sidecar_check: "pocketbase-x86_64-unknown-linux-gnu"
             runtime_smoke_command: "xvfb-run -a npm run smoke:runtime -- --platform linux --hold-ms 3000 --timeout-ms 150000"
 
     runs-on: ${{ matrix.os }}
@@ -78,14 +92,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            wget \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libxdo-dev \
             librsvg2-dev \
             patchelf \
             libgtk-3-dev \
             libglib2.0-dev \
             libssl-dev \
-            libayatana-appindicator3-dev
+            libayatana-appindicator3-dev \
+            xvfb
 
       - name: Install frontend dependencies
         run: npm ci
@@ -128,8 +147,50 @@ jobs:
           includeUpdaterJson: false
           args: --bundles ${{ matrix.bundle_targets }}
 
+      - name: Create Windows portable bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $targetRoot = Join-Path $PWD "src-tauri/target/release"
+          $bundleRoot = Join-Path $targetRoot "bundle"
+          $portableName = "Kanqual_${version}_x64_portable"
+          $portableDir = Join-Path (Join-Path $bundleRoot "portable") $portableName
+          $portableZip = "${portableDir}.zip"
+
+          if (-not (Test-Path (Join-Path $targetRoot "kanqual.exe"))) {
+            Write-Error "Portable packaging failed: src-tauri/target/release/kanqual.exe was not found."
+            exit 1
+          }
+
+          if (-not (Test-Path (Join-Path $targetRoot "pocketbase.exe"))) {
+            Write-Error "Portable packaging failed: src-tauri/target/release/pocketbase.exe was not found."
+            exit 1
+          }
+
+          if (Test-Path $portableDir) {
+            Remove-Item -LiteralPath $portableDir -Recurse -Force
+          }
+          if (Test-Path $portableZip) {
+            Remove-Item -LiteralPath $portableZip -Force
+          }
+
+          New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $portableDir "data") | Out-Null
+
+          Copy-Item -LiteralPath (Join-Path $targetRoot "kanqual.exe") -Destination (Join-Path $portableDir "kanqual.exe") -Force
+          Copy-Item -LiteralPath (Join-Path $targetRoot "pocketbase.exe") -Destination (Join-Path $portableDir "pocketbase.exe") -Force
+          Set-Content -LiteralPath (Join-Path $portableDir "portable-mode.json") -Value "{}" -NoNewline
+          Copy-Item -LiteralPath (Join-Path $PWD "LICENSE") -Destination $portableDir -Force
+          Copy-Item -LiteralPath (Join-Path $PWD "LICENSES.md") -Destination $portableDir -Force
+          Copy-Item -LiteralPath (Join-Path $PWD "THIRD_PARTY_NOTICES.md") -Destination $portableDir -Force
+          Copy-Item -LiteralPath (Join-Path $PWD "licenses") -Destination $portableDir -Recurse -Force
+
+          Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath $portableZip -Force
+          Write-Host "Created portable bundle: $portableZip"
+
       - name: Run packaged artifact smoke test
-        run: npm run smoke:packaged -- --platform ${{ matrix.platform_label }}
+        run: npm run smoke:packaged -- --platform ${{ matrix.smoke_platform }} ${{ matrix.smoke_packaged_args }}
 
       - name: Run packaged runtime smoke test
         shell: pwsh
