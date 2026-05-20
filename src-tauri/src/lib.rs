@@ -173,6 +173,10 @@ async fn start_local_pocketbase_runtime(
 }
 
 fn kanqual_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Some(smoke_data_dir) = smoke_test_data_dir_override() {
+        fs::create_dir_all(&smoke_data_dir).map_err(|e| e.to_string())?;
+        return Ok(smoke_data_dir);
+    }
     if let Some(portable_dir) = portable_data_dir()? {
         fs::create_dir_all(&portable_dir).map_err(|e| e.to_string())?;
         return Ok(portable_dir);
@@ -199,6 +203,47 @@ fn portable_data_dir() -> Result<Option<PathBuf>, String> {
         return Ok(Some(exe_dir.join(PORTABLE_DATA_DIR_NAME)));
     }
     Ok(None)
+}
+
+fn smoke_test_env_var(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn smoke_test_enabled() -> bool {
+    smoke_test_env_var("KANQUAL_SMOKE_TEST")
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+fn smoke_test_data_dir_override() -> Option<PathBuf> {
+    if !smoke_test_enabled() {
+        return None;
+    }
+    smoke_test_env_var("KANQUAL_SMOKE_DATA_DIR").map(PathBuf::from)
+}
+
+fn smoke_test_state_path() -> Option<PathBuf> {
+    if !smoke_test_enabled() {
+        return None;
+    }
+    smoke_test_env_var("KANQUAL_SMOKE_STATE_PATH").map(PathBuf::from)
+}
+
+fn write_smoke_test_state(_app: &tauri::AppHandle, payload: serde_json::Value) -> Result<(), String> {
+    let Some(state_path) = smoke_test_state_path() else {
+        return Ok(());
+    };
+
+    if let Some(parent) = state_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let serialized = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
+    fs::write(state_path, serialized).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn is_portable_mode() -> Result<bool, String> {
@@ -296,6 +341,33 @@ struct AppInfo {
     app_data_dir: String,
     app_version: String,
     portable_mode: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SmokeTestConfig {
+    enabled: bool,
+    run_id: Option<String>,
+    state_path: Option<String>,
+    user_name: Option<String>,
+    user_email: Option<String>,
+    user_password: Option<String>,
+    project_name: Option<String>,
+    app_data_dir: String,
+    portable_mode: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SmokeTestStateUpdateRequest {
+    phase: String,
+    message: Option<String>,
+    success: Option<bool>,
+    failure: Option<String>,
+    project_id: Option<String>,
+    user_email: Option<String>,
+    app_data_dir: Option<String>,
+    portable_mode: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1189,6 +1261,43 @@ fn get_app_info(app: tauri::AppHandle) -> Result<AppInfo, String> {
         app_version: app.package_info().version.to_string(),
         portable_mode: is_portable_mode()?,
     })
+}
+
+#[tauri::command]
+fn get_smoke_test_config_command(app: tauri::AppHandle) -> Result<SmokeTestConfig, String> {
+    let app_data_dir = kanqual_data_dir(&app)?;
+    Ok(SmokeTestConfig {
+        enabled: smoke_test_enabled(),
+        run_id: smoke_test_env_var("KANQUAL_SMOKE_RUN_ID"),
+        state_path: smoke_test_state_path().map(|path| path.to_string_lossy().to_string()),
+        user_name: smoke_test_env_var("KANQUAL_SMOKE_USER_NAME"),
+        user_email: smoke_test_env_var("KANQUAL_SMOKE_USER_EMAIL"),
+        user_password: smoke_test_env_var("KANQUAL_SMOKE_USER_PASSWORD"),
+        project_name: smoke_test_env_var("KANQUAL_SMOKE_PROJECT_NAME"),
+        app_data_dir: app_data_dir.to_string_lossy().to_string(),
+        portable_mode: is_portable_mode()?,
+    })
+}
+
+#[tauri::command]
+fn update_smoke_test_state_command(
+    app: tauri::AppHandle,
+    request: SmokeTestStateUpdateRequest,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "phase": request.phase,
+        "message": request.message,
+        "success": request.success,
+        "failure": request.failure,
+        "projectId": request.project_id,
+        "userEmail": request.user_email,
+        "appDataDir": request
+            .app_data_dir
+            .unwrap_or_else(|| kanqual_data_dir(&app).map(|path| path.to_string_lossy().to_string()).unwrap_or_default()),
+        "portableMode": request.portable_mode.unwrap_or_else(|| is_portable_mode().unwrap_or(false)),
+        "updatedAtMs": current_time_ms(),
+    });
+    write_smoke_test_state(&app, payload)
 }
 
 async fn authenticate_internal_superuser(
@@ -5596,7 +5705,29 @@ async fn start_local_pocketbase_command(
     pb_process: tauri::State<'_, PbProcess>,
     network_mode: tauri::State<'_, NetworkMode>,
 ) -> Result<String, String> {
+    let _ = write_smoke_test_state(
+        &app,
+        serde_json::json!({
+            "phase": "native-start-local",
+            "message": "Starting local PocketBase from the native host.",
+            "success": false,
+            "appDataDir": kanqual_data_dir(&app).map(|path| path.to_string_lossy().to_string()).unwrap_or_default(),
+            "portableMode": is_portable_mode().unwrap_or(false),
+            "updatedAtMs": current_time_ms(),
+        }),
+    );
     start_local_pocketbase_runtime(&app, &pb_process, &network_mode).await?;
+    let _ = write_smoke_test_state(
+        &app,
+        serde_json::json!({
+            "phase": "native-start-local-complete",
+            "message": "Local PocketBase start command completed.",
+            "success": false,
+            "appDataDir": kanqual_data_dir(&app).map(|path| path.to_string_lossy().to_string()).unwrap_or_default(),
+            "portableMode": is_portable_mode().unwrap_or(false),
+            "updatedAtMs": current_time_ms(),
+        }),
+    );
     Ok(PB_URL.to_string())
 }
 
@@ -5650,6 +5781,8 @@ pub fn run() {
             read_text_file,
             get_pb_url,
             get_app_info,
+            get_smoke_test_config_command,
+            update_smoke_test_state_command,
             create_user_account_command,
             register_user_account_command,
             ensure_imported_user_account_command,

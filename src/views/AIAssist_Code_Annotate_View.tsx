@@ -9,7 +9,6 @@ import {
   Paragraph,
   TextRun,
 } from "docx";
-import { jsPDF } from "jspdf";
 import { useStore } from "../context/StoreContext";
 import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
@@ -21,6 +20,15 @@ import {
 } from "../components/ProcessedTranscriptView";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+
+let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
+
+async function loadJsPdf() {
+  if (!jsPdfPromise) {
+    jsPdfPromise = import("jspdf");
+  }
+  return jsPdfPromise;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -3480,6 +3488,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
       const path = await save({ defaultPath: `${exportTitle}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
       if (!path) return;
 
+      const { jsPDF } = await loadJsPdf();
       const pdf = new jsPDF({ unit: "pt", format: "letter" });
       const margin = 54;
       const pageH = pdf.internal.pageSize.getHeight();

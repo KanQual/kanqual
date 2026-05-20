@@ -5,12 +5,34 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
-import { Document as DocxDocument, HeadingLevel, ImageRun, Packer, Paragraph, TextRun } from "docx";
-import { jsPDF } from "jspdf";
-import ExcelJS from "exceljs";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+
+let excelJsPromise: Promise<any> | null = null;
+let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
+let docxPromise: Promise<typeof import("docx")> | null = null;
+
+async function loadExcelJs() {
+  if (!excelJsPromise) {
+    excelJsPromise = import("exceljs");
+  }
+  return excelJsPromise;
+}
+
+async function loadJsPdf() {
+  if (!jsPdfPromise) {
+    jsPdfPromise = import("jspdf");
+  }
+  return jsPdfPromise;
+}
+
+async function loadDocx() {
+  if (!docxPromise) {
+    docxPromise = import("docx");
+  }
+  return docxPromise;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1817,12 +1839,13 @@ function ReportPage({
       const path = await save({ defaultPath: `${name || "Report"}.xlsx`, filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }] });
       if (!path) return;
 
+      const ExcelJS = await loadExcelJs();
       const workbook = new ExcelJS.Workbook();
       workbook.creator = currentUser?.name || currentUser?.email || "Kanqual";
       workbook.created = new Date();
 
-      const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE1E4EA" } };
-      function styleHeaderCell(cell: ExcelJS.Cell) { cell.font = { bold: true }; cell.fill = HEADER_FILL; }
+      const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE1E4EA" } };
+      function styleHeaderCell(cell: any) { cell.font = { bold: true }; cell.fill = HEADER_FILL; }
 
       const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown");
       const createdAt = row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString());
@@ -1927,7 +1950,7 @@ function ReportPage({
         "Note",
       ];
       const hdrRow = annSheet.addRow(headers);
-      hdrRow.eachCell((cell) => styleHeaderCell(cell));
+      hdrRow.eachCell((cell: any) => styleHeaderCell(cell));
       annSheet.views = [{ state: "frozen", ySplit: 1 }];
 
       const annToGroup = new Map<string, string>();
@@ -1988,6 +2011,7 @@ function ReportPage({
       const path = await save({ defaultPath: `${name || "Report"}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
       if (!path) return;
       
+      const { jsPDF } = await loadJsPdf();
       const pdf = new jsPDF({ unit: "pt", format: "letter" });
       const margin = 54;
       const pageWidth = pdf.internal.pageSize.getWidth();
@@ -2116,10 +2140,19 @@ function ReportPage({
       const path = await save({ defaultPath: `${name || "Report"}.docx`, filters: [{ name: "Word Document", extensions: ["docx"] }] });
       if (!path) return;
 
+      const {
+        Document: DocxDocument,
+        HeadingLevel,
+        ImageRun,
+        Packer,
+        Paragraph,
+        TextRun,
+      } = await loadDocx();
+
       const docxGroupLabels: Record<string, string> = { none: "None", code: "Code", document: "Document", coder: "Coder" };
       const docxSortLabels: Record<string, string> = { document: "Document", code: "Code", coder: "Coder", quoteLength: "Quote Length", quote: "Quote (A–Z)" };
 
-      const children: Paragraph[] = [
+      const children: any[] = [
         new Paragraph({ text: name || "Untitled Report", heading: HeadingLevel.TITLE }),
         new Paragraph(`Created by: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown")}`),
         new Paragraph(`Created: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`),
@@ -2184,7 +2217,7 @@ function ReportPage({
 
       const addDocxAnn = (ann: AnnItem) => {
         const ctx = annContext(ann, docxContentMap);
-        const quoteRuns: TextRun[] = [];
+        const quoteRuns: any[] = [];
         if (ctx.before) quoteRuns.push(new TextRun({ text: (ctx.ellipsisBefore ? "…" : "") + ctx.before, italics: true, color: "9AA5B4" }));
         quoteRuns.push(new TextRun({ text: `"${ann.quote}"`, italics: true }));
         if (ctx.after) quoteRuns.push(new TextRun({ text: ctx.after + (ctx.ellipsisAfter ? "…" : ""), italics: true, color: "9AA5B4" }));

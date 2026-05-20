@@ -5,25 +5,35 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import {
-  Document as DocxDocument,
-  HeadingLevel,
-  ImageRun,
-  Packer,
-  Paragraph,
-  ShadingType,
-  Table,
-  TableCell,
-  TableRow,
-  TextRun,
-  WidthType,
-} from "docx";
-import { jsPDF } from "jspdf";
-import ExcelJS from "exceljs";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+
+let excelJsPromise: Promise<any> | null = null;
+let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
+let docxPromise: Promise<typeof import("docx")> | null = null;
+
+async function loadExcelJs() {
+  if (!excelJsPromise) {
+    excelJsPromise = import("exceljs");
+  }
+  return excelJsPromise;
+}
+
+async function loadJsPdf() {
+  if (!jsPdfPromise) {
+    jsPdfPromise = import("jspdf");
+  }
+  return jsPdfPromise;
+}
+
+async function loadDocx() {
+  if (!docxPromise) {
+    docxPromise = import("docx");
+  }
+  return docxPromise;
+}
 
 type CodeReportKind = "frequencies" | "summary";
 type CodeReportSortCol = "name" | "kind" | "createdByName" | "createdAt";
@@ -2615,13 +2625,14 @@ function CodeReportCreationPage({
       const path = await save({ defaultPath: `${name || "Report"}.xlsx`, filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }] });
       if (!path) return;
 
+      const ExcelJS = await loadExcelJs();
       const workbook = new ExcelJS.Workbook();
       workbook.creator = currentUser?.name || currentUser?.email || "Kanqual";
       workbook.created = new Date();
 
-      const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE1E4EA" } };
+      const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE1E4EA" } };
 
-      function styleHeader(cell: ExcelJS.Cell) {
+      function styleHeader(cell: any) {
         cell.font = { bold: true };
         cell.fill = HEADER_FILL;
       }
@@ -2768,7 +2779,7 @@ function CodeReportCreationPage({
         const ws = workbook.addWorksheet("Co-Occurrence");
         ws.columns = [{ width: 18 }, { width: 30 }, { width: 24 }, { width: 10 }];
         const coHdr = ws.addRow(["Section", "Category", "Code", "Count"]);
-        coHdr.eachCell((cell) => styleHeader(cell));
+        coHdr.eachCell((cell: any) => styleHeader(cell));
         for (const rowItem of reportExportRows) {
           for (const v of rowItem.values) {
             ws.addRow([rowItem.section, rowItem.category, v.code, v.value]);
@@ -2794,6 +2805,7 @@ function CodeReportCreationPage({
       const path = await save({ defaultPath: `${name || "Report"}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
       if (!path) return;
 
+      const { jsPDF } = await loadJsPdf();
       const pdf = new jsPDF({ unit: "pt", format: "letter" });
       const margin = 54;
       const pageH = pdf.internal.pageSize.getHeight();
@@ -3070,11 +3082,25 @@ function CodeReportCreationPage({
       const path = await save({ defaultPath: `${name || "Report"}.docx`, filters: [{ name: "Word Document", extensions: ["docx"] }] });
       if (!path) return;
 
+      const {
+        Document: DocxDocument,
+        HeadingLevel,
+        ImageRun,
+        Packer,
+        Paragraph,
+        ShadingType,
+        Table,
+        TableCell,
+        TableRow,
+        TextRun,
+        WidthType,
+      } = await loadDocx();
+
       // DOCX content width in DXA (twentieths of a point): letter minus 1-inch margins each side
       const contentDXA = 9360;
       const headerShading = { type: ShadingType.SOLID, color: "E1E4EA", fill: "E1E4EA" };
 
-      function makeTableCell(text: string, widthDXA: number, bold = false, shading?: typeof headerShading): TableCell {
+      function makeTableCell(text: string, widthDXA: number, bold = false, shading?: typeof headerShading) {
         return new TableCell({
           width: { size: widthDXA, type: WidthType.DXA },
           shading,
@@ -3086,7 +3112,7 @@ function CodeReportCreationPage({
         sectionTitle: string,
         tableRows: Array<{ label: string; values: number[] }>,
         displayBuckets: Array<{ label: string }>,
-      ): Table {
+      ) {
         const labelDXA = Math.round(contentDXA * 0.28);
         const numData = displayBuckets.length;
         const dataDXA = numData > 0 ? Math.round((contentDXA - labelDXA) / numData) : contentDXA - labelDXA;
@@ -3114,7 +3140,7 @@ function CodeReportCreationPage({
         firstHeader: string,
         secondHeader: string,
         rows: Array<{ label: string; value: string | number }>,
-      ): Table {
+      ) {
         const labelDXA = Math.round(contentDXA * 0.7);
         const valueDXA = contentDXA - labelDXA;
         return new Table({
@@ -3137,7 +3163,7 @@ function CodeReportCreationPage({
         });
       }
 
-      function buildDocxCoOccurrenceTable(matrix: CoOccurrenceMatrix): Table {
+      function buildDocxCoOccurrenceTable(matrix: CoOccurrenceMatrix) {
         const codes = matrix.codes;
         const labelDXA = Math.round(contentDXA * 0.3);
         const numCols = Math.max(codes.length, 1);
@@ -3174,7 +3200,7 @@ function CodeReportCreationPage({
         });
       }
 
-      const children: Array<Paragraph | Table> = [
+      const children: any[] = [
         new Paragraph({ text: name || "Untitled Report", heading: HeadingLevel.TITLE }),
         new Paragraph(`Type: ${reportLabel}`),
         new Paragraph(`Created by: ${createdBy}`),

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run native tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Validate role matrix when source CSV is present
+        shell: pwsh
+        run: |
+          if (Test-Path "role_permission_matrix_recommended.csv") {
+            npm run validate:roles
+          } else {
+            Write-Host "Skipping role matrix validation because role_permission_matrix_recommended.csv is not present."
+          }

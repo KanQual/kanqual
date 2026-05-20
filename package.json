@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "prepare:pb-sidecar": "node scripts/prepare-pocketbase-sidecar.mjs",
-    "validate:roles": "node scripts/validate-role-matrix.mjs"
+    "validate:roles": "node scripts/validate-role-matrix.mjs",
+    "smoke:packaged": "node scripts/smoke-packaged.mjs",
+    "smoke:runtime": "node scripts/smoke-runtime.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

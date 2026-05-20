@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
-import ExcelJS from "exceljs";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
@@ -11,10 +10,7 @@ import {
   getProcessedTranscriptQuestionOutline,
   parseProcessedTranscriptSegments,
 } from "../components/ProcessedTranscriptView";
-import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,6 +104,26 @@ const ATTRIBUTE_TYPE_OPTIONS: { value: AttributeDataType; label: string }[] = [
 ];
 
 const AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY = "kq_ai_assist_add_attribute_target";
+
+let excelJsPromise: Promise<any> | null = null;
+let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
+
+async function loadExcelJs() {
+  if (!excelJsPromise) {
+    excelJsPromise = import("exceljs");
+  }
+  return excelJsPromise;
+}
+
+async function loadPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+      return module;
+    });
+  }
+  return pdfJsPromise;
+}
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
@@ -808,7 +824,8 @@ async function extractDocxText(file: File): Promise<string> {
 
 async function extractPdfText(file: File): Promise<string> {
   const data = await file.arrayBuffer();
-  const pdf  = await pdfjsLib.getDocument({ data }).promise;
+  const pdfjsLib = await loadPdfJs();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
   const parts: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page    = await pdf.getPage(i);
@@ -1162,6 +1179,7 @@ async function parseSpreadsheetFile(file: File): Promise<string[][]> {
     throw new Error(`Unsupported spreadsheet type ".${ext}".`);
   }
 
+  const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await file.arrayBuffer());
   const worksheet = workbook.worksheets[0];
@@ -1170,7 +1188,7 @@ async function parseSpreadsheetFile(file: File): Promise<string[][]> {
   }
 
   const rows: string[][] = [];
-  worksheet.eachRow({ includeEmpty: false }, (row) => {
+  worksheet.eachRow({ includeEmpty: false }, (row: any) => {
     const cells = row.values;
     const normalized = Array.isArray(cells)
       ? cells.slice(1).map((cell) => (cell == null ? "" : String(cell).trim()))

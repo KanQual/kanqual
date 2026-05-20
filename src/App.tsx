@@ -1,34 +1,68 @@
-import { useEffect, useState } from "react";
+import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { StoreProvider, useStore } from "./context/StoreContext";
+import { getSmokeTestConfig, updateSmokeTestState } from "./lib/smokeTest";
 import { initTheme } from "./theme";
 import { Sidebar } from "./components/Sidebar";
 import { AuthView } from "./views/Auth_View";
-import { ProjectsView } from "./views/Projects_View";
-import { HomeView } from "./views/Project_Home_View";
-import { UsersView } from "./views/Project_Users_View";
-import { CasesView } from "./views/Project_Cases_View";
-import { DocumentsView } from "./views/Project_Documents_View";
-import { CodebookView } from "./views/Project_Codebook_View";
-import { AnnotationsView } from "./views/Project_Annotations_View";
-import { CodeTextView } from "./views/Analysis_Code_View";
-import { AIAssistedCodingView } from "./views/AIAssist_Code_View";
-import { AIAnalyzeView } from "./views/AIAssist_Analyze_View";
-import { AIAssistProcessDocumentsView } from "./views/AIAssist_ProcessDocuments_View";
-import { AIAssistProcessDocumentsReviewView } from "./views/AIAssist_ProcessDocuments_Review_View";
-import { MemosView } from "./views/Analysis_Memos_View";
-import { CodeReportsView } from "./views/Reports_Annotations_View";
-import { AIAssistAttributeCaseView, AIAssistAttributeDocumentView } from "./views/AIAssist_Attributes_View";
-import { AIAssistView } from "./views/AIAssist_Home_View";
-import { AIAssistChatView } from "./views/AIAssist_Chat_View";
-import { UserSettingsView } from "./views/User_Settings_View";
-import { AppSettingsView } from "./views/App_Settings_View";
-import { ProjectLogView } from "./views/Project_Log_View";
-import { ProjectSettingsView } from "./views/Project_Settings_View";
-import { ReportsUsersView } from "./views/Reports_Users_View";
-import { CodesView } from "./views/Reports_Codes_View";
 import { useAutomaticProjectBackups } from "./hooks/useAutomaticProjectBackups";
 import "./App.css";
+
+function lazyView<T extends ComponentType<unknown>>(loader: () => Promise<{ default: T }>) {
+  return lazy(loader);
+}
+
+const ProjectsViewLazy = lazyView(() => import("./views/Projects_View").then((m) => ({ default: m.ProjectsView })));
+const HomeViewLazy = lazyView(() => import("./views/Project_Home_View").then((m) => ({ default: m.HomeView })));
+const UsersViewLazy = lazyView(() => import("./views/Project_Users_View").then((m) => ({ default: m.UsersView })));
+const CasesViewLazy = lazyView(() => import("./views/Project_Cases_View").then((m) => ({ default: m.CasesView })));
+const DocumentsViewLazy = lazyView(() => import("./views/Project_Documents_View").then((m) => ({ default: m.DocumentsView })));
+const CodebookViewLazy = lazyView(() => import("./views/Project_Codebook_View").then((m) => ({ default: m.CodebookView })));
+const AnnotationsViewLazy = lazyView(() => import("./views/Project_Annotations_View").then((m) => ({ default: m.AnnotationsView })));
+const ProjectSettingsViewLazy = lazyView(() => import("./views/Project_Settings_View").then((m) => ({ default: m.ProjectSettingsView })));
+const CodeTextViewLazy = lazyView(() => import("./views/Analysis_Code_View").then((m) => ({ default: m.CodeTextView })));
+const MemosViewLazy = lazyView(() => import("./views/Analysis_Memos_View").then((m) => ({ default: m.MemosView })));
+const AIAssistViewLazy = lazyView(() => import("./views/AIAssist_Home_View").then((m) => ({ default: m.AIAssistView })));
+const AIAssistChatViewLazy = lazyView(() => import("./views/AIAssist_Chat_View").then((m) => ({ default: m.AIAssistChatView })));
+const AIAssistProcessDocumentsViewLazy = lazyView(() => import("./views/AIAssist_ProcessDocuments_View").then((m) => ({ default: m.AIAssistProcessDocumentsView })));
+const AIAssistProcessDocumentsReviewViewLazy = lazyView(() => import("./views/AIAssist_ProcessDocuments_Review_View").then((m) => ({ default: m.AIAssistProcessDocumentsReviewView })));
+const AIAssistedCodingViewLazy = lazyView(() => import("./views/AIAssist_Code_View").then((m) => ({ default: m.AIAssistedCodingView })));
+const AIAssistAttributeCaseViewLazy = lazyView(() => import("./views/AIAssist_Attributes_View").then((m) => ({ default: m.AIAssistAttributeCaseView })));
+const AIAssistAttributeDocumentViewLazy = lazyView(() => import("./views/AIAssist_Attributes_View").then((m) => ({ default: m.AIAssistAttributeDocumentView })));
+const AIAnalyzeViewLazy = lazyView(() => import("./views/AIAssist_Analyze_View").then((m) => ({ default: m.AIAnalyzeView })));
+const CodeReportsViewLazy = lazyView(() => import("./views/Reports_Annotations_View").then((m) => ({ default: m.CodeReportsView })));
+const CodesViewLazy = lazyView(() => import("./views/Reports_Codes_View").then((m) => ({ default: m.CodesView })));
+const ReportsUsersViewLazy = lazyView(() => import("./views/Reports_Users_View").then((m) => ({ default: m.ReportsUsersView })));
+const ProjectLogViewLazy = lazyView(() => import("./views/Project_Log_View").then((m) => ({ default: m.ProjectLogView })));
+const UserSettingsViewLazy = lazyView(() => import("./views/User_Settings_View").then((m) => ({ default: m.UserSettingsView })));
+const AppSettingsViewLazy = lazyView(() => import("./views/App_Settings_View").then((m) => ({ default: m.AppSettingsView })));
+
+const VIEW_COMPONENTS = {
+  projects: ProjectsViewLazy,
+  home: HomeViewLazy,
+  users: UsersViewLazy,
+  cases: CasesViewLazy,
+  documents: DocumentsViewLazy,
+  codebook: CodebookViewLazy,
+  annotations: AnnotationsViewLazy,
+  "project-settings": ProjectSettingsViewLazy,
+  "code-text": CodeTextViewLazy,
+  memos: MemosViewLazy,
+  "ai-assist": AIAssistViewLazy,
+  "ai-assist-chat": AIAssistChatViewLazy,
+  "ai-assist-process-documents": AIAssistProcessDocumentsViewLazy,
+  "ai-assist-process-documents-review": AIAssistProcessDocumentsReviewViewLazy,
+  "ai-assisted-coding": AIAssistedCodingViewLazy,
+  "ai-assist-case-attributes": AIAssistAttributeCaseViewLazy,
+  "ai-assist-document-attributes": AIAssistAttributeDocumentViewLazy,
+  "ai-analyze": AIAnalyzeViewLazy,
+  "code-reports": CodeReportsViewLazy,
+  codes: CodesViewLazy,
+  coders: ReportsUsersViewLazy,
+  "project-log": ProjectLogViewLazy,
+  "user-settings": UserSettingsViewLazy,
+  "app-settings": AppSettingsViewLazy,
+} as const;
 
 function formatDurationEstimate(seconds: number): string {
   if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min`;
@@ -387,8 +421,242 @@ function EmbeddingModelDownloadBanner() {
   );
 }
 
+function ViewLoadingFallback() {
+  return (
+    <div className="view-loading-state" role="status" aria-live="polite">
+      <div className="view-loading-card">
+        <strong>Loading view...</strong>
+        <span>Preparing the tools and data for this section.</span>
+      </div>
+    </div>
+  );
+}
+
+function SmokeTestAuthRunner() {
+  const { status, user, pb, useLocalServer, register } = useAuth();
+  const runStartedRef = useRef(false);
+  const unmountedRef = useRef(false);
+  const pbRef = useRef(pb);
+
+  useEffect(() => {
+    pbRef.current = pb;
+  }, [pb]);
+
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    async function runSmokeAuthFlow() {
+      const config = await getSmokeTestConfig();
+      if (!config.enabled || runStartedRef.current || status === "loading" || user) return;
+
+      const userName = config.userName?.trim();
+      const userEmail = config.userEmail?.trim().toLowerCase();
+      const userPassword = config.userPassword ?? "";
+      if (!userName || !userEmail || !userPassword) {
+        await updateSmokeTestState({
+          phase: "failed",
+          failure: "Smoke test is missing the temporary local account credentials.",
+          success: false,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+        runStartedRef.current = true;
+        return;
+      }
+
+      runStartedRef.current = true;
+
+      try {
+        await updateSmokeTestState({
+          phase: "starting-local-workspace",
+          message: "Launching the local PocketBase workspace.",
+          success: false,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+        await useLocalServer();
+        if (unmountedRef.current) {
+          await updateSmokeTestState({
+            phase: "runner-unmounted-after-local-start",
+            message: "Smoke auth runner unmounted after local startup completed.",
+            success: false,
+            userEmail,
+            appDataDir: config.appDataDir,
+            portableMode: config.portableMode,
+          });
+          return;
+        }
+
+        await updateSmokeTestState({
+          phase: "runner-after-local-start",
+          message: "Smoke auth runner resumed after useLocalServer completed.",
+          success: false,
+          userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+
+        let waitIterations = 0;
+        while (!pbRef.current && waitIterations < 40) {
+          waitIterations += 1;
+          await new Promise((resolve) => window.setTimeout(resolve, 100));
+        }
+        if (!pbRef.current) {
+          throw new Error("Local workspace client did not become ready after startup.");
+        }
+        await updateSmokeTestState({
+          phase: "runner-pb-ready-for-register",
+          message: `Local workspace client became available after ${waitIterations * 100} ms.`,
+          success: false,
+          userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+
+        await updateSmokeTestState({
+          phase: "registering-user",
+          message: `Creating the first local account for ${userEmail}.`,
+          success: false,
+          userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+        await updateSmokeTestState({
+          phase: "runner-before-register-call",
+          message: `Calling register() for ${userEmail}.`,
+          success: false,
+          userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+        await register(userName, userEmail, userPassword);
+        if (unmountedRef.current) {
+          return;
+        }
+        await updateSmokeTestState({
+          phase: "runner-register-complete",
+          message: `register() completed for ${userEmail}.`,
+          success: false,
+          userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+      } catch (error) {
+        if (unmountedRef.current) return;
+        await updateSmokeTestState({
+          phase: "failed",
+          failure: error instanceof Error ? error.message : "Smoke auth flow failed.",
+          success: false,
+          userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+      }
+    }
+
+    void runSmokeAuthFlow();
+  }, [pb, register, status, useLocalServer, user]);
+
+  return null;
+}
+
+function SmokeTestStoreRunner() {
+  const { projects, projectsLoading, activeProject, createProject, openProject } = useStore();
+  const runStartedRef = useRef(false);
+  const unmountedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    async function runSmokeProjectFlow() {
+      const config = await getSmokeTestConfig();
+      if (!config.enabled || runStartedRef.current || projectsLoading) return;
+
+      const projectName = config.projectName?.trim();
+      if (!projectName) {
+        runStartedRef.current = true;
+        await updateSmokeTestState({
+          phase: "failed",
+          failure: "Smoke test is missing the test project name.",
+          success: false,
+          userEmail: config.userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+        return;
+      }
+
+      if (activeProject?.name === projectName) {
+        runStartedRef.current = true;
+        await updateSmokeTestState({
+          phase: "completed",
+          message: `Opened smoke test project "${projectName}".`,
+          success: true,
+          projectId: activeProject.id,
+          userEmail: config.userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+        return;
+      }
+
+      try {
+        runStartedRef.current = true;
+        await updateSmokeTestState({
+          phase: "creating-project",
+          message: `Creating smoke test project "${projectName}".`,
+          success: false,
+          userEmail: config.userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+
+        const existingProject = projects.find((project) => project.name.trim().toLowerCase() === projectName.toLowerCase());
+        const project = existingProject ?? await createProject(projectName, "Packaged runtime smoke test project.");
+        if (unmountedRef.current) return;
+
+        await openProject(project, activeProject);
+        if (unmountedRef.current) return;
+
+        await updateSmokeTestState({
+          phase: "completed",
+          message: `Created and opened smoke test project "${project.name}".`,
+          success: true,
+          projectId: project.id,
+          userEmail: config.userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+      } catch (error) {
+        if (unmountedRef.current) return;
+        await updateSmokeTestState({
+          phase: "failed",
+          failure: error instanceof Error ? error.message : "Smoke project flow failed.",
+          success: false,
+          userEmail: config.userEmail,
+          appDataDir: config.appDataDir,
+          portableMode: config.portableMode,
+        });
+      }
+    }
+
+    void runSmokeProjectFlow();
+  }, [activeProject, createProject, openProject, projects, projectsLoading]);
+
+  return null;
+}
+
 function AppShell() {
   const { view } = useStore();
+  const ActiveView = VIEW_COMPONENTS[view as keyof typeof VIEW_COMPONENTS];
 
   useEffect(() => { initTheme(); }, []);
   useAutomaticProjectBackups();
@@ -400,30 +668,11 @@ function AppShell() {
         <ProjectEmbeddingBuildBanner />
         <DocumentProcessingBanner />
         <EmbeddingModelDownloadBanner />
-{view === "projects"      && <ProjectsView />}
-        {view === "home"          && <HomeView />}
-        {view === "users"         && <UsersView />}
-        {view === "cases"         && <CasesView />}
-        {view === "documents"     && <DocumentsView />}
-        {view === "codebook"      && <CodebookView />}
-        {view === "annotations"   && <AnnotationsView />}
-        {view === "project-settings" && <ProjectSettingsView />}
-        {view === "code-text"     && <CodeTextView />}
-        {view === "memos"         && <MemosView />}
-        {view === "ai-assist"     && <AIAssistView />}
-        {view === "ai-assist-chat" && <AIAssistChatView />}
-        {view === "ai-assist-process-documents" && <AIAssistProcessDocumentsView />}
-        {view === "ai-assist-process-documents-review" && <AIAssistProcessDocumentsReviewView />}
-        {view === "ai-assisted-coding" && <AIAssistedCodingView />}
-        {view === "ai-assist-case-attributes" && <AIAssistAttributeCaseView />}
-        {view === "ai-assist-document-attributes" && <AIAssistAttributeDocumentView />}
-        {view === "ai-analyze"    && <AIAnalyzeView />}
-        {view === "code-reports"  && <CodeReportsView />}
-        {view === "codes"         && <CodesView />}
-        {view === "coders"        && <ReportsUsersView />}
-        {view === "project-log"   && <ProjectLogView />}
-        {view === "user-settings" && <UserSettingsView />}
-        {view === "app-settings"  && <AppSettingsView />}
+        {ActiveView && (
+          <Suspense fallback={<ViewLoadingFallback />}>
+            <ActiveView />
+          </Suspense>
+        )}
       </main>
     </div>
   );
@@ -433,7 +682,12 @@ function AuthGate() {
   const { status, pb, user } = useAuth();
 
   if (status !== "authenticated" || !pb) {
-    return <AuthView />;
+    return (
+      <>
+        <SmokeTestAuthRunner />
+        <AuthView />
+      </>
+    );
   }
 
   if (user?.must_change_password) {
@@ -442,6 +696,7 @@ function AuthGate() {
 
   return (
     <StoreProvider pb={pb}>
+      <SmokeTestStoreRunner />
       <AppShell />
     </StoreProvider>
   );

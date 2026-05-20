@@ -4,7 +4,6 @@ import { useAuth } from "../context/AuthContext";
 import type { Code } from "../types";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import { jsPDF } from "jspdf";
 import {
   Document as DocxDocument,
   HeadingLevel,
@@ -14,6 +13,15 @@ import {
 } from "docx";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { HelpIcon } from "../components/AppIcons";
+
+let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
+
+async function loadJsPdf() {
+  if (!jsPdfPromise) {
+    jsPdfPromise = import("jspdf");
+  }
+  return jsPdfPromise;
+}
 
 // ─── Rich text editor ─────────────────────────────────────────────────────────
 
@@ -1037,6 +1045,7 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
         docName:  a.expand?.document?.name ?? "—",
       }));
 
+      const { jsPDF } = await loadJsPdf();
       const pdf = new jsPDF({ unit: "pt", format: "letter" });
       const margin = 54;
       const pageH = pdf.internal.pageSize.getHeight();

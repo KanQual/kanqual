@@ -17,9 +17,6 @@
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
     "fs:allow-app-read-recursive",
-    "fs:allow-app-write-recursive",
-    "shell:allow-execute",
-    "shell:allow-kill",
-    "shell:allow-stdin-write"
+    "fs:allow-app-write-recursive"
   ]
 }

@@ -18,6 +18,7 @@ import {
 } from "../lib/pb";
 import { clearRecentProjects, readAppSettings } from "../lib/appSettings";
 import { clearLocalAccounts, clearRemoteSessions, LOCAL_PB_URL } from "../lib/authHistory";
+import { getSmokeTestConfig, updateSmokeTestState } from "../lib/smokeTest";
 
 type AuthStatus = "loading" | "ready" | "authenticated";
 const LAST_SERVER_URL_KEY = "kq_last_server_url";
@@ -44,6 +45,23 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function reportSmokeStep(phase: string, message: string): Promise<void> {
+  try {
+    const config = await getSmokeTestConfig();
+    if (!config.enabled) return;
+    await updateSmokeTestState({
+      phase,
+      message,
+      success: false,
+      userEmail: config.userEmail,
+      appDataDir: config.appDataDir,
+      portableMode: config.portableMode,
+    });
+  } catch {
+    // Smoke breadcrumbs are best-effort only.
+  }
+}
+
 function generateUserIdentifier(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -58,6 +76,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [serverUrl, setServerUrlState] = useState(LOCAL_PB_URL);
   const [error, setError] = useState<string | null>(null);
   const authUnsubscribeRef = useRef<(() => void) | null>(null);
+  const pbRef = useRef<PocketBase | null>(null);
+
+  useEffect(() => {
+    pbRef.current = pb;
+  }, [pb]);
 
   const bindAuthStore = useCallback((instance: PocketBase) => {
     authUnsubscribeRef.current?.();
@@ -94,13 +117,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await stopLocalPocketBase().catch(() => undefined);
       }
 
+      await reportSmokeStep(
+        "frontend-activate-start",
+        normalizedUrl === LOCAL_PB_URL
+          ? "Activating local workspace in the frontend."
+          : `Activating remote workspace at ${normalizedUrl}.`,
+      );
+
       const resolvedUrl = normalizedUrl === LOCAL_PB_URL
         ? await startLocalPocketBase()
         : normalizedUrl;
+      await reportSmokeStep(
+        "frontend-start-local-returned",
+        `startLocalPocketBase returned ${resolvedUrl}.`,
+      );
+
       const instance = await waitForPb(resolvedUrl, options?.waitTimeoutMs);
+      await reportSmokeStep(
+        "frontend-wait-for-pb-complete",
+        `PocketBase health probe succeeded for ${resolvedUrl}.`,
+      );
 
       if (resolvedUrl === LOCAL_PB_URL && options?.ensureLocalSetup) {
+        await reportSmokeStep(
+          "frontend-ensure-setup-start",
+          "Starting local backend setup from the frontend.",
+        );
         await ensureSetup(instance);
+        await reportSmokeStep(
+          "frontend-ensure-setup-finished",
+          "Local backend setup finished in the frontend.",
+        );
       }
 
       const settings = readAppSettings();
@@ -120,12 +167,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         instance.authStore.clear();
       }
 
+      await reportSmokeStep(
+        "frontend-activate-finalizing",
+        `Finalizing auth state with status ${nextStatus}.`,
+      );
       setPb(instance);
       setUser(nextUser);
       setStatus(nextStatus);
       setError(null);
       setServerUrlState(resolvedUrl);
       bindAuthStore(instance);
+      await reportSmokeStep(
+        "frontend-activate-complete",
+        `Frontend activation completed with status ${nextStatus}.`,
+      );
 
       try {
         localStorage.setItem(LAST_SERVER_URL_KEY, resolvedUrl);
@@ -234,10 +289,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      if (!pb) throw new Error("Choose a local or remote workspace before signing in.");
+      const activePb = pbRef.current;
+      if (!activePb) throw new Error("Choose a local or remote workspace before signing in.");
       setError(null);
       try {
-        const result = await pb.collection("users").authWithPassword(email, password);
+        const result = await activePb.collection("users").authWithPassword(email, password);
         setUser(result.record);
         setStatus("authenticated");
         try {
@@ -251,12 +307,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw e;
       }
     },
-    [pb, serverUrl]
+    [serverUrl]
   );
 
   const register = useCallback(
     async (name: string, email: string, password: string) => {
-      if (!pb) throw new Error("Choose local device work before creating a local account.");
+      const activePb = pbRef.current;
+      if (!activePb) throw new Error("Choose local device work before creating a local account.");
       setError(null);
       try {
         if (serverUrl === LOCAL_PB_URL) {
@@ -271,7 +328,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           // Remote registrations should be performed via the PocketBase client
           // so that remote clients can create users against the host server.
-          await pb.collection("users").create({
+          await activePb.collection("users").create({
             name,
             email,
             password,
@@ -282,8 +339,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             user_identifier: generateUserIdentifier(),
           });
         }
-        await pb.collection("users").authWithPassword(email, password);
-        setUser(pb.authStore.record);
+        await activePb.collection("users").authWithPassword(email, password);
+        setUser(activePb.authStore.record);
         setStatus("authenticated");
         try {
           localStorage.setItem(LAST_SERVER_URL_KEY, serverUrl);
@@ -296,7 +353,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw e;
       }
     },
-    [pb, serverUrl]
+    [serverUrl]
   );
 
   const updateProfile = useCallback(
