@@ -2,7 +2,7 @@
 
 Kanqual is a free, open-source, local-first qualitative research application for coding, memoing, reporting, and AI-assisted analysis by Mehmet Cansoy, Associate Professor of Sociology at Fairfield University.
 
-It is built as a desktop app with Tauri, React, TypeScript, Rust, and an embedded PocketBase backend. It is built on Windows 11, but also confirmed to work on Windows 10, MacOS 13, and Ubuntu. 
+It is built as a desktop app with Tauri, React, TypeScript, Rust, and an embedded PocketBase backend. It is built on Windows 11, but also confirmed to work on Windows 10, MacOS 26.5, and Ubuntu 26.04. 
 
 ## What Kanqual Does
 
@@ -30,7 +30,7 @@ See:
 
 ## Status
 
-Current app version: `0.9.0`
+Current app version: `0.9.2`
 
 Kanqual is under active development. Interfaces, AI workflows, packaging details, and setup expectations may continue to evolve as the releases are refined for v1.0.
 
@@ -55,21 +55,6 @@ Kanqual currently supports:
 - Local embedding model download and project embedding builds
 
 AI Assist depends on local model/runtime setup in App Settings. In networked collaboration mode, remote clients use the host machine's AI runtime and project embeddings rather than their own local machine state.
-
-## Windows Distribution
-
-Kanqual currently ships Windows builds in two main forms:
-
-- Installer build
-  - Standard Windows installation
-  - Stores app data in the user profile by default
-
-- Portable build
-  - Runs without installation
-  - Can keep app data next to the executable when `portable-mode.json` is present
-  - Intended for removable drives, shared lab machines, and cases where users want a self-contained app folder
-
-Portable mode includes a `data` folder and keeps Kanqual-managed app data inside the portable directory. The portable build is intended to reduce machine-local residue compared with a normal installed build.
 
 ## Tech Stack
 
