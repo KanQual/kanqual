@@ -33,7 +33,7 @@ See:
 
 ## Status
 
-Current app version: `0.9.2`
+Current app version: `0.9.3`
 
 Kanqual is under active development. Interfaces, AI workflows, packaging details, and setup expectations may continue to evolve as the releases are refined for v1.0.
 
