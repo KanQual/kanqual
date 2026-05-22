@@ -1,6 +1,8 @@
 import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { StoreProvider, useStore } from "./context/StoreContext";
+import { readAppSettings } from "./lib/appSettings";
+import { getAppRuntimeInfo } from "./lib/dataRoot";
 import { getSmokeTestConfig, updateSmokeTestState } from "./lib/smokeTest";
 import { initTheme } from "./theme";
 import { Sidebar } from "./components/Sidebar";
@@ -87,6 +89,76 @@ function formatGigabytes(value: number): string {
 
 function formatPercent(value: number | null): string {
   return value == null ? "--" : `${Math.max(0, Math.min(100, value)).toFixed(0)}%`;
+}
+
+type ReleaseCheckResult = {
+  latestVersion: string;
+  releaseUrl: string;
+};
+
+const UPDATE_RELEASES_URL = "https://github.com/KanQual/kanqual/releases";
+const UPDATE_DISMISSED_VERSION_KEY = "kq_update_dismissed_version";
+
+function normalizeSemver(version: string): number[] {
+  const clean = version.trim().replace(/^v/i, "").split("-")[0];
+  const parts = clean.split(".").map((part) => Number.parseInt(part, 10));
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+}
+
+function compareSemver(a: string, b: string): number {
+  const left = normalizeSemver(a);
+  const right = normalizeSemver(b);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const diff = (left[index] || 0) - (right[index] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+async function fetchLatestRelease(): Promise<ReleaseCheckResult | null> {
+  const response = await fetch("https://api.github.com/repos/KanQual/kanqual/releases/latest", {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!response.ok) throw new Error(`GitHub release check failed with status ${response.status}.`);
+  const release = await response.json() as Record<string, unknown>;
+  if (typeof release.tag_name !== "string") return null;
+  return {
+    latestVersion: release.tag_name,
+    releaseUrl: typeof release.html_url === "string" ? release.html_url : UPDATE_RELEASES_URL,
+  };
+}
+
+function UpdateAvailableBanner({
+  version,
+  releaseUrl,
+  onDismiss,
+}: {
+  version: string;
+  releaseUrl: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="embedding-build-banner embedding-build-banner--completed">
+      <div className="embedding-build-banner-copy">
+        <strong>Update available</strong>
+        <span>Kanqual {version} is available.</span>
+        <span>Download the latest release from GitHub when you’re ready to update.</span>
+      </div>
+      <div className="embedding-build-banner-actions">
+        <a
+          className="btn btn--primary"
+          href={releaseUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          View release
+        </a>
+        <button type="button" className="btn" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function ForcePasswordChangeView() {
@@ -667,14 +739,54 @@ function SmokeTestStoreRunner() {
 function AppShell() {
   const { view } = useStore();
   const ActiveView = VIEW_COMPONENTS[view as keyof typeof VIEW_COMPONENTS];
+  const [availableUpdate, setAvailableUpdate] = useState<ReleaseCheckResult | null>(null);
 
   useEffect(() => { initTheme(); }, []);
   useAutomaticProjectBackups();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkForAppUpdates() {
+      const settings = readAppSettings();
+      if (!settings.updates.autoCheck) return;
+      try {
+        const runtimeInfo = await getAppRuntimeInfo();
+        const update = await fetchLatestRelease();
+        if (!update) return;
+        if (compareSemver(update.latestVersion, runtimeInfo.appVersion) <= 0) return;
+        const dismissedVersion = localStorage.getItem(UPDATE_DISMISSED_VERSION_KEY);
+        if (dismissedVersion === update.latestVersion) return;
+        if (!cancelled) setAvailableUpdate(update);
+      } catch (error) {
+        console.warn("Update check failed:", describeUnknownError(error));
+      }
+    }
+
+    void checkForAppUpdates();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function dismissAvailableUpdate() {
+    if (availableUpdate) {
+      localStorage.setItem(UPDATE_DISMISSED_VERSION_KEY, availableUpdate.latestVersion);
+    }
+    setAvailableUpdate(null);
+  }
 
   return (
     <div className="app-shell">
       <Sidebar />
       <main className="app-main">
+        {availableUpdate && (
+          <UpdateAvailableBanner
+            version={availableUpdate.latestVersion}
+            releaseUrl={availableUpdate.releaseUrl}
+            onDismiss={dismissAvailableUpdate}
+          />
+        )}
         <ProjectEmbeddingBuildBanner />
         <DocumentProcessingBanner />
         <EmbeddingModelDownloadBanner />

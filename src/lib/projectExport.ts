@@ -1219,6 +1219,7 @@ export async function importRefiQdaIntoProject(
     const record = await pb.collection("documents").create({
       project: projectId,
       name: doc.name,
+      type: "Text",
       file_path: "",
       content: doc.content,
       notes: doc.notes,
@@ -1300,12 +1301,13 @@ export async function importRefiQdaIntoProject(
       if (!codeId) continue;
       const startOffset = Math.max(0, Math.min(selection.startOffset, doc.content.length));
       const endOffset = Math.max(startOffset, Math.min(selection.endOffset, doc.content.length));
+      const quote = doc.content.slice(startOffset, endOffset).trim() || selection.note?.trim() || "[Imported selection]";
       await pb.collection("annotations").create({
         document: documentId,
         code: codeId,
         start_offset: startOffset,
         end_offset: endOffset,
-        quote: doc.content.slice(startOffset, endOffset),
+        quote,
         note: selection.note,
         created_by: userId || undefined,
         deleted_at: "",

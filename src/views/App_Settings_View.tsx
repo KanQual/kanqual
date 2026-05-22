@@ -20,6 +20,7 @@ import {
 } from "../theme";
 import { invoke } from "@tauri-apps/api/core";
 import { readDir, stat } from "@tauri-apps/plugin-fs";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
 import {
@@ -143,6 +144,7 @@ const aboutRustLicenses = parseMarkdownLicenseTable(
 );
 
 const RELEASE_DATE = "May 9, 2026";
+const GITHUB_RELEASES_URL = "https://github.com/KanQual/kanqual/releases";
 
 // ─── Color row ────────────────────────────────────────────────────────────────
 
@@ -938,6 +940,12 @@ export function AppSettingsView() {
       id: "diagnostics",
       title: "Diagnostics",
       description: "Check app health, storage, and environment details.",
+      visible: canOpenAppSettings,
+    },
+    {
+      id: "updates",
+      title: "Updates",
+      description: "Choose the release channel and whether Kanqual warns you when a newer version is available.",
       visible: canOpenAppSettings,
     },
     {
@@ -1767,32 +1775,10 @@ export function AppSettingsView() {
       case "updates":
         return (
           <>
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Update channel</div>
-                <div className="settings-row-desc">Stable is safest for daily work. Beta is useful for preview builds once they exist.</div>
-              </div>
-              <div className="segmented-control">
-                {(["stable", "beta"] as const).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={settings.updates.channel === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                    onClick={() => persist({
-                      ...settings,
-                      updates: { ...settings.updates, channel: option },
-                    }, "Update preferences saved.")}
-                  >
-                    {option === "stable" ? "Stable" : "Beta"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <label className="settings-toggle-row">
               <span>
                 <strong>Check for updates automatically</strong>
-                <small>Saved now for future updater integration. No automatic update checks are wired yet.</small>
+                <small>Checks GitHub releases on startup and shows a warning when a newer version is available.</small>
               </span>
               <input
                 type="checkbox"
@@ -1804,20 +1790,20 @@ export function AppSettingsView() {
               />
             </label>
 
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Install updates when closing the app</strong>
-                <small>Saved now for future updater integration. This setting is not active yet.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.updates.installOnQuit}
-                onChange={(e) => persist({
-                  ...settings,
-                  updates: { ...settings.updates, installOnQuit: e.target.checked },
-                }, "Update preferences saved.")}
-              />
-            </label>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-label">Latest releases</div>
+                <div className="settings-row-desc">Open the KanQual GitHub releases page in your default browser.</div>
+              </div>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => void openUrl(GITHUB_RELEASES_URL)}
+              >
+                Open Releases Page
+              </button>
+            </div>
+
           </>
         );
       case "llm":
@@ -2821,32 +2807,10 @@ export function AppSettingsView() {
           </div>
         </div>
 
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <div className="settings-row-label">Update channel</div>
-            <div className="settings-row-desc">Stable is safest for daily work. Beta is useful for preview builds once they exist.</div>
-          </div>
-          <div className="segmented-control">
-            {(["stable", "beta"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={settings.updates.channel === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                onClick={() => persist({
-                  ...settings,
-                  updates: { ...settings.updates, channel: option },
-                }, "Update preferences saved.")}
-              >
-                {option === "stable" ? "Stable" : "Beta"}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <label className="settings-toggle-row">
           <span>
             <strong>Check for updates automatically</strong>
-            <small>Saved now for future updater integration. No automatic update checks are wired yet.</small>
+            <small>Checks GitHub releases on startup and shows a warning when a newer version is available.</small>
           </span>
           <input
             type="checkbox"
@@ -2858,20 +2822,20 @@ export function AppSettingsView() {
           />
         </label>
 
-        <label className="settings-toggle-row">
-          <span>
-            <strong>Install updates when closing the app</strong>
-            <small>Saved now for future updater integration. This setting is not active yet.</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.updates.installOnQuit}
-            onChange={(e) => persist({
-              ...settings,
-              updates: { ...settings.updates, installOnQuit: e.target.checked },
-            }, "Update preferences saved.")}
-          />
-        </label>
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-label">Latest releases</div>
+            <div className="settings-row-desc">Open the KanQual GitHub releases page in your default browser.</div>
+          </div>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => void openUrl(GITHUB_RELEASES_URL)}
+          >
+            Open Releases Page
+          </button>
+        </div>
+
       </section>
         </>
       )}

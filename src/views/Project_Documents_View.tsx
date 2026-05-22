@@ -10,6 +10,8 @@ import {
   getProcessedTranscriptQuestionOutline,
   parseProcessedTranscriptSegments,
 } from "../components/ProcessedTranscriptView";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -777,35 +779,88 @@ function stripRtf(rtf: string): string {
 }
 
 async function findZipEntry(bytes: Uint8Array, target: string): Promise<string | null> {
-  let off = 0;
-  while (off < bytes.length - 30) {
-    if (bytes[off] !== 0x50 || bytes[off+1] !== 0x4b ||
-        bytes[off+2] !== 0x03 || bytes[off+3] !== 0x04) break;
-    const method      = bytes[off+8]  | (bytes[off+9]  << 8);
-    const cSize       = bytes[off+18] | (bytes[off+19] << 8) | (bytes[off+20] << 16) | (bytes[off+21] << 24);
-    const fnLen       = bytes[off+26] | (bytes[off+27] << 8);
-    const extraLen    = bytes[off+28] | (bytes[off+29] << 8);
-    const fname       = new TextDecoder().decode(bytes.slice(off+30, off+30+fnLen));
-    const dataOff     = off + 30 + fnLen + extraLen;
-    const compressed  = bytes.slice(dataOff, dataOff + cSize);
-    if (fname === target) {
-      if (method === 0) return new TextDecoder().decode(compressed);
-      if (method === 8) {
-        const ds = new DecompressionStream("deflate-raw");
-        const w  = ds.writable.getWriter();
-        w.write(compressed); w.close();
-        const r = ds.readable.getReader();
-        const chunks: Uint8Array[] = [];
-        for (;;) { const { done, value } = await r.read(); if (done) break; chunks.push(value); }
-        const out = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
-        let pos = 0; for (const c of chunks) { out.set(c, pos); pos += c.length; }
-        return new TextDecoder().decode(out);
-      }
-      return null;
-    }
-    off = dataOff + cSize;
+  const decoder = new TextDecoder();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocdSignature = 0x06054b50;
+  const centralDirectorySignature = 0x02014b50;
+  const localFileHeaderSignature = 0x04034b50;
+  const maxCommentLength = 0xffff;
+  const searchStart = Math.max(0, bytes.length - (22 + maxCommentLength));
+
+  async function inflateCompressedData(compressed: Uint8Array, method: number): Promise<string | null> {
+    if (method === 0) return decoder.decode(compressed);
+    if (method !== 8) return null;
+    const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    const out = await new Response(stream).arrayBuffer();
+    return decoder.decode(out);
   }
+
+  for (let off = bytes.length - 22; off >= searchStart; off--) {
+    if (view.getUint32(off, true) !== eocdSignature) continue;
+    const centralDirectorySize = view.getUint32(off + 12, true);
+    const centralDirectoryOffset = view.getUint32(off + 16, true);
+    const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
+    if (centralDirectoryEnd > bytes.length) break;
+
+    let cursor = centralDirectoryOffset;
+    while (cursor + 46 <= centralDirectoryEnd) {
+      if (view.getUint32(cursor, true) !== centralDirectorySignature) break;
+      const method = view.getUint16(cursor + 10, true);
+      const cSize = view.getUint32(cursor + 20, true);
+      const fnLen = view.getUint16(cursor + 28, true);
+      const extraLen = view.getUint16(cursor + 30, true);
+      const commentLen = view.getUint16(cursor + 32, true);
+      const localHeaderOffset = view.getUint32(cursor + 42, true);
+      const nameStart = cursor + 46;
+      const nameEnd = nameStart + fnLen;
+      const fname = decoder.decode(bytes.slice(nameStart, nameEnd));
+      if (fname === target) {
+        if (localHeaderOffset + 30 > bytes.length) return null;
+        if (view.getUint32(localHeaderOffset, true) !== localFileHeaderSignature) return null;
+        const localFnLen = view.getUint16(localHeaderOffset + 26, true);
+        const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+        const dataOff = localHeaderOffset + 30 + localFnLen + localExtraLen;
+        const compressed = bytes.slice(dataOff, dataOff + cSize);
+        return inflateCompressedData(compressed, method);
+      }
+      cursor = nameEnd + extraLen + commentLen;
+    }
+  }
+
   return null;
+}
+
+function extractWordXmlText(xml: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length > 0) {
+    return xml
+      .replace(/<w:tab[^>]*\/>/g, "\t")
+      .replace(/<w:br[^>]*\/>/g, "\n")
+      .replace(/<w:cr[^>]*\/>/g, "\n")
+      .replace(/<\/w:p>/g, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/ {2,}/g, " ")
+      .trim();
+  }
+
+  const wordNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  const paragraphs = Array.from(doc.getElementsByTagNameNS(wordNs, "p"));
+  const lines = paragraphs.map((paragraph) => {
+    let text = "";
+    for (const node of Array.from(paragraph.getElementsByTagName("*"))) {
+      if (node.namespaceURI !== wordNs) continue;
+      if (node.localName === "t") text += node.textContent ?? "";
+      else if (node.localName === "tab") text += "\t";
+      else if (node.localName === "br" || node.localName === "cr") text += "\n";
+    }
+    return text.replace(/ {2,}/g, " ").trimEnd();
+  });
+  return lines.filter((line, index) => line || index < lines.length - 1).join("\n").trim();
 }
 
 async function extractDocxText(file: File): Promise<string> {
@@ -813,13 +868,7 @@ async function extractDocxText(file: File): Promise<string> {
   const bytes = new Uint8Array(buf);
   const xml   = await findZipEntry(bytes, "word/document.xml");
   if (!xml) return "";
-  return xml
-    .replace(/<w:br[^/]*/g, "\n")
-    .replace(/<\/w:p>/g, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-    .replace(/ {2,}/g, " ")
-    .trim();
+  return extractWordXmlText(xml);
 }
 
 async function extractPdfText(file: File): Promise<string> {
@@ -1310,6 +1359,7 @@ function NewDocumentModal({
   const [pasteHasContent, setPasteHasContent] = useState(initialPasted.length > 0);
   const pastedRef = useRef<HTMLDivElement | null>(null);
   const [dragging,  setDragging]  = useState(false);
+  const dragDepthRef = useRef(0);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1333,6 +1383,8 @@ function NewDocumentModal({
     setExtracted("");
     setExtractErr(null);
     setExtracting(false);
+    dragDepthRef.current = 0;
+    setDragging(false);
   }
 
   function setModeAndReset(nextMode: InputMode) {
@@ -1427,24 +1479,127 @@ function NewDocumentModal({
     e.target.value = "";
   }
 
+  function getDraggedFiles(dataTransfer: DataTransfer): File[] {
+    const itemFiles = Array.from(dataTransfer.items ?? [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => !!file);
+    return itemFiles.length > 0 ? itemFiles : Array.from(dataTransfer.files ?? []);
+  }
+
+  function isFileDrag(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    return Array.from(dataTransfer.types ?? []).includes("Files");
+  }
+
+  function handleDragEnter(e: React.DragEvent) {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setDragging(true);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    setDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragging(false);
+  }
+
+  function resetDragState() {
+    dragDepthRef.current = 0;
+    setDragging(false);
+  }
+
+  function fileNameFromPath(path: string): string {
+    const normalized = path.replace(/\\/g, "/");
+    const name = normalized.split("/").pop();
+    return name && name.trim() ? name : "Dropped file";
+  }
+
+  async function readDroppedFile(path: string): Promise<File> {
+    const bytes = await readTauriFile(path);
+    return new File([bytes], fileNameFromPath(path));
+  }
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    async function attachDragDropListener() {
+      try {
+        unlisten = await getCurrentWindow().onDragDropEvent(async (event) => {
+          if (disposed) return;
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setDragging(true);
+            return;
+          }
+          if (event.payload.type === "leave") {
+            resetDragState();
+            return;
+          }
+          resetDragState();
+          try {
+            if (mode === "batch") {
+              const files = await Promise.all(event.payload.paths.map((path) => readDroppedFile(path)));
+              if (files.length > 0) await processBatchFiles(files);
+              return;
+            }
+            const firstPath = event.payload.paths[0];
+            if (!firstPath) return;
+            const droppedFile = await readDroppedFile(firstPath);
+            if (mode === "csv") {
+              await processSpreadsheetFile(droppedFile);
+            } else {
+              await processFile(droppedFile);
+            }
+          } catch (err) {
+            setExtractErr(err instanceof Error ? err.message : "Could not read dropped file.");
+          }
+        });
+      } catch {
+        // Browser builds rely on the DOM drag/drop handlers above.
+      }
+    }
+
+    void attachDragDropListener();
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, [mode, name, importSettings.autoNameFromFile, importSettings.trimImportedText]);
+
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
-    setDragging(false);
-    const f = e.dataTransfer.files?.[0];
+    e.stopPropagation();
+    resetDragState();
+    const f = getDraggedFiles(e.dataTransfer)[0];
     if (f) void processFile(f);
   }
 
   function onBatchDrop(e: React.DragEvent) {
     e.preventDefault();
-    setDragging(false);
-    const nextFiles = Array.from(e.dataTransfer.files ?? []);
+    e.stopPropagation();
+    resetDragState();
+    const nextFiles = getDraggedFiles(e.dataTransfer);
     if (nextFiles.length > 0) void processBatchFiles(nextFiles);
   }
 
   function onCsvDrop(e: React.DragEvent) {
     e.preventDefault();
-    setDragging(false);
-    const nextFile = e.dataTransfer.files?.[0];
+    e.stopPropagation();
+    resetDragState();
+    const nextFile = getDraggedFiles(e.dataTransfer)[0];
     if (nextFile) void processSpreadsheetFile(nextFile);
   }
 
@@ -1704,15 +1859,16 @@ function NewDocumentModal({
               <div
                 className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${file ? " doc-dropzone--filled" : ""}`}
                 onClick={() => !file && fileInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
                 onDrop={onDrop}
               >
                 {!file ? (
                   <>
                     <span className="doc-dropzone-icon">↑</span>
                     <span className="doc-dropzone-primary">Click to browse or drag &amp; drop</span>
-                    <span className="doc-dropzone-hint">txt · rtf · doc · docx · pdf · csv</span>
+                    <span className="doc-dropzone-hint">txt · rtf · docx · pdf · csv</span>
                   </>
                 ) : extracting ? (
                   <span className="doc-dropzone-primary">Reading file…</span>
@@ -1756,8 +1912,9 @@ function NewDocumentModal({
               <div
                 className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${batchFiles.length > 0 ? " doc-dropzone--filled" : ""}`}
                 onClick={() => batchInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
                 onDrop={onBatchDrop}
               >
                 {batchFiles.length === 0 ? (
@@ -1800,8 +1957,9 @@ function NewDocumentModal({
               <div
                 className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${csvFile ? " doc-dropzone--filled" : ""}`}
                 onClick={() => csvInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
                 onDrop={onCsvDrop}
               >
                 {!csvFile ? (

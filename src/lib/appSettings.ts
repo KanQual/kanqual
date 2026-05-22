@@ -20,9 +20,7 @@ export type PrivacySecuritySettings = {
 };
 
 export type UpdateSettings = {
-  channel: "stable" | "beta";
   autoCheck: boolean;
-  installOnQuit: boolean;
 };
 
 export type LlmSettings = {
@@ -75,9 +73,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     forgetLoginIdentitiesOnLogout: false,
   },
   updates: {
-    channel: "stable",
     autoCheck: true,
-    installOnQuit: false,
   },
   llm: {
     chunkSize: 1200,
