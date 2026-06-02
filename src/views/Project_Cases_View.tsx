@@ -409,57 +409,49 @@ function CaseDetail({
     <div className="view case-detail-view">
       <div className="workspace-back-row workspace-back-row--split">
         <button className="btn" onClick={onBack}>Back to Cases</button>
-        <div className="user-detail-menu-wrap" ref={menuRef}>
+        <div className="workspace-back-actions">
           <button
             type="button"
-            className="home-menu-btn user-detail-menu-btn"
-            aria-label="Case actions"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
+            className="btn btn--primary"
+            onClick={() => setShowEditModal(true)}
+            disabled={!canEdit}
+            title={!canEdit ? "You do not have permission to edit cases" : undefined}
           >
-            <span />
-            <span />
-            <span />
+            Edit Case
           </button>
-          {menuOpen && (
-            <div className="context-menu user-detail-menu" role="menu">
-              {canEdit ? (
-                <button
-                  type="button"
-                  className="context-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setShowEditModal(true);
-                  }}
-                >
-                  Edit Case
-                </button>
-              ) : (
-                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit cases">
-                  Edit Case
-                </div>
-              )}
-              {canDelete ? (
-                <button
-                  type="button"
-                  className="context-menu-item context-menu-item--danger"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onRequestDelete(row);
-                  }}
-                >
-                  Delete Case
-                </button>
-              ) : (
-                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete cases">
-                  Delete Case
-                </div>
-              )}
-            </div>
-          )}
+          <div className="user-detail-menu-wrap" ref={menuRef}>
+            <button
+              type="button"
+              className="btn"
+              aria-label="Case actions"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              Actions
+            </button>
+            {menuOpen && (
+              <div className="context-menu user-detail-menu" role="menu">
+                {canDelete ? (
+                  <button
+                    type="button"
+                    className="context-menu-item context-menu-item--danger"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onRequestDelete(row);
+                    }}
+                  >
+                    Delete Case
+                  </button>
+                ) : (
+                  <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete cases">
+                    Delete Case
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -893,6 +885,7 @@ export function CasesView() {
   const [assocDocCase,   setAssocDocCase]   = useState<CaseRow | null>(null);
   const [memoForCase,    setMemoForCase]    = useState<CaseRow | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
   const [showAttributesTable, setShowAttributesTable] = useState(false);
   const [attributeDefs, setAttributeDefs] = useState<AttributeDefinition[]>([]);
   const [attributeValues, setAttributeValues] = useState<Record<string, AttributeValue>>({});
@@ -905,6 +898,7 @@ export function CasesView() {
   const [attributeContextMenu, setAttributeContextMenu] = useState<{ x: number; y: number; attr: AttributeDefinition } | null>(null);
   const attributeContextMenuRef = useRef<HTMLDivElement>(null);
   const attributeContextMenuStyle = useViewportContextMenuStyle(attributeContextMenu, attributeContextMenuRef);
+  const headerActionsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!activeProject || !canManageCaseAttributes) return;
@@ -922,6 +916,27 @@ export function CasesView() {
       // Best-effort handoff only.
     }
   }, [activeProject, canManageCaseAttributes]);
+
+  useEffect(() => {
+    if (!headerActionsOpen) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!headerActionsRef.current?.contains(event.target as Node)) {
+        setHeaderActionsOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setHeaderActionsOpen(false);
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [headerActionsOpen]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -1384,13 +1399,6 @@ export function CasesView() {
         </div>
         <div className="view-header-actions">
           <button
-            type="button"
-            className="btn"
-            onClick={() => setShowAttributesTable((show) => !show)}
-          >
-            {showAttributesTable ? "Show Cases" : "Show Attributes"}
-          </button>
-          <button
             className="btn btn--primary"
             onClick={
               showAttributesTable
@@ -1416,6 +1424,33 @@ export function CasesView() {
           >
             {showAttributesTable ? "+ Add Attribute" : "+ New Case"}
           </button>
+          <div className="user-detail-menu-wrap" ref={headerActionsRef}>
+            <button
+              type="button"
+              className="btn"
+              aria-label="Case workspace actions"
+              aria-haspopup="menu"
+              aria-expanded={headerActionsOpen}
+              onClick={() => setHeaderActionsOpen((open) => !open)}
+            >
+              Actions
+            </button>
+            {headerActionsOpen && (
+              <div className="context-menu user-detail-menu" role="menu">
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setHeaderActionsOpen(false);
+                    setShowAttributesTable((show) => !show);
+                  }}
+                >
+                  {showAttributesTable ? "Show Cases" : "Show Attributes"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

@@ -1061,6 +1061,12 @@ body {
   justify-content: space-between;
 }
 
+.workspace-back-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .workspace-back-row--annotate {
   padding: 28px 32px 0;
   margin-bottom: 12px;
@@ -1820,22 +1826,15 @@ body {
 }
 
 .project-card-menu-button {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
+  min-height: 30px;
   background: transparent;
   color: var(--color-text-muted);
-  padding: 0;
-  gap: 3px;
-  border: 0;
+  padding: 0 10px;
+  border: var(--border-width) solid var(--color-border);
 }
 
 .project-card-menu-button:hover {
   color: var(--color-primary);
-}
-
-.project-card-menu-button span {
-  width: 14px;
 }
 
 .project-card-menu {

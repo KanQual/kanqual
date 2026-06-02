@@ -373,49 +373,49 @@ function CodeDetail({
       <div className="workspace-back-row workspace-back-row--split">
         <button className="btn" onClick={onBack}>Back to Codebook</button>
         {(canEditCode || canDeleteCode) && (
-          <div className="user-detail-menu-wrap" ref={menuRef}>
+          <div className="workspace-back-actions">
             <button
               type="button"
-              className="home-menu-btn user-detail-menu-btn"
-              aria-label="Code actions"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
+              className="btn btn--primary"
+              onClick={() => setShowEditModal(true)}
+              disabled={!canEditCode}
+              title={!canEditCode ? "You do not have permission to edit codes" : undefined}
             >
-              <span />
-              <span />
-              <span />
+              Edit Code
             </button>
-            {menuOpen && (
-              <div className="context-menu user-detail-menu" role="menu">
-                {canEditCode && (
-                  <button
-                    type="button"
-                    className="context-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setShowEditModal(true);
-                    }}
-                  >
-                    Edit Code
-                  </button>
-                )}
-                {canDeleteCode && (
-                  <button
-                    type="button"
-                    className="context-menu-item context-menu-item--danger"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onRequestDelete(row);
-                    }}
-                  >
-                    Delete Code
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="user-detail-menu-wrap" ref={menuRef}>
+              <button
+                type="button"
+                className="btn"
+                aria-label="Code actions"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                Actions
+              </button>
+              {menuOpen && (
+                <div className="context-menu user-detail-menu" role="menu">
+                  {canDeleteCode ? (
+                    <button
+                      type="button"
+                      className="context-menu-item context-menu-item--danger"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onRequestDelete(row);
+                      }}
+                    >
+                      Delete Code
+                    </button>
+                  ) : (
+                    <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete codes">
+                      Delete Code
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -258,6 +258,341 @@ Recommended redesign:
   - `Theme`
   - `Density`
   - `Typography`
+
+## Workspace top-right actions
+
+This section covers the action controls in the top-right corner of workspace headers and detail views.
+
+### Recommended shared rule
+
+Ignore help for the purpose of action hierarchy.
+
+Every workspace should use one of these patterns:
+
+1. `Primary + Actions`
+2. `Actions` only
+
+Definitions:
+
+- `Primary` = the one dominant, high-frequency next step for the workspace
+- `Actions` = a labeled overflow menu for secondary, infrequent, administrative, or destructive tasks
+
+Do not use:
+
+- hamburger-only action triggers
+- multiple equal-weight top-right buttons unless they are true peer actions
+- mixed patterns where some detail views hide everything in a menu while list views expose direct actions without a clear rule
+
+### Labeling rule
+
+- Primary buttons should be verb-first:
+  - `New Project`
+  - `Add User`
+  - `New Document`
+  - `Edit User`
+  - `Save Changes`
+- Secondary items should move into a labeled `Actions` menu
+- Destructive actions should appear last in the `Actions` menu
+
+### View-by-view normalization target
+
+#### Projects
+
+File:
+
+- `src/views/Projects_View.tsx`
+
+Recommended pattern:
+
+- Primary: `New Project`
+- Actions: none at the page header level for now
+
+Notes:
+
+- This screen already has a strong primary action
+- If project-card menus are kept, consider relabeling those triggers as `Actions` rather than using hamburger-only affordances
+
+#### Project Home
+
+File:
+
+- `src/views/Project_Home_View.tsx`
+
+Current pattern:
+
+- hamburger-only project actions menu
+
+Recommended pattern:
+
+- `Actions` only
+
+Suggested menu contents:
+
+- `Edit Project`
+- `Change Active Project`
+- `Delete Project`
+
+Rationale:
+
+- There is no obvious create-style dominant action in the top-right corner
+- The current hamburger reads like navigation, not workspace-local actions
+
+#### Users list
+
+File:
+
+- `src/views/Project_Users_View.tsx`
+
+Current pattern:
+
+- Primary button only: `Add Member`
+
+Recommended pattern:
+
+- Primary: `Add User`
+- Actions: add later only if true secondary workspace-level actions are introduced
+
+Rationale:
+
+- This is already close to the desired model
+- The only recommended cleanup is renaming `Add Member` to `Add User` for consistency with the workspace label
+
+#### User detail
+
+File:
+
+- `src/views/Project_Users_View.tsx`
+
+Current pattern:
+
+- hamburger menu only
+
+Recommended pattern:
+
+- Primary: `Edit User`
+- Actions:
+  - `Remove from Project`
+
+Rationale:
+
+- Editing is the dominant action when inspecting a single user
+- Removal is secondary and destructive, so it belongs in `Actions`
+
+#### Documents list
+
+File:
+
+- `src/views/Project_Documents_View.tsx`
+
+Current pattern:
+
+- visible toggle: `Show Attributes`
+- visible primary: `New Document`
+
+Recommended pattern:
+
+- Primary: `New Document`
+- Actions:
+  - `Show Attributes`
+  - attribute-management tasks if more are added later
+
+Rationale:
+
+- `New Document` is the dominant workflow action
+- `Show Attributes` is a mode switch, not a peer primary CTA
+
+#### Document detail
+
+File:
+
+- `src/views/Project_Documents_View.tsx`
+
+Current pattern:
+
+- hamburger menu only
+
+Recommended pattern:
+
+- Primary: `Edit Metadata`
+- Actions:
+  - `Memo`
+  - `Create Editable Copy`
+  - `Delete`
+
+Rationale:
+
+- The detail view should expose the most common update path directly
+- Secondary and destructive items should move into `Actions`
+
+#### Cases list
+
+File:
+
+- `src/views/Project_Cases_View.tsx`
+
+Current pattern:
+
+- visible toggle: `Show Attributes`
+- visible primary: `New Case`
+
+Recommended pattern:
+
+- Primary: `New Case`
+- Actions:
+  - `Show Attributes`
+  - attribute-management tasks if more are added later
+
+Rationale:
+
+- Same structure as Documents
+- The mode switch should not compete visually with the create action
+
+#### Case detail
+
+File:
+
+- `src/views/Project_Cases_View.tsx`
+
+Current pattern:
+
+- hamburger menu only
+
+Recommended pattern:
+
+- Primary: `Edit Case`
+- Actions:
+  - `Memo`
+  - `Delete`
+
+Rationale:
+
+- Editing is the dominant detail-view action
+- Destructive and secondary actions should be grouped under `Actions`
+
+#### Codebook list
+
+File:
+
+- `src/views/Project_Codebook_View.tsx`
+
+Current pattern:
+
+- Primary button only: `New Code`
+
+Recommended pattern:
+
+- Primary: `New Code`
+- Actions: none at the page header level for now
+
+Rationale:
+
+- This already fits the shared model
+- Add a page-level `Actions` menu only if import/export or batch codebook tasks are promoted into the header
+
+#### Code detail
+
+File:
+
+- `src/views/Project_Codebook_View.tsx`
+
+Current pattern:
+
+- hamburger menu only
+
+Recommended pattern:
+
+- Primary: `Edit Code`
+- Actions:
+  - `Delete Code`
+
+Rationale:
+
+- Editing is the dominant detail task
+- Deletion is secondary and destructive
+
+#### Memos list
+
+File:
+
+- `src/views/Analysis_Memos_View.tsx`
+
+Current pattern:
+
+- Primary button only: `New Memo`
+
+Recommended pattern:
+
+- Primary: `New Memo`
+- Actions: none at the page header level for now
+
+Rationale:
+
+- This already fits the desired model
+
+#### Memo detail / editor
+
+File:
+
+- `src/views/Analysis_Memos_View.tsx`
+
+Current pattern:
+
+- direct save action in the top-right area
+
+Recommended pattern:
+
+- Primary: `Save Changes` or `Save Memo`
+- Actions: none unless secondary memo-level actions are added later
+
+Rationale:
+
+- Save is the dominant action in an editor context
+
+#### AI Assist Home
+
+File:
+
+- `src/views/AIAssist_Home_View.tsx`
+
+Current pattern:
+
+- no workspace action button, effectively help/status only
+
+Recommended pattern:
+
+- `Actions` only if future global AI Assist actions are introduced
+- otherwise keep no action control in the top-right action slot
+
+Rationale:
+
+- This behaves like a launch dashboard, not a create/manage workspace
+- Do not force an empty primary action where none exists
+
+#### App Settings / Project Settings / User Settings
+
+Files:
+
+- `src/views/App_Settings_View.tsx`
+- `src/views/Project_Settings_View.tsx`
+- `src/views/User_Settings_View.tsx`
+
+Recommended pattern:
+
+- no primary action in the overview header
+- no `Actions` menu unless a true overview-level administrative action is introduced later
+
+Rationale:
+
+- The cards themselves are the action surface
+- Header actions would add noise rather than clarity
+
+### Implementation order
+
+1. Replace hamburger-only detail-view triggers with labeled `Actions` buttons
+2. Keep existing primary create buttons where they already exist
+3. Move non-primary toggles like `Show Attributes` into `Actions`
+4. Normalize detail views to `Edit X` as the visible primary action when editing is the dominant task
+5. Keep destructive items at the bottom of the `Actions` menu with danger styling
   - `Custom Theme`
 - Each group should have a short explainer
 - Use stronger spacing between preference families, not just between rows

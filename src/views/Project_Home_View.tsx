@@ -266,16 +266,14 @@ export function HomeView() {
         {userRole === "owner" && (
           <button
             ref={menuButtonRef}
-            className="btn home-menu-btn"
+            className="btn"
             type="button"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             aria-label="Project actions"
             onClick={() => setMenuOpen((open) => !open)}
           >
-            <span />
-            <span />
-            <span />
+            Actions
           </button>
         )}
       </header>

@@ -735,7 +735,7 @@ export function ProjectsView() {
                   <div className="project-card-topbar">
                     <button
                       type="button"
-                      className="btn home-menu-btn project-card-menu-button"
+                      className="btn project-card-menu-button"
                       aria-label={`Project actions for ${p.name}`}
                       aria-expanded={menuProjectId === p.id}
                       onClick={(e) => {
@@ -743,9 +743,7 @@ export function ProjectsView() {
                         setMenuProjectId((current) => current === p.id ? null : p.id);
                       }}
                     >
-                      <span aria-hidden="true" />
-                      <span aria-hidden="true" />
-                      <span aria-hidden="true" />
+                      Actions
                     </button>
                     {menuProjectId === p.id && (
                       <div

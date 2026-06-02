@@ -140,57 +140,49 @@ function UserDetail({
         <button className="btn user-detail-back" onClick={onBack}>
           Back to Users
         </button>
-        <div className="user-detail-menu-wrap" ref={menuRef}>
+        <div className="workspace-back-actions">
           <button
             type="button"
-            className="home-menu-btn user-detail-menu-btn"
-            aria-label="User actions"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
+            className="btn btn--primary"
+            onClick={() => onRequestEdit(row)}
+            disabled={!canEdit}
+            title={!canEdit ? "You do not have permission to edit this user's role" : undefined}
           >
-            <span />
-            <span />
-            <span />
+            Edit User
           </button>
-          {menuOpen && (
-            <div className="context-menu user-detail-menu" role="menu">
-              {canEdit ? (
-                <button
-                  type="button"
-                  className="context-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onRequestEdit(row);
-                  }}
-                >
-                  Edit User
-                </button>
-              ) : (
-                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit this user's role">
-                  Edit User
-                </div>
-              )}
-              {canRemove ? (
-                <button
-                  type="button"
-                  className="context-menu-item context-menu-item--danger"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onRequestRemove(row);
-                  }}
-                >
-                  Remove from Project
-                </button>
-              ) : (
-                <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to remove this user from the project">
-                  Remove from Project
-                </div>
-              )}
-            </div>
-          )}
+          <div className="user-detail-menu-wrap" ref={menuRef}>
+            <button
+              type="button"
+              className="btn"
+              aria-label="User actions"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              Actions
+            </button>
+            {menuOpen && (
+              <div className="context-menu user-detail-menu" role="menu">
+                {canRemove ? (
+                  <button
+                    type="button"
+                    className="context-menu-item context-menu-item--danger"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onRequestRemove(row);
+                    }}
+                  >
+                    Remove from Project
+                  </button>
+                ) : (
+                  <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to remove this user from the project">
+                    Remove from Project
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1009,7 +1001,7 @@ export function UsersView() {
             disabled={!canInviteMembers}
             title={!canInviteMembers ? "You do not have permission to add users to this project" : undefined}
           >
-            + Add Member
+            + Add User
           </button>
         </div>
       </header>
