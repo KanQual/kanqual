@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, type ReactNode } from "react";
 import type { RecordModel } from "pocketbase";
 import {
   type Theme,
@@ -37,7 +37,7 @@ import { permissionMatrixRows, type PermissionMatrixRow } from "../lib/permissio
 import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
 import { HelpIcon } from "../components/AppIcons";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Helpers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -146,7 +146,35 @@ const aboutRustLicenses = parseMarkdownLicenseTable(
 const RELEASE_DATE = "May 9, 2026";
 const GITHUB_RELEASES_URL = "https://github.com/KanQual/kanqual/releases";
 
-// ─── Color row ────────────────────────────────────────────────────────────────
+type SettingsModalSectionProps = {
+  title: string;
+  description: ReactNode;
+  children?: ReactNode;
+  tone?: "default" | "warning" | "danger";
+};
+
+function SettingsModalSection({
+  title,
+  description,
+  children,
+  tone = "default",
+}: SettingsModalSectionProps) {
+  return (
+    <section className="app-settings-modal-section">
+      <div className={`app-settings-modal-section-header app-settings-modal-section-header--${tone}`}>
+        <h3>{title}</h3>
+        <div className="app-settings-modal-section-description">{description}</div>
+      </div>
+      {children ? <div className="app-settings-modal-section-body">{children}</div> : null}
+    </section>
+  );
+}
+
+function shouldShowAppAutoSaveNotice(sectionId: string) {
+  return ["startup", "import", "privacy", "updates", "llm"].includes(sectionId);
+}
+
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Color row ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 import { useEffect } from "react";
 
@@ -213,7 +241,7 @@ function ColorRow({
           onClick={() => onReset(varDef.key)}
           title="Reset to default"
         >
-          ↺
+          ÃƒÂ¢Ã¢â‚¬Â Ã‚Âº
         </button>
       ) : (
         <span className="color-row-reset-spacer" />
@@ -222,7 +250,7 @@ function ColorRow({
   );
 }
 
-// ─── Slider row ───────────────────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Slider row ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 function SliderRow({
   label,
@@ -265,7 +293,7 @@ function SliderRow({
   );
 }
 
-// ─── Theme editor (rendered inside modal) ─────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Theme editor (rendered inside modal) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 function ThemeEditor({
   initial,
@@ -282,7 +310,7 @@ function ThemeEditor({
   const [borderRadius, setBorderRadius] = useState(initial.borderRadius);
   const [borderWidth, setBorderWidth] = useState(initial.borderWidth);
 
-  // Live preview — applies to the page instantly, nothing persisted
+  // Live preview ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â applies to the page instantly, nothing persisted
   useEffect(() => {
     applyLive(base, colors, borderRadius, borderWidth);
   }, [base, colors, borderRadius, borderWidth]);
@@ -430,7 +458,7 @@ function ThemeEditor({
   );
 }
 
-// ─── Theme manager modal ───────────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Theme manager modal ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 export function ThemeManagerModal({
   onClose,
@@ -564,7 +592,7 @@ export function ThemeManagerModal({
                         {p.base}
                       </span>
                       <span className="theme-preset-meta">
-                        radius {p.borderRadius}px · border {p.borderWidth}px
+                        radius {p.borderRadius}px Ãƒâ€šÃ‚Â· border {p.borderWidth}px
                       </span>
                     </div>
                     <div className="theme-preset-actions">
@@ -604,18 +632,18 @@ export function ThemeManagerModal({
   );
 }
 
-// ─── Network helpers ──────────────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Network helpers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 type PingStatus = "idle" | "loading" | "success" | "error";
 interface PingResult { status: PingStatus; ms?: number; error?: string; }
 
 function PingBadge({ result }: { result: PingResult }) {
   if (result.status === "idle")    return <span className="ping-badge ping-badge--idle">Not tested</span>;
-  if (result.status === "loading") return <span className="ping-badge ping-badge--idle">Testing…</span>;
-  if (result.status === "success") return <span className="ping-badge ping-badge--ok">● Reachable &nbsp;{result.ms} ms</span>;
+  if (result.status === "loading") return <span className="ping-badge ping-badge--idle">TestingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</span>;
+  if (result.status === "success") return <span className="ping-badge ping-badge--ok">ÃƒÂ¢Ã¢â‚¬â€Ã‚Â Reachable &nbsp;{result.ms} ms</span>;
   return (
     <span className="ping-badge ping-badge--error">
-      ✕ Unreachable{result.error && <> — {result.error}</>}
+      ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¢ Unreachable{result.error && <> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {result.error}</>}
     </span>
   );
 }
@@ -638,20 +666,20 @@ export function AddressCard({
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
         <code className="settings-code-line" style={{ minWidth: 220 }}>
-          {loading ? "Detecting…" : (address ?? "Unavailable")}
+          {loading ? "DetectingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" : (address ?? "Unavailable")}
         </code>
         <button className="btn btn--sm" disabled={!address} onClick={() => address && navigator.clipboard.writeText(address).catch(() => {})}>
           Copy
         </button>
         <button className="btn btn--sm btn--primary" disabled={!address || disabled || ping.status === "loading"} onClick={onTest}>
-          {ping.status === "loading" ? "Testing…" : "Test"}
+          {ping.status === "loading" ? "TestingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" : "Test"}
         </button>
       </div>
     </div>
   );
 }
 
-// ─── Main view ────────────────────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Main view ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 function CollaborationPingBadge({
   result,
@@ -901,68 +929,117 @@ export function AppSettingsView() {
 
   const settingsOverviewCards = [
     {
-      id: "permissions",
-      title: "User Permissions",
-      description: "Review the full role matrix for administrators, owners, editors, coders, and viewers.",
-      visible: canOpenAppSettings,
-    },
-    {
-      id: "network",
-      title: "Network & Collaboration",
-      description: "Control whether this device is accessible to collaborators.",
-      visible: canOpenAppSettings,
-    },
-    {
-      id: "storage",
-      title: "Data Location & Storage",
-      description: "View where local data and backups are stored.",
-      visible: canOpenAppSettings,
-    },
-    {
       id: "startup",
       title: "Startup & Session",
       description: "Choose how Kanqual opens and resumes work.",
       visible: canChangeStartupSettings,
+      tone: "default" as const,
     },
     {
       id: "import",
       title: "Document Import",
       description: "Set default behaviors for importing and creating documents.",
       visible: canOpenAppSettings,
+      tone: "default" as const,
+    },
+    {
+      id: "llm",
+      title: "AI Assist Settings",
+      description: "Download and configure the local AI runtime Kanqual uses for embeddings and generation.",
+      visible: canManageLlmSettings || canDownloadEmbeddingModel || canDeleteEmbeddingModel,
+      tone: "ai" as const,
     },
     {
       id: "privacy",
       title: "Privacy & Security",
       description: "Manage local privacy options for shared or sensitive use.",
       visible: canOpenAppSettings,
+      tone: "default" as const,
+    },
+    {
+      id: "storage",
+      title: "Data Location & Storage",
+      description: "View where local data and backups are stored.",
+      visible: canOpenAppSettings,
+      tone: "default" as const,
+    },
+    {
+      id: "updates",
+      title: "Updates",
+      description: "Choose whether Kanqual checks for newer releases and where to review them.",
+      visible: canOpenAppSettings,
+      tone: "default" as const,
     },
     {
       id: "diagnostics",
       title: "Diagnostics",
       description: "Check app health, storage, and environment details.",
       visible: canOpenAppSettings,
+      tone: "default" as const,
     },
     {
-      id: "updates",
-      title: "Updates",
-      description: "Choose the release channel and whether Kanqual warns you when a newer version is available.",
+      id: "permissions",
+      title: "User Permissions",
+      description: "Review the full role matrix for administrators, owners, editors, coders, and viewers.",
       visible: canOpenAppSettings,
+      tone: "default" as const,
     },
     {
-      id: "llm",
-      title: "AI Assist Settings",
-      description: "Download and setup local large language models for embeddings and and other AI Assist features.",
-      visible: canManageLlmSettings || canDownloadEmbeddingModel || canDeleteEmbeddingModel,
+      id: "network",
+      title: "Network & Collaboration",
+      description: "Control whether this device is accessible to collaborators.",
+      visible: canOpenAppSettings,
+      tone: "network" as const,
     },
     ...(canAccessAdministration
       ? [{
           id: "administration",
           title: "Administration",
-          description: "Manage registered users, clear local app data, and jump to administration views.",
+          description: "Manage registered users, clear local app data, and open administrator-only workspace tools.",
           visible: true,
+          tone: "admin" as const,
         }]
       : []),
   ].filter((card) => card.visible);
+
+  const appSettingsCardById = new Map(settingsOverviewCards.map((card) => [card.id, card]));
+  const appSettingsSections = [
+    {
+      id: "everyday",
+      eyebrow: "Everyday Use",
+      title: "Change the app behaviors people are most likely to notice in daily work.",
+      description: "These settings affect how Kanqual launches, how documents start, and whether local AI tools are ready to support the workflow.",
+      cardIds: ["startup", "import", "llm"],
+    },
+    {
+      id: "privacy-data",
+      eyebrow: "Privacy & Data",
+      title: "Control what is stored locally and how the device handles sensitive research work.",
+      description: "Use these cards to review local storage, privacy defaults, and the folders Kanqual depends on.",
+      cardIds: ["privacy", "storage"],
+    },
+    {
+      id: "maintenance",
+      eyebrow: "Maintenance",
+      title: "Review health, diagnostics, and release behavior for this installation.",
+      description: "These cards help you inspect the local runtime, confirm the database is healthy, and keep track of newer releases.",
+      cardIds: ["updates", "diagnostics"],
+    },
+    {
+      id: "advanced",
+      eyebrow: "Advanced",
+      title: "Use these tools for permissions, collaboration, and administrator-only device actions.",
+      description: "These settings carry broader impact across accounts or the local machine, so they are grouped separately from daily app behavior.",
+      cardIds: ["permissions", "network", "administration"],
+    },
+  ]
+    .map((section) => ({
+      ...section,
+      cards: section.cardIds
+        .map((cardId) => appSettingsCardById.get(cardId))
+        .filter((card): card is NonNullable<typeof card> => Boolean(card)),
+    }))
+    .filter((section) => section.cards.length > 0);
 
   const openRequestedSettingsModal = useCallback(() => {
     const requestedModal = sessionStorage.getItem("kanqual:open-app-settings-modal");
@@ -1327,90 +1404,104 @@ export function AppSettingsView() {
     switch (sectionId) {
       case "permissions":
         return (
-          <div className="permission-matrix">
-            <p className="permission-matrix-intro">
-              This matrix shows which actions each role can perform in the current KanQual permission model.
-            </p>
-            {Object.entries(permissionMatrixByCategory).map(([category, rows]) => (
-              <section key={category} className="permission-matrix-section">
-                <h3>{category}</h3>
-                <div className="permission-matrix-table-wrap">
-                  <table className="permission-matrix-table">
-                    <thead>
-                      <tr>
-                        <th>Permission</th>
-                        <th>Description</th>
-                        <th>Administrator</th>
-                        <th>Owner</th>
-                        <th>Editor</th>
-                        <th>Coder</th>
-                        <th>Viewer</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((row) => (
-                        <tr key={`${row.category}-${row.permission}`}>
-                          <td>{row.permission}</td>
-                          <td>{row.description}</td>
-                          <td className={row.administrator ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.administrator ? "✓" : "✕"}</td>
-                          <td className={row.owner ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.owner ? "✓" : "✕"}</td>
-                          <td className={row.editor ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.editor ? "✓" : "✕"}</td>
-                          <td className={row.coder ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.coder ? "✓" : "✕"}</td>
-                          <td className={row.viewer ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.viewer ? "✓" : "✕"}</td>
+          <SettingsModalSection
+            title="Role Matrix"
+            description="Review which actions each Kanqual role can perform in the current permission model."
+          >
+            <div className="permission-matrix">
+              <p className="permission-matrix-intro">
+                This matrix shows which actions each role can perform in the current KanQual permission model.
+              </p>
+              {Object.entries(permissionMatrixByCategory).map(([category, rows]) => (
+                <section key={category} className="permission-matrix-section">
+                  <h3>{category}</h3>
+                  <div className="permission-matrix-table-wrap">
+                    <table className="permission-matrix-table">
+                      <thead>
+                        <tr>
+                          <th>Permission</th>
+                          <th>Description</th>
+                          <th>Administrator</th>
+                          <th>Owner</th>
+                          <th>Editor</th>
+                          <th>Coder</th>
+                          <th>Viewer</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            ))}
-          </div>
+                      </thead>
+                      <tbody>
+                        {rows.map((row) => (
+                          <tr key={`${row.category}-${row.permission}`}>
+                            <td>{row.permission}</td>
+                            <td>{row.description}</td>
+                            <td className={row.administrator ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.administrator ? "Yes" : "No"}</td>
+                            <td className={row.owner ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.owner ? "Yes" : "No"}</td>
+                            <td className={row.editor ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.editor ? "Yes" : "No"}</td>
+                            <td className={row.coder ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.coder ? "Yes" : "No"}</td>
+                            <td className={row.viewer ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.viewer ? "Yes" : "No"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ))}
+            </div>
+          </SettingsModalSection>
         );
       case "network":
         return (
           <>
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Network mode</div>
-                <div className="settings-row-desc">
-                  {networkMode === "local"
-                    ? "Local only - data is not accessible from other devices."
-                    : localIp
-                      ? `Network mode active - other devices can connect at http://${localIp}:8090`
-                      : "Network mode active - other devices on your local network can connect."}
+            <SettingsModalSection
+              title="Access Mode"
+              description="Choose whether this Kanqual database stays available only on this device or can be reached from other trusted devices on the network."
+            >
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Network mode</div>
+                  <div className="settings-row-desc">
+                    {networkMode === "local"
+                      ? "Local only - data is not accessible from other devices."
+                      : localIp
+                        ? `Network mode active - other devices can connect at http://${localIp}:8090`
+                        : "Network mode active - other devices on your local network can connect."}
+                  </div>
+                </div>
+                <div className="segmented-control">
+                  {(["local", "lan"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={networkMode === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                      onClick={() => void handleNetworkModeToggle(option)}
+                      disabled={networkSwitching}
+                    >
+                      {networkSwitching && option !== networkMode
+                        ? "Restarting..."
+                        : option === "local" ? "Local only" : "Allow network"}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="segmented-control">
-                {(["local", "lan"] as const).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={networkMode === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                    onClick={() => void handleNetworkModeToggle(option)}
-                    disabled={networkSwitching}
-                  >
-                    {networkSwitching && option !== networkMode
-                      ? "Restarting..."
-                      : option === "local" ? "Local only" : "Allow network"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className={`settings-warning ${networkMode === "lan" ? "settings-warning--danger" : ""}`}>
-              <strong>{networkMode === "lan" ? "LAN mode is live for this session." : "Local-only mode is recommended for routine work."}</strong>
-              <br />
-              {networkMode === "lan"
-                ? "Anyone on the same trusted network who can reach this device can attempt to connect to Kanqual until the app closes or you switch back to local-only mode."
-                : "Other devices cannot reach this Kanqual database while local-only mode is active."}
-            </div>
-            <div className="settings-warning">
-              <strong>Session behavior and auditability</strong>
-              <br />
-              Kanqual always reverts to local-only mode on next launch. When a project is open, LAN/local mode changes are also written to that project's log.
-            </div>
+            </SettingsModalSection>
+            <SettingsModalSection
+              title="Safety Notes"
+              tone={networkMode === "lan" ? "danger" : "warning"}
+              description={
+                <>
+                  <strong>{networkMode === "lan" ? "LAN mode is live for this session." : "Local-only mode is recommended for routine work."}</strong>{" "}
+                  {networkMode === "lan"
+                    ? "Anyone on the same trusted network who can reach this device can attempt to connect to Kanqual until the app closes or you switch back to local-only mode."
+                    : "Other devices cannot reach this Kanqual database while local-only mode is active."}{" "}
+                  Kanqual always reverts to local-only mode on next launch, and when a project is open these mode changes are written to that project's log.
+                </>
+              }
+            />
 
             {networkMode === "lan" && (
-              <>
+              <SettingsModalSection
+                title="Connection Addresses"
+                description="Use these addresses to test or share the running Kanqual instance while network mode is enabled."
+              >
                 <CollaborationAddressCard
                   label="Local Network"
                   description="Reachable by devices on the same Wi-Fi or LAN. Share this address with collaborators on your local network."
@@ -1434,13 +1525,16 @@ export function AppSettingsView() {
                   onTest={testExternalPing}
                   scope="internet"
                 />
-              </>
+              </SettingsModalSection>
             )}
           </>
         );
       case "storage":
         return (
-          <>
+          <SettingsModalSection
+            title="Local Storage"
+            description="Review where Kanqual stores its managed data and how much space the tracked folders currently use."
+          >
             <div className="settings-row">
               <div className="settings-row-info">
                 <div className="settings-row-label">Storage mode</div>
@@ -1487,14 +1581,17 @@ export function AppSettingsView() {
                 <small>Database plus managed backup files</small>
               </div>
             </div>
-          </>
+          </SettingsModalSection>
         );
       case "startup":
         if (!canChangeStartupSettings) {
           return <div className="settings-empty-state">You do not have permission to change startup or session settings.</div>;
         }
         return (
-          <>
+          <SettingsModalSection
+            title="Launch Behavior"
+            description="Choose what Kanqual should reopen automatically when someone starts the app on this device."
+          >
             <label className="settings-toggle-row">
               <span>
                 <strong>Sign in last user on launch</strong>
@@ -1524,82 +1621,95 @@ export function AppSettingsView() {
                 }, "Startup behavior saved.")}
               />
             </label>
-          </>
+          </SettingsModalSection>
         );
       case "import":
         return (
           <>
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Default import mode</div>
-                <div className="settings-row-desc">Choose whether the new document dialog starts in upload mode or paste mode.</div>
+            <SettingsModalSection
+              title="Default Import Mode"
+              description="Choose which workflow the new document dialog should open with by default."
+            >
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Default import mode</div>
+                  <div className="settings-row-desc">Choose whether the new document dialog starts in upload mode or paste mode.</div>
+                </div>
+                <div className="segmented-control">
+                  {(["upload", "paste"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={settings.documentImport.defaultMode === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                      onClick={() => persist({
+                        ...settings,
+                        documentImport: { ...settings.documentImport, defaultMode: option },
+                      }, "Document import defaults saved.")}
+                    >
+                      {option === "upload" ? "Upload" : "Paste"}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="segmented-control">
-                {(["upload", "paste"] as const).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={settings.documentImport.defaultMode === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                    onClick={() => persist({
-                      ...settings,
-                      documentImport: { ...settings.documentImport, defaultMode: option },
-                    }, "Document import defaults saved.")}
-                  >
-                    {option === "upload" ? "Upload" : "Paste"}
-                  </button>
-                ))}
-              </div>
-            </div>
+            </SettingsModalSection>
 
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Auto-name documents from uploaded files</strong>
-                <small>Pre-fills the document name from the selected filename when the name field is empty.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.documentImport.autoNameFromFile}
-                onChange={(e) => persist({
-                  ...settings,
-                  documentImport: { ...settings.documentImport, autoNameFromFile: e.target.checked },
-                }, "Document import defaults saved.")}
-              />
-            </label>
+            <SettingsModalSection
+              title="Import Safeguards"
+              description="Set the defaults Kanqual should apply while it prepares uploaded or pasted text for a new document."
+            >
+              <label className="settings-toggle-row">
+                <span>
+                  <strong>Auto-name documents from uploaded files</strong>
+                  <small>Pre-fills the document name from the selected filename when the name field is empty.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={settings.documentImport.autoNameFromFile}
+                  onChange={(e) => persist({
+                    ...settings,
+                    documentImport: { ...settings.documentImport, autoNameFromFile: e.target.checked },
+                  }, "Document import defaults saved.")}
+                />
+              </label>
 
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Trim imported text automatically</strong>
-                <small>Removes leading and trailing whitespace from pasted text and extracted file contents before save.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.documentImport.trimImportedText}
-                onChange={(e) => persist({
-                  ...settings,
-                  documentImport: { ...settings.documentImport, trimImportedText: e.target.checked },
-                }, "Document import defaults saved.")}
-              />
-            </label>
+              <label className="settings-toggle-row">
+                <span>
+                  <strong>Trim imported text automatically</strong>
+                  <small>Removes leading and trailing whitespace from pasted text and extracted file contents before save.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={settings.documentImport.trimImportedText}
+                  onChange={(e) => persist({
+                    ...settings,
+                    documentImport: { ...settings.documentImport, trimImportedText: e.target.checked },
+                  }, "Document import defaults saved.")}
+                />
+              </label>
 
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Warn before creating empty imports</strong>
-                <small>Shows a confirmation if a file produces no extracted text and you continue anyway.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.documentImport.warnBeforeEmptyImport}
-                onChange={(e) => persist({
-                  ...settings,
-                  documentImport: { ...settings.documentImport, warnBeforeEmptyImport: e.target.checked },
-                }, "Document import defaults saved.")}
-              />
-            </label>
+              <label className="settings-toggle-row">
+                <span>
+                  <strong>Warn before creating empty imports</strong>
+                  <small>Shows a confirmation if a file produces no extracted text and you continue anyway.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={settings.documentImport.warnBeforeEmptyImport}
+                  onChange={(e) => persist({
+                    ...settings,
+                    documentImport: { ...settings.documentImport, warnBeforeEmptyImport: e.target.checked },
+                  }, "Document import defaults saved.")}
+                />
+              </label>
+            </SettingsModalSection>
           </>
         );
       case "privacy":
         return (
-          <>
+          <SettingsModalSection
+            title="Local Privacy Controls"
+            description="Choose how much local activity and device-level identity information Kanqual should retain on this machine."
+          >
             <label className="settings-toggle-row">
               <span>
                 <strong>Hide stored file names in document details</strong>
@@ -1644,11 +1754,14 @@ export function AppSettingsView() {
                 }, "Privacy settings saved.")}
               />
             </label>
-          </>
+          </SettingsModalSection>
         );
       case "diagnostics":
         return (
-          <>
+          <SettingsModalSection
+            title="Health Checks"
+            description="Inspect the local runtime, storage connection, and core service endpoint for this installation."
+          >
             <div className="settings-row">
               <div className="settings-row-info">
                 <div className="settings-row-label">App version</div>
@@ -1674,7 +1787,7 @@ export function AppSettingsView() {
                 <div className="settings-row-desc settings-code-line">http://127.0.0.1:8090</div>
               </div>
             </div>
-          </>
+          </SettingsModalSection>
         );
       case "administration":
         if (!canAccessAdministration) {
@@ -1682,99 +1795,100 @@ export function AppSettingsView() {
         }
         return (
           <>
-            <div className="settings-row settings-row--block">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Administration Tools</div>
-                <div className="settings-row-desc">
-                  These actions are only available to administrators on this device.
-                </div>
+            <SettingsModalSection
+              title="Administration Shortcuts"
+              description="Open the main administrator workspaces for project-level or user-level management."
+            >
+              <div className="app-settings-stats">
+                <button
+                  type="button"
+                  className="app-settings-stat-card app-settings-stat-card--button"
+                  onClick={() => handleOpenAdminView("projects")}
+                >
+                  <strong>Project Administration</strong>
+                  <span>Open Projects</span>
+                  <small>Manage projects, ownership, and project-level administration.</small>
+                </button>
+                <button
+                  type="button"
+                  className="app-settings-stat-card app-settings-stat-card--button"
+                  onClick={() => handleOpenAdminView("users")}
+                  disabled={!activeProject}
+                >
+                  <strong>User Administration</strong>
+                  <span>{activeProject ? "Open Project Users" : "Open a project first"}</span>
+                  <small>Manage members and roles in the currently active project.</small>
+                </button>
               </div>
-            </div>
+            </SettingsModalSection>
 
-            <div className="app-settings-stats">
-              <button
-                type="button"
-                className="app-settings-stat-card app-settings-stat-card--button"
-                onClick={() => handleOpenAdminView("projects")}
-              >
-                <strong>Project Administration</strong>
-                <span>Open Projects</span>
-                <small>Manage projects, ownership, and project-level administration.</small>
-              </button>
-              <button
-                type="button"
-                className="app-settings-stat-card app-settings-stat-card--button"
-                onClick={() => handleOpenAdminView("users")}
-                disabled={!activeProject}
-              >
-                <strong>User Administration</strong>
-                <span>{activeProject ? "Open Project Users" : "Open a project first"}</span>
-                <small>Manage members and roles in the currently active project.</small>
-              </button>
-            </div>
-
-            <div className="settings-row settings-row--block">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Registered Users</div>
-                <div className="settings-row-desc">
-                  Delete local KanQual accounts from this device. Your current administrator account cannot be deleted here.
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-list">
-              {registeredUsers.map((entry) => {
-                const role = String(entry.app_role ?? "standard");
-                const isCurrentUser = entry.id === user?.id;
-                return (
-                  <div key={entry.id} className="settings-list-item">
-                    <div className="settings-list-item-info">
-                      <strong>{String(entry.name || entry.email || "Unnamed user")}</strong>
-                      <small>{String(entry.email || "No email")}</small>
-                      <small>{role === "administrator" ? "Administrator" : "Standard user"}</small>
+            <SettingsModalSection
+              title="Registered Users"
+              description="Delete local KanQual accounts from this device. Your current administrator account cannot be removed here."
+            >
+              <div className="settings-list">
+                {registeredUsers.map((entry) => {
+                  const role = String(entry.app_role ?? "standard");
+                  const isCurrentUser = entry.id === user?.id;
+                  return (
+                    <div key={entry.id} className="settings-list-item">
+                      <div className="settings-list-item-info">
+                        <strong>{String(entry.name || entry.email || "Unnamed user")}</strong>
+                        <small>{String(entry.email || "No email")}</small>
+                        <small>{role === "administrator" ? "Administrator" : "Standard user"}</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn--danger"
+                        onClick={() => void handleDeleteRegisteredUser(entry.id)}
+                        disabled={adminBusy || isCurrentUser || !canDeleteLocalUsers}
+                      >
+                        {isCurrentUser ? "Current Account" : !canDeleteLocalUsers ? "No Permission" : "Delete"}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn--danger"
-                      onClick={() => void handleDeleteRegisteredUser(entry.id)}
-                      disabled={adminBusy || isCurrentUser || !canDeleteLocalUsers}
-                    >
-                      {isCurrentUser ? "Current Account" : !canDeleteLocalUsers ? "No Permission" : "Delete"}
-                    </button>
-                  </div>
-                );
-              })}
-              {!registeredUsers.length && !adminBusy && canViewLocalUsers && (
-                <div className="settings-empty-state">No registered users found.</div>
-              )}
-              {!canViewLocalUsers && (
-                <div className="settings-empty-state">You do not have permission to view local users.</div>
-              )}
-            </div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Clear App Data</div>
-                <div className="settings-row-desc">
-                  Wipe all local KanQual records on this device, including users, projects, and stored working data.
-                </div>
+                  );
+                })}
+                {!registeredUsers.length && !adminBusy && canViewLocalUsers && (
+                  <div className="settings-empty-state">No registered users found.</div>
+                )}
+                {!canViewLocalUsers && (
+                  <div className="settings-empty-state">You do not have permission to view local users.</div>
+                )}
               </div>
-              <button
-                type="button"
-                className="btn btn--danger"
-                onClick={() => void handleClearAppData()}
-                disabled={adminBusy || !canClearLocalAppData}
-              >
-                Clear App Data
-              </button>
-            </div>
+            </SettingsModalSection>
 
-            {adminNotice && <div className="settings-notice">{adminNotice}</div>}
+            <SettingsModalSection
+              title="Destructive Maintenance"
+              tone="danger"
+              description="Wipe all local KanQual records on this device, including users, projects, and stored working data."
+            >
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Clear App Data</div>
+                  <div className="settings-row-desc">
+                    Wipe all local KanQual records on this device, including users, projects, and stored working data.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--danger"
+                  onClick={() => void handleClearAppData()}
+                  disabled={adminBusy || !canClearLocalAppData}
+                >
+                  Clear App Data
+                </button>
+              </div>
+
+              {adminNotice && <div className="settings-notice">{adminNotice}</div>}
+            </SettingsModalSection>
           </>
         );
       case "updates":
         return (
-          <>
+          <SettingsModalSection
+            title="Update Preferences"
+            description="Control whether Kanqual checks for newer releases automatically and where to review them manually."
+          >
             <label className="settings-toggle-row">
               <span>
                 <strong>Check for updates automatically</strong>
@@ -1803,8 +1917,7 @@ export function AppSettingsView() {
                 Open Releases Page
               </button>
             </div>
-
-          </>
+          </SettingsModalSection>
         );
       case "llm":
         if (!(canManageLlmSettings || canDownloadEmbeddingModel || canDeleteEmbeddingModel)) {
@@ -2451,18 +2564,30 @@ export function AppSettingsView() {
           </section>
           )}
 
-          <div className="app-settings-overview-grid">
-          {settingsOverviewCards.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className="app-settings-overview-card"
-              onClick={() => setActiveSettingsModal(card.id)}
-            >
-              <h3>{card.title}</h3>
-              <p>{card.description}</p>
-            </button>
-          ))}
+          <div className="app-settings-overview-sections">
+            {appSettingsSections.map((section) => (
+              <section key={section.id} className="app-settings-overview-section">
+                <div className="app-settings-overview-section-header">
+                  <p className="app-settings-overview-section-eyebrow">{section.eyebrow}</p>
+                  <h2>{section.title}</h2>
+                  <p>{section.description}</p>
+                </div>
+
+                <div className="app-settings-overview-grid">
+                  {section.cards.map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className={`app-settings-overview-card app-settings-overview-card--${card.tone}`}
+                      onClick={() => setActiveSettingsModal(card.id)}
+                    >
+                      <h3>{card.title}</h3>
+                      <p>{card.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
         </div>
       </div>
@@ -2485,10 +2610,10 @@ export function AppSettingsView() {
             <div className="settings-row-label">Network mode</div>
             <div className="settings-row-desc">
               {networkMode === "local"
-                ? "Local only — data is not accessible from other devices."
+                ? "Local only ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â data is not accessible from other devices."
                 : localIp
-                  ? `Network mode active — other devices can connect at http://${localIp}:8090`
-                  : "Network mode active — other devices on your local network can connect."}
+                  ? `Network mode active ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â other devices can connect at http://${localIp}:8090`
+                  : "Network mode active ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â other devices on your local network can connect."}
             </div>
           </div>
           <div className="segmented-control">
@@ -2846,14 +2971,25 @@ export function AppSettingsView() {
             <div className="settings-section-header">
               <div>
                 <h2 className="settings-section-title">{activeSettingsCard.title}</h2>
-                <p className="settings-section-desc">{activeSettingsCard.description}</p>
               </div>
               <button className="btn" type="button" onClick={() => setActiveSettingsModal(null)}>
                 Close
               </button>
             </div>
             <div className="app-settings-modal-body">
-              {renderSettingsModalBody(activeSettingsCard.id)}
+              <div className="app-settings-modal-sections">
+                {renderSettingsModalBody(activeSettingsCard.id)}
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              {shouldShowAppAutoSaveNotice(activeSettingsCard.id) ? (
+                <p className="app-settings-modal-footer-note">Changes save automatically on this device.</p>
+              ) : (
+                <span />
+              )}
+              <button className="btn btn--primary" type="button" onClick={() => setActiveSettingsModal(null)}>
+                Done
+              </button>
             </div>
           </div>
         </div>

@@ -1711,7 +1711,6 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
     setPendingTextCitation,
     documentLockConflict,
     clearDocumentLockConflict,
-    setView,
     annotations,
     codes,
   } = useStore();
@@ -1779,6 +1778,11 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
 
   return (
     <div className="view annotate-view">
+      {onBack && (
+        <div className="workspace-back-row workspace-back-row--annotate">
+          <button className="btn" onClick={() => { clearDocumentLockConflict(); onBack(); }}>Back to Documents</button>
+        </div>
+      )}
       <div className="annotate-back-bar">
         <div className="users-title-wrap">
           <h1 className="annotate-title">Code Text</h1>
@@ -1792,9 +1796,6 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
-        {onBack && (
-          <button className="btn" onClick={onBack}>← Code Documents</button>
-        )}
       </div>
       <div className="annotate-layout code-text-annotate-layout" ref={layoutRef}>
         <div className="annotate-left">
@@ -1904,17 +1905,6 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
                 </p>
               </>
             )}
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button
-                className="btn btn--primary"
-                onClick={() => {
-                  clearDocumentLockConflict();
-                  setView("documents");
-                }}
-              >
-                Back to Documents
-              </button>
-            </div>
           </div>
         </div>
       )}

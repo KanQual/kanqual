@@ -2266,10 +2266,12 @@ function ReportPage({
 
   return (
     <div className="annotate-view">
+      <div className="workspace-back-row workspace-back-row--annotate">
+        <button className="btn" onClick={onBack}>Back to Reports</button>
+      </div>
 
       {/* ── Top bar ── */}
-      <div className="annotate-back-bar" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingBottom: 10 }}>
-        <button className="btn" onClick={onBack}>← Back to Reports</button>
+      <div className="annotate-back-bar" style={{ alignItems: "center", paddingBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           <button

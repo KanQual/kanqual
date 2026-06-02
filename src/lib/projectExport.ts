@@ -8,12 +8,22 @@ type ExportTable = {
   rows: Record<string, unknown>[];
 };
 
+type ProjectExportAsset = {
+  collection: string;
+  recordId: string;
+  field: string;
+  fileName: string;
+  mimeType: string;
+  dataBase64: string;
+};
+
 export type ProjectExportData = {
   format: "kanqual-project-export";
   version: 1;
   exportedAt: string;
   project: Record<string, unknown>;
   tables: ExportTable[];
+  assets: ProjectExportAsset[];
 };
 
 export type ProjectBackupReason = "automatic" | "manual" | "session";
@@ -105,6 +115,7 @@ const TABLE_SPECS: {
   { name: "project_ai_chat_messages", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "project_members", filter: (id) => `project="${id}"`, sort: "created", expand: "user" },
   { name: "documents",         filter: (id) => `project="${id}"`,          sort: "created" },
+  { name: "project_uploaded_files", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "codes", filter: (id) => `project="${id}"`, sort: "created" },
   { name: "annotations", filter: (id) => `document.project="${id}"`, sort: "document,start_offset", expand: "created_by" },
   { name: "cases", filter: (id) => `project="${id}"`, sort: "created" },
@@ -168,6 +179,21 @@ function collectColumns(rows: Record<string, unknown>[]): string[] {
   return [...seen];
 }
 
+function firstFileName(value: unknown): string {
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : "";
+  return typeof value === "string" ? value : "";
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const slice = bytes.subarray(index, Math.min(index + chunkSize, bytes.length));
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
 async function fetchTable(
   pb: PocketBase,
   name: string,
@@ -179,6 +205,33 @@ async function fetchTable(
     expand: options.expand,
   });
   return { name, rows: records.map((r: RecordModel) => serializeRecord(r)) };
+}
+
+async function fetchUploadedFileAssets(pb: PocketBase, projectId: string): Promise<ProjectExportAsset[]> {
+  const records = await pb.collection("project_uploaded_files").getFullList({
+    filter: `project="${projectId}"`,
+    sort: "created",
+  });
+  const assets: ProjectExportAsset[] = [];
+  for (const record of records) {
+    const fileName = firstFileName(record.uploaded_file);
+    if (!fileName) continue;
+    const response = await fetch(pb.files.getURL(record, fileName));
+    if (!response.ok) {
+      throw new Error(`Could not fetch retained uploaded file "${fileName}" for export.`);
+    }
+    assets.push({
+      collection: "project_uploaded_files",
+      recordId: record.id,
+      field: "uploaded_file",
+      fileName,
+      mimeType: typeof record.mime_type === "string"
+        ? record.mime_type
+        : response.headers.get("content-type") ?? "application/octet-stream",
+      dataBase64: bytesToBase64(new Uint8Array(await response.arrayBuffer())),
+    });
+  }
+  return assets;
 }
 
 function usersTableFromMembers(membersTable: ExportTable | undefined): ExportTable {
@@ -216,6 +269,7 @@ export async function fetchProjectExportData(pb: PocketBase, project: Project): 
       }),
     ),
   );
+  const assets = await fetchUploadedFileAssets(pb, project.id);
   const projectMembers = tables.find((table) => table.name === "project_members");
   const usersTable = usersTableFromMembers(projectMembers);
 
@@ -225,6 +279,7 @@ export async function fetchProjectExportData(pb: PocketBase, project: Project): 
     exportedAt: new Date().toISOString(),
     project: serializeRecord(projectRecord),
     tables: [{ name: "projects", rows: [serializeRecord(projectRecord)] }, usersTable, ...tables],
+    assets,
   };
 }
 
@@ -265,6 +320,9 @@ function assertProjectExportData(value: unknown): ProjectExportData {
   const data = value as ProjectExportData;
   if (data.format !== "kanqual-project-export" || !Array.isArray(data.tables)) {
     throw new Error("The selected file is not a Kanqual project export.");
+  }
+  if (!Array.isArray(data.assets)) {
+    data.assets = [];
   }
   return data;
 }
@@ -440,6 +498,7 @@ type ImportContext = {
   userId: string;
   canReassociateUsers: boolean;
   sourceIdentifier: (value: unknown) => string;
+  uploadedFileAssetsByKey: Map<string, ProjectExportAsset>;
 };
 
 type ImportStep = {
@@ -467,6 +526,19 @@ async function createScheduledRecord(
     context.idMap,
     context.tableCounts,
   );
+}
+
+function assetKey(collection: string, recordId: string, field: string, fileName: string): string {
+  return `${collection}::${recordId}::${field}::${fileName}`;
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 const IMPORT_SCHEDULE: ImportStep[] = [
@@ -544,6 +616,32 @@ const IMPORT_SCHEDULE: ImportStep[] = [
       await createScheduledRecord("cases", row, {
         ...stripSystemFields(row),
         project: context.projectId,
+        created_by: importedCreatedBy(context, row.created_by),
+        created_by_identifier: context.sourceIdentifier(row.created_by),
+      }, context);
+    },
+  },
+  {
+    table: "project_uploaded_files",
+    importRow: async (row, context) => {
+      const sourceId = textValue(row.id);
+      const fileName = firstFileName(row.uploaded_file);
+      const asset = context.uploadedFileAssetsByKey.get(
+        assetKey("project_uploaded_files", sourceId, "uploaded_file", fileName),
+      );
+      if (!asset) {
+        throw new Error(`The backup is missing the retained source file payload for uploaded file record ${sourceId || "(unknown)"}.`);
+      }
+      await createScheduledRecord("project_uploaded_files", row, {
+        ...stripSystemFields(row),
+        project: context.projectId,
+        document: remapOptionalRelation(row.document, context.idMap) ?? null,
+        case: remapOptionalRelation(row.case, context.idMap) ?? null,
+        uploaded_file: new File(
+          [base64ToBytes(asset.dataBase64)],
+          asset.fileName,
+          { type: asset.mimeType || textValue(row.mime_type) || "application/octet-stream" },
+        ),
         created_by: importedCreatedBy(context, row.created_by),
         created_by_identifier: context.sourceIdentifier(row.created_by),
       }, context);
@@ -762,6 +860,12 @@ export async function importProjectBackupIntoProject(
     userId,
     canReassociateUsers,
     sourceIdentifier: (value: unknown) => importedUsersBySourceId.get(textValue(value))?.userIdentifier || "",
+    uploadedFileAssetsByKey: new Map(
+      (data.assets ?? []).map((asset) => [
+        assetKey(asset.collection, asset.recordId, asset.field, asset.fileName),
+        asset,
+      ]),
+    ),
   };
 
   for (const step of IMPORT_SCHEDULE) {

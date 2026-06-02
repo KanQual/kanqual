@@ -377,6 +377,11 @@ function DocumentProcessingBanner() {
           {phase === "error" && "Document processing failed"}
         </strong>
         <span>{documentProcessingStatus.message}</span>
+        {isActive && documentProcessingStatus.currentChunkIndex && documentProcessingStatus.currentChunkTotal && (
+          <span>
+            Chunk {documentProcessingStatus.currentChunkIndex} of {documentProcessingStatus.currentChunkTotal}.
+          </span>
+        )}
         {failures.length > 0 && (
           <div className="embedding-build-banner-meta embedding-build-banner-meta--stacked">
             {failures.map((failure, index) => (

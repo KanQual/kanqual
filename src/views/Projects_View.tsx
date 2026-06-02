@@ -373,23 +373,31 @@ export function ProjectsView() {
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>New Project</h2>
-              <div className="mode-options">
-              <button className="mode-option" onClick={() => goToMode("create")}>
+            <p className="import-project-copy">
+              Start a blank project or bring an existing project into this workspace.
+            </p>
+            <div className="mode-options-shell">
+              <button className="mode-option mode-option--primary" onClick={() => goToMode("create")}>
                 <span className="mode-option-title">Create Empty Project</span>
                 <span className="mode-option-desc">Start from scratch with a blank Kanqual project.</span>
               </button>
-              <button className="mode-option" onClick={() => goToMode("import")}>
-                <span className="mode-option-title">Import Project</span>
-                <span className="mode-option-desc">Upload a Kanqual JSON backup exported from Project Settings.</span>
-              </button>
-              <button className="mode-option" onClick={() => goToMode("import-encrypted")}>
-                <span className="mode-option-title">Import Encrypted Backup</span>
-                <span className="mode-option-desc">Upload a password-protected Kanqual encrypted backup for safe off-site storage.</span>
-              </button>
-              <button className="mode-option" onClick={() => goToMode("import-refi")}>
-                <span className="mode-option-title">Import REFI-QDA Project</span>
-                <span className="mode-option-desc">Upload a standard .qdpx file from Kanqual, QualCoder, or another QDA tool.</span>
-              </button>
+              <div className="mode-options-group">
+                <div className="mode-options-group-label">Import Existing</div>
+                <div className="mode-options">
+                  <button className="mode-option" onClick={() => goToMode("import")}>
+                    <span className="mode-option-title">Import Project</span>
+                    <span className="mode-option-desc">Upload a Kanqual JSON backup exported from Project Settings.</span>
+                  </button>
+                  <button className="mode-option" onClick={() => goToMode("import-encrypted")}>
+                    <span className="mode-option-title">Import Encrypted Backup</span>
+                    <span className="mode-option-desc">Upload a password-protected Kanqual encrypted backup for safe off-site storage.</span>
+                  </button>
+                  <button className="mode-option" onClick={() => goToMode("import-refi")}>
+                    <span className="mode-option-title">Import REFI-QDA Project</span>
+                    <span className="mode-option-desc">Upload a standard .qdpx file from Kanqual, QualCoder, or another QDA tool.</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="form-actions">
               <button type="button" className="btn" onClick={closeModal}>

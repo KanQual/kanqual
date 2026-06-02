@@ -983,6 +983,21 @@ struct OllamaDocumentProcessingRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct OllamaDocumentChunkProcessingRequest {
+    chunk_text: String,
+    chunk_index: usize,
+    protocol: String,
+    host: String,
+    port: u16,
+    model: String,
+    timeout_seconds: u64,
+    temperature: f64,
+    num_ctx: u32,
+    keep_alive_minutes: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct OllamaDocumentSegmentModelItem {
     segment_type: String,
     speaker_id: Option<String>,
@@ -1024,6 +1039,17 @@ struct OllamaDocumentProcessingResponse {
     model: String,
     base_url: String,
     chunk_count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OllamaDocumentChunkProcessingResponse {
+    processed_content: String,
+    segments: Vec<OllamaDocumentSegmentOutput>,
+    proper_name_candidates: Vec<OllamaDocumentProperNameCandidate>,
+    model: String,
+    base_url: String,
+    chunk_index: usize,
 }
 
 #[derive(Deserialize)]
@@ -2343,6 +2369,14 @@ async fn ensure_backend_setup_http(
             { "name": "model", "type": "text" },
             { "name": "base_url", "type": "text" },
             { "name": "chunk_count", "type": "number" },
+            { "name": "processed_chunk_count", "type": "number" },
+            { "name": "processing_status", "type": "text" },
+            { "name": "processing_error", "type": "text" },
+            { "name": "chunk_manifest_json", "type": "text", "max": 1000000 },
+            { "name": "processing_started_at", "type": "text" },
+            { "name": "processing_completed_at", "type": "text" },
+            { "name": "last_processed_chunk_index", "type": "number" },
+            { "name": "source_content_hash", "type": "text" },
             { "name": "processed_content", "type": "text", "max": 10000000 },
             { "name": "segments_json", "type": "text", "max": 10000000 },
             { "name": "proper_name_candidates_json", "type": "text", "max": 1000000 },
@@ -2367,6 +2401,25 @@ async fn ensure_backend_setup_http(
     let cases = get_collection_by_name(client, token, "cases").await?
         .ok_or_else(|| "The cases collection is missing after setup.".to_string())?;
     let cases_id = value_id(&cases)?;
+    upsert_collection_http(client, token, "project_uploaded_files", serde_json::json!({
+        "fields": [
+            { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+            { "name": "document", "type": "relation", "collectionId": documents_id, "maxSelect": 1 },
+            { "name": "case", "type": "relation", "collectionId": cases_id, "maxSelect": 1 },
+            { "name": "uploaded_file", "type": "file", "required": true, "maxSelect": 1, "maxSize": 104857600, "mimeTypes": [], "thumbs": [], "protected": false },
+            { "name": "original_file_name", "type": "text" },
+            { "name": "mime_type", "type": "text" },
+            { "name": "size_bytes", "type": "number" },
+            { "name": "source_kind", "type": "select", "required": true, "maxSelect": 1, "values": ["document", "case", "other"] },
+            { "name": "status", "type": "select", "required": true, "maxSelect": 1, "values": ["active", "processed", "orphaned", "deleted"] },
+            { "name": "status_history_json", "type": "text", "max": 1000000 },
+            { "name": "content_hash", "type": "text" },
+            { "name": "import_summary_json", "type": "text", "max": 1000000 },
+            { "name": "created_by", "type": "relation", "collectionId": "_pb_users_auth_", "maxSelect": 1 },
+            { "name": "created_by_identifier", "type": "text" },
+            { "name": "deleted_at", "type": "text" }
+        ]
+    }), false).await?;
     upsert_collection_http(client, token, "case_documents", serde_json::json!({
         "fields": [
             { "name": "case", "type": "relation", "collectionId": cases_id, "required": true, "maxSelect": 1 },
@@ -5259,6 +5312,162 @@ async fn process_document_with_ollama(
     })
 }
 
+fn document_processing_system_prompt() -> &'static str {
+    "You are a qualitative research assistant helping process interview transcripts and similar documents.\n\n\
+    Analyze the provided text and split it into labeled segments that together cover the entire text.\n\
+    This may be only one portion of a longer document, so classify each segment based on its content alone.\n\n\
+    Segment types:\n\
+    - \"metadata\": document header information such as title, date, location, participant names, or other framing text before the interview begins\n\
+    - \"question\": a question, prompt, or speaking turn from the interviewer, moderator, or facilitator\n\
+    - \"answer\": a response or speaking turn from an interviewee, participant, or respondent\n\n\
+    Also identify only speaker names that appear in the transcript format itself, meaning real names used as speaker labels or turn labels.\n\
+    Do not identify names mentioned only inside the body text.\n\
+    Do not include generic role words by themselves, such as \"Interviewer\", \"Participant\", or \"Moderator\", unless they are clearly used as actual names in the speaker label.\n\n\
+    Return strict JSON only, with no markdown fences and no extra keys, in exactly this shape:\n\
+    {\"segments\": [{\"segmentType\": \"...\", \"speakerId\": \"...\", \"text\": \"...\"}, ...], \"properNames\": [\"...\", \"...\"]}\n\n\
+    Rules:\n\
+    - The segments must cover the entire text; every character must appear in exactly one segment\n\
+    - Preserve the original text verbatim within each segment; do not rephrase, summarize, or modify wording\n\
+    - speakerId is the speaker label exactly as it appears in the text, for example \"Interviewer\", \"I\", or \"P1\"; use an empty string if not applicable\n\
+    - properNames must be exact text snippets copied from the source text, not paraphrases\n\
+    - properNames should contain only likely real speaker names worth reviewing for anonymization\n\
+    - If a person's real name appears as a speaker label, include it in properNames\n\
+    - Do not include organizations, places, or names that appear only in the spoken text body\n\
+    - If the same name appears multiple times, include it only once in properNames\n\
+    - If the text has no clear interview structure, label everything as \"answer\" segments"
+}
+
+#[tauri::command]
+async fn process_document_chunk_with_ollama(
+    request: OllamaDocumentChunkProcessingRequest,
+) -> Result<OllamaDocumentChunkProcessingResponse, String> {
+    if request.model.trim().is_empty() {
+        return Err("Choose an Ollama model in App Settings before processing a document.".to_string());
+    }
+    let chunk_text = request.chunk_text.trim().to_string();
+    if chunk_text.is_empty() {
+        return Err("This document chunk has no content to process.".to_string());
+    }
+
+    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(request.timeout_seconds.max(600)))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let user_message = format!("Text content:\n{}", chunk_text);
+    let response = client
+        .post(format!("{base_url}/api/chat"))
+        .json(&serde_json::json!({
+            "model": request.model,
+            "stream": false,
+            "messages": [
+                { "role": "system", "content": document_processing_system_prompt() },
+                { "role": "user",   "content": user_message  },
+            ],
+            "options": {
+                "temperature": request.temperature,
+                "num_ctx": request.num_ctx,
+            },
+            "keep_alive": format!("{}m", request.keep_alive_minutes),
+            "format": "json",
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!(
+                    "Ollama timed out while processing this document at {base_url}. Transcript processing can take several minutes, especially for longer files."
+                )
+            } else {
+                format!("Could not reach Ollama at {base_url}: {e}")
+            }
+        })?
+        .error_for_status()
+        .map_err(|e| format!("Ollama returned an error on chunk {}: {e}", request.chunk_index + 1))?;
+
+    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
+    let raw = payload
+        .get("message").and_then(|m| m.get("content")).and_then(Value::as_str)
+        .map(str::trim).filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("Ollama returned an empty response for chunk {}.", request.chunk_index + 1))?;
+    let json_part = extract_json_object(raw).unwrap_or(raw);
+    let parsed: OllamaDocumentSegmentsModelResponse = serde_json::from_str(json_part)
+        .map_err(|e| format!("Could not parse Ollama's response for chunk {}: {e}", request.chunk_index + 1))?;
+
+    if parsed.segments.is_empty() {
+        return Err(format!("Ollama returned no segments for chunk {}.", request.chunk_index + 1));
+    }
+
+    let mut processed_content = String::new();
+    let mut segments: Vec<OllamaDocumentSegmentOutput> = Vec::new();
+    for seg in parsed.segments.into_iter() {
+        let text = seg.text.unwrap_or_default();
+        let text = text.trim();
+        if text.is_empty() { continue; }
+        if !processed_content.is_empty() { processed_content.push_str("\n\n"); }
+        let start_offset = processed_content.len();
+        processed_content.push_str(text);
+        let end_offset = processed_content.len();
+        let segment_type = match seg.segment_type.trim().to_ascii_lowercase().as_str() {
+            "metadata" => "metadata",
+            "question" => "question",
+            _ => "answer",
+        };
+        segments.push(OllamaDocumentSegmentOutput {
+            segment_type: segment_type.to_string(),
+            speaker_id: seg.speaker_id.unwrap_or_default().trim().to_string(),
+            start_offset,
+            end_offset,
+            sort_order: segments.len(),
+            text: text.to_string(),
+            chunk_index: request.chunk_index,
+        });
+    }
+    if segments.is_empty() {
+        return Err(format!("Ollama returned no segments for chunk {}.", request.chunk_index + 1));
+    }
+
+    let mut proper_name_map: HashMap<String, String> = HashMap::new();
+    if let Some(proper_names) = parsed.proper_names {
+        for candidate in proper_names {
+            if let Some(normalized) = normalize_proper_name_candidate(&candidate) {
+                proper_name_map
+                    .entry(normalized.to_ascii_lowercase())
+                    .or_insert(normalized);
+            }
+        }
+    }
+    for seg in &segments {
+        if looks_like_named_speaker_label(&seg.speaker_id) {
+            let normalized = seg.speaker_id.trim().to_string();
+            proper_name_map
+                .entry(normalized.to_ascii_lowercase())
+                .or_insert(normalized);
+        }
+    }
+    let proper_name_candidates = proper_name_map
+        .into_values()
+        .map(|text| {
+            let source_type = if segments.iter().any(|seg| seg.speaker_id.trim().eq_ignore_ascii_case(&text)) {
+                "speaker".to_string()
+            } else {
+                "text".to_string()
+            };
+            OllamaDocumentProperNameCandidate { text, source_type }
+        })
+        .collect();
+
+    Ok(OllamaDocumentChunkProcessingResponse {
+        processed_content,
+        segments,
+        proper_name_candidates,
+        model: request.model,
+        base_url,
+        chunk_index: request.chunk_index,
+    })
+}
+
 #[tauri::command]
 async fn generate_code_decomposition_with_ollama(
     request: OllamaCodeSummaryRequest,
@@ -5834,6 +6043,7 @@ pub fn run() {
             generate_attribute_value_suggestions_with_ollama,
             cancel_attribute_suggestion_run,
             process_document_with_ollama,
+            process_document_chunk_with_ollama,
             generate_code_conceptual_summary_with_ollama,
             generate_most_typical_annotation_with_ollama,
             generate_code_decomposition_with_ollama,

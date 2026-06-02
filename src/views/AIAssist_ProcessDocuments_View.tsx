@@ -1,73 +1,21 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import type { RecordModel } from "pocketbase";
 import { useStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
-
-type TranscriptProcessingSegment = {
-  segmentType: "metadata" | "question" | "answer";
-  speakerId: string;
-  startOffset: number;
-  endOffset: number;
-  sortOrder: number;
-  text: string;
-  chunkIndex: number;
-};
+import {
+  collectSpeakerSummaries,
+  DEFAULT_PROCESSED_DOCUMENT_REVIEW_LENSES,
+  getFirstEnabledProcessedReviewLens,
+  PROCESSED_DOCUMENT_REVIEW_COLLECTION,
+  PROCESSED_DOCUMENT_REVIEW_LENSES as REVIEW_LENSES,
+  segmentContainsTimestamp,
+  toProcessedReviewRecord,
+  type ProcessedDocumentReviewLensId as ReviewLensId,
+  type ProcessedDocumentReviewRecord,
+  type TranscriptNameCandidate,
+  type TranscriptProcessingSegment,
+} from "../lib/processedDocumentReviews";
 
 type SegmentType = TranscriptProcessingSegment["segmentType"];
-
-type TranscriptNameCandidate = {
-  text: string;
-  sourceType: string;
-};
-
-type ReviewLensId = "speaker-segmentation" | "named-entity-extraction";
-
-type ReviewLens = {
-  id: ReviewLensId;
-  label: string;
-  description: string;
-};
-
-type SpeakerSummary = {
-  id: string;
-  turnCount: number;
-  questionCount: number;
-  answerCount: number;
-};
-
-type ProcessedDocumentReviewRecord = {
-  id: string;
-  projectId: string;
-  documentId: string;
-  documentName: string;
-  filePath: string;
-  status: "pending_review" | "reviewed";
-  processedContent: string;
-  segments: TranscriptProcessingSegment[];
-  properNameCandidates: TranscriptNameCandidate[];
-  enabledReviewLenses: Record<ReviewLensId, boolean>;
-  model: string;
-  baseUrl: string;
-  chunkCount: number;
-  exportedToProject: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-const REVIEW_LENSES: ReviewLens[] = [
-  {
-    id: "speaker-segmentation",
-    label: "Identify elements",
-    description: "Identify metadata, speakers, and roles in the transcript.",
-  },
-  {
-    id: "named-entity-extraction",
-    label: "Named entity extraction",
-    description: "Show likely speaker-name candidates that may need review or anonymization.",
-  },
-];
-
-const REVIEW_COLLECTION = "processed_document_reviews";
 
 function describeProcessingError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -82,101 +30,6 @@ function describeProcessingError(error: unknown): string {
     }
   }
   return "Could not process this transcript.";
-}
-
-function fmtDate(iso: string): string {
-  if (!iso) return "-";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "-";
-  }
-}
-void fmtDate;
-
-function segmentContainsTimestamp(segment: TranscriptProcessingSegment): boolean {
-  const patterns = [
-    /\b\d{1,2}:\d{2}(?::\d{2})?\b/g,
-    /\[\d{1,2}:\d{2}(?::\d{2})?\]/g,
-    /\b\d{1,2}\.\d{2}(?::\d{2})?\b/g,
-  ];
-  return patterns.some((pattern) => pattern.test(segment.text));
-}
-
-function collectSpeakerSummaries(segments: TranscriptProcessingSegment[]): SpeakerSummary[] {
-  const bySpeaker = new Map<string, SpeakerSummary>();
-  for (const segment of segments) {
-    const speaker = segment.speakerId.trim() || "Unlabeled";
-    const current = bySpeaker.get(speaker) ?? {
-      id: speaker,
-      turnCount: 0,
-      questionCount: 0,
-      answerCount: 0,
-    };
-    current.turnCount += 1;
-    if (segment.segmentType === "question") current.questionCount += 1;
-    if (segment.segmentType === "answer") current.answerCount += 1;
-    bySpeaker.set(speaker, current);
-  }
-  return [...bySpeaker.values()].sort(
-    (left, right) => right.turnCount - left.turnCount || left.id.localeCompare(right.id),
-  );
-}
-
-function parseJsonValue<T>(value: unknown, fallback: T): T {
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function normalizeReviewLenses(value: unknown): Record<ReviewLensId, boolean> {
-  const fallback: Record<ReviewLensId, boolean> = {
-    "speaker-segmentation": true,
-    "named-entity-extraction": true,
-  };
-  if (!value || typeof value !== "object") return fallback;
-  return {
-    "speaker-segmentation":
-      typeof Reflect.get(value, "speaker-segmentation") === "boolean"
-        ? Boolean(Reflect.get(value, "speaker-segmentation"))
-        : fallback["speaker-segmentation"],
-    "named-entity-extraction":
-      typeof Reflect.get(value, "named-entity-extraction") === "boolean"
-        ? Boolean(Reflect.get(value, "named-entity-extraction"))
-        : fallback["named-entity-extraction"],
-  };
-}
-
-function toProcessedReviewRecord(record: RecordModel): ProcessedDocumentReviewRecord {
-  return {
-    id: record.id,
-    projectId: String(record.project ?? ""),
-    documentId: String(record.document ?? ""),
-    documentName: String(record.document_name ?? ""),
-    filePath: String(record.file_path ?? ""),
-    status: record.status === "reviewed" ? "reviewed" : "pending_review",
-    processedContent: String(record.processed_content ?? ""),
-    segments: parseJsonValue<TranscriptProcessingSegment[]>(record.segments_json, []),
-    properNameCandidates: parseJsonValue<TranscriptNameCandidate[]>(record.proper_name_candidates_json, []),
-    enabledReviewLenses: normalizeReviewLenses(
-      parseJsonValue<Record<string, boolean> | null>(record.enabled_review_lenses_json, null),
-    ),
-    model: String(record.model ?? ""),
-    baseUrl: String(record.base_url ?? ""),
-    chunkCount: Number(record.chunk_count ?? 0),
-    exportedToProject: Boolean(record.exported_to_project),
-    createdAt: String(record.created ?? ""),
-    updatedAt: String(record.updated ?? ""),
-  };
 }
 
 function ReviewResultsPanel({
@@ -383,8 +236,7 @@ export function AIAssistProcessDocumentsView() {
   const [selectedProcessDocumentIds, setSelectedProcessDocumentIds] = useState<string[]>([]);
   const [processError, setProcessError] = useState("");
   const [processReviewLenses, setProcessReviewLenses] = useState<Record<ReviewLensId, boolean>>({
-    "speaker-segmentation": true,
-    "named-entity-extraction": true,
+    ...DEFAULT_PROCESSED_DOCUMENT_REVIEW_LENSES,
   });
   const [reviewRecords, setReviewRecords] = useState<ProcessedDocumentReviewRecord[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
@@ -414,10 +266,7 @@ export function AIAssistProcessDocumentsView() {
       setSelectedProcessDocumentIds([]);
       setProcessError("");
       if (!processBusy) {
-        setProcessReviewLenses({
-          "speaker-segmentation": true,
-          "named-entity-extraction": true,
-        });
+        setProcessReviewLenses({ ...DEFAULT_PROCESSED_DOCUMENT_REVIEW_LENSES });
       }
     }
   }, [processModalOpen, processBusy]);
@@ -485,7 +334,7 @@ export function AIAssistProcessDocumentsView() {
     setLoadingReviews(true);
     setReviewError("");
     try {
-      const records = await pb.collection(REVIEW_COLLECTION).getFullList({
+      const records = await pb.collection(PROCESSED_DOCUMENT_REVIEW_COLLECTION).getFullList({
         filter: `project="${activeProject.id}"&&deleted_at=""`,
         sort: "-updated",
       });
@@ -518,7 +367,7 @@ export function AIAssistProcessDocumentsView() {
     });
   }
 
-  async function handleRunProcessingSelection() {
+  async function handleRunProcessingSelection(options?: { restart?: boolean }) {
     if (!activeProject || selectedProcessDocuments.length === 0 || !canUseAiProcessDocuments) return;
     setProcessError("");
     try {
@@ -526,6 +375,9 @@ export function AIAssistProcessDocumentsView() {
         projectId: activeProject.id,
         documentIds: selectedProcessDocuments.map((document) => document.id),
         reviewLenses: processReviewLenses,
+        restartDocumentIds: options?.restart
+          ? selectedProcessDocuments.map((document) => document.id)
+          : undefined,
       });
       setProcessModalOpen(false);
     } catch (nextError) {
@@ -537,10 +389,7 @@ export function AIAssistProcessDocumentsView() {
   function openReviewRecord(record: ProcessedDocumentReviewRecord) {
     setSelectedReviewRecord(record);
     setSelectedReviewSegments(record.segments);
-    const firstEnabledLens =
-      REVIEW_LENSES.find((lens) => record.enabledReviewLenses[lens.id])?.id ??
-      "speaker-segmentation";
-    setSelectedReviewActiveTab(firstEnabledLens);
+    setSelectedReviewActiveTab(getFirstEnabledProcessedReviewLens(record.enabledReviewLenses));
     setSaveReviewError("");
   }
 
@@ -549,7 +398,7 @@ export function AIAssistProcessDocumentsView() {
     setSaveReviewBusy(true);
     setSaveReviewError("");
     try {
-      await pb.collection(REVIEW_COLLECTION).update(selectedReviewRecord.id, {
+      await pb.collection(PROCESSED_DOCUMENT_REVIEW_COLLECTION).update(selectedReviewRecord.id, {
         segments_json: JSON.stringify(selectedReviewSegments),
         status: "reviewed",
       });
@@ -786,21 +635,31 @@ export function AIAssistProcessDocumentsView() {
                                   processedReview
                                     ? processedReview.status === "reviewed"
                                       ? " memo-sel-item-status-badge--reviewed"
-                                      : " memo-sel-item-status-badge--pending"
+                                      : processedReview.processingStatus === "partial" || processedReview.processingStatus === "error"
+                                        ? " memo-sel-item-status-badge--pending"
+                                        : " memo-sel-item-status-badge--pending"
                                     : " memo-sel-item-status-badge--none"
                                 }`}
                                 title={
                                   processedReview
                                     ? processedReview.status === "reviewed"
                                       ? "A reviewed processed version is already saved for this document"
-                                      : "A processed version is already saved and still pending review"
+                                      : processedReview.processingStatus === "partial"
+                                        ? `A partial processed version is saved (${processedReview.processedChunkCount} of ${processedReview.chunkCount} chunks completed).`
+                                        : processedReview.processingStatus === "error"
+                                          ? processedReview.processingError || "Processing failed before completion."
+                                          : "A processed version is already saved and still pending review"
                                     : "No processed version is currently saved for this document"
                                 }
                               >
                                 {processedReview
                                   ? processedReview.status === "reviewed"
                                     ? "Reviewed"
-                                    : "Pending"
+                                    : processedReview.processingStatus === "partial"
+                                      ? "Partial"
+                                      : processedReview.processingStatus === "error"
+                                        ? "Failed"
+                                        : "Pending"
                                   : "None"}
                               </span>
                             </span>
@@ -816,7 +675,7 @@ export function AIAssistProcessDocumentsView() {
                     <div>
                       <div className="surface-card-title">Settings</div>
                       <p className="surface-card-description">
-                        Choose which review outputs to save with each processed document.
+                        Choose which review outputs to save with each processed document. Standard runs resume compatible partial checkpoints automatically.
                       </p>
                     </div>
                   </div>
@@ -849,6 +708,9 @@ export function AIAssistProcessDocumentsView() {
                       </div>
                       <div className="ai-segments-search-copy">
                         {documentProcessingStatus.currentDocumentName || "Selected documents"} are being processed in the background.
+                        {documentProcessingStatus.currentChunkIndex && documentProcessingStatus.currentChunkTotal
+                          ? ` Chunk ${documentProcessingStatus.currentChunkIndex} of ${documentProcessingStatus.currentChunkTotal}.`
+                          : ""}
                       </div>
                     </div>
                   </div>
@@ -868,11 +730,19 @@ export function AIAssistProcessDocumentsView() {
               </button>
               <button
                 type="button"
+                className="btn"
+                disabled={processBusy || selectedProcessDocumentIds.length === 0}
+                onClick={() => void handleRunProcessingSelection({ restart: true })}
+              >
+                {processBusy ? "Processing" : "Restart Selected"}
+              </button>
+              <button
+                type="button"
                 className="btn btn--primary"
                 disabled={processBusy || selectedProcessDocumentIds.length === 0}
                 onClick={() => void handleRunProcessingSelection()}
               >
-                {processBusy ? "Processing" : "Run"}
+                {processBusy ? "Processing" : "Process / Resume"}
               </button>
             </div>
           </div>

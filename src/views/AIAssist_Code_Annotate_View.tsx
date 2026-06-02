@@ -4352,19 +4352,23 @@ export function AIAnalyzeView({
           onClick={() => setHelpOpen(true)}
           title="Show Help"
           aria-label="Show Help"
-        >
-          <HelpIcon className="users-help-icon" />
-        </button>
+      >
+        <HelpIcon className="users-help-icon" />
+      </button>
       </div>
-      {onBack && (
-        <button className="btn" onClick={onBack}>Back to Analyses</button>
-      )}
     </header>
   );
+
+  const analyzeBackRow = onBack ? (
+    <div className="workspace-back-row">
+      <button className="btn" onClick={onBack}>Back to Analyses</button>
+    </div>
+  ) : null;
 
   if (!activeProject) {
     return (
       <div className="view">
+        {analyzeBackRow}
         {analyzeHeader}
         <div className="empty-state"><p>Open a project first.</p></div>
         {analyzeHelpModal}
@@ -4375,6 +4379,7 @@ export function AIAnalyzeView({
   if (!canUseAiAnalyzeTools) {
     return (
       <div className="view">
+        {analyzeBackRow}
         {analyzeHeader}
         <div className="empty-state"><p>You do not have permission to use AI Assist analyze tools for this project.</p></div>
         {analyzeHelpModal}
@@ -4385,6 +4390,7 @@ export function AIAnalyzeView({
   if (!aiAssistEnabledForProject) {
     return (
       <div className="view">
+        {analyzeBackRow}
         {analyzeHeader}
         <div className="empty-state"><p>Enable AI Assist in Project Settings before using AI analysis tools.</p></div>
         {analyzeHelpModal}
@@ -4394,6 +4400,11 @@ export function AIAnalyzeView({
 
   return (
       <div className="view annotate-view ai-assisted-coding-annotate-view">
+        {onBack && (
+          <div className="workspace-back-row workspace-back-row--annotate">
+            <button className="btn" onClick={onBack}>Back to Analyses</button>
+          </div>
+        )}
         <div className="annotate-back-bar">
           <div className="users-title-wrap">
             <h1>Analyze Codes</h1>
@@ -4407,9 +4418,6 @@ export function AIAnalyzeView({
               <HelpIcon className="users-help-icon" />
             </button>
           </div>
-          {onBack && (
-            <button className="btn" onClick={onBack}>Back to Analyses</button>
-          )}
         </div>
         {analyzeHelpModal}
         <div
@@ -4480,7 +4488,6 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
     annotations,
     codes,
     activeDocument,
-    setActiveDocument,
     documentLockConflict,
     clearDocumentLockConflict,
     aiCodingRelevantSegmentsSessions,
@@ -4638,6 +4645,11 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
 
   return (
     <div className="view annotate-view ai-assisted-coding-annotate-view">
+      {onBack && (
+        <div className="workspace-back-row workspace-back-row--annotate">
+          <button className="btn" onClick={() => { clearDocumentLockConflict(); onBack(); }}>Back to Documents</button>
+        </div>
+      )}
       <div className="annotate-back-bar">
         <div className="view-title-with-help">
           <h1>AI Assist Coding View</h1>
@@ -4651,9 +4663,6 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
-        {onBack && (
-          <button className="btn" onClick={onBack}>← Code Documents</button>
-        )}
       </div>
       {codingHelpOpen && (
         <div className="modal-overlay" onClick={() => setCodingHelpOpen(false)}>
@@ -4778,17 +4787,6 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
                 </p>
               </>
             )}
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button
-                className="btn btn--primary"
-                onClick={() => {
-                  clearDocumentLockConflict();
-                  setActiveDocument(null);
-                }}
-              >
-                Back to AI Assisted Coding
-              </button>
-            </div>
           </div>
         </div>
       )}

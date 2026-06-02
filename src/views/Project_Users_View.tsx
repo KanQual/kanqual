@@ -136,7 +136,7 @@ function UserDetail({
 
   return (
     <div className="view user-detail">
-      <div className="user-detail-topbar">
+      <div className="workspace-back-row workspace-back-row--split">
         <button className="btn user-detail-back" onClick={onBack}>
           Back to Users
         </button>

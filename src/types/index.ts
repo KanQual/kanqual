@@ -18,6 +18,37 @@ export interface Document {
   importedAt: string;
 }
 
+export interface ProjectUploadedFile {
+  id: string;
+  projectId: string;
+  documentId: string | null;
+  caseId: string | null;
+  uploadedFile: string;
+  originalFileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  sourceKind: "document" | "case" | "other";
+  status: "active" | "processed" | "orphaned" | "deleted";
+  statusHistory: Array<{
+    at: string;
+    fromStatus: "active" | "processed" | "orphaned" | "deleted" | null;
+    toStatus: "active" | "processed" | "orphaned" | "deleted";
+    reason: string;
+    actorUserId: string | null;
+    actorIdentifier: string;
+    documentId?: string | null;
+    caseId?: string | null;
+  }>;
+  statusHistoryJson: string;
+  contentHash: string;
+  importSummaryJson: string;
+  createdBy?: string | null;
+  createdByIdentifier?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string;
+}
+
 export interface Case {
   id: string;
   projectId: string;

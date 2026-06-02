@@ -385,10 +385,12 @@ export function MemoEditorView({
 
   return (
     <div className="view doc-detail-view">
-      <div className="case-detail-topbar">
+      <div className="workspace-back-row">
         <button className="btn" onClick={onBack}>
-          {backLabel ?? (isEdit ? "← Back to Memo" : "← Back to Memos")}
+          {backLabel ?? "Back to Memos"}
         </button>
+      </div>
+      <div className="case-detail-topbar">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           <button
@@ -1175,8 +1177,10 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
 
   return (
     <div className="view doc-detail-view">
+      <div className="workspace-back-row">
+        <button className="btn" onClick={onBack}>Back to Memos</button>
+      </div>
       <div className="case-detail-topbar">
-        <button className="btn" onClick={onBack}>← Back to Memos</button>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={() => setShowExportModal(true)}>Export</button>
           <button

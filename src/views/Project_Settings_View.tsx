@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -49,7 +49,8 @@ import {
   ProjectLogTable,
   PROJECT_LOG_ACTION_LABELS,
 } from "./Project_Log_View";
-import type { PendingImportedUser, Project, ProjectLogEntry } from "../types";
+import type { PendingImportedUser, Project, ProjectLogEntry, ProjectUploadedFile } from "../types";
+import { PROJECT_UPLOADED_FILES_COLLECTION } from "../lib/projectUploadedFiles";
 import { HelpIcon } from "../components/AppIcons";
 
 const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
@@ -59,6 +60,34 @@ const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
   { cmd: "insertUnorderedList", label: "UL", title: "Bullet list" },
   { cmd: "insertOrderedList", label: "1.", title: "Numbered list" },
 ];
+
+type SettingsModalSectionProps = {
+  title: string;
+  description: ReactNode;
+  children?: ReactNode;
+  tone?: "default" | "warning" | "danger";
+};
+
+function SettingsModalSection({
+  title,
+  description,
+  children,
+  tone = "default",
+}: SettingsModalSectionProps) {
+  return (
+    <section className="app-settings-modal-section">
+      <div className={`app-settings-modal-section-header app-settings-modal-section-header--${tone}`}>
+        <h3>{title}</h3>
+        <div className="app-settings-modal-section-description">{description}</div>
+      </div>
+      {children ? <div className="app-settings-modal-section-body">{children}</div> : null}
+    </section>
+  );
+}
+
+function shouldShowProjectAutoSaveNotice(sectionId: string) {
+  return ["ai-assist", "document-import"].includes(sectionId);
+}
 
 function restoredUserNotice(summary: {
   importedUsers: Array<{ email: string; temporaryPassword?: string; created: boolean }>;
@@ -254,6 +283,7 @@ export function ProjectSettingsView() {
     updateProject,
     projects,
     documents,
+    projectUploadedFiles,
     cases,
     codes,
     annotations,
@@ -270,6 +300,7 @@ export function ProjectSettingsView() {
     updateProjectAiAssistSettings,
     updateProjectDocumentImportSettings,
     startProjectEmbeddingBuild,
+    deleteProjectUploadedFile,
     isLocalWorkspace,
   } = useStore();
   const [exporting, setExporting] = useState<"json" | "xlsx" | "qdpx" | "encrypted" | null>(null);
@@ -291,7 +322,6 @@ export function ProjectSettingsView() {
   const [backupBusy, setBackupBusy] = useState<"manual" | "settings" | "restore" | "delete" | null>(null);
   const [backupError, setBackupError] = useState("");
   const [backupNotice, setBackupNotice] = useState("");
-  const [backupSettingsOpen, setBackupSettingsOpen] = useState(false);
   const [retentionDraft, setRetentionDraft] = useState<BackupRetentionSettings>(DEFAULT_BACKUP_RETENTION);
   const [automaticIntervalDraft, setAutomaticIntervalDraft] = useState(DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES);
   const [backupStatusNow, setBackupStatusNow] = useState(() => new Date());
@@ -316,6 +346,10 @@ export function ProjectSettingsView() {
   const [aiAssistRequirementOpen, setAiAssistRequirementOpen] = useState(false);
   const [aiAssistBuildOpen, setAiAssistBuildOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [uploadedFilesNotice, setUploadedFilesNotice] = useState("");
+  const [uploadedFilesError, setUploadedFilesError] = useState("");
+  const [uploadedFileDeleteTarget, setUploadedFileDeleteTarget] = useState<ProjectUploadedFile | null>(null);
+  const [uploadedFileDeleteBusy, setUploadedFileDeleteBusy] = useState(false);
   const aiAssistBuildBusy =
     projectEmbeddingBuildStatus?.phase === "running" || projectEmbeddingBuildStatus?.phase === "cancelling";
   const canEditProjectMetadata = canCurrentUser("editProjectMetadata");
@@ -331,13 +365,40 @@ export function ProjectSettingsView() {
     || canDeleteProjectEmbeddings;
   const canExchangeCodebook =
     canCurrentUser("createCode") || canCurrentUser("editCode") || canExportProject;
+  const canManageUploadedFiles = canCurrentUser("manageProjectUploadedFiles");
   const canAccessProjectSettings =
     canEditProjectMetadata
     || canExportProject
     || canRestoreProjectBackup
     || canManageBackups
     || canManageProjectAiAssist
+    || canManageUploadedFiles
     || canExchangeCodebook;
+
+  const visibleUploadedFiles = projectUploadedFiles
+    .filter((file) => file.status !== "deleted")
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+
+  function uploadedFileUrl(file: ProjectUploadedFile): string {
+    return `${pb.baseURL}/api/files/${PROJECT_UPLOADED_FILES_COLLECTION}/${file.id}/${file.uploadedFile}`;
+  }
+
+  async function handleDeleteUploadedFile() {
+    if (!uploadedFileDeleteTarget) return;
+    setUploadedFilesError("");
+    setUploadedFilesNotice("");
+    setUploadedFileDeleteBusy(true);
+    try {
+      await deleteProjectUploadedFile(uploadedFileDeleteTarget.id, uploadedFileDeleteTarget.originalFileName);
+      setUploadedFilesNotice(`Deleted retained source file "${uploadedFileDeleteTarget.originalFileName}".`);
+      setUploadedFileDeleteTarget(null);
+    } catch (error) {
+      console.error("Failed to delete retained source file:", error);
+      setUploadedFilesError("Could not delete the retained source file.");
+    } finally {
+      setUploadedFileDeleteBusy(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -662,7 +723,7 @@ export function ProjectSettingsView() {
     }
   }
 
-  async function openBackupSettings() {
+  async function refreshBackupSettingsDrafts() {
     if (!activeProject || !canManageBackups) return;
     setBackupError("");
     try {
@@ -676,7 +737,6 @@ export function ProjectSettingsView() {
       console.error("Failed to load backup policy:", error);
       setBackupError("Could not load backup settings.");
     }
-    setBackupSettingsOpen(true);
   }
 
   async function handleBackupSettingsSave(e: React.SyntheticEvent<HTMLFormElement>) {
@@ -696,7 +756,6 @@ export function ProjectSettingsView() {
         "project.backup.settings",
         `Updated backup settings (interval ${automaticIntervalDraft} min, hourly ${retentionDraft.hourlyHours}h, daily ${retentionDraft.dailyDays}d, weekly ${retentionDraft.weeklyWeeks}w)`,
       );
-      setBackupSettingsOpen(false);
       setBackupNotice("Backup settings saved.");
     } catch (error) {
       console.error("Backup settings update failed:", error);
@@ -1014,50 +1073,104 @@ export function ProjectSettingsView() {
 
   const projectSettingsCards = [
     {
-      id: "ai-assist",
-      title: "AI Assist",
-      description: "Enable or disable AI assistance for this project and choose which types of help are allowed.",
-      visible: canManageProjectAiAssist,
-    },
-    {
       id: "details",
       title: "Project Details",
       description: "Update the project name and read-only description shown on Project Home.",
       visible: canEditProjectMetadata,
+      tone: "default",
     },
     {
       id: "document-import",
       title: "Document Import",
       description: "Set shared defaults for how newly imported documents are saved into this project.",
       visible: canEditProjectMetadata,
+      tone: "default",
+    },
+    {
+      id: "ai-assist",
+      title: "AI Assist",
+      description: "Turn project AI Assist on or off and manage the embeddings it depends on.",
+      visible: canManageProjectAiAssist,
+      tone: "ai",
+    },
+    {
+      id: "uploaded-files",
+      title: "Uploaded Source Files",
+      description: "Review retained uploaded files and explicitly delete them without affecting derived documents or cases.",
+      visible: canManageUploadedFiles,
+      tone: "default",
+    },
+    {
+      id: "backups",
+      title: "Project Backups",
+      description: "Create backups, review retention, and restore a new copy of the project when needed.",
+      visible: canManageBackups || canRestoreProjectBackup,
+      tone: "admin",
     },
     {
       id: "log",
       title: "Project Log",
       description: "Review project activity and audit changes made across the project.",
       visible: canAccessProjectSettings,
-    },
-    {
-      id: "backups",
-      title: "Project Backups",
-      description: "Create, review, restore, and manage automatic and manual project backups.",
-      visible: canManageBackups || canRestoreProjectBackup,
+      tone: "default",
     },
     {
       id: "export",
       title: "Project Export",
-      description: "Create a complete project backup or export workbook for review and migration.",
+      description: "Export the project for review, migration, or secure off-device storage.",
       visible: canExportProject,
+      tone: "network",
     },
     {
       id: "codebook",
       title: "Codebook Exchange",
       description: "Import or export the code hierarchy using the REFI-QDA Codebook standard.",
       visible: canExchangeCodebook,
+      tone: "default",
     },
   ] as const;
 
   const visibleProjectSettingsCards = projectSettingsCards.filter((card) => card.visible);
+  const projectSettingsCardById = new Map(visibleProjectSettingsCards.map((card) => [card.id, card]));
+  const projectSettingsSectionDefs = [
+    {
+      id: "setup",
+      eyebrow: "Project Setup",
+      title: "Manage the shared defaults that shape this project's day-to-day work.",
+      description: "Start here for project metadata, default import behavior, and project-level AI Assist controls.",
+      cardIds: ["details", "document-import", "ai-assist"],
+    },
+    {
+      id: "project-data",
+      eyebrow: "Project Data",
+      title: "Review the files, backups, and audit history that belong to this project.",
+      description: "These tools help you manage retained source files, backup snapshots, and project activity over time.",
+      cardIds: ["uploaded-files", "backups", "log"],
+    },
+    {
+      id: "exchange",
+      eyebrow: "Exchange",
+      title: "Move project materials into or out of Kanqual.",
+      description: "Use these cards when you need to export the project or exchange only the shared code hierarchy.",
+      cardIds: ["export", "codebook"],
+    },
+  ] satisfies Array<{
+    id: string;
+    eyebrow: string;
+    title: string;
+    description: string;
+    cardIds: Array<(typeof projectSettingsCards)[number]["id"]>;
+  }>;
+
+  const projectSettingsSections = projectSettingsSectionDefs
+    .map((section) => ({
+      ...section,
+      cards: section.cardIds.flatMap((cardId) => {
+        const card = projectSettingsCardById.get(cardId);
+        return card ? [card] : [];
+      }),
+    }))
+    .filter((section) => section.cards.length > 0);
   const activeProjectSettingsCard = visibleProjectSettingsCards.find((card) => card.id === activeProjectSettingsModal) ?? null;
 
   function renderProjectSettingsModalBody(sectionId: string) {
@@ -1096,34 +1209,35 @@ export function ProjectSettingsView() {
                     ? "No local project embeddings have been built yet."
                     : "No host project embeddings have been built yet.";
         return (
-          <>
+          <div className="app-settings-modal-sections">
             {aiAssistError && <div className="form-error project-settings-error">{aiAssistError}</div>}
             {aiAssistNotice && <div className="settings-success project-settings-success">{aiAssistNotice}</div>}
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Enable AI assistance</strong>
-                <small>Turn project-level AI help on or off for everyone working in this project.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={projectAiAssistSettings.enabled}
-                disabled={aiAssistBuildBusy || !canEnableProjectAiAssist}
-                onChange={(event) => void handleAiAssistEnabledChange(event.target.checked)}
-              />
-            </label>
+            <SettingsModalSection
+              title="Project AI Assist"
+              description="Turn project-level AI help on or off for everyone working in this project."
+            >
+              <label className="settings-toggle-row">
+                <span>
+                  <strong>Enable AI assistance</strong>
+                  <small>When disabled, project AI Assist features stay off even if the device is configured for AI Assist.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={projectAiAssistSettings.enabled}
+                  disabled={aiAssistBuildBusy || !canEnableProjectAiAssist}
+                  onChange={(event) => void handleAiAssistEnabledChange(event.target.checked)}
+                />
+              </label>
+            </SettingsModalSection>
 
-            <div className="settings-section settings-section--nested" style={{ marginTop: 16 }}>
-              <div className="settings-section-header">
-                <div>
-                  <h2 className="settings-section-title">Project Embeddings</h2>
-                  <p className="settings-section-desc">
-                    {isLocalWorkspace
-                      ? "Status of this project's local embeddings for AI Assist retrieval."
-                      : "Status of this project's host embeddings for AI Assist retrieval."}
-                  </p>
-                </div>
-              </div>
-
+            <SettingsModalSection
+              title="Project Embeddings"
+              description={
+                isLocalWorkspace
+                  ? "Review the status of this project's local embeddings for AI Assist retrieval and rebuild them when needed."
+                  : "Review the status of this project's host embeddings for AI Assist retrieval and rebuild them when needed."
+              }
+            >
               <div className="app-settings-stats ai-assist-embedding-stats">
                 <div className="app-settings-stat-card">
                   <strong>{embeddingStatusLabel}</strong>
@@ -1183,245 +1297,424 @@ export function ProjectSettingsView() {
                   You can view project embedding status, but you do not have permission to rebuild or delete embeddings.
                 </div>
               )}
-            </div>
-          </>
+            </SettingsModalSection>
+          </div>
         );
         }
       case "details":
         return (
-          <div className="project-details-card">
-            <div>
-              <div className="project-details-name">{activeProject!.name}</div>
-              {hasHtmlText(activeProject!.description) ? (
-                <div
-                  className="project-details-description rich-description"
-                  dangerouslySetInnerHTML={{ __html: activeProject!.description }}
-                />
-              ) : (
-                <p className="project-details-description project-details-description--empty">
-                  No project description has been added yet.
-                </p>
-              )}
-            </div>
-            <button className="btn btn--primary" onClick={openDetailsModal}>
-              Edit Project Details
-            </button>
+          <div className="app-settings-modal-sections">
+            <SettingsModalSection
+              title="Current Details"
+              description="Review the current project name and description before opening the editor."
+            >
+              <div className="project-details-card">
+                <div>
+                  <div className="project-details-name">{activeProject!.name}</div>
+                  {hasHtmlText(activeProject!.description) ? (
+                    <div
+                      className="project-details-description rich-description"
+                      dangerouslySetInnerHTML={{ __html: activeProject!.description }}
+                    />
+                  ) : (
+                    <p className="project-details-description project-details-description--empty">
+                      No project description has been added yet.
+                    </p>
+                  )}
+                </div>
+                <button className="btn btn--primary" onClick={openDetailsModal}>
+                  Edit Project Details
+                </button>
+              </div>
+            </SettingsModalSection>
           </div>
         );
       case "document-import":
         return (
-          <>
+          <div className="app-settings-modal-sections">
             {documentImportError && <div className="form-error project-settings-error">{documentImportError}</div>}
             {documentImportNotice && <div className="settings-success project-settings-success">{documentImportNotice}</div>}
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Store original filename</strong>
-                <small>Use the uploaded filename as stored document metadata by default for everyone importing into this project.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={projectDocumentImportSettings.storeOriginalFileName}
-                onChange={(event) => void handleProjectDocumentImportSettingsChange({
-                  storeOriginalFileName: event.target.checked,
-                })}
-              />
-            </label>
-          </>
+            <SettingsModalSection
+              title="Shared Import Defaults"
+              description="Control the default metadata behavior everyone should use when importing new documents into this project."
+            >
+              <label className="settings-toggle-row">
+                <span>
+                  <strong>Store original filename</strong>
+                  <small>Use the uploaded filename as stored document metadata by default for everyone importing into this project.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={projectDocumentImportSettings.storeOriginalFileName}
+                  onChange={(event) => void handleProjectDocumentImportSettingsChange({
+                    storeOriginalFileName: event.target.checked,
+                  })}
+                />
+              </label>
+            </SettingsModalSection>
+          </div>
+        );
+      case "uploaded-files":
+        return (
+          <div className="app-settings-modal-sections">
+            {uploadedFilesError && <div className="form-error project-settings-error">{uploadedFilesError}</div>}
+            {uploadedFilesNotice && <div className="settings-success project-settings-success">{uploadedFilesNotice}</div>}
+            <SettingsModalSection
+              title="Retained Source Files"
+              description="Uploaded source files are retained separately from editable project documents. Deleting a document does not remove its original uploaded file."
+            >
+              <div className="backup-list">
+                {visibleUploadedFiles.length > 0 ? (
+                  visibleUploadedFiles.map((file) => (
+                    <div key={file.id} className="backup-list-item">
+                      <div>
+                        <div className="backup-list-title">
+                          {file.originalFileName || file.uploadedFile || "Unnamed upload"}
+                          <span className="backup-badge backup-badge--scheduled">{file.status}</span>
+                        </div>
+                        <div className="backup-list-meta">
+                          {(file.mimeType || "Unknown type")}
+                          {file.sizeBytes > 0 ? ` | ${formatBackupSize(file.sizeBytes)}` : ""}
+                          {file.documentId ? ` | Linked document: ${documents.find((doc) => doc.id === file.documentId)?.name ?? "Deleted document"}` : ""}
+                          {file.caseId ? ` | Linked case: ${cases.find((item) => item.id === file.caseId)?.name ?? "Deleted case"}` : ""}
+                        </div>
+                        <div className="backup-list-meta">
+                          Uploaded {formatBackupDate(file.createdAt)}
+                        </div>
+                      </div>
+                      <div className="backup-header-actions">
+                        {file.uploadedFile && (
+                          <a
+                            className="btn"
+                            href={uploadedFileUrl(file)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Download
+                          </a>
+                        )}
+                        <button
+                          className="btn btn--danger"
+                          type="button"
+                          onClick={() => setUploadedFileDeleteTarget(file)}
+                        >
+                          Delete Source File
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state backup-empty-state">
+                    <p>No retained uploaded source files are currently available for this project.</p>
+                  </div>
+                )}
+              </div>
+            </SettingsModalSection>
+          </div>
         );
       case "log":
         return (
-          <>
-            <div className="settings-section-header">
-              <div>
-                <p className="import-project-copy">
-                  Activity for {activeProject!.name}. Delete actions automatically create a project backup instead of inline restore actions.
-                </p>
+          <div className="app-settings-modal-sections">
+            <SettingsModalSection
+              title="Project Activity"
+              description={`Review activity for ${activeProject!.name}. Delete actions automatically create a project backup instead of inline restore actions.`}
+            >
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Export log</div>
+                  <div className="settings-row-desc">Download the project activity log as a CSV file for external review.</div>
+                </div>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => void handleProjectLogExport()}
+                  disabled={projectLogExporting}
+                >
+                  {projectLogExporting ? "Exporting..." : "Export CSV"}
+                </button>
               </div>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void handleProjectLogExport()}
-                disabled={projectLogExporting}
-              >
-                {projectLogExporting ? "Exporting..." : "Export CSV"}
-              </button>
-            </div>
             {exportError && <p className="auth-error">{exportError}</p>}
             <ProjectLogTable />
-          </>
+            </SettingsModalSection>
+          </div>
         );
       case "backups":
         return (
-          <>
-            <div className="settings-section-header">
-              <div>
-                <p className="settings-section-desc">
-                  Automatic backups are stored privately in app data for this project. Restore creates a new project so the current project is left untouched.
-                </p>
-              </div>
+          <div className="app-settings-modal-sections">
+            {backupError && <div className="form-error project-settings-error">{backupError}</div>}
+            {backupNotice && <div className="settings-success project-settings-success">{backupNotice}</div>}
+
+            <SettingsModalSection
+              title="Backup Controls"
+              description="Automatic backups are stored privately in app data for this project. Restore always creates a new project so the current project stays untouched."
+            >
               <div className="backup-header-actions">
                 {canManageBackups && (
                   <>
-                    <button className="btn" onClick={openBackupSettings} disabled={!!backupBusy}>
-                      Backup Settings
-                    </button>
                     <button className="btn btn--primary" onClick={handleManualBackup} disabled={!!backupBusy}>
                       {backupBusy === "manual" ? "Creating..." : "Create Backup Now"}
                     </button>
                   </>
                 )}
               </div>
-            </div>
 
-            {backupError && <div className="form-error project-settings-error">{backupError}</div>}
-            {backupNotice && <div className="settings-success project-settings-success">{backupNotice}</div>}
+              {canManageBackups && (
+                <details
+                  className="ai-assist-settings-disclosure"
+                  onToggle={(event) => {
+                    const element = event.currentTarget;
+                    if (element.open) {
+                      void refreshBackupSettingsDrafts();
+                    }
+                  }}
+                >
+                  <summary className="ai-assist-settings-disclosure-summary">Backup settings</summary>
+                  <div className="ai-assist-settings-disclosure-body">
+                    <form className="form" onSubmit={handleBackupSettingsSave}>
+                      <label className="form-label">
+                        Minimum automatic backup interval
+                        <span className="backup-field-hint">
+                          Automatic backups will not be created more often than this, even when project changes are detected.
+                        </span>
+                        <input
+                          className="form-input"
+                          type="number"
+                          min={1}
+                          max={1440}
+                          value={automaticIntervalDraft}
+                          onChange={(e) => setAutomaticIntervalDraft(Number(e.target.value))}
+                          disabled={backupBusy === "settings"}
+                        />
+                      </label>
 
-            <div className="backup-list">
-              {backupManifest?.backups.length ? (
-                backupManifest.backups.map((backup) => (
-                  <div
-                    key={backup.file}
-                    className="backup-list-item"
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setBackupContextMenu({ x: event.clientX, y: event.clientY, backup });
-                    }}
-                  >
-                    <div>
-                      <div className="backup-list-title">
-                        {formatBackupDate(backup.createdAt)}
-                        {backup.manual ? (
-                          <span className="backup-badge">Retained indefinitely</span>
-                        ) : (
-                          backupRetentionLabels(backupRetentionStatus(
-                            backup,
-                            backupManifest.backups,
-                            backupManifest.retention,
-                            backupStatusNow,
-                          )).map((label) => (
-                            <span
-                              key={label}
-                              className={`backup-badge ${
-                                label.startsWith("Will become") ? "backup-badge--promotion" : "backup-badge--scheduled"
-                              }`}
-                            >
-                              {label}
+                      <div className="backup-retention-form backup-retention-form--modal">
+                        <label className="form-label">
+                          Hourly window
+                          <span className="backup-field-hint">Keep one automatic backup per hour for this many hours.</span>
+                          <input
+                            className="form-input"
+                            type="number"
+                            min={1}
+                            value={retentionDraft.hourlyHours}
+                            onChange={(e) => setRetentionDraft((current) => ({ ...current, hourlyHours: Number(e.target.value) }))}
+                            disabled={backupBusy === "settings"}
+                          />
+                        </label>
+                        <label className="form-label">
+                          Daily window
+                          <span className="backup-field-hint">Keep one automatic backup per day for this many days.</span>
+                          <input
+                            className="form-input"
+                            type="number"
+                            min={1}
+                            value={retentionDraft.dailyDays}
+                            onChange={(e) => setRetentionDraft((current) => ({ ...current, dailyDays: Number(e.target.value) }))}
+                            disabled={backupBusy === "settings"}
+                          />
+                        </label>
+                        <label className="form-label">
+                          Weekly window
+                          <span className="backup-field-hint">Keep one automatic backup per week for this many weeks.</span>
+                          <input
+                            className="form-input"
+                            type="number"
+                            min={1}
+                            value={retentionDraft.weeklyWeeks}
+                            onChange={(e) => setRetentionDraft((current) => ({ ...current, weeklyWeeks: Number(e.target.value) }))}
+                            disabled={backupBusy === "settings"}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="project-export-actions project-export-actions--modal">
+                        <button type="submit" className="btn btn--primary" disabled={backupBusy === "settings"}>
+                          {backupBusy === "settings" ? "Saving..." : "Save Backup Settings"}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </details>
+              )}
+            </SettingsModalSection>
+
+            <SettingsModalSection
+              title="Available Backups"
+              description="Review each retained backup, see why it was created, and restore a copy when you need to recover prior project state."
+            >
+              <div className="backup-list">
+                {backupManifest?.backups.length ? (
+                  backupManifest.backups.map((backup) => (
+                    <div
+                      key={backup.file}
+                      className="backup-list-item"
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setBackupContextMenu({ x: event.clientX, y: event.clientY, backup });
+                      }}
+                    >
+                      <div>
+                        <div className="backup-list-title">
+                          {formatBackupDate(backup.createdAt)}
+                          {backup.manual ? (
+                            <span className="backup-badge">Retained indefinitely</span>
+                          ) : (
+                            backupRetentionLabels(backupRetentionStatus(
+                              backup,
+                              backupManifest.backups,
+                              backupManifest.retention,
+                              backupStatusNow,
+                            )).map((label) => (
+                              <span
+                                key={label}
+                                className={`backup-badge ${
+                                  label.startsWith("Will become") ? "backup-badge--promotion" : "backup-badge--scheduled"
+                                }`}
+                              >
+                                {label}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                        <div className="backup-list-meta">
+                          {backupDisplayReason(backup.reason)} backup
+                          {formatBackupSize(backup.sizeBytes) ? ` | ${formatBackupSize(backup.sizeBytes)}` : ""}
+                        </div>
+                        {!backup.manual && (
+                          <div className="backup-trigger-row">
+                            <span className="backup-badge backup-badge--trigger">
+                              Triggered by: {backupTriggerLabel(backup, logEntries)}
                             </span>
-                          ))
+                          </div>
                         )}
                       </div>
-                      <div className="backup-list-meta">
-                        {backupDisplayReason(backup.reason)} backup
-                        {formatBackupSize(backup.sizeBytes) ? ` | ${formatBackupSize(backup.sizeBytes)}` : ""}
-                      </div>
-                      {!backup.manual && (
-                        <div className="backup-trigger-row">
-                          <span className="backup-badge backup-badge--trigger">
-                            Triggered by: {backupTriggerLabel(backup, logEntries)}
-                          </span>
-                        </div>
-                      )}
+                      <button
+                        className="btn"
+                        onClick={() => setRestoreBackup(backup)}
+                        disabled={!!backupBusy || !canRestoreProjectBackup}
+                      >
+                        Restore
+                      </button>
                     </div>
-                    <button
-                      className="btn"
-                      onClick={() => setRestoreBackup(backup)}
-                      disabled={!!backupBusy || !canRestoreProjectBackup}
-                    >
-                      Restore
-                    </button>
+                  ))
+                ) : (
+                  <div className="empty-state backup-empty-state">
+                    <p>No backups have been created for this project yet.</p>
                   </div>
-                ))
-              ) : (
-                <div className="empty-state backup-empty-state">
-                  <p>No backups have been created for this project yet.</p>
-                </div>
-              )}
-            </div>
-          </>
+                )}
+              </div>
+            </SettingsModalSection>
+          </div>
         );
       case "export":
         return (
-          <>
-            <p className="import-project-copy">
-              Choose the export format that best fits your next step.
-            </p>
-            <div className="settings-warning settings-warning--danger">
-              <strong>Standard exports are not encrypted.</strong>
-              <br />
-              JSON backups, Excel workbooks, and REFI-QDA project exports can contain project content, coding, memos, and user-linked metadata in readable form. Store them only in trusted locations.
-            </div>
+          <div className="app-settings-modal-sections">
             {exportError && <p className="auth-error">{exportError}</p>}
-            <div className="project-export-actions project-export-actions--modal">
-              <button className="btn" onClick={() => handleExport("json")} disabled={!!exporting}>
-                {exporting === "json" ? "Exporting..." : "Export JSON Backup"}
-              </button>
-              <button className="btn btn--primary" onClick={() => handleExport("xlsx")} disabled={!!exporting}>
-                {exporting === "xlsx" ? "Exporting..." : "Export Excel Workbook"}
-              </button>
-              <button className="btn btn--primary" onClick={() => handleExport("qdpx")} disabled={!!exporting}>
-                {exporting === "qdpx" ? "Exporting..." : "Export REFI-QDA Project"}
-              </button>
-            </div>
-            <hr className="settings-inline-separator" />
-            <div className="form">
-              <p className="import-project-copy">
-                Create an encrypted off-site backup protected by a password. This password is not recoverable.
-              </p>
-              <div className="settings-warning">
-                <strong>Recommended for cloud or off-site storage</strong>
-                <br />
-                Use encrypted backups for file sharing, cloud storage, USB transfer, or any storage location outside this device. Keep the password in a secure password manager because Kanqual cannot recover it later.
+            <SettingsModalSection
+              title="Recommended: Encrypted Backup"
+              description={
+                <>
+                  <strong>Use this when you need a secure full-project backup for cloud storage, file sharing, USB transfer, or any other off-device storage.</strong>
+                  <br />
+                  Keep the password in a secure password manager because Kanqual cannot recover it later.
+                </>
+              }
+              tone="warning"
+            >
+              <div className="form">
+                <label className="form-label">
+                  Backup password
+                  <input
+                    className="form-input"
+                    type="password"
+                    value={encryptedBackupPassword}
+                    onChange={(e) => setEncryptedBackupPassword(e.target.value)}
+                    placeholder="Enter a password"
+                    autoComplete="new-password"
+                  />
+                </label>
+                <label className="form-label">
+                  Confirm password
+                  <input
+                    className="form-input"
+                    type="password"
+                    value={encryptedBackupPasswordConfirm}
+                    onChange={(e) => setEncryptedBackupPasswordConfirm(e.target.value)}
+                    placeholder="Re-enter the password"
+                    autoComplete="new-password"
+                  />
+                </label>
+                <div className="project-export-actions project-export-actions--modal">
+                  <button
+                    className="btn btn--primary"
+                    onClick={() => void handleEncryptedBackupExport()}
+                    disabled={!!exporting || !encryptedBackupPassword || !encryptedBackupPasswordConfirm}
+                  >
+                    {exporting === "encrypted" ? "Exporting..." : "Export Encrypted Backup"}
+                  </button>
+                </div>
               </div>
-              <label className="form-label">
-                Backup password
-                <input
-                  className="form-input"
-                  type="password"
-                  value={encryptedBackupPassword}
-                  onChange={(e) => setEncryptedBackupPassword(e.target.value)}
-                  placeholder="Enter a password"
-                  autoComplete="new-password"
-                />
-              </label>
-              <label className="form-label">
-                Confirm password
-                <input
-                  className="form-input"
-                  type="password"
-                  value={encryptedBackupPasswordConfirm}
-                  onChange={(e) => setEncryptedBackupPasswordConfirm(e.target.value)}
-                  placeholder="Re-enter the password"
-                  autoComplete="new-password"
-                />
-              </label>
+            </SettingsModalSection>
+            <SettingsModalSection
+              title="Other Whole-Project Exports"
+              description={
+                <>
+                  <strong>Use these when you need to move the full project into another system or create a readable Kanqual-native export.</strong>
+                  <br />
+                  These exports are not encrypted and can contain project content, coding, memos, and user-linked metadata in readable form.
+                </>
+              }
+              tone="danger"
+            >
               <div className="project-export-actions project-export-actions--modal">
-                <button
-                  className="btn btn--primary"
-                  onClick={() => void handleEncryptedBackupExport()}
-                  disabled={!!exporting || !encryptedBackupPassword || !encryptedBackupPasswordConfirm}
-                >
-                  {exporting === "encrypted" ? "Exporting..." : "Export Encrypted Backup"}
+                <button className="btn" onClick={() => handleExport("json")} disabled={!!exporting}>
+                  {exporting === "json" ? "Exporting..." : "Export JSON Backup"}
+                </button>
+                <button className="btn" onClick={() => handleExport("qdpx")} disabled={!!exporting}>
+                  {exporting === "qdpx" ? "Exporting..." : "Export REFI-QDA Project"}
                 </button>
               </div>
-            </div>
-          </>
+              <div className="app-settings-modal-section-body">
+                <p className="settings-section-desc">
+                  <strong>JSON Backup:</strong> Best for a full Kanqual-native backup or technical inspection.
+                </p>
+                <p className="settings-section-desc">
+                  <strong>REFI-QDA Project:</strong> Best for moving the project to other qualitative analysis tools that support REFI-QDA.
+                </p>
+              </div>
+            </SettingsModalSection>
+            <SettingsModalSection
+              title="Review Export"
+              description="Use this when you want to inspect, report on, or analyze project contents outside Kanqual without moving the full project."
+            >
+              <div className="project-export-actions project-export-actions--modal">
+                <button className="btn btn--primary" onClick={() => handleExport("xlsx")} disabled={!!exporting}>
+                  {exporting === "xlsx" ? "Exporting..." : "Export Excel Workbook"}
+                </button>
+              </div>
+              <p className="settings-section-desc">
+                <strong>Excel Workbook:</strong> Best for review, reporting, and external analysis outside Kanqual.
+              </p>
+            </SettingsModalSection>
+          </div>
         );
       case "codebook":
         return (
-          <>
-            <p className="import-project-copy">
-              Import or export only the code hierarchy using the REFI-QDA Codebook standard.
-            </p>
+          <div className="app-settings-modal-sections">
             {codebookError && <p className="auth-error">{codebookError}</p>}
-            <div className="project-export-actions project-export-actions--modal">
-              <button className="btn" onClick={handleCodebookImport} disabled={!!codebookBusy}>
-                {codebookBusy === "import" ? "Importing..." : "Import REFI-QDA Codebook"}
-              </button>
-              <button className="btn btn--primary" onClick={handleCodebookExport} disabled={!!codebookBusy}>
-                {codebookBusy === "export" ? "Exporting..." : "Export REFI-QDA Codebook"}
-              </button>
-            </div>
-          </>
+            <SettingsModalSection
+              title="Codebook Exchange"
+              description="Import or export only the code hierarchy using the REFI-QDA Codebook standard."
+            >
+              <div className="project-export-actions project-export-actions--modal">
+                <button className="btn" onClick={handleCodebookImport} disabled={!!codebookBusy}>
+                  {codebookBusy === "import" ? "Importing..." : "Import REFI-QDA Codebook"}
+                </button>
+                <button className="btn btn--primary" onClick={handleCodebookExport} disabled={!!codebookBusy}>
+                  {codebookBusy === "export" ? "Exporting..." : "Export REFI-QDA Codebook"}
+                </button>
+              </div>
+            </SettingsModalSection>
+          </div>
         );
       default:
         return null;
@@ -1444,9 +1737,11 @@ export function ProjectSettingsView() {
   if (!canAccessProjectSettings) {
     return (
       <div className="view">
+        <div className="workspace-back-row">
+          <button className="btn" onClick={() => setView("home")}>Back to Home</button>
+        </div>
         <header className="view-header">
           <h1>Project Settings</h1>
-          <button className="btn" onClick={() => setView("home")}>Back to Home</button>
         </header>
         <div className="empty-state">
           <p>You do not have access to Project Settings for this project.</p>
@@ -1457,6 +1752,9 @@ export function ProjectSettingsView() {
 
   return (
     <div className="view project-settings-view">
+      <div className="workspace-back-row">
+        <button className="btn" onClick={() => setView("home")}>Back to Home</button>
+      </div>
       <header className="view-header">
         <div>
           <div className="view-title-with-help">
@@ -1466,22 +1764,33 @@ export function ProjectSettingsView() {
             </button>
           </div>
         </div>
-        <button className="btn" onClick={() => setView("home")}>Back to Home</button>
       </header>
 
       <div className="app-settings-overview-shell project-settings-overview-shell">
         <div className="app-settings-overview-stack">
-          <div className="app-settings-overview-grid">
-            {visibleProjectSettingsCards.map((card) => (
-              <button
-                key={card.id}
-                type="button"
-                className="app-settings-overview-card"
-                onClick={() => setActiveProjectSettingsModal(card.id)}
-              >
-                <h3>{card.title}</h3>
-                <p>{card.description}</p>
-              </button>
+          <div className="app-settings-overview-sections">
+            {projectSettingsSections.map((section) => (
+              <section key={section.id} className="app-settings-overview-section">
+                <div className="app-settings-overview-section-header">
+                  <p className="app-settings-overview-section-eyebrow">{section.eyebrow}</p>
+                  <h2>{section.title}</h2>
+                  <p>{section.description}</p>
+                </div>
+
+                <div className="app-settings-overview-grid">
+                  {section.cards.map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className={`app-settings-overview-card app-settings-overview-card--${card.tone}`}
+                      onClick={() => setActiveProjectSettingsModal(card.id)}
+                    >
+                      <h3>{card.title}</h3>
+                      <p>{card.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         </div>
@@ -1549,7 +1858,6 @@ export function ProjectSettingsView() {
             <div className="settings-section-header">
               <div>
                 <h2 className="settings-section-title">{activeProjectSettingsCard.title}</h2>
-                <p className="settings-section-desc">{activeProjectSettingsCard.description}</p>
               </div>
               <button className="btn" type="button" onClick={() => setActiveProjectSettingsModal(null)}>
                 Close
@@ -1557,6 +1865,16 @@ export function ProjectSettingsView() {
             </div>
             <div className="app-settings-modal-body">
               {renderProjectSettingsModalBody(activeProjectSettingsCard.id)}
+            </div>
+            <div className="app-settings-modal-footer">
+              {shouldShowProjectAutoSaveNotice(activeProjectSettingsCard.id) ? (
+                <p className="app-settings-modal-footer-note">Changes save automatically for this project.</p>
+              ) : (
+                <span />
+              )}
+              <button className="btn btn--primary" type="button" onClick={() => setActiveProjectSettingsModal(null)}>
+                Done
+              </button>
             </div>
           </div>
         </div>
@@ -1629,85 +1947,6 @@ export function ProjectSettingsView() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {backupSettingsOpen && (
-        <div className="modal-overlay" onClick={() => backupBusy !== "settings" && setBackupSettingsOpen(false)}>
-          <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-            <h2>Backup Settings</h2>
-            <form className="form" onSubmit={handleBackupSettingsSave}>
-              <label className="form-label">
-                Minimum automatic backup interval
-                <span className="backup-field-hint">
-                  Automatic backups will not be created more often than this, even when project changes are detected.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={1}
-                  max={1440}
-                  value={automaticIntervalDraft}
-                  onChange={(e) => setAutomaticIntervalDraft(Number(e.target.value))}
-                  disabled={backupBusy === "settings"}
-                />
-              </label>
-
-              <div className="backup-retention-form backup-retention-form--modal">
-                <label className="form-label">
-                  Hourly window
-                  <span className="backup-field-hint">Keep one automatic backup per hour for this many hours.</span>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min={1}
-                    value={retentionDraft.hourlyHours}
-                    onChange={(e) => setRetentionDraft((current) => ({ ...current, hourlyHours: Number(e.target.value) }))}
-                    disabled={backupBusy === "settings"}
-                  />
-                </label>
-                <label className="form-label">
-                  Daily window
-                  <span className="backup-field-hint">Keep one automatic backup per day for this many days.</span>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min={1}
-                    value={retentionDraft.dailyDays}
-                    onChange={(e) => setRetentionDraft((current) => ({ ...current, dailyDays: Number(e.target.value) }))}
-                    disabled={backupBusy === "settings"}
-                  />
-                </label>
-                <label className="form-label">
-                  Weekly window
-                  <span className="backup-field-hint">Keep one automatic backup per week for this many weeks.</span>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min={1}
-                    value={retentionDraft.weeklyWeeks}
-                    onChange={(e) => setRetentionDraft((current) => ({ ...current, weeklyWeeks: Number(e.target.value) }))}
-                    disabled={backupBusy === "settings"}
-                  />
-                </label>
-              </div>
-
-              {backupError && <p className="auth-error">{backupError}</p>}
-              <div className="form-actions">
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setBackupSettingsOpen(false)}
-                  disabled={backupBusy === "settings"}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn--primary" disabled={!!backupBusy}>
-                  {backupBusy === "settings" ? "Saving..." : "Save Backup Settings"}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
@@ -1880,6 +2119,39 @@ export function ProjectSettingsView() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {uploadedFileDeleteTarget && (
+        <div className="modal-overlay" onClick={() => !uploadedFileDeleteBusy && setUploadedFileDeleteTarget(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Delete Retained Source File</h2>
+            <p className="import-project-copy">
+              This will delete the retained original uploaded file for{" "}
+              <strong>{uploadedFileDeleteTarget.originalFileName || uploadedFileDeleteTarget.uploadedFile}</strong>.
+            </p>
+            <div className="settings-warning settings-warning--danger">
+              Documents or cases created from this upload will remain in the project, but future backups and exports will no longer include this original source file.
+            </div>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setUploadedFileDeleteTarget(null)}
+                disabled={uploadedFileDeleteBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                onClick={() => void handleDeleteUploadedFile()}
+                disabled={uploadedFileDeleteBusy}
+              >
+                {uploadedFileDeleteBusy ? "Deleting..." : "Delete Source File"}
+              </button>
             </div>
           </div>
         </div>

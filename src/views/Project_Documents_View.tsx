@@ -6,6 +6,11 @@ import { MemoEditorView } from "./Analysis_Memos_View";
 import { readAppSettings } from "../lib/appSettings";
 import { HelpIcon } from "../components/AppIcons";
 import {
+  AttributeValuesModal as SharedAttributeValuesModal,
+  type SharedAttributeDataType as AttributeDataType,
+  type SharedAttributeDraft as AttributeDraft,
+} from "../components/AttributeValuesModal";
+import {
   ProcessedTranscriptView,
   getProcessedTranscriptQuestionOutline,
   parseProcessedTranscriptSegments,
@@ -30,8 +35,6 @@ interface DocRow {
   createdAt: string;
 }
 
-type AttributeDataType = "text" | "number" | "datetime" | "categorical";
-
 interface AttributeDefinition {
   id: string;
   name: string;
@@ -46,14 +49,6 @@ interface AttributeValue {
   documentId: string;
   attributeId: string;
   value: string;
-}
-
-interface AttributeDraft {
-  id?: string;
-  name: string;
-  dataType: AttributeDataType;
-  description: string;
-  options: string[];
 }
 
 type SortCol = "name" | "cases" | "memos" | "createdByName" | "createdAt";
@@ -78,12 +73,6 @@ function maskedFileLabel(filePath: string): string {
   return readAppSettings().privacy.maskFilePaths ? "Hidden by app settings" : filePath;
 }
 
-function inputTypeForDataType(dataType: AttributeDataType) {
-  if (dataType === "number") return "number";
-  if (dataType === "datetime") return "datetime-local";
-  return "text";
-}
-
 function normalizeAttributeOptions(options: string[]): string[] {
   return options.map((option) => option.trim()).filter(Boolean);
 }
@@ -97,13 +86,6 @@ function parseAttributeOptions(value: unknown): string[] {
     return [];
   }
 }
-
-const ATTRIBUTE_TYPE_OPTIONS: { value: AttributeDataType; label: string }[] = [
-  { value: "text", label: "Text" },
-  { value: "number", label: "Numbers" },
-  { value: "datetime", label: "Date/time" },
-  { value: "categorical", label: "Categorical" },
-];
 
 const AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY = "kq_ai_assist_add_attribute_target";
 
@@ -456,9 +438,8 @@ function DocumentDetail({
 
   return (
     <div className="view doc-detail-view">
-      {/* Top bar */}
-      <div className="case-detail-topbar">
-        <button className="btn" onClick={onBack}>← Back to Documents</button>
+      <div className="workspace-back-row workspace-back-row--split">
+        <button className="btn" onClick={onBack}>Back to Documents</button>
         <div className="user-detail-menu-wrap" ref={menuRef}>
           <button
             type="button"
@@ -1335,7 +1316,14 @@ function NewDocumentModal({
   onDone: () => void;
   onClose: () => void;
 }) {
-  const { addDocument, pb, activeProject, projectDocumentImportSettings } = useStore();
+  const {
+    addDocument,
+    createProjectUploadedFileRecord,
+    updateProjectUploadedFileStatus,
+    pb,
+    activeProject,
+    projectDocumentImportSettings,
+  } = useStore();
   const { user: currentUser } = useAuth();
   const importSettings = {
     ...readAppSettings().documentImport,
@@ -1667,7 +1655,13 @@ function NewDocumentModal({
           setLoading(false);
           return;
         }
-        const document = await addDocument(name.trim(), file_path, content, currentUser?.id);
+        const document = await addDocument(name.trim(), file_path, content, currentUser?.id, {
+          sourceFile: mode === "upload" ? file : null,
+          sourceKind: "document",
+          importSummary: mode === "upload" && file
+            ? { mode: "upload", originalFileName: file.name }
+            : undefined,
+        });
         if (document?.id && onCreated) {
           await onCreated(document.id);
         }
@@ -1695,7 +1689,13 @@ function NewDocumentModal({
               importSettings.storeOriginalFileName ? currentFile.name : "",
               content,
               currentUser?.id,
-              { notes: "", setActive: false },
+              {
+                notes: "",
+                setActive: false,
+                sourceFile: currentFile,
+                sourceKind: "document",
+                importSummary: { mode: "batch-upload", originalFileName: currentFile.name },
+              },
             );
             createdCount += 1;
           } catch (err) {
@@ -1720,6 +1720,12 @@ function NewDocumentModal({
       const nameHeader = csvMappings.find((mapping) => mapping.role === "name")?.header;
       const descriptionHeader = csvMappings.find((mapping) => mapping.role === "description")?.header;
       const definitionsByName = await ensureCsvAttributeDefinitions();
+      const csvUploadedFileRecord = csvFile
+        ? await createProjectUploadedFileRecord(csvFile, "other", {
+          mode: "csv-import",
+          originalFileName: csvFile.name,
+        })
+        : null;
 
       let createdCount = 0;
       for (let index = 0; index < csvRows.length; index += 1) {
@@ -1754,6 +1760,13 @@ function NewDocumentModal({
 
       if (createdCount === 0) {
         throw new Error("No documents were created from the CSV file.");
+      }
+      if (csvUploadedFileRecord?.id) {
+        await updateProjectUploadedFileStatus(
+          csvUploadedFileRecord.id,
+          "processed",
+          `Created ${createdCount} document${createdCount === 1 ? "" : "s"} from retained CSV upload.`,
+        );
       }
       onDone();
     } catch (err) {
@@ -2081,144 +2094,6 @@ function NewDocumentModal({
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-function AttributeValuesModal({
-  draft,
-  rows,
-  attributeValues,
-  saving,
-  onBack,
-  onCancel,
-  onSave,
-}: {
-  draft: AttributeDraft;
-  rows: DocRow[];
-  attributeValues: Record<string, AttributeValue>;
-  saving: boolean;
-  onBack?: () => void;
-  onCancel: () => void;
-  onSave: (draft: AttributeDraft, valuesByDocument: Record<string, string>) => void;
-}) {
-  const [name, setName] = useState(draft.name);
-  const [dataType, setDataType] = useState<AttributeDataType>(draft.dataType);
-  const [description, setDescription] = useState(draft.description);
-  const [options, setOptions] = useState<string[]>(draft.options.length > 0 ? draft.options : ["", ""]);
-  const [valuesByDocument, setValuesByDocument] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    for (const row of rows) {
-      initial[row.id] = draft.id ? attributeValues[`${row.id}:${draft.id}`]?.value ?? "" : "";
-    }
-    return initial;
-  });
-
-  return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-        <h2>{draft.id ? "Edit Attribute" : "Attribute Values"}</h2>
-
-        <div className="attribute-values-details">
-          <label className="form-group">
-            <span className="form-label">Attribute name</span>
-            <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <div className="form-group">
-            <span className="form-label">Data type</span>
-            <div className="attribute-type-picker">
-              {ATTRIBUTE_TYPE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
-                  onClick={() => setDataType(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="form-group attribute-details-span">
-            <span className="form-label">Description</span>
-            <textarea
-              className="form-input attribute-description-input"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-            />
-          </label>
-          {dataType === "categorical" && (
-            <div className="form-group attribute-details-span">
-              <span className="form-label">Categories</span>
-              <div className="attribute-category-list">
-                {options.map((option, index) => (
-                  <input
-                    key={index}
-                    className="form-input"
-                    value={option}
-                    onChange={(e) => setOptions((prev) => prev.map((item, itemIndex) => itemIndex === index ? e.target.value : item))}
-                    placeholder={`Category ${index + 1}`}
-                  />
-                ))}
-              </div>
-              <button
-                type="button"
-                className="btn btn--small"
-                onClick={() => setOptions((prev) => [...prev, ""])}
-              >
-                Add More
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="attribute-values-list">
-          {rows.length === 0 ? (
-            <p className="case-card-empty">No documents yet.</p>
-          ) : (
-            rows.map((row) => (
-              <label key={row.id} className="attribute-value-row">
-                <span>{row.name}</span>
-                {dataType === "categorical" ? (
-                  <select
-                    className="form-input"
-                    value={valuesByDocument[row.id] ?? ""}
-                    onChange={(e) => setValuesByDocument((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                  >
-                    <option value="">—</option>
-                    {normalizeAttributeOptions(options).map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                    {(valuesByDocument[row.id] ?? "").trim() && !normalizeAttributeOptions(options).includes(valuesByDocument[row.id] ?? "") && (
-                      <option value={valuesByDocument[row.id]}>{valuesByDocument[row.id]}</option>
-                    )}
-                  </select>
-                ) : (
-                  <input
-                    className="form-input"
-                    type={inputTypeForDataType(dataType)}
-                    step={dataType === "number" ? "any" : undefined}
-                    value={valuesByDocument[row.id] ?? ""}
-                    onChange={(e) => setValuesByDocument((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                  />
-                )}
-              </label>
-            ))
-          )}
-        </div>
-
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          {onBack && <button className="btn" onClick={onBack} disabled={saving}>Back</button>}
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            onClick={() => onSave({ ...draft, name: name.trim(), dataType, description: description.trim(), options: normalizeAttributeOptions(options) }, valuesByDocument)}
-            disabled={saving || !name.trim() || (dataType === "categorical" && normalizeAttributeOptions(options).length < 2)}
-          >
-            {saving ? "Saving..." : "Save Attribute"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function DocumentsView() {
   const {
@@ -2230,7 +2105,6 @@ export function DocumentsView() {
     activeDocument,
     setActiveDocument,
     documentLockConflict,
-    clearDocumentLockConflict,
     pendingDocId,
     setPendingDocId,
     deleteDocument,
@@ -2687,7 +2561,7 @@ export function DocumentsView() {
     return (
       <MemoEditorView
         preselectedDocumentIds={[memoForDoc.id]}
-        backLabel="← Back to Documents"
+        backLabel="Back to Documents"
         onSaved={() => setMemoForDoc(null)}
         onBack={() => setMemoForDoc(null)}
       />
@@ -2734,18 +2608,6 @@ export function DocumentsView() {
                   </p>
                 </>
               )}
-              <div className="form-actions" style={{ marginTop: 24 }}>
-                <button
-                  className="btn btn--primary"
-                  onClick={() => {
-                    clearDocumentLockConflict();
-                    setSelectedRow(null);
-                    setEditStartRow(null);
-                  }}
-                >
-                  Back to Documents
-                </button>
-              </div>
             </div>
           </div>
         )}
@@ -3167,13 +3029,19 @@ export function DocumentsView() {
       )}
 
       {attributeValueDraft && (
-        <AttributeValuesModal
+        <SharedAttributeValuesModal
           draft={attributeValueDraft}
-          rows={sorted}
-          attributeValues={attributeValues}
+          rows={sorted.map((row) => ({ id: row.id, name: row.name }))}
+          initialValuesByOwner={Object.fromEntries(
+            sorted.map((row) => [
+              row.id,
+              attributeValueDraft.id ? attributeValues[`${row.id}:${attributeValueDraft.id}`]?.value ?? "" : "",
+            ]),
+          )}
           saving={attributeSaving}
           onCancel={() => !attributeSaving && setAttributeValueDraft(null)}
           onSave={handleSaveAttribute}
+          emptyStateLabel="No documents yet."
         />
       )}
     </div>

@@ -36,6 +36,7 @@ const PERMISSION_KEY_BY_LABEL = {
   "Edit document metadata": "editDocumentMetadata",
   "Edit document content": "editDocumentContent",
   "Delete document": "deleteDocument",
+  "Manage uploaded source files": "manageProjectUploadedFiles",
   "Associate documents with cases": "associateDocumentsWithCases",
   "View document attributes": "viewDocumentAttributes",
   "Edit document attributes": "editDocumentAttributes",

@@ -9,6 +9,7 @@ import type {
   Code,
   Annotation,
   Memo,
+  ProjectUploadedFile,
   View,
   Role,
   ProjectLogEntry,
@@ -62,6 +63,14 @@ import {
   type RelevantSegmentsAiJobResult,
 } from "../lib/aiJobs";
 import { ensureSetup, getBackendIdentitySnapshot } from "../lib/pb";
+import {
+  PROJECT_UPLOADED_FILES_COLLECTION,
+  buildUploadedFileStatusEvent,
+  toProjectUploadedFile,
+  type ProjectUploadedFileSourceKind,
+  type ProjectUploadedFileStatus,
+  type ProjectUploadedFileStatusEvent,
+} from "../lib/projectUploadedFiles";
 import { createProjectBackup } from "../lib/projectBackups";
 import type {
   ProjectEmbeddingBuildItem,
@@ -196,6 +205,205 @@ function normalizeCodeUniqueAnnotationsAiJobResult(raw: unknown): CodeUniqueAnno
     annotations: normalizeAnnotationIndexListResult(raw),
     model: typeof candidate.model === "string" ? candidate.model : "",
   };
+}
+
+type ProcessingSegmentType = "metadata" | "question" | "answer";
+
+type DocumentProcessingSegment = {
+  segmentType: ProcessingSegmentType;
+  speakerId: string;
+  startOffset: number;
+  endOffset: number;
+  sortOrder: number;
+  text: string;
+  chunkIndex: number;
+};
+
+type DocumentProcessingProperNameCandidate = {
+  text: string;
+  sourceType: string;
+};
+
+type DocumentProcessingChunkManifest = {
+  version: 1;
+  model: string;
+  numCtx: number;
+  temperature: number;
+  contentHash: string;
+  totalChunks: number;
+  chunks: Array<{
+    chunkIndex: number;
+    status: "pending" | "running" | "completed" | "error";
+    attempts: number;
+    error?: string;
+  }>;
+};
+
+type DocumentProcessingAggregate = {
+  processedContent: string;
+  segments: DocumentProcessingSegment[];
+  properNameCandidates: DocumentProcessingProperNameCandidate[];
+};
+
+function parseJsonString<T>(value: unknown, fallback: T): T {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function splitDocumentProcessingChunks(content: string, numCtx: number): Array<{ chunkIndex: number; text: string }> {
+  const chunkChars = Math.max((Math.max(0, numCtx - 900)) * 4, 4000);
+  const chunks: Array<{ chunkIndex: number; text: string }> = [];
+  let remaining = content.trim();
+  while (remaining) {
+    if (Array.from(remaining).length <= chunkChars) {
+      chunks.push({ chunkIndex: chunks.length, text: remaining });
+      break;
+    }
+    let codeUnitLimit = 0;
+    let charCount = 0;
+    for (const char of remaining) {
+      codeUnitLimit += char.length;
+      charCount += 1;
+      if (charCount >= chunkChars) break;
+    }
+    const candidate = remaining.slice(0, codeUnitLimit);
+    const splitAt = Math.max(
+      candidate.lastIndexOf("\n\n") >= 0
+        ? candidate.lastIndexOf("\n\n") + 2
+        : candidate.lastIndexOf("\n") >= 0
+          ? candidate.lastIndexOf("\n") + 1
+          : codeUnitLimit,
+      1,
+    );
+    const chunk = remaining.slice(0, splitAt);
+    if (chunk.trim()) {
+      chunks.push({ chunkIndex: chunks.length, text: chunk });
+    }
+    remaining = remaining.slice(splitAt);
+  }
+  return chunks;
+}
+
+async function hashDocumentProcessingContent(content: string): Promise<string> {
+  const bytes = new TextEncoder().encode(content);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function createInitialChunkManifest(input: {
+  contentHash: string;
+  model: string;
+  numCtx: number;
+  temperature: number;
+  totalChunks: number;
+}): DocumentProcessingChunkManifest {
+  return {
+    version: 1,
+    contentHash: input.contentHash,
+    model: input.model,
+    numCtx: input.numCtx,
+    temperature: input.temperature,
+    totalChunks: input.totalChunks,
+    chunks: Array.from({ length: input.totalChunks }, (_, chunkIndex) => ({
+      chunkIndex,
+      status: "pending" as const,
+      attempts: 0,
+    })),
+  };
+}
+
+function appendChunkAggregate(
+  aggregate: DocumentProcessingAggregate,
+  response: {
+    processedContent: string;
+    segments: unknown[];
+    properNameCandidates: unknown[];
+    chunkIndex: number;
+  },
+): DocumentProcessingAggregate {
+  const baseOffset = aggregate.processedContent ? aggregate.processedContent.length + 2 : 0;
+  const rebasedSegments = (response.segments as Array<Record<string, unknown>>).map((segment, index) => ({
+    segmentType: segment.segmentType === "metadata" || segment.segmentType === "question" ? segment.segmentType : "answer",
+    speakerId: typeof segment.speakerId === "string" ? segment.speakerId : "",
+    startOffset: baseOffset + Number(segment.startOffset ?? 0),
+    endOffset: baseOffset + Number(segment.endOffset ?? 0),
+    sortOrder: aggregate.segments.length + index,
+    text: typeof segment.text === "string" ? segment.text : "",
+    chunkIndex: response.chunkIndex,
+  })) satisfies DocumentProcessingSegment[];
+  const properNameMap = new Map<string, DocumentProcessingProperNameCandidate>();
+  for (const candidate of aggregate.properNameCandidates) {
+    properNameMap.set(candidate.text.trim().toLowerCase(), candidate);
+  }
+  for (const candidate of response.properNameCandidates as Array<Record<string, unknown>>) {
+    const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+    if (!text) continue;
+    properNameMap.set(text.toLowerCase(), {
+      text,
+      sourceType: typeof candidate.sourceType === "string" ? candidate.sourceType : "text",
+    });
+  }
+  return {
+    processedContent: aggregate.processedContent
+      ? `${aggregate.processedContent}\n\n${response.processedContent}`
+      : response.processedContent,
+    segments: [...aggregate.segments, ...rebasedSegments],
+    properNameCandidates: [...properNameMap.values()],
+  };
+}
+
+function mergeDocumentProcessingSegments(segments: DocumentProcessingSegment[]): DocumentProcessingSegment[] {
+  const merged: DocumentProcessingSegment[] = [];
+  for (const segment of segments) {
+    const text = segment.text.trim();
+    if (!text) continue;
+    const normalizedSegment = { ...segment, text };
+    const last = merged[merged.length - 1];
+    if (
+      last
+      && last.chunkIndex !== normalizedSegment.chunkIndex
+      && last.segmentType === normalizedSegment.segmentType
+      && last.speakerId.trim().toLowerCase() === normalizedSegment.speakerId.trim().toLowerCase()
+    ) {
+      last.text = `${last.text}\n\n${normalizedSegment.text}`;
+      continue;
+    }
+    merged.push(normalizedSegment);
+  }
+  let cursor = 0;
+  return merged.map((segment, index) => {
+    const startOffset = cursor;
+    const endOffset = startOffset + segment.text.length;
+    cursor = endOffset + 2;
+    return { ...segment, startOffset, endOffset, sortOrder: index };
+  });
+}
+
+function buildProcessedContentFromSegments(segments: DocumentProcessingSegment[]): string {
+  return segments.map((segment) => segment.text).join("\n\n");
+}
+
+function collectProcessingProperNameCandidates(
+  segments: DocumentProcessingSegment[],
+  existing: DocumentProcessingProperNameCandidate[],
+): DocumentProcessingProperNameCandidate[] {
+  const properNameMap = new Map<string, DocumentProcessingProperNameCandidate>();
+  for (const candidate of existing) {
+    const text = candidate.text.trim();
+    if (!text) continue;
+    properNameMap.set(text.toLowerCase(), { text, sourceType: candidate.sourceType || "text" });
+  }
+  for (const segment of segments) {
+    const speakerId = segment.speakerId.trim();
+    if (!speakerId) continue;
+    if (!/[A-Za-z]/.test(speakerId) || !/[a-z]/.test(speakerId)) continue;
+    properNameMap.set(speakerId.toLowerCase(), { text: speakerId, sourceType: "speaker" });
+  }
+  return [...properNameMap.values()];
 }
 
 // ─── Map PocketBase records to our typed model ───────────────────────────────
@@ -334,6 +542,7 @@ type DocumentProcessingRequest = {
   projectId: string;
   documentIds: string[];
   reviewLenses: Record<DocumentProcessingReviewLensId, boolean>;
+  restartDocumentIds?: string[];
 };
 
 type BackgroundDocumentProcessingStatus = {
@@ -348,6 +557,8 @@ type BackgroundDocumentProcessingStatus = {
     documentName: string;
     message: string;
   }>;
+  currentChunkIndex?: number;
+  currentChunkTotal?: number;
 };
 
 type PendingNewMemoContext = {
@@ -425,6 +636,7 @@ export function useAppStore(pb: PocketBase) {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [projectUploadedFiles, setProjectUploadedFiles] = useState<ProjectUploadedFile[]>([]);
   const [cases, setCases] = useState<Case[]>([]);
   const [activeDocument, setActiveDocument] = useState<Document | null>(null);
   const [activeDocumentLock, setActiveDocumentLock] = useState<DocumentLockInfo | null>(null);
@@ -581,6 +793,8 @@ export function useAppStore(pb: PocketBase) {
         currentDocumentName: string;
         message: string;
         failures: Array<{ documentName: string; message: string }>;
+        currentChunkIndex?: number;
+        currentChunkTotal?: number;
       }) => Promise<void> | void,
     ) => {
       const llmSettings = readAppSettings().llm;
@@ -618,63 +832,202 @@ export function useAppStore(pb: PocketBase) {
       const failures: Array<{ documentName: string; message: string }> = [];
       for (let index = 0; index < selectedDocuments.length; index += 1) {
         const document = selectedDocuments[index];
+        const forceRestart = request.restartDocumentIds?.includes(document.id) ?? false;
         await onProgress?.({
           completedDocuments: index,
           totalDocuments: selectedDocuments.length,
           currentDocumentName: document.name,
-          message: `Processing ${document.name} (${index + 1} of ${selectedDocuments.length}).`,
+          message: `${forceRestart ? "Restarting" : "Processing"} ${document.name} (${index + 1} of ${selectedDocuments.length}).`,
           failures: [...failures],
         });
 
         try {
-          const response = await invoke<{
-            processedContent: string;
-            segments: unknown[];
-            properNameCandidates: unknown[];
-            model: string;
-            baseUrl: string;
-            chunkCount: number;
-          }>("process_document_with_ollama", {
-            request: {
-              documentContent: document.content,
-              protocol: llmSettings.ollamaProtocol,
-              host: llmSettings.ollamaHost,
-              port: llmSettings.ollamaPort,
+          const chunks = splitDocumentProcessingChunks(document.content, llmSettings.ollamaNumCtx);
+          if (chunks.length === 0) {
+            throw new Error("The document has no content to process.");
+          }
+          const sourceContentHash = await hashDocumentProcessingContent(document.content);
+          const existing = await pb.collection("processed_document_reviews").getFirstListItem(
+            `project="${request.projectId}"&&document="${document.id}"&&deleted_at=""`,
+          ).catch(() => null);
+          const resumableManifest = existing
+            ? parseJsonString<DocumentProcessingChunkManifest | null>(existing.chunk_manifest_json, null)
+            : null;
+          const canResume = !forceRestart && Boolean(
+            existing
+            && existing.source_content_hash === sourceContentHash
+            && String(existing.model ?? "") === llmSettings.ollamaSelectedModel
+            && Number(existing.chunk_count ?? 0) === chunks.length
+            && resumableManifest
+            && resumableManifest.contentHash === sourceContentHash
+            && resumableManifest.model === llmSettings.ollamaSelectedModel
+            && resumableManifest.numCtx === llmSettings.ollamaNumCtx
+            && resumableManifest.temperature === llmSettings.ollamaTemperature,
+          );
+          const manifest = canResume && resumableManifest
+            ? resumableManifest
+            : createInitialChunkManifest({
+              contentHash: sourceContentHash,
               model: llmSettings.ollamaSelectedModel,
-              timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-              temperature: llmSettings.ollamaTemperature,
               numCtx: llmSettings.ollamaNumCtx,
-              keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
-            },
-          });
-
-          const payload = {
+              temperature: llmSettings.ollamaTemperature,
+              totalChunks: chunks.length,
+            });
+          let aggregate: DocumentProcessingAggregate = canResume && existing
+            ? {
+              processedContent: String(existing.processed_content ?? ""),
+              segments: parseJsonString<DocumentProcessingSegment[]>(existing.segments_json, []),
+              properNameCandidates: parseJsonString<DocumentProcessingProperNameCandidate[]>(
+                existing.proper_name_candidates_json,
+                [],
+              ),
+            }
+            : {
+              processedContent: "",
+              segments: [],
+              properNameCandidates: [],
+            };
+          let reviewRecordId = typeof existing?.id === "string" ? existing.id : "";
+          const basePayload = {
             project: request.projectId,
             document: document.id,
             document_name: document.name,
             file_path: document.filePath,
-            status: "pending_review",
-            model: response.model,
-            base_url: response.baseUrl,
-            chunk_count: response.chunkCount,
-            processed_content: response.processedContent,
-            segments_json: JSON.stringify(response.segments),
-            proper_name_candidates_json: JSON.stringify(response.properNameCandidates),
+            status: forceRestart ? "pending_review" : existing?.status === "reviewed" ? "reviewed" : "pending_review",
+            model: llmSettings.ollamaSelectedModel,
+            base_url: `${llmSettings.ollamaProtocol}://${llmSettings.ollamaHost}:${llmSettings.ollamaPort}`,
+            chunk_count: chunks.length,
+            processed_chunk_count: canResume ? manifest.chunks.filter((chunk) => chunk.status === "completed").length : 0,
+            processing_status: "running",
+            processing_error: "",
+            chunk_manifest_json: JSON.stringify(manifest),
+            processing_started_at: forceRestart ? new Date().toISOString() : String(existing?.processing_started_at ?? new Date().toISOString()),
+            processing_completed_at: "",
+            last_processed_chunk_index: canResume
+              ? Math.max(-1, ...manifest.chunks.filter((chunk) => chunk.status === "completed").map((chunk) => chunk.chunkIndex))
+              : -1,
+            source_content_hash: sourceContentHash,
+            processed_content: aggregate.processedContent,
+            segments_json: JSON.stringify(aggregate.segments),
+            proper_name_candidates_json: JSON.stringify(aggregate.properNameCandidates),
             enabled_review_lenses_json: JSON.stringify(request.reviewLenses),
-            exported_to_project: false,
+            exported_to_project: forceRestart ? false : Boolean(existing?.exported_to_project),
             created_by: pb.authStore.record?.id ?? "",
             created_by_identifier: String(pb.authStore.record?.user_identifier ?? ""),
             deleted_at: "",
           };
-
-          try {
-            const existing = await pb.collection("processed_document_reviews").getFirstListItem(
-              `project="${request.projectId}"&&document="${document.id}"&&deleted_at=""`,
-            );
-            await pb.collection("processed_document_reviews").update(existing.id, payload);
-          } catch {
-            await pb.collection("processed_document_reviews").create(payload);
+          if (reviewRecordId) {
+            await pb.collection("processed_document_reviews").update(reviewRecordId, basePayload);
+          } else {
+            const created = await pb.collection("processed_document_reviews").create(basePayload);
+            reviewRecordId = created.id;
           }
+
+          let lastCompletedChunkIndex = canResume
+            ? Math.max(-1, ...manifest.chunks.filter((chunk) => chunk.status === "completed").map((chunk) => chunk.chunkIndex))
+            : -1;
+          for (let chunkIndex = lastCompletedChunkIndex + 1; chunkIndex < chunks.length; chunkIndex += 1) {
+            const manifestChunk = manifest.chunks[chunkIndex];
+            if (!manifestChunk) continue;
+            manifestChunk.status = "running";
+            manifestChunk.attempts += 1;
+            delete manifestChunk.error;
+            await pb.collection("processed_document_reviews").update(reviewRecordId, {
+              processing_status: "running",
+              processing_error: "",
+              chunk_manifest_json: JSON.stringify(manifest),
+              processed_chunk_count: manifest.chunks.filter((chunk) => chunk.status === "completed").length,
+              last_processed_chunk_index: lastCompletedChunkIndex,
+            });
+            await onProgress?.({
+              completedDocuments: index,
+              totalDocuments: selectedDocuments.length,
+              currentDocumentName: document.name,
+              currentChunkIndex: chunkIndex + 1,
+              currentChunkTotal: chunks.length,
+              message: `${forceRestart ? "Restarting" : canResume ? "Resuming" : "Processing"} ${document.name} chunk ${chunkIndex + 1} of ${chunks.length} (${index + 1} of ${selectedDocuments.length} documents).`,
+              failures: [...failures],
+            });
+            try {
+              const response = await invoke<{
+                processedContent: string;
+                segments: unknown[];
+                properNameCandidates: unknown[];
+                model: string;
+                baseUrl: string;
+                chunkIndex: number;
+              }>("process_document_chunk_with_ollama", {
+                request: {
+                  chunkText: chunks[chunkIndex]?.text ?? "",
+                  chunkIndex,
+                  protocol: llmSettings.ollamaProtocol,
+                  host: llmSettings.ollamaHost,
+                  port: llmSettings.ollamaPort,
+                  model: llmSettings.ollamaSelectedModel,
+                  timeoutSeconds: llmSettings.ollamaDocumentProcessingTimeoutSeconds,
+                  temperature: llmSettings.ollamaTemperature,
+                  numCtx: llmSettings.ollamaNumCtx,
+                  keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+                },
+              });
+              aggregate = appendChunkAggregate(aggregate, response);
+              manifestChunk.status = "completed";
+              lastCompletedChunkIndex = chunkIndex;
+              await pb.collection("processed_document_reviews").update(reviewRecordId, {
+                model: response.model,
+                base_url: response.baseUrl,
+                processed_chunk_count: manifest.chunks.filter((chunk) => chunk.status === "completed").length,
+                processing_status: chunkIndex === chunks.length - 1 ? "completed" : "running",
+                processing_error: "",
+                chunk_manifest_json: JSON.stringify(manifest),
+                last_processed_chunk_index: chunkIndex,
+                processed_content: aggregate.processedContent,
+                segments_json: JSON.stringify(aggregate.segments),
+                proper_name_candidates_json: JSON.stringify(aggregate.properNameCandidates),
+              });
+            } catch (error) {
+              manifestChunk.status = "error";
+              manifestChunk.error = error instanceof Error && error.message.trim()
+                ? error.message
+                : typeof error === "string" && error.trim()
+                  ? error
+                  : "Could not process this document chunk.";
+              await pb.collection("processed_document_reviews").update(reviewRecordId, {
+                processed_chunk_count: manifest.chunks.filter((chunk) => chunk.status === "completed").length,
+                processing_status: lastCompletedChunkIndex >= 0 ? "partial" : "error",
+                processing_error: manifestChunk.error,
+                chunk_manifest_json: JSON.stringify(manifest),
+                last_processed_chunk_index: lastCompletedChunkIndex,
+                processed_content: aggregate.processedContent,
+                segments_json: JSON.stringify(aggregate.segments),
+                proper_name_candidates_json: JSON.stringify(aggregate.properNameCandidates),
+              });
+              throw error;
+            }
+          }
+
+          const mergedSegments = mergeDocumentProcessingSegments(aggregate.segments);
+          const finalProcessedContent = buildProcessedContentFromSegments(mergedSegments);
+          const finalProperNameCandidates = collectProcessingProperNameCandidates(
+            mergedSegments,
+            aggregate.properNameCandidates,
+          );
+          await pb.collection("processed_document_reviews").update(reviewRecordId, {
+            status: existing?.status === "reviewed" ? "reviewed" : "pending_review",
+            model: llmSettings.ollamaSelectedModel,
+            chunk_count: chunks.length,
+            processed_chunk_count: chunks.length,
+            processing_status: "completed",
+            processing_error: "",
+            processing_completed_at: new Date().toISOString(),
+            chunk_manifest_json: JSON.stringify(manifest),
+            last_processed_chunk_index: chunks.length - 1,
+            source_content_hash: sourceContentHash,
+            processed_content: finalProcessedContent,
+            segments_json: JSON.stringify(mergedSegments),
+            proper_name_candidates_json: JSON.stringify(finalProperNameCandidates),
+            enabled_review_lenses_json: JSON.stringify(request.reviewLenses),
+          });
         } catch (error) {
           failures.push({
             documentName: document.name,
@@ -1390,6 +1743,9 @@ export function useAppStore(pb: PocketBase) {
               result_json: JSON.stringify({
                 completedDocuments: progress.completedDocuments,
                 totalDocuments: progress.totalDocuments,
+                currentDocumentName: progress.currentDocumentName,
+                currentChunkIndex: progress.currentChunkIndex,
+                currentChunkTotal: progress.currentChunkTotal,
                 failures: progress.failures,
               }),
             });
@@ -1642,8 +1998,8 @@ export function useAppStore(pb: PocketBase) {
         totalDocuments: request.documentIds.length,
         currentDocumentName: "",
         message: isLocalBackendUrl(pb.baseURL)
-          ? `Preparing to process ${request.documentIds.length} document${request.documentIds.length === 1 ? "" : "s"}.`
-          : `Submitting ${request.documentIds.length} document${request.documentIds.length === 1 ? "" : "s"} to the host AI runtime.`,
+          ? `Preparing to ${request.restartDocumentIds?.length ? "restart" : "process"} ${request.documentIds.length} document${request.documentIds.length === 1 ? "" : "s"}.`
+          : `Submitting ${request.documentIds.length} document${request.documentIds.length === 1 ? "" : "s"} to the host AI runtime${request.restartDocumentIds?.length ? " for restart" : ""}.`,
         failures: [],
       });
 
@@ -1659,6 +2015,8 @@ export function useAppStore(pb: PocketBase) {
                 currentDocumentName: progress.currentDocumentName,
                 message: progress.message,
                 failures: [...progress.failures],
+                currentChunkIndex: progress.currentChunkIndex,
+                currentChunkTotal: progress.currentChunkTotal,
               });
             });
             setDocumentProcessingStatus({
@@ -1672,23 +2030,37 @@ export function useAppStore(pb: PocketBase) {
                   ? `Processed ${result.processedDocuments} of ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added the successful ones to the review queue.`
                   : `Processed ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added them to the review queue.`,
               failures: [...result.failures],
+              currentChunkIndex: undefined,
+              currentChunkTotal: undefined,
             });
           } else {
             const job = await createDocumentProcessingAiJob(pb, {
               projectId: request.projectId,
               documentIds: request.documentIds,
               reviewLenses: request.reviewLenses,
+              restartDocumentIds: request.restartDocumentIds,
             });
             const terminal = await waitForAiJobTerminalState(pb, job.id, {
+              timeoutMs: 60 * 60 * 1000,
               onProgress: (currentJob) => {
                 let progressResult:
-                  | { completedDocuments?: number; totalDocuments?: number; failures?: Array<{ documentName: string; message: string }> }
+                  | {
+                      completedDocuments?: number;
+                      totalDocuments?: number;
+                      currentDocumentName?: string;
+                      currentChunkIndex?: number;
+                      currentChunkTotal?: number;
+                      failures?: Array<{ documentName: string; message: string }>;
+                    }
                   | null = null;
                 if (currentJob.resultJson) {
                   try {
                     progressResult = JSON.parse(currentJob.resultJson) as {
                       completedDocuments?: number;
                       totalDocuments?: number;
+                      currentDocumentName?: string;
+                      currentChunkIndex?: number;
+                      currentChunkTotal?: number;
                       failures?: Array<{ documentName: string; message: string }>;
                     };
                   } catch {
@@ -1700,9 +2072,11 @@ export function useAppStore(pb: PocketBase) {
                   projectId: request.projectId,
                   completedDocuments: progressResult?.completedDocuments ?? 0,
                   totalDocuments: progressResult?.totalDocuments ?? request.documentIds.length,
-                  currentDocumentName: "",
+                  currentDocumentName: progressResult?.currentDocumentName ?? "",
                   message: currentJob.hostMessage || "Waiting for host AI processing...",
                   failures: progressResult?.failures ?? [],
+                  currentChunkIndex: progressResult?.currentChunkIndex,
+                  currentChunkTotal: progressResult?.currentChunkTotal,
                   error: currentJob.status === "error" ? currentJob.errorMessage : undefined,
                 });
               },
@@ -1717,6 +2091,8 @@ export function useAppStore(pb: PocketBase) {
                 message: terminal.errorMessage || "Host AI processing failed.",
                 error: terminal.errorMessage || "Host AI processing failed.",
                 failures: [],
+                currentChunkIndex: undefined,
+                currentChunkTotal: undefined,
               });
             } else {
               const result = terminal.resultJson
@@ -1737,6 +2113,8 @@ export function useAppStore(pb: PocketBase) {
                     ? `Host AI processed ${result.processedDocuments} of ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added the successful ones to the review queue.`
                     : `Host AI processed ${result.totalDocuments} document${result.totalDocuments === 1 ? "" : "s"} and added them to the review queue.`,
                 failures: [...result.failures],
+                currentChunkIndex: undefined,
+                currentChunkTotal: undefined,
               });
             }
           }
@@ -1756,6 +2134,8 @@ export function useAppStore(pb: PocketBase) {
             message,
             error: message,
             failures: [],
+            currentChunkIndex: undefined,
+            currentChunkTotal: undefined,
           });
           setDocumentProcessingBannerOpen(true);
         } finally {
@@ -2179,6 +2559,14 @@ export function useAppStore(pb: PocketBase) {
       .then((r) => setDocuments(r.map(toDocument)))
       .catch(console.error);
 
+    pb.collection(PROJECT_UPLOADED_FILES_COLLECTION)
+      .getFullList({ filter: `project="${pid}"&&deleted_at=""`, sort: "-created" })
+      .then((r) => setProjectUploadedFiles(r.map((record) => ({
+        ...toProjectUploadedFile(record),
+        statusHistoryJson: JSON.stringify(toProjectUploadedFile(record).statusHistory),
+      }))))
+      .catch(console.error);
+
     pb.collection("cases")
       .getFullList({ filter: `project="${pid}"&&deleted_at=""`, sort: "created" })
       .then((r) => setCases(r.map(toCase)))
@@ -2213,6 +2601,31 @@ export function useAppStore(pb: PocketBase) {
         }
       }
       if (e.action === "delete") setDocuments((p) => p.filter((x) => x.id !== e.record.id));
+    });
+
+    const unsubUploadedFiles = pb.collection(PROJECT_UPLOADED_FILES_COLLECTION).subscribe("*", (e) => {
+      if (e.record.project !== pid) return;
+      const uploadedFile = {
+        ...toProjectUploadedFile(e.record),
+        statusHistoryJson: JSON.stringify(toProjectUploadedFile(e.record).statusHistory),
+      };
+      if (e.action === "create") {
+        setProjectUploadedFiles((current) => [uploadedFile, ...current.filter((item) => item.id !== uploadedFile.id)]);
+      }
+      if (e.action === "update") {
+        if (e.record.deleted_at) {
+          setProjectUploadedFiles((current) => current.filter((item) => item.id !== e.record.id));
+        } else {
+          setProjectUploadedFiles((current) =>
+            current.some((item) => item.id === uploadedFile.id)
+              ? current.map((item) => item.id === uploadedFile.id ? uploadedFile : item)
+              : [uploadedFile, ...current],
+          );
+        }
+      }
+      if (e.action === "delete") {
+        setProjectUploadedFiles((current) => current.filter((item) => item.id !== e.record.id));
+      }
     });
 
     const unsubCases = pb.collection("cases").subscribe("*", (e) => {
@@ -2299,12 +2712,14 @@ export function useAppStore(pb: PocketBase) {
 
       return () => {
         unsubDocs.then((fn) => fn()).catch(() => {});
+        unsubUploadedFiles.then((fn) => fn()).catch(() => {});
         unsubCases.then((fn) => fn()).catch(() => {});
         unsubCodes.then((fn) => fn()).catch(() => {});
         unsubMemos.then((fn) => fn()).catch(() => {});
         unsubLog.then((fn) => fn()).catch(() => {});
         unsubProjectSettings.then((fn) => fn()).catch(() => {});
         setDocuments([]);
+        setProjectUploadedFiles([]);
         setCases([]);
         setCodes([]);
         setMemos([]);
@@ -2597,6 +3012,7 @@ export function useAppStore(pb: PocketBase) {
         deleteAll("document_locks", `document.project="${project.id}"`),
         deleteAll("document_lock_kicks", `document.project="${project.id}"`),
         deleteAll("processed_document_reviews", `document.project="${project.id}"`),
+        deleteAll("project_uploaded_files", `project="${project.id}"`),
         deleteAll("memos", `project="${project.id}"`),
         deleteAll("case_documents", `case.project="${project.id}"`),
         deleteAll("case_attributes", `case.project="${project.id}"`),
@@ -2694,6 +3110,118 @@ export function useAppStore(pb: PocketBase) {
     [pb, activeProject, logAction]
   );
 
+  const createProjectUploadedFileRecord = useCallback(
+    async (
+      file: File,
+      sourceKind: ProjectUploadedFileSourceKind,
+      importSummary?: Record<string, unknown>,
+    ) => {
+      if (!activeProject) return null;
+      const actorUserId = pb.authStore.record?.id ?? null;
+      const actorIdentifier = String(pb.authStore.record?.user_identifier ?? "");
+      const statusHistory: ProjectUploadedFileStatusEvent[] = [
+        buildUploadedFileStatusEvent({
+          fromStatus: null,
+          toStatus: "active",
+          reason: "Uploaded source file retained.",
+          actorUserId,
+          actorIdentifier,
+        }),
+      ];
+      const record = await pb.collection(PROJECT_UPLOADED_FILES_COLLECTION).create({
+        project: activeProject.id,
+        document: "",
+        case: "",
+        uploaded_file: file,
+        original_file_name: file.name,
+        mime_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        source_kind: sourceKind,
+        status: "active",
+        status_history_json: JSON.stringify(statusHistory),
+        content_hash: "",
+        import_summary_json: importSummary ? JSON.stringify(importSummary) : "",
+        created_by: actorUserId ?? "",
+        created_by_identifier: actorIdentifier,
+        deleted_at: "",
+      });
+      return toProjectUploadedFile(record);
+    },
+    [activeProject, pb],
+  );
+
+  const updateProjectUploadedFileStatus = useCallback(
+    async (
+      uploadedFileId: string,
+      nextStatus: ProjectUploadedFileStatus,
+      reason: string,
+      options?: {
+        documentId?: string | null;
+        caseId?: string | null;
+      },
+    ) => {
+      const record = await pb.collection(PROJECT_UPLOADED_FILES_COLLECTION).getOne(uploadedFileId);
+      const current = toProjectUploadedFile(record);
+      const actorUserId = pb.authStore.record?.id ?? null;
+      const actorIdentifier = String(pb.authStore.record?.user_identifier ?? "");
+      const nextHistory = [
+        ...current.statusHistory,
+        buildUploadedFileStatusEvent({
+          fromStatus: current.status,
+          toStatus: nextStatus,
+          reason,
+          actorUserId,
+          actorIdentifier,
+          documentId: options?.documentId ?? current.documentId,
+          caseId: options?.caseId ?? current.caseId,
+        }),
+      ];
+      await pb.collection(PROJECT_UPLOADED_FILES_COLLECTION).update(uploadedFileId, {
+        document: options?.documentId ?? current.documentId ?? "",
+        case: options?.caseId ?? current.caseId ?? "",
+        status: nextStatus,
+        status_history_json: JSON.stringify(nextHistory),
+      });
+    },
+    [pb],
+  );
+
+  const deleteProjectUploadedFile = useCallback(
+    async (uploadedFileId: string, fileName?: string) => {
+      const record = await pb.collection(PROJECT_UPLOADED_FILES_COLLECTION).getOne(uploadedFileId);
+      const current = toProjectUploadedFile(record);
+      const actorUserId = pb.authStore.record?.id ?? null;
+      const actorIdentifier = String(pb.authStore.record?.user_identifier ?? "");
+      const deletedAt = new Date().toISOString();
+      const nextHistory = [
+        ...current.statusHistory,
+        buildUploadedFileStatusEvent({
+          fromStatus: current.status,
+          toStatus: "deleted",
+          reason: `Retained source file${fileName ? ` "${fileName}"` : ""} was explicitly deleted from Project Settings.`,
+          actorUserId,
+          actorIdentifier,
+          documentId: current.documentId,
+          caseId: current.caseId,
+        }),
+      ];
+      await pb.collection(PROJECT_UPLOADED_FILES_COLLECTION).update(uploadedFileId, {
+        status: "deleted",
+        status_history_json: JSON.stringify(nextHistory),
+        deleted_at: deletedAt,
+      });
+      if (activeProject) {
+        await logAction(
+          activeProject.id,
+          "project_uploaded_file.delete",
+          `Deleted retained source file${fileName ? ` "${fileName}"` : ""}`,
+          uploadedFileId,
+        );
+      }
+    },
+    [activeProject, logAction, pb],
+  );
+
   const addDocument = useCallback(
     async (
       name: string,
@@ -2704,9 +3232,19 @@ export function useAppStore(pb: PocketBase) {
         notes?: string;
         type?: string;
         setActive?: boolean;
+        sourceFile?: File | null;
+        sourceKind?: ProjectUploadedFileSourceKind;
+        importSummary?: Record<string, unknown>;
       },
     ) => {
       if (!activeProject) return;
+      const uploadedFileRecord = options?.sourceFile
+        ? await createProjectUploadedFileRecord(
+          options.sourceFile,
+          options.sourceKind ?? "document",
+          options.importSummary,
+        )
+        : null;
       const payload: Record<string, unknown> = {
         project: activeProject.id,
         name,
@@ -2722,6 +3260,14 @@ export function useAppStore(pb: PocketBase) {
             : ""
           : pb.authStore.record?.user_identifier || "";
         const record = await pb.collection("documents").create(payload);
+      if (uploadedFileRecord?.id) {
+        await updateProjectUploadedFileStatus(
+          uploadedFileRecord.id,
+          "processed",
+          `Created document "${name}" from retained upload.`,
+          { documentId: record.id },
+        );
+      }
       const doc = toDocument(record);
       if (options?.setActive !== false) {
         setActiveDocument(doc);
@@ -2729,7 +3275,7 @@ export function useAppStore(pb: PocketBase) {
       await logAction(activeProject.id, "document.create", `Added document "${name}"`);
       return doc;
     },
-    [pb, activeProject, logAction]
+    [pb, activeProject, createProjectUploadedFileRecord, logAction, updateProjectUploadedFileStatus]
   );
 
 
@@ -2752,9 +3298,22 @@ export function useAppStore(pb: PocketBase) {
       const anns = await pb.collection("annotations").getFullList({ filter: `document="${id}"&&deleted_at=""`, fields: "id" });
       await Promise.all(anns.map((a) => pb.collection("annotations").update(a.id, { deleted_at: deletedAt })));
       await pb.collection("documents").update(id, { deleted_at: deletedAt });
+      const uploadedFiles = await pb.collection(PROJECT_UPLOADED_FILES_COLLECTION).getFullList({
+        filter: `document="${id}"&&deleted_at=""&&status!="deleted"`,
+      });
+      await Promise.all(
+        uploadedFiles.map((record) =>
+          updateProjectUploadedFileStatus(
+            record.id,
+            "orphaned",
+            `Document${name ? ` "${name}"` : ""} was deleted while retaining the original upload.`,
+            { documentId: id },
+          ),
+        ),
+      );
       if (activeProject) await logAction(activeProject.id, "document.delete", `Deleted document${name ? ` "${name}"` : ""}`, id);
     },
-    [pb, activeProject, logAction, ensureProjectSafetyBackup]
+    [pb, activeProject, logAction, ensureProjectSafetyBackup, updateProjectUploadedFileStatus]
   );
 
   const addCaseDocument = useCallback(
@@ -3295,6 +3854,7 @@ export function useAppStore(pb: PocketBase) {
     appPermissions,
     canCurrentUser,
     documents,
+    projectUploadedFiles,
     cases,
     activeDocument, setActiveDocument,
     codes,
@@ -3308,6 +3868,9 @@ export function useAppStore(pb: PocketBase) {
     logEntries,
     createProject, updateProject, deleteProject, openProject, openProjectToView, closeProject,
     restoreRecord,
+    createProjectUploadedFileRecord,
+    updateProjectUploadedFileStatus,
+    deleteProjectUploadedFile,
     addDocument, updateDocument, deleteDocument,
     addCaseDocument, removeCaseDocument,
     addCode, updateCode, deleteCode,

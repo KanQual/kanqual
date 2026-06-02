@@ -36,6 +36,7 @@ export type LlmSettings = {
   ollamaPort: number;
   ollamaSelectedModel: string;
   ollamaRequestTimeoutSeconds: number;
+  ollamaDocumentProcessingTimeoutSeconds: number;
   ollamaTemperature: number;
   ollamaNumCtx: number;
   ollamaKeepAliveMinutes: number;
@@ -88,6 +89,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     ollamaPort: 11434,
     ollamaSelectedModel: "",
     ollamaRequestTimeoutSeconds: 120,
+    ollamaDocumentProcessingTimeoutSeconds: 1800,
     ollamaTemperature: 0.2,
     ollamaNumCtx: 8192,
     ollamaKeepAliveMinutes: 10,
@@ -140,6 +142,12 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
       DEFAULT_APP_SETTINGS.llm.ollamaRequestTimeoutSeconds,
       5,
       600,
+    ),
+    ollamaDocumentProcessingTimeoutSeconds: clampInteger(
+      value?.ollamaDocumentProcessingTimeoutSeconds,
+      DEFAULT_APP_SETTINGS.llm.ollamaDocumentProcessingTimeoutSeconds,
+      30,
+      3600,
     ),
     ollamaTemperature,
     ollamaNumCtx: clampInteger(value?.ollamaNumCtx, DEFAULT_APP_SETTINGS.llm.ollamaNumCtx, 256, 131072),

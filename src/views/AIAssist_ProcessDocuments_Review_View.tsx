@@ -1,169 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RecordModel } from "pocketbase";
 import { useStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
-
-type TranscriptProcessingSegment = {
-  segmentType: "metadata" | "question" | "answer";
-  speakerId: string;
-  startOffset: number;
-  endOffset: number;
-  sortOrder: number;
-  text: string;
-  chunkIndex: number;
-};
+import {
+  collectSpeakerSummaries,
+  formatProcessedReviewDate,
+  getFirstEnabledProcessedReviewLens,
+  PROCESSED_DOCUMENT_REVIEW_COLLECTION,
+  PROCESSED_DOCUMENT_REVIEW_LENSES as REVIEW_LENSES,
+  segmentContainsTimestamp,
+  toProcessedReviewRecord,
+  type ProcessedDocumentReviewLensId as ReviewLensId,
+  type ProcessedDocumentReviewRecord,
+  type TranscriptNameCandidate,
+  type TranscriptProcessingSegment,
+} from "../lib/processedDocumentReviews";
 
 type SegmentType = TranscriptProcessingSegment["segmentType"];
-
-type TranscriptNameCandidate = {
-  text: string;
-  sourceType: string;
-};
-
-type ReviewLensId = "speaker-segmentation" | "named-entity-extraction";
-
-type ReviewLens = {
-  id: ReviewLensId;
-  label: string;
-  description: string;
-};
-
-type SpeakerSummary = {
-  id: string;
-  turnCount: number;
-  questionCount: number;
-  answerCount: number;
-};
-
-type ProcessedDocumentReviewRecord = {
-  id: string;
-  projectId: string;
-  documentId: string;
-  documentName: string;
-  filePath: string;
-  status: "pending_review" | "reviewed";
-  processedContent: string;
-  segments: TranscriptProcessingSegment[];
-  properNameCandidates: TranscriptNameCandidate[];
-  enabledReviewLenses: Record<ReviewLensId, boolean>;
-  model: string;
-  baseUrl: string;
-  chunkCount: number;
-  exportedToProject: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-const REVIEW_LENSES: ReviewLens[] = [
-  {
-    id: "speaker-segmentation",
-    label: "Identify elements",
-    description: "Identify metadata, speakers, and roles in the transcript.",
-  },
-  {
-    id: "named-entity-extraction",
-    label: "Named entity extraction",
-    description: "Show likely speaker-name candidates that may need review or anonymization.",
-  },
-];
-
-const REVIEW_COLLECTION = "processed_document_reviews";
-
-function fmtDate(iso: string): string {
-  if (!iso) return "-";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "-";
-  }
-}
-
-function segmentContainsTimestamp(segment: TranscriptProcessingSegment): boolean {
-  const patterns = [
-    /\b\d{1,2}:\d{2}(?::\d{2})?\b/g,
-    /\[\d{1,2}:\d{2}(?::\d{2})?\]/g,
-    /\b\d{1,2}\.\d{2}(?::\d{2})?\b/g,
-  ];
-  return patterns.some((pattern) => pattern.test(segment.text));
-}
-
-function collectSpeakerSummaries(segments: TranscriptProcessingSegment[]): SpeakerSummary[] {
-  const bySpeaker = new Map<string, SpeakerSummary>();
-  for (const segment of segments) {
-    const speaker = segment.speakerId.trim() || "Unlabeled";
-    const current = bySpeaker.get(speaker) ?? {
-      id: speaker,
-      turnCount: 0,
-      questionCount: 0,
-      answerCount: 0,
-    };
-    current.turnCount += 1;
-    if (segment.segmentType === "question") current.questionCount += 1;
-    if (segment.segmentType === "answer") current.answerCount += 1;
-    bySpeaker.set(speaker, current);
-  }
-  return [...bySpeaker.values()].sort(
-    (left, right) => right.turnCount - left.turnCount || left.id.localeCompare(right.id),
-  );
-}
-
-function parseJsonValue<T>(value: unknown, fallback: T): T {
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function normalizeReviewLenses(value: unknown): Record<ReviewLensId, boolean> {
-  const fallback: Record<ReviewLensId, boolean> = {
-    "speaker-segmentation": true,
-    "named-entity-extraction": true,
-  };
-  if (!value || typeof value !== "object") return fallback;
-  return {
-    "speaker-segmentation":
-      typeof Reflect.get(value, "speaker-segmentation") === "boolean"
-        ? Boolean(Reflect.get(value, "speaker-segmentation"))
-        : fallback["speaker-segmentation"],
-    "named-entity-extraction":
-      typeof Reflect.get(value, "named-entity-extraction") === "boolean"
-        ? Boolean(Reflect.get(value, "named-entity-extraction"))
-        : fallback["named-entity-extraction"],
-  };
-}
-
-function toProcessedReviewRecord(record: RecordModel): ProcessedDocumentReviewRecord {
-  return {
-    id: record.id,
-    projectId: String(record.project ?? ""),
-    documentId: String(record.document ?? ""),
-    documentName: String(record.document_name ?? ""),
-    filePath: String(record.file_path ?? ""),
-    status: record.status === "reviewed" ? "reviewed" : "pending_review",
-    processedContent: String(record.processed_content ?? ""),
-    segments: parseJsonValue<TranscriptProcessingSegment[]>(record.segments_json, []),
-    properNameCandidates: parseJsonValue<TranscriptNameCandidate[]>(record.proper_name_candidates_json, []),
-    enabledReviewLenses: normalizeReviewLenses(
-      parseJsonValue<Record<string, boolean> | null>(record.enabled_review_lenses_json, null),
-    ),
-    model: String(record.model ?? ""),
-    baseUrl: String(record.base_url ?? ""),
-    chunkCount: Number(record.chunk_count ?? 0),
-    exportedToProject: Boolean(record.exported_to_project),
-    createdAt: String(record.created ?? ""),
-    updatedAt: String(record.updated ?? ""),
-  };
-}
-
 function ReviewResultsPanel({
   reviewSegments,
   setReviewSegments,
@@ -343,8 +196,19 @@ function ReviewResultsPanel({
 }
 
 export function AIAssistProcessDocumentsReviewView() {
-  const { activeProject, pb, setView, deleteDocument, logAction, canCurrentUser, projectAiAssistSettings } = useStore();
+  const {
+    activeProject,
+    pb,
+    setView,
+    deleteDocument,
+    logAction,
+    canCurrentUser,
+    projectAiAssistSettings,
+    startBackgroundDocumentProcessing,
+    documentProcessingStatus,
+  } = useStore();
   const canReviewProcessedDocuments = canCurrentUser("reviewProcessedDocuments");
+  const canUseAiProcessDocuments = canCurrentUser("useAiProcessDocuments");
   const canEditAiOutputs = canCurrentUser("editAiOutputs");
   const canSaveAiOutputs = canCurrentUser("saveAiOutputs");
   const canExportAiOutputsToProject = canCurrentUser("exportAiOutputsToProject");
@@ -366,6 +230,12 @@ export function AIAssistProcessDocumentsReviewView() {
   const [deleteOriginalOnExport, setDeleteOriginalOnExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [rerunBusy, setRerunBusy] = useState(false);
+  const [rerunError, setRerunError] = useState("");
+
+  const processBusy =
+    documentProcessingStatus?.phase === "running" &&
+    documentProcessingStatus.projectId === activeProject?.id;
 
   const selectedReviewSpeakerSummaries = useMemo(
     () => collectSpeakerSummaries(selectedReviewSegments),
@@ -375,10 +245,9 @@ export function AIAssistProcessDocumentsReviewView() {
   function openReviewRecord(record: ProcessedDocumentReviewRecord) {
     setSelectedReviewRecord(record);
     setSelectedReviewSegments(record.segments);
-    const firstEnabledLens =
-      REVIEW_LENSES.find((lens) => record.enabledReviewLenses[lens.id])?.id ?? "speaker-segmentation";
-    setSelectedReviewActiveTab(firstEnabledLens);
+    setSelectedReviewActiveTab(getFirstEnabledProcessedReviewLens(record.enabledReviewLenses));
     setSaveReviewError("");
+    setRerunError("");
   }
 
   function openExportModal() {
@@ -398,7 +267,7 @@ export function AIAssistProcessDocumentsReviewView() {
     setLoadingReviews(true);
     setReviewError("");
     try {
-      const records = await pb.collection(REVIEW_COLLECTION).getFullList({
+      const records = await pb.collection(PROCESSED_DOCUMENT_REVIEW_COLLECTION).getFullList({
         filter: `project="${activeProject.id}"&&deleted_at=""`,
         sort: "-updated",
       });
@@ -427,7 +296,7 @@ export function AIAssistProcessDocumentsReviewView() {
     setSaveReviewBusy(true);
     setSaveReviewError("");
     try {
-      await pb.collection(REVIEW_COLLECTION).update(selectedReviewRecord.id, {
+      await pb.collection(PROCESSED_DOCUMENT_REVIEW_COLLECTION).update(selectedReviewRecord.id, {
         segments_json: JSON.stringify(selectedReviewSegments),
         status: "reviewed",
       });
@@ -474,7 +343,7 @@ export function AIAssistProcessDocumentsReviewView() {
         deleted_at: "",
       });
 
-      await pb.collection(REVIEW_COLLECTION).update(selectedReviewRecord.id, {
+      await pb.collection(PROCESSED_DOCUMENT_REVIEW_COLLECTION).update(selectedReviewRecord.id, {
         exported_to_project: true,
       });
 
@@ -503,6 +372,25 @@ export function AIAssistProcessDocumentsReviewView() {
       setExportError(nextError instanceof Error ? nextError.message : "Could not export processed document.");
     } finally {
       setExportBusy(false);
+    }
+  }
+
+  async function handleReprocessSelectedRecord(options?: { restart?: boolean }) {
+    if (!activeProject || !selectedReviewRecord || !canUseAiProcessDocuments) return;
+    setRerunBusy(true);
+    setRerunError("");
+    try {
+      await startBackgroundDocumentProcessing({
+        projectId: activeProject.id,
+        documentIds: [selectedReviewRecord.documentId],
+        reviewLenses: selectedReviewRecord.enabledReviewLenses,
+        restartDocumentIds: options?.restart ? [selectedReviewRecord.documentId] : undefined,
+      });
+    } catch (nextError) {
+      console.error("Failed to restart processed document run:", nextError);
+      setRerunError(nextError instanceof Error ? nextError.message : "Could not start document processing.");
+    } finally {
+      setRerunBusy(false);
     }
   }
 
@@ -547,6 +435,11 @@ export function AIAssistProcessDocumentsReviewView() {
 
   return (
     <div className="view ai-process-doc-view ai-process-doc-view--reviewing">
+      <div className="workspace-back-row">
+        <button type="button" className="btn" onClick={() => setView("ai-assist-process-documents")}>
+          Back to Processed Documents
+        </button>
+      </div>
       <header className="view-header">
         <div className="users-title-wrap">
           <h1>Review Processed Documents</h1>
@@ -563,11 +456,6 @@ export function AIAssistProcessDocumentsReviewView() {
       </header>
 
       <div className="ai-process-doc-review-shell">
-        <div className="ai-process-doc-review-toolbar-spacer">
-          <button type="button" className="btn" onClick={() => setView("ai-assist-process-documents")}>
-            {"← Processed Documents"}
-          </button>
-        </div>
         <div className="doc-detail-layout ai-process-doc-review-layout">
           <div className="doc-detail-left ai-process-doc-review-list-panel">
             <div className="surface-card ai-process-doc-review-list-card">
@@ -585,6 +473,7 @@ export function AIAssistProcessDocumentsReviewView() {
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Status</th>
                       <th>Processed</th>
                       <th>In Project</th>
                     </tr>
@@ -592,11 +481,11 @@ export function AIAssistProcessDocumentsReviewView() {
                   <tbody>
                     {loadingReviews ? (
                       <tr>
-                        <td colSpan={3} className="users-td-msg">Loading...</td>
+                        <td colSpan={4} className="users-td-msg">Loading...</td>
                       </tr>
                     ) : reviewRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="users-td-msg">No processed documents yet.</td>
+                        <td colSpan={4} className="users-td-msg">No processed documents yet.</td>
                       </tr>
                     ) : (
                       reviewRecords.map((record) => (
@@ -608,7 +497,18 @@ export function AIAssistProcessDocumentsReviewView() {
                           onClick={() => openReviewRecord(record)}
                         >
                           <td className="users-td users-td--name">{record.documentName || "Untitled document"}</td>
-                          <td className="users-td users-td--muted">{fmtDate(record.updatedAt)}</td>
+                          <td className="users-td users-td--muted">
+                            {record.status === "reviewed"
+                              ? "Reviewed"
+                              : record.processingStatus === "partial"
+                                ? `Partial (${record.processedChunkCount}/${record.chunkCount})`
+                                : record.processingStatus === "error"
+                                  ? "Failed"
+                                  : record.processingStatus === "running"
+                                    ? `Running (${record.processedChunkCount}/${record.chunkCount})`
+                                    : "Pending"}
+                          </td>
+                          <td className="users-td users-td--muted">{formatProcessedReviewDate(record.updatedAt)}</td>
                           <td className="users-td users-td--muted">{record.exportedToProject ? "Yes" : "No"}</td>
                         </tr>
                       ))
@@ -632,7 +532,7 @@ export function AIAssistProcessDocumentsReviewView() {
                       <h2>{selectedReviewRecord.documentName || "Untitled document"}</h2>
                       <p className="surface-card-description">
                         {selectedReviewRecord.model || "Unknown model"} | {selectedReviewRecord.chunkCount} chunk
-                        {selectedReviewRecord.chunkCount === 1 ? "" : "s"} | Processed {fmtDate(selectedReviewRecord.updatedAt)}
+                        {selectedReviewRecord.chunkCount === 1 ? "" : "s"} | {selectedReviewRecord.processedChunkCount} processed | Processed {formatProcessedReviewDate(selectedReviewRecord.updatedAt)}
                       </p>
                     </div>
                     {selectedReviewSpeakerSummaries.length > 0 && (
@@ -649,6 +549,16 @@ export function AIAssistProcessDocumentsReviewView() {
                   </div>
 
                   {saveReviewError && <div className="form-error project-settings-error">{saveReviewError}</div>}
+                  {rerunError && <div className="form-error project-settings-error">{rerunError}</div>}
+                  {selectedReviewRecord.processingStatus === "partial" && (
+                    <div className="users-permission-note" style={{ marginBottom: 12 }}>
+                      This run is partial. {selectedReviewRecord.processedChunkCount} of {selectedReviewRecord.chunkCount} chunks completed.
+                      {selectedReviewRecord.processingError ? ` Last error: ${selectedReviewRecord.processingError}` : ""}
+                    </div>
+                  )}
+                  {selectedReviewRecord.processingStatus === "error" && selectedReviewRecord.processingError && (
+                    <div className="form-error project-settings-error">{selectedReviewRecord.processingError}</div>
+                  )}
 
                   <ReviewResultsPanel
                     reviewSegments={selectedReviewSegments}
@@ -661,12 +571,42 @@ export function AIAssistProcessDocumentsReviewView() {
                   />
 
                   <div className="form-actions">
+                    {(selectedReviewRecord.processingStatus === "partial" || selectedReviewRecord.processingStatus === "error") && (
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={processBusy || rerunBusy || !canUseAiProcessDocuments}
+                        onClick={() => void handleReprocessSelectedRecord()}
+                        title={!canUseAiProcessDocuments ? "You do not have permission to process documents" : undefined}
+                      >
+                        {rerunBusy ? "Starting" : "Resume Processing"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn"
-                      disabled={exportBusy || !canExportAiOutputsToProject}
+                      disabled={processBusy || rerunBusy || !canUseAiProcessDocuments}
+                      onClick={() => void handleReprocessSelectedRecord({ restart: true })}
+                      title={!canUseAiProcessDocuments ? "You do not have permission to process documents" : undefined}
+                    >
+                      {rerunBusy ? "Starting" : "Restart Processing"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={
+                        exportBusy
+                        || !canExportAiOutputsToProject
+                        || selectedReviewRecord.processingStatus !== "completed"
+                      }
                       onClick={openExportModal}
-                      title={!canExportAiOutputsToProject ? "You do not have permission to export AI outputs to the project" : undefined}
+                      title={
+                        !canExportAiOutputsToProject
+                          ? "You do not have permission to export AI outputs to the project"
+                          : selectedReviewRecord.processingStatus !== "completed"
+                            ? "Only completed processed documents can be exported to the project"
+                            : undefined
+                      }
                     >
                       {selectedReviewRecord.exportedToProject ? "Exported to Project" : "Export to Project"}
                     </button>

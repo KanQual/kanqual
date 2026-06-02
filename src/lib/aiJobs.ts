@@ -51,6 +51,7 @@ export type DocumentProcessingAiJobRequest = {
   projectId: string;
   documentIds: string[];
   reviewLenses: Record<"speaker-segmentation" | "named-entity-extraction", boolean>;
+  restartDocumentIds?: string[];
 };
 
 export type AttributeSuggestionAiJobRequest = {

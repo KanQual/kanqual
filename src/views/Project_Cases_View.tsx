@@ -4,6 +4,11 @@ import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
 import { HelpIcon } from "../components/AppIcons";
+import {
+  AttributeValuesModal as SharedAttributeValuesModal,
+  type SharedAttributeDataType as AttributeDataType,
+  type SharedAttributeDraft as AttributeDraft,
+} from "../components/AttributeValuesModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,8 +21,6 @@ interface CaseRow {
   createdByName: string;
   createdAt: string;
 }
-
-type AttributeDataType = "text" | "number" | "datetime" | "categorical";
 
 interface AttributeDefinition {
   id: string;
@@ -33,14 +36,6 @@ interface AttributeValue {
   caseId: string;
   attributeId: string;
   value: string;
-}
-
-interface AttributeDraft {
-  id?: string;
-  name: string;
-  dataType: AttributeDataType;
-  description: string;
-  options: string[];
 }
 
 type SortCol = "name" | "documents" | "memos" | "createdByName" | "createdAt";
@@ -79,13 +74,6 @@ function parseAttributeOptions(value: unknown): string[] {
     return [];
   }
 }
-
-const ATTRIBUTE_TYPE_OPTIONS: { value: AttributeDataType; label: string }[] = [
-  { value: "text", label: "Text" },
-  { value: "number", label: "Numbers" },
-  { value: "datetime", label: "Date/time" },
-  { value: "categorical", label: "Categorical" },
-];
 
 const AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY = "kq_ai_assist_add_attribute_target";
 
@@ -419,9 +407,8 @@ function CaseDetail({
 
   return (
     <div className="view case-detail-view">
-      {/* Top bar */}
-      <div className="case-detail-topbar">
-        <button className="btn" onClick={onBack}>← Back to Cases</button>
+      <div className="workspace-back-row workspace-back-row--split">
+        <button className="btn" onClick={onBack}>Back to Cases</button>
         <div className="user-detail-menu-wrap" ref={menuRef}>
           <button
             type="button"
@@ -857,150 +844,6 @@ function AssociateDocumentsModal({
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-function AttributeValuesModal({
-  draft,
-  rows,
-  attributeValues,
-  saving,
-  onBack,
-  onCancel,
-  onSave,
-}: {
-  draft: AttributeDraft;
-  rows: CaseRow[];
-  attributeValues: Record<string, AttributeValue>;
-  saving: boolean;
-  onBack?: () => void;
-  onCancel: () => void;
-  onSave: (draft: AttributeDraft, valuesByCase: Record<string, string>) => void;
-}) {
-  const [name, setName] = useState(draft.name);
-  const [dataType, setDataType] = useState<AttributeDataType>(draft.dataType);
-  const [description, setDescription] = useState(draft.description);
-  const [options, setOptions] = useState<string[]>(draft.options.length > 0 ? draft.options : ["", ""]);
-  const [valuesByCase, setValuesByCase] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    for (const row of rows) {
-      initial[row.id] = draft.id ? attributeValues[`${row.id}:${draft.id}`]?.value ?? "" : "";
-    }
-    return initial;
-  });
-
-  const inputType = inputTypeForDataType(dataType);
-
-  return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-        <h2>{draft.id ? "Edit Attribute" : "Attribute Values"}</h2>
-
-        <div className="attribute-values-details">
-          <label className="form-group">
-            <span className="form-label">Attribute name</span>
-            <input
-              className="form-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <div className="form-group">
-            <span className="form-label">Data type</span>
-            <div className="attribute-type-picker">
-              {ATTRIBUTE_TYPE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
-                  onClick={() => setDataType(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="form-group attribute-details-span">
-            <span className="form-label">Description</span>
-            <textarea
-              className="form-input attribute-description-input"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-            />
-          </label>
-          {dataType === "categorical" && (
-            <div className="form-group attribute-details-span">
-              <span className="form-label">Categories</span>
-              <div className="attribute-category-list">
-                {options.map((option, index) => (
-                  <input
-                    key={index}
-                    className="form-input"
-                    value={option}
-                    onChange={(e) => setOptions((prev) => prev.map((item, itemIndex) => itemIndex === index ? e.target.value : item))}
-                    placeholder={`Category ${index + 1}`}
-                  />
-                ))}
-              </div>
-              <button
-                type="button"
-                className="btn btn--small"
-                onClick={() => setOptions((prev) => [...prev, ""])}
-              >
-                Add More
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="attribute-values-list">
-          {rows.length === 0 ? (
-            <p className="case-card-empty">No cases yet.</p>
-          ) : (
-            rows.map((row) => (
-              <label key={row.id} className="attribute-value-row">
-                <span>{row.name}</span>
-                {dataType === "categorical" ? (
-                  <select
-                    className="form-input"
-                    value={valuesByCase[row.id] ?? ""}
-                    onChange={(e) => setValuesByCase((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                  >
-                    <option value="">—</option>
-                    {normalizeAttributeOptions(options).map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                    {(valuesByCase[row.id] ?? "").trim() && !normalizeAttributeOptions(options).includes(valuesByCase[row.id] ?? "") && (
-                      <option value={valuesByCase[row.id]}>{valuesByCase[row.id]}</option>
-                    )}
-                  </select>
-                ) : (
-                  <input
-                    className="form-input"
-                    type={inputType}
-                    step={dataType === "number" ? "any" : undefined}
-                    value={valuesByCase[row.id] ?? ""}
-                    onChange={(e) => setValuesByCase((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                  />
-                )}
-              </label>
-            ))
-          )}
-        </div>
-
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          {onBack && <button className="btn" onClick={onBack} disabled={saving}>Back</button>}
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            onClick={() => onSave({ ...draft, name: name.trim(), dataType, description: description.trim(), options: normalizeAttributeOptions(options) }, valuesByCase)}
-            disabled={saving || !name.trim() || (dataType === "categorical" && normalizeAttributeOptions(options).length < 2)}
-          >
-            {saving ? "Saving..." : "Save Attribute"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function CasesView() {
   const {
@@ -1456,7 +1299,7 @@ export function CasesView() {
     return (
       <MemoEditorView
         preselectedCaseIds={[memoForCase.id]}
-        backLabel="← Back to Cases"
+        backLabel="Back to Cases"
         onSaved={() => setMemoForCase(null)}
         onBack={() => setMemoForCase(null)}
       />
@@ -1915,13 +1758,19 @@ export function CasesView() {
       )}
 
       {attributeValueDraft && (
-        <AttributeValuesModal
+        <SharedAttributeValuesModal
           draft={attributeValueDraft}
-          rows={sorted}
-          attributeValues={attributeValues}
+          rows={sorted.map((row) => ({ id: row.id, name: row.name }))}
+          initialValuesByOwner={Object.fromEntries(
+            sorted.map((row) => [
+              row.id,
+              attributeValueDraft.id ? attributeValues[`${row.id}:${attributeValueDraft.id}`]?.value ?? "" : "",
+            ]),
+          )}
           saving={attributeSaving}
           onCancel={() => !attributeSaving && setAttributeValueDraft(null)}
           onSave={handleSaveAttribute}
+          emptyStateLabel="No cases yet."
         />
       )}
     </div>

@@ -370,8 +370,8 @@ function CodeDetail({
 
   return (
     <div className="view doc-detail-view">
-      <div className="case-detail-topbar">
-        <button className="btn" onClick={onBack}>← Back to Codebook</button>
+      <div className="workspace-back-row workspace-back-row--split">
+        <button className="btn" onClick={onBack}>Back to Codebook</button>
         {(canEditCode || canDeleteCode) && (
           <div className="user-detail-menu-wrap" ref={menuRef}>
             <button
@@ -867,7 +867,7 @@ export function CodebookView() {
     return (
       <MemoEditorView
         preselectedCodeIds={[memoForCode.id]}
-        backLabel="← Back to Codebook"
+        backLabel="Back to Codebook"
         onSaved={() => setMemoForCode(null)}
         onBack={() => setMemoForCode(null)}
       />
