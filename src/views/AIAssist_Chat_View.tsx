@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
+import { assertActiveLlmRuntime } from "../lib/llmRuntime";
 import { HelpIcon } from "../components/AppIcons";
 import {
   clearActiveProjectAiChatId,
@@ -579,13 +580,10 @@ export function AIAssistChatView() {
     const messageText = draft.trim();
     if (!messageText) return;
     if (isLocalWorkspace) {
-      const llmSettings = readAppSettings().llm;
-      if (!llmSettings.ollamaEnabled) {
-        setChatError("Enable Ollama in App Settings before using project chat.");
-        return;
-      }
-      if (!llmSettings.ollamaSelectedModel) {
-        setChatError("Choose an Ollama model in App Settings before using project chat.");
+      try {
+        assertActiveLlmRuntime(readAppSettings().llm, "using project chat");
+      } catch (error) {
+        setChatError(error instanceof Error ? error.message : "Configure AI Assist before using project chat.");
         return;
       }
     }
@@ -679,6 +677,7 @@ export function AIAssistChatView() {
         setChatError(progressMessage);
       });
 
+      const activeRuntime = isLocalWorkspace ? assertActiveLlmRuntime(readAppSettings().llm, "using project chat") : null;
       const assistantMessage = await createProjectAiChatMessage(pb, {
         chatId: nextChatId!,
         projectId: activeProject.id,
@@ -687,7 +686,7 @@ export function AIAssistChatView() {
         metadata: {
           model: response.model,
           usedContextItems: response.usedContextItems,
-          source: "ollama",
+          source: activeRuntime?.sourceTag ?? "host",
           citations: response.citations,
         },
       });
@@ -714,8 +713,8 @@ export function AIAssistChatView() {
       updateChats(refreshedChats, nextChatId);
       setChatError("");
     } catch (error) {
-      console.error("Project chat with Ollama failed:", error);
-      setChatError(error instanceof Error ? error.message : "Could not get a response from Ollama.");
+      console.error("Project chat failed:", error);
+      setChatError(error instanceof Error ? error.message : "Could not get a response from the configured LLM.");
     } finally {
       setSending(false);
     }
@@ -897,7 +896,7 @@ export function AIAssistChatView() {
                     : <p>{message.text}</p>}
                   {message.role === "assistant" && message.metadata && (
                     <div className="ai-chat-message-footnote">
-                      {message.metadata.source === "ollama" && <span>Answered with Ollama</span>}
+                      {message.metadata.source && <span>Answered with {message.metadata.source === "copilot" ? "GitHub Models" : message.metadata.source === "blablador" ? "Blablador" : message.metadata.source === "openai" ? "OpenAI" : message.metadata.source === "anthropic" ? "Anthropic" : message.metadata.source === "host" ? "Host AI" : "Ollama"}</span>}
                       {typeof message.metadata.usedContextItems === "number" && (
                         <span>{message.metadata.usedContextItems} indexed project items used</span>
                       )}
@@ -1007,7 +1006,7 @@ export function AIAssistChatView() {
             </label>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => void handleSendMessage()} disabled={!draft.trim() || sending || activeChatReadOnly}>
-                {sending ? "Waiting for Ollama..." : "Send Message"}
+                {sending ? "Waiting for AI response..." : "Send Message"}
               </button>
             </div>
           </div>

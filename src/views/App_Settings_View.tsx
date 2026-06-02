@@ -943,13 +943,6 @@ export function AppSettingsView() {
       tone: "default" as const,
     },
     {
-      id: "llm",
-      title: "AI Assist Settings",
-      description: "Download and configure the local AI runtime Kanqual uses for embeddings and generation.",
-      visible: canManageLlmSettings || canDownloadEmbeddingModel || canDeleteEmbeddingModel,
-      tone: "ai" as const,
-    },
-    {
       id: "privacy",
       title: "Privacy & Security",
       description: "Manage local privacy options for shared or sensitive use.",
@@ -1009,7 +1002,7 @@ export function AppSettingsView() {
       eyebrow: "Everyday Use",
       title: "Change the app behaviors people are most likely to notice in daily work.",
       description: "These settings affect how Kanqual launches, how documents start, and whether local AI tools are ready to support the workflow.",
-      cardIds: ["startup", "import", "llm"],
+      cardIds: ["startup", "import"],
     },
     {
       id: "privacy-data",
@@ -1924,469 +1917,508 @@ export function AppSettingsView() {
           return <div className="settings-empty-state">You do not have permission to manage local AI Assist settings on this device.</div>;
         }
         return (
-          <>
-            <div className="settings-row settings-row--block">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Embedding model</div>
-                <div className="settings-row-desc">
-                  Step 1: download the multilingual-e5 embedding model to this device. Step 2: keep it installed so Kanqual can build project embeddings. Step 3: tune chunking below before you run or rebuild embeddings for a project.
+          <div className="app-settings-modal-sections">
+            <SettingsModalSection
+              title="AI Assist Status"
+              description="Check whether embeddings, the local server, and the selected model are ready before you start an AI Assist workflow."
+            >
+              <div className="ai-assist-settings-status-grid">
+                <div className="ai-assist-settings-status-card">
+                  <span className="ai-assist-settings-status-label">Embeddings</span>
+                  <strong>{embeddingModelStatus?.installed ? "Ready" : "Needs download"}</strong>
+                  <span className="project-model-description">
+                    {formatCompletionStatus(embeddingModelDownloadStatus, embeddingModelStatus)}
+                    {embeddingModelStatus?.bytes ? ` | ${formatBytes(embeddingModelStatus.bytes)}` : ""}
+                  </span>
+                </div>
+                <div className="ai-assist-settings-status-card">
+                  <span className="ai-assist-settings-status-label">Local LLM</span>
+                  <strong>{settings.llm.ollamaEnabled ? "Enabled" : "Disabled"}</strong>
+                  <span className="project-model-description">
+                    {ollamaDiscovery?.ok
+                      ? `Connected | ${ollamaDiscovery.modelCount} models found`
+                      : "Not connected yet"}
+                  </span>
+                </div>
+                <div className="ai-assist-settings-status-card">
+                  <span className="ai-assist-settings-status-label">Selected model</span>
+                  <strong>{settings.llm.ollamaSelectedModel || "None selected"}</strong>
+                  <span className="project-model-description">
+                    {ollamaDiscovery?.version ? `Server version ${ollamaDiscovery.version}` : "Choose a model after testing the server"}
+                  </span>
                 </div>
               </div>
-            </div>
+            </SettingsModalSection>
 
-            {embeddingModelError && <div className="form-error project-settings-error">{embeddingModelError}</div>}
-            {embeddingModelNotice && <div className="settings-success project-settings-success">{embeddingModelNotice}</div>}
+            <SettingsModalSection
+              title="Step 1: Embedding Runtime"
+              description="Download the local embedding model Kanqual uses for search and retrieval, then open tuning only when you need to adjust indexing behavior."
+            >
+              {embeddingModelError && <div className="form-error project-settings-error">{embeddingModelError}</div>}
+              {embeddingModelNotice && <div className="settings-success project-settings-success">{embeddingModelNotice}</div>}
 
-            <div className="project-model-card">
-              <div>
-                <div className="project-model-name">{embeddingModelStatus?.displayName ?? "multilingual-e5-large"}</div>
-                <p className="project-model-description">
-                  Repo: <code>{embeddingModelStatus?.repoId ?? "intfloat/multilingual-e5-large"}</code>
-                </p>
-                <p className="project-model-description">
-                  Status: {embeddingModelStatus?.installed ? "Downloaded locally" : "Not downloaded yet"}
-                  {embeddingModelStatus?.bytes ? ` | ${formatBytes(embeddingModelStatus.bytes)}` : ""}
-                  {embeddingModelStatus?.files ? ` | ${embeddingModelStatus.files} files` : ""}
-                </p>
-                <p className="project-model-description">
-                  Completion status: {formatCompletionStatus(embeddingModelDownloadStatus, embeddingModelStatus)}
-                </p>
-                <p className="project-model-description">
-                  Total download size: {formatBytes(embeddingModelPreflight?.totalBytes ?? 0)}
-                </p>
-                <p className="project-model-description">
-                  Already on device: {formatBytes(embeddingModelPreflight?.existingBytes ?? embeddingModelStatus?.bytes ?? 0)}
-                  {embeddingModelPreflight?.manifestAvailable
-                    ? ` | ${embeddingModelPreflight?.existingFiles ?? 0} files`
-                    : ""}
-                </p>
-                <p className="project-model-description">
-                  Remaining download: {formatBytes(embeddingModelPreflight?.remainingBytes ?? 0)}
-                  {embeddingModelPreflight?.manifestAvailable && embeddingModelPreflight?.remainingFiles != null
-                    ? ` across ${embeddingModelPreflight.remainingFiles} files`
-                    : ""}
-                </p>
-                <p className="project-model-description">
-                  Downloaded: {embeddingModelStatus?.installed ? formatDownloadDate(embeddingModelStatus.downloadedAtMs) : "Not downloaded yet"}
-                </p>
-                <p className="project-model-description">
-                  Location: <code>{embeddingModelStatus?.modelDir ?? "Detecting local model directory..."}</code>
-                </p>
-                {embeddingModelPreflight?.message && (
-                  <p className="project-model-description">{embeddingModelPreflight.message}</p>
-                )}
+              <div className="project-model-card">
+                <div>
+                  <div className="project-model-name">{embeddingModelStatus?.displayName ?? "multilingual-e5-large"}</div>
+                  <p className="project-model-description">
+                    Status: {embeddingModelStatus?.installed ? "Downloaded locally" : "Not downloaded yet"}
+                    {embeddingModelStatus?.bytes ? ` | ${formatBytes(embeddingModelStatus.bytes)}` : ""}
+                    {embeddingModelStatus?.files ? ` | ${embeddingModelStatus.files} files` : ""}
+                  </p>
+                  <p className="project-model-description">
+                    Completion: {formatCompletionStatus(embeddingModelDownloadStatus, embeddingModelStatus)}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="project-export-actions project-export-actions--modal">
-              <button
-                className="btn btn--primary"
-                type="button"
-                onClick={() => void handleEmbeddingModelDownload()}
-                disabled={embeddingModelBusy || !!embeddingModelStatus?.installed || !canDownloadEmbeddingModel}
-              >
-                {embeddingModelBusy
-                  ? embeddingModelDownloadStatus?.phase === "cancelling"
-                    ? "Cancelling..."
-                    : "Downloading..."
-                  : embeddingModelStatus?.installed
-                    ? "Already Downloaded"
-                    : "Download from Hugging Face"}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void handleEmbeddingModelCancel()}
-                disabled={
-                  !canDownloadEmbeddingModel ||
-                  !embeddingModelDownloadStatus ||
-                  (embeddingModelDownloadStatus.phase !== "downloading" &&
-                    embeddingModelDownloadStatus.phase !== "cancelling")
-                }
-              >
-                {embeddingModelDownloadStatus?.phase === "cancelling" ? "Cancelling..." : "Cancel Download"}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void handleEmbeddingModelClear()}
-                disabled={
-                  !canDeleteEmbeddingModel ||
-                  embeddingModelBusy ||
-                  (!embeddingModelStatus?.installed && !(embeddingModelStatus?.files && embeddingModelStatus.files > 0))
-                }
-              >
-                Clear Local Model
-              </button>
-            </div>
+              <div className="project-export-actions project-export-actions--modal">
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={() => void handleEmbeddingModelDownload()}
+                  disabled={embeddingModelBusy || !!embeddingModelStatus?.installed || !canDownloadEmbeddingModel}
+                >
+                  {embeddingModelBusy
+                    ? embeddingModelDownloadStatus?.phase === "cancelling"
+                      ? "Cancelling..."
+                      : "Downloading..."
+                    : embeddingModelStatus?.installed
+                      ? "Already Downloaded"
+                      : "Download from Hugging Face"}
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => void handleEmbeddingModelCancel()}
+                  disabled={
+                    !canDownloadEmbeddingModel ||
+                    !embeddingModelDownloadStatus ||
+                    (embeddingModelDownloadStatus.phase !== "downloading" &&
+                      embeddingModelDownloadStatus.phase !== "cancelling")
+                  }
+                >
+                  {embeddingModelDownloadStatus?.phase === "cancelling" ? "Cancelling..." : "Cancel Download"}
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => void handleEmbeddingModelClear()}
+                  disabled={
+                    !canDeleteEmbeddingModel ||
+                    embeddingModelBusy ||
+                    (!embeddingModelStatus?.installed && !(embeddingModelStatus?.files && embeddingModelStatus.files > 0))
+                  }
+                >
+                  Clear Local Model
+                </button>
+              </div>
 
-            <div className="llm-settings-grid">
-              <label className="form-label">
-                Chunk size
-                <span className="settings-field-hint">
-                  Step 1 after download: choose how much text Kanqual should place into each embedding chunk before indexing.
+              <details className="ai-assist-settings-disclosure">
+                <summary className="ai-assist-settings-disclosure-summary">Show download details</summary>
+                <div className="ai-assist-settings-disclosure-body">
+                  <ul className="ai-assist-settings-summary-list">
+                    <li>
+                      <strong>Repository:</strong> <code>{embeddingModelStatus?.repoId ?? "intfloat/multilingual-e5-large"}</code>
+                    </li>
+                    <li>
+                      <strong>Total download:</strong> {formatBytes(embeddingModelPreflight?.totalBytes ?? 0)}
+                    </li>
+                    <li>
+                      <strong>Already on device:</strong> {formatBytes(embeddingModelPreflight?.existingBytes ?? embeddingModelStatus?.bytes ?? 0)}
+                      {embeddingModelPreflight?.manifestAvailable ? ` | ${embeddingModelPreflight?.existingFiles ?? 0} files` : ""}
+                    </li>
+                    <li>
+                      <strong>Remaining:</strong> {formatBytes(embeddingModelPreflight?.remainingBytes ?? 0)}
+                      {embeddingModelPreflight?.manifestAvailable && embeddingModelPreflight?.remainingFiles != null
+                        ? ` across ${embeddingModelPreflight.remainingFiles} files`
+                        : ""}
+                    </li>
+                    <li>
+                      <strong>Downloaded:</strong> {embeddingModelStatus?.installed ? formatDownloadDate(embeddingModelStatus.downloadedAtMs) : "Not downloaded yet"}
+                    </li>
+                    <li>
+                      <strong>Location:</strong> <code>{embeddingModelStatus?.modelDir ?? "Detecting local model directory..."}</code>
+                    </li>
+                    {embeddingModelPreflight?.message ? (
+                      <li>
+                        <strong>Note:</strong> {embeddingModelPreflight.message}
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              </details>
+
+              <details className="ai-assist-settings-disclosure">
+                <summary className="ai-assist-settings-disclosure-summary">Embedding tuning</summary>
+                <div className="ai-assist-settings-disclosure-body">
+                  <div className="llm-settings-grid">
+                    <label className="form-label">
+                      Chunk size
+                      <span className="settings-field-hint">
+                        Character cap for each embedding chunk. Kanqual also stops earlier when a chunk is likely to exceed the model's token budget.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={100}
+                        max={20000}
+                        value={settings.llm.chunkSize}
+                        onChange={(e) => {
+                          const chunkSize = clampInteger(Number(e.target.value), 100, 20000);
+                          const overlapSize = Math.min(settings.llm.overlapSize, Math.max(0, chunkSize - 1));
+                          persist({
+                            ...settings,
+                            llm: {
+                              ...settings.llm,
+                              chunkSize,
+                              overlapSize,
+                            },
+                          }, "LLM settings saved.");
+                        }}
+                      />
+                    </label>
+
+                    <label className="form-label">
+                      Overlap size
+                      <span className="settings-field-hint">
+                        Shared characters between neighboring chunks after token-aware chunking.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={0}
+                        max={Math.max(0, settings.llm.chunkSize - 1)}
+                        value={settings.llm.overlapSize}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            overlapSize: clampInteger(Number(e.target.value), 0, Math.max(0, settings.llm.chunkSize - 1)),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
+
+                    <label className="form-label">
+                      Batch size
+                      <span className="settings-field-hint">
+                        Chunks processed together during indexing.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={1}
+                        max={256}
+                        value={settings.llm.batchSize}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            batchSize: clampInteger(Number(e.target.value), 1, 256),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </details>
+            </SettingsModalSection>
+
+            <SettingsModalSection
+              title="Step 2: Local LLM Connection"
+              description="Turn on the local server integration, test it, and open the connection settings only when you need to change the endpoint."
+            >
+              <label className="settings-toggle-row">
+                <span>
+                  <strong>Enable local LLM integration</strong>
+                  <small>Save local connection details for future AI Assist generation features.</small>
                 </span>
                 <input
-                  className="form-input"
-                  type="number"
-                  min={100}
-                  max={20000}
-                  value={settings.llm.chunkSize}
-                  onChange={(e) => {
-                    const chunkSize = clampInteger(Number(e.target.value), 100, 20000);
-                    const overlapSize = Math.min(settings.llm.overlapSize, Math.max(0, chunkSize - 1));
-                    persist({
-                      ...settings,
-                      llm: {
-                        ...settings.llm,
-                        chunkSize,
-                        overlapSize,
-                      },
-                    }, "LLM settings saved.");
-                  }}
-                />
-              </label>
-
-              <label className="form-label">
-                Overlap size
-                <span className="settings-field-hint">
-                  Step 2: keep some shared text between neighboring chunks so retrieval can preserve context across boundaries.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={0}
-                  max={Math.max(0, settings.llm.chunkSize - 1)}
-                  value={settings.llm.overlapSize}
+                  type="checkbox"
+                  checked={settings.llm.ollamaEnabled}
+                  disabled={!canManageLlmSettings}
                   onChange={(e) => persist({
                     ...settings,
-                    llm: {
-                      ...settings.llm,
-                      overlapSize: clampInteger(Number(e.target.value), 0, Math.max(0, settings.llm.chunkSize - 1)),
-                    },
+                    llm: { ...settings.llm, ollamaEnabled: e.target.checked },
                   }, "LLM settings saved.")}
                 />
               </label>
 
-              <label className="form-label">
-                Batch size
-                <span className="settings-field-hint">
-                  Step 3: choose how many chunks Kanqual should process together when it builds embeddings.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={1}
-                  max={256}
-                  value={settings.llm.batchSize}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      batchSize: clampInteger(Number(e.target.value), 1, 256),
-                    },
-                  }, "LLM settings saved.")}
-                />
-              </label>
-            </div>
-
-            <div className="settings-row settings-row--block">
-              <div className="settings-row-info">
-                <div className="settings-row-label">Local LLM over HTTP</div>
-                <div className="settings-row-desc">
-                  Step 1: enable local LLM integration. Step 2: enter the LLM service's address and port. Step 3: test the connection. Step 4: choose the model Kanqual should use for generation features.
+              <div className="project-model-card">
+                <div>
+                  <div className="project-model-name">Local LLM server</div>
+                  <p className="project-model-description">
+                    Endpoint: <code>{settings.llm.ollamaProtocol}://{settings.llm.ollamaHost}:{settings.llm.ollamaPort}</code>
+                  </p>
+                  <p className="project-model-description">
+                    Status: {ollamaDiscovery?.ok ? "Connected" : "Not tested yet"}
+                    {ollamaDiscovery?.version ? ` | Version ${ollamaDiscovery.version}` : ""}
+                    {ollamaDiscovery?.ok ? ` | ${ollamaDiscovery.modelCount} models found` : ""}
+                  </p>
                 </div>
               </div>
-            </div>
 
-            <label className="settings-toggle-row">
-              <span>
-                <strong>Enable local LLM integration</strong>
-                <small>Save local LLM connection details and make them available for future AI Assist generation features.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.llm.ollamaEnabled}
-                disabled={!canManageLlmSettings}
-                onChange={(e) => persist({
-                  ...settings,
-                  llm: { ...settings.llm, ollamaEnabled: e.target.checked },
-                }, "LLM settings saved.")}
-              />
-            </label>
+              <div className="project-export-actions project-export-actions--modal llm-connection-actions llm-connection-actions--stacked">
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={() => void handleOllamaTestConnection()}
+                  disabled={ollamaBusy || !canManageLlmSettings}
+                >
+                  {ollamaBusy ? "Testing..." : "Test Connection"}
+                </button>
+              </div>
 
-            <fieldset className="llm-connection-layout" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-              <div className="llm-connection-fields">
+              {ollamaError && <div className="form-error project-settings-error">{ollamaError}</div>}
+              {ollamaNotice && <div className="settings-success project-settings-success">{ollamaNotice}</div>}
+
+              <details className="ai-assist-settings-disclosure">
+                <summary className="ai-assist-settings-disclosure-summary">Show connection settings</summary>
+                <div className="ai-assist-settings-disclosure-body">
+                  <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                    <label className="form-label">
+                      Protocol
+                      <span className="settings-field-hint">
+                        Most local setups use plain HTTP.
+                      </span>
+                      <select
+                        className="form-input"
+                        value={settings.llm.ollamaProtocol}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaProtocol: e.target.value === "https" ? "https" : "http",
+                          },
+                        }, "LLM settings saved.")}
+                      >
+                        <option value="http">http</option>
+                        <option value="https">https</option>
+                      </select>
+                    </label>
+
+                    <label className="form-label">
+                      Host / URL
+                      <span className="settings-field-hint">
+                        Usually <code>127.0.0.1</code> or <code>localhost</code>.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="text"
+                        value={settings.llm.ollamaHost}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaHost: e.target.value,
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
+
+                    <label className="form-label">
+                      Port
+                      <span className="settings-field-hint">
+                        Default for many local servers: <code>11434</code>.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={settings.llm.ollamaPort}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaPort: clampInteger(Number(e.target.value), 1, 65535),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
+
+                    <label className="form-label">
+                      Request timeout
+                      <span className="settings-field-hint">
+                        Seconds to wait when testing or listing models.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={5}
+                        max={600}
+                        value={settings.llm.ollamaRequestTimeoutSeconds}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaRequestTimeoutSeconds: clampInteger(Number(e.target.value), 5, 600),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
+                  </fieldset>
+                </div>
+              </details>
+            </SettingsModalSection>
+
+            <SettingsModalSection
+              title="Step 3: Model Defaults"
+              description="Choose the local model Kanqual should use, then expand advanced defaults only when you want to tune generation behavior."
+            >
+              <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                 <label className="form-label">
-                  Protocol
+                  Available local model
                   <span className="settings-field-hint">
-                    Most local LLM setups use plain HTTP on the local machine.
+                    Test the connection first to load installed models from this server.
                   </span>
                   <select
                     className="form-input"
-                    value={settings.llm.ollamaProtocol}
+                    value={settings.llm.ollamaSelectedModel}
                     onChange={(e) => persist({
                       ...settings,
                       llm: {
                         ...settings.llm,
-                        ollamaProtocol: e.target.value === "https" ? "https" : "http",
+                        ollamaSelectedModel: e.target.value,
                       },
                     }, "LLM settings saved.")}
+                    disabled={ollamaModels.length === 0}
                   >
-                    <option value="http">http</option>
-                    <option value="https">https</option>
+                    <option value="">{ollamaModels.length === 0 ? "No models loaded yet" : "Select a model"}</option>
+                    {ollamaModels.map((model) => (
+                      <option key={model.name} value={model.name}>
+                        {model.name}
+                      </option>
+                    ))}
                   </select>
                 </label>
+              </fieldset>
 
-                <label className="form-label">
-                  Local LLM host / URL
-                  <span className="settings-field-hint">
-                    Usually <code>127.0.0.1</code>, <code>localhost</code>, or a reachable LAN address.
-                  </span>
-                  <input
-                    className="form-input"
-                    type="text"
-                    value={settings.llm.ollamaHost}
-                    onChange={(e) => persist({
-                      ...settings,
-                      llm: {
-                        ...settings.llm,
-                        ollamaHost: e.target.value,
-                      },
-                    }, "LLM settings saved.")}
-                  />
-                </label>
+              <details className="ai-assist-settings-disclosure">
+                <summary className="ai-assist-settings-disclosure-summary">Advanced generation defaults</summary>
+                <div className="ai-assist-settings-disclosure-body">
+                  <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                    <label className="form-label">
+                      Temperature
+                      <span className="settings-field-hint">
+                        Lower values are more deterministic.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={0}
+                        max={2}
+                        step={0.1}
+                        value={settings.llm.ollamaTemperature}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaTemperature: Math.max(0, Math.min(2, Number(e.target.value) || 0)),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
 
-                <label className="form-label">
-                  Port
-                  <span className="settings-field-hint">
-                    Many local LLM servers use <code>11434</code> by default.
-                  </span>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={settings.llm.ollamaPort}
-                    onChange={(e) => persist({
-                      ...settings,
-                      llm: {
-                        ...settings.llm,
-                        ollamaPort: clampInteger(Number(e.target.value), 1, 65535),
-                      },
-                    }, "LLM settings saved.")}
-                  />
-                </label>
+                    <label className="form-label">
+                      Context window
+                      <span className="settings-field-hint">
+                        Default <code>num_ctx</code> target for future requests.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={256}
+                        max={131072}
+                        value={settings.llm.ollamaNumCtx}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaNumCtx: clampInteger(Number(e.target.value), 256, 131072),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
 
-                <label className="form-label">
-                  Request timeout
-                  <span className="settings-field-hint">
-                    Maximum seconds to wait when testing the local LLM server or listing models.
-                  </span>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min={5}
-                    max={600}
-                    value={settings.llm.ollamaRequestTimeoutSeconds}
-                    onChange={(e) => persist({
-                      ...settings,
-                      llm: {
-                        ...settings.llm,
-                        ollamaRequestTimeoutSeconds: clampInteger(Number(e.target.value), 5, 600),
-                      },
-                    }, "LLM settings saved.")}
-                  />
-                </label>
-              </div>
+                    <label className="form-label">
+                      Keep alive (minutes)
+                      <span className="settings-field-hint">
+                        Keeps models warm between requests.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={0}
+                        max={1440}
+                        value={settings.llm.ollamaKeepAliveMinutes}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaKeepAliveMinutes: clampInteger(Number(e.target.value), 0, 1440),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
 
-              <div className="llm-connection-side">
-                <div className="project-model-card">
-                  <div>
-                    <div className="project-model-name">Local LLM server</div>
-                    <p className="project-model-description">
-                      Endpoint: <code>{settings.llm.ollamaProtocol}://{settings.llm.ollamaHost}:{settings.llm.ollamaPort}</code>
-                    </p>
-                    <p className="project-model-description">
-                      Status: {ollamaDiscovery?.ok ? "Connected" : "Not tested yet"}
-                      {ollamaDiscovery?.version ? ` | Version ${ollamaDiscovery.version}` : ""}
-                      {ollamaDiscovery?.ok ? ` | ${ollamaDiscovery.modelCount} models found` : ""}
-                    </p>
-                  </div>
+                    <label className="form-label">
+                      Relevant-segment shortlist
+                      <span className="settings-field-hint">
+                        Top matches sent to the model before it narrows them down.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={settings.llm.ollamaRelevantSegmentsCandidateLimit}
+                        onChange={(e) => {
+                          const candidateLimit = clampInteger(Number(e.target.value), 1, 50);
+                          persist({
+                            ...settings,
+                            llm: {
+                              ...settings.llm,
+                              ollamaRelevantSegmentsCandidateLimit: candidateLimit,
+                              ollamaRelevantSegmentsMaxResults: Math.min(
+                                settings.llm.ollamaRelevantSegmentsMaxResults,
+                                candidateLimit,
+                              ),
+                            },
+                          }, "LLM settings saved.");
+                        }}
+                      />
+                    </label>
+
+                    <label className="form-label">
+                      Relevant segments returned
+                      <span className="settings-field-hint">
+                        Maximum number of segments returned to AI Assisted Coding.
+                      </span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={1}
+                        max={settings.llm.ollamaRelevantSegmentsCandidateLimit}
+                        value={settings.llm.ollamaRelevantSegmentsMaxResults}
+                        onChange={(e) => persist({
+                          ...settings,
+                          llm: {
+                            ...settings.llm,
+                            ollamaRelevantSegmentsMaxResults: clampInteger(
+                              Number(e.target.value),
+                              1,
+                              settings.llm.ollamaRelevantSegmentsCandidateLimit,
+                            ),
+                          },
+                        }, "LLM settings saved.")}
+                      />
+                    </label>
+                  </fieldset>
                 </div>
-
-                <div className="project-export-actions project-export-actions--modal llm-connection-actions">
-                  <button
-                    className="btn btn--primary"
-                    type="button"
-                    onClick={() => void handleOllamaTestConnection()}
-                    disabled={ollamaBusy || !canManageLlmSettings}
-                  >
-                    {ollamaBusy ? "Testing..." : "Test Connection"}
-                  </button>
-                </div>
-              </div>
-            </fieldset>
-
-            {ollamaError && <div className="form-error project-settings-error">{ollamaError}</div>}
-            {ollamaNotice && <div className="settings-success project-settings-success">{ollamaNotice}</div>}
-
-            <div className="settings-row settings-row--block">
-              <div className="settings-row-info">
-                <div className="settings-row-label">LLM Settings</div>
-                <div className="settings-row-desc">
-                  Once the connection test succeeds, pick a model first, then adjust how Kanqual should use it during AI Assist generation and retrieval workflows.
-                </div>
-              </div>
-            </div>
-
-            <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-              <label className="form-label">
-                Available local model
-                <span className="settings-field-hint">
-                  Test the connection first to load the installed local models from this server.
-                </span>
-                <select
-                  className="form-input"
-                  value={settings.llm.ollamaSelectedModel}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      ollamaSelectedModel: e.target.value,
-                    },
-                  }, "LLM settings saved.")}
-                  disabled={ollamaModels.length === 0}
-                >
-                  <option value="">{ollamaModels.length === 0 ? "No models loaded yet" : "Select a model"}</option>
-                  {ollamaModels.map((model) => (
-                    <option key={model.name} value={model.name}>
-                      {model.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="form-label">
-                Temperature
-                <span className="settings-field-hint">
-                  Lower values are more deterministic. Saved now for future local LLM generation requests.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={settings.llm.ollamaTemperature}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      ollamaTemperature: Math.max(0, Math.min(2, Number(e.target.value) || 0)),
-                    },
-                  }, "LLM settings saved.")}
-                />
-              </label>
-
-              <label className="form-label">
-                Context window
-                <span className="settings-field-hint">
-                  Saved as the default local LLM <code>num_ctx</code> target for future AI Assist generation requests.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={256}
-                  max={131072}
-                  value={settings.llm.ollamaNumCtx}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      ollamaNumCtx: clampInteger(Number(e.target.value), 256, 131072),
-                    },
-                  }, "LLM settings saved.")}
-                />
-              </label>
-
-              <label className="form-label">
-                Keep alive (minutes)
-                <span className="settings-field-hint">
-                  Saved as the future local LLM keep-alive target so models can stay warm between requests.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={settings.llm.ollamaKeepAliveMinutes}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      ollamaKeepAliveMinutes: clampInteger(Number(e.target.value), 0, 1440),
-                    },
-                  }, "LLM settings saved.")}
-                />
-              </label>
-
-              <label className="form-label">
-                Relevant-segment shortlist
-                <span className="settings-field-hint">
-                  Number of top embedding matches from the open document to send to the local LLM before it chooses the most relevant ones.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={settings.llm.ollamaRelevantSegmentsCandidateLimit}
-                  onChange={(e) => {
-                    const candidateLimit = clampInteger(Number(e.target.value), 1, 50);
-                    persist({
-                      ...settings,
-                      llm: {
-                        ...settings.llm,
-                        ollamaRelevantSegmentsCandidateLimit: candidateLimit,
-                        ollamaRelevantSegmentsMaxResults: Math.min(
-                          settings.llm.ollamaRelevantSegmentsMaxResults,
-                          candidateLimit,
-                        ),
-                      },
-                    }, "LLM settings saved.");
-                  }}
-                />
-              </label>
-
-              <label className="form-label">
-                Relevant segments returned
-                <span className="settings-field-hint">
-                  Maximum number of segments the local LLM should send back for AI Assisted Coding after reviewing the shortlist.
-                </span>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={1}
-                  max={settings.llm.ollamaRelevantSegmentsCandidateLimit}
-                  value={settings.llm.ollamaRelevantSegmentsMaxResults}
-                  onChange={(e) => persist({
-                    ...settings,
-                    llm: {
-                      ...settings.llm,
-                      ollamaRelevantSegmentsMaxResults: clampInteger(
-                        Number(e.target.value),
-                        1,
-                        settings.llm.ollamaRelevantSegmentsCandidateLimit,
-                      ),
-                    },
-                  }, "LLM settings saved.")}
-                />
-              </label>
-            </fieldset>
-
-
-          </>
+              </details>
+            </SettingsModalSection>
+          </div>
         );
       default:
         return null;

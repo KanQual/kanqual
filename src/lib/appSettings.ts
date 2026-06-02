@@ -23,6 +23,10 @@ export type UpdateSettings = {
   autoCheck: boolean;
 };
 
+export type LlmConnectionMode = "none" | "local" | "cloud";
+
+export type CloudLlmProvider = "openai" | "anthropic" | "copilot" | "blablador" | "ollama";
+
 export type LlmSettings = {
   chunkSize: number;
   overlapSize: number;
@@ -30,6 +34,10 @@ export type LlmSettings = {
   prefixPassages: boolean;
   prefixQueries: boolean;
   normalizeWhitespace: boolean;
+  connectionMode: LlmConnectionMode;
+  cloudProvider: CloudLlmProvider;
+  cloudApiSecret: string;
+  cloudSelectedModel: string;
   ollamaEnabled: boolean;
   ollamaProtocol: "http" | "https";
   ollamaHost: string;
@@ -77,12 +85,16 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     autoCheck: true,
   },
   llm: {
-    chunkSize: 1200,
-    overlapSize: 150,
+    chunkSize: 1800,
+    overlapSize: 100,
     batchSize: 16,
     prefixPassages: true,
     prefixQueries: true,
     normalizeWhitespace: true,
+    connectionMode: "none",
+    cloudProvider: "openai",
+    cloudApiSecret: "",
+    cloudSelectedModel: "",
     ollamaEnabled: false,
     ollamaProtocol: "http",
     ollamaHost: "127.0.0.1",
@@ -123,6 +135,12 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
     1,
     ollamaRelevantSegmentsCandidateLimit,
   );
+  const connectionMode =
+    value?.connectionMode === "local" || value?.connectionMode === "cloud" || value?.connectionMode === "none"
+      ? value.connectionMode
+      : value?.ollamaEnabled
+        ? "local"
+        : DEFAULT_APP_SETTINGS.llm.connectionMode;
   return {
     chunkSize,
     overlapSize,
@@ -130,7 +148,17 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
     prefixPassages: value?.prefixPassages ?? DEFAULT_APP_SETTINGS.llm.prefixPassages,
     prefixQueries: value?.prefixQueries ?? DEFAULT_APP_SETTINGS.llm.prefixQueries,
     normalizeWhitespace: value?.normalizeWhitespace ?? DEFAULT_APP_SETTINGS.llm.normalizeWhitespace,
-    ollamaEnabled: value?.ollamaEnabled ?? DEFAULT_APP_SETTINGS.llm.ollamaEnabled,
+    connectionMode,
+    cloudProvider:
+      value?.cloudProvider === "anthropic"
+      || value?.cloudProvider === "copilot"
+      || value?.cloudProvider === "blablador"
+      || value?.cloudProvider === "ollama"
+        ? value.cloudProvider
+        : DEFAULT_APP_SETTINGS.llm.cloudProvider,
+    cloudApiSecret: typeof value?.cloudApiSecret === "string" ? value.cloudApiSecret : "",
+    cloudSelectedModel: typeof value?.cloudSelectedModel === "string" ? value.cloudSelectedModel : "",
+    ollamaEnabled: connectionMode === "local",
     ollamaProtocol: value?.ollamaProtocol === "https" ? "https" : DEFAULT_APP_SETTINGS.llm.ollamaProtocol,
     ollamaHost: typeof value?.ollamaHost === "string" && value.ollamaHost.trim()
       ? value.ollamaHost.trim()

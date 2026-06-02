@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "../context/StoreContext";
 import { readAppSettings } from "../lib/appSettings";
+import { assertActiveLlmRuntime } from "../lib/llmRuntime";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { HelpIcon } from "../components/AppIcons";
 import {
@@ -1005,13 +1006,7 @@ function AIAssistAttributeWorkspace({
     }));
     try {
       if (isLocalWorkspace) {
-        const llmSettings = readAppSettings().llm;
-        if (!llmSettings.ollamaEnabled) {
-          throw new Error("Enable Ollama in App Settings before generating AI suggestions.");
-        }
-        if (!llmSettings.ollamaSelectedModel) {
-          throw new Error("Choose an Ollama model in App Settings before generating AI suggestions.");
-        }
+        assertActiveLlmRuntime(readAppSettings().llm, "generating AI suggestions");
       }
       const items = await loadSuggestionInputItems();
       setSuggestionRunState({
@@ -1332,7 +1327,7 @@ function AIAssistAttributeWorkspace({
               <span className="ai-segments-progress-bar" />
             </div>
             <div className="ai-segments-search-copy">
-              Ollama is generating suggested values for {selectedAttribute.name}
+              AI Assist is generating suggested values for {selectedAttribute.name}
               {visibleSuggestionProgress ? ` (${visibleSuggestionProgress.completedItems}/${visibleSuggestionProgress.totalItems})` : ""}.
             </div>
           </div>

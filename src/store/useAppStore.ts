@@ -23,6 +23,12 @@ import {
   type LlmSettings,
 } from "../lib/appSettings";
 import {
+  assertActiveLlmRuntime,
+  buildLlmInvokeRequestFields,
+  hasConfiguredActiveLlm,
+  hasSelectedActiveLlmModel,
+} from "../lib/llmRuntime";
+import {
   getAppRolePermissions,
   getProjectRolePermissions,
   hasPermission,
@@ -130,6 +136,12 @@ function isSnapshotTooLongError(error: unknown): boolean {
   const snapshotError = maybe.response?.data?.snapshot;
   const message = `${snapshotError?.message || ""} ${snapshotError?.code || ""}`.toLowerCase();
   return message.includes("no more than 5000") || message.includes("validation_max_text_constraint");
+}
+
+function describeUnknownError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return fallback;
 }
 
 function sameProjectAiAssistRuntimeStatus(
@@ -741,25 +753,13 @@ export function useAppStore(pb: PocketBase) {
   const runProjectChatRequestLocally = useCallback(
     async (request: ProjectChatAiJobRequest): Promise<ProjectChatAiJobResult> => {
       const llmSettings = readAppSettings().llm;
-      if (!llmSettings.ollamaEnabled) {
-        throw new Error("Enable Ollama in App Settings before using project chat.");
-      }
-      if (!llmSettings.ollamaSelectedModel) {
-        throw new Error("Choose an Ollama model in App Settings before using project chat.");
-      }
+      assertActiveLlmRuntime(llmSettings, "using project chat");
       return invoke<ProjectChatAiJobResult>("chat_with_project_ollama", {
         request: {
           projectId: request.projectId,
           query: request.query,
           conversation: request.conversation,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
           prefixQueries: llmSettings.prefixQueries,
           selectedContextMode: request.selectedContextMode,
           selectedDocumentIds: request.selectedDocumentIds,
@@ -775,12 +775,7 @@ export function useAppStore(pb: PocketBase) {
 
   const getHostLlmSettingsOrThrow = useCallback((): LlmSettings => {
     const llmSettings = readAppSettings().llm;
-    if (!llmSettings.ollamaEnabled) {
-      throw new Error("Enable Ollama in App Settings on the host device before using AI Assist.");
-    }
-    if (!llmSettings.ollamaSelectedModel) {
-      throw new Error("Choose an Ollama model in App Settings on the host device before using AI Assist.");
-    }
+    assertActiveLlmRuntime(llmSettings, "using AI Assist");
     return llmSettings;
   }, []);
 
@@ -798,12 +793,7 @@ export function useAppStore(pb: PocketBase) {
       }) => Promise<void> | void,
     ) => {
       const llmSettings = readAppSettings().llm;
-      if (!llmSettings.ollamaEnabled) {
-        throw new Error("Enable Ollama in App Settings before processing documents.");
-      }
-      if (!llmSettings.ollamaSelectedModel) {
-        throw new Error("Choose an Ollama model in App Settings before processing documents.");
-      }
+      const runtime = assertActiveLlmRuntime(llmSettings, "processing documents");
 
       const selectedDocuments = (
         await Promise.all(
@@ -856,11 +846,11 @@ export function useAppStore(pb: PocketBase) {
           const canResume = !forceRestart && Boolean(
             existing
             && existing.source_content_hash === sourceContentHash
-            && String(existing.model ?? "") === llmSettings.ollamaSelectedModel
+            && String(existing.model ?? "") === runtime.model
             && Number(existing.chunk_count ?? 0) === chunks.length
             && resumableManifest
             && resumableManifest.contentHash === sourceContentHash
-            && resumableManifest.model === llmSettings.ollamaSelectedModel
+            && resumableManifest.model === runtime.model
             && resumableManifest.numCtx === llmSettings.ollamaNumCtx
             && resumableManifest.temperature === llmSettings.ollamaTemperature,
           );
@@ -868,7 +858,7 @@ export function useAppStore(pb: PocketBase) {
             ? resumableManifest
             : createInitialChunkManifest({
               contentHash: sourceContentHash,
-              model: llmSettings.ollamaSelectedModel,
+              model: runtime.model,
               numCtx: llmSettings.ollamaNumCtx,
               temperature: llmSettings.ollamaTemperature,
               totalChunks: chunks.length,
@@ -894,8 +884,8 @@ export function useAppStore(pb: PocketBase) {
             document_name: document.name,
             file_path: document.filePath,
             status: forceRestart ? "pending_review" : existing?.status === "reviewed" ? "reviewed" : "pending_review",
-            model: llmSettings.ollamaSelectedModel,
-            base_url: `${llmSettings.ollamaProtocol}://${llmSettings.ollamaHost}:${llmSettings.ollamaPort}`,
+            model: runtime.model,
+            base_url: runtime.baseUrl,
             chunk_count: chunks.length,
             processed_chunk_count: canResume ? manifest.chunks.filter((chunk) => chunk.status === "completed").length : 0,
             processing_status: "running",
@@ -960,14 +950,8 @@ export function useAppStore(pb: PocketBase) {
                 request: {
                   chunkText: chunks[chunkIndex]?.text ?? "",
                   chunkIndex,
-                  protocol: llmSettings.ollamaProtocol,
-                  host: llmSettings.ollamaHost,
-                  port: llmSettings.ollamaPort,
-                  model: llmSettings.ollamaSelectedModel,
+                  ...buildLlmInvokeRequestFields(llmSettings),
                   timeoutSeconds: llmSettings.ollamaDocumentProcessingTimeoutSeconds,
-                  temperature: llmSettings.ollamaTemperature,
-                  numCtx: llmSettings.ollamaNumCtx,
-                  keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
                 },
               });
               aggregate = appendChunkAggregate(aggregate, response);
@@ -1014,7 +998,7 @@ export function useAppStore(pb: PocketBase) {
           );
           await pb.collection("processed_document_reviews").update(reviewRecordId, {
             status: existing?.status === "reviewed" ? "reviewed" : "pending_review",
-            model: llmSettings.ollamaSelectedModel,
+            model: runtime.model,
             chunk_count: chunks.length,
             processed_chunk_count: chunks.length,
             processing_status: "completed",
@@ -1098,14 +1082,7 @@ export function useAppStore(pb: PocketBase) {
           attributeDescription: request.attributeDescription,
           attributeOptions: request.attributeOptions,
           items: request.items,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
         },
       });
     },
@@ -1159,14 +1136,7 @@ export function useAppStore(pb: PocketBase) {
           codeId: request.codeId,
           codeLabel: request.codeLabel,
           codeDescription: request.codeDescription,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
           candidateLimit: llmSettings.ollamaRelevantSegmentsCandidateLimit,
           maxResults: llmSettings.ollamaRelevantSegmentsMaxResults,
           prefixQueries: llmSettings.prefixQueries,
@@ -1207,7 +1177,7 @@ export function useAppStore(pb: PocketBase) {
           results: prev[documentId]?.results ?? [],
           lastModel: prev[documentId]?.lastModel ?? "",
           searchError: "",
-          searchNotice: `Ollama is reviewing indexed segments from the open document for "${codeLabel}".`,
+          searchNotice: `The configured LLM is reviewing indexed segments from the open document for "${codeLabel}".`,
         },
       }));
 
@@ -1237,8 +1207,8 @@ export function useAppStore(pb: PocketBase) {
             searchError: "",
             searchNotice:
               response.segments.length > 0
-                ? `Ollama reviewed ${response.searchedItems} indexed candidates and returned ${response.segments.length} relevant segments.`
-                : `Ollama reviewed ${response.searchedItems} indexed candidates but did not identify any strong matches yet.`,
+                ? `${response.model} reviewed ${response.searchedItems} indexed candidates and returned ${response.segments.length} relevant segments.`
+                : `${response.model} reviewed ${response.searchedItems} indexed candidates but did not identify any strong matches yet.`,
           },
         }));
       } catch (error) {
@@ -1249,7 +1219,7 @@ export function useAppStore(pb: PocketBase) {
             lockedCodeId: request.codeId,
             results: [],
             lastModel: "",
-            searchError: error instanceof Error ? error.message : "Could not search for relevant segments.",
+            searchError: describeUnknownError(error, "Could not search for relevant segments."),
             searchNotice: "",
           },
         }));
@@ -1274,14 +1244,7 @@ export function useAppStore(pb: PocketBase) {
       return invoke<CodeConceptualSummaryAiJobResult>("generate_code_conceptual_summary_with_ollama", {
         request: {
           ...request,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
         },
       });
     },
@@ -1311,14 +1274,7 @@ export function useAppStore(pb: PocketBase) {
       const result = await invoke<unknown>("generate_most_typical_annotation_with_ollama", {
         request: {
           ...request,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
         },
       });
       return normalizeMostTypicalAnnotationAiJobResult(result);
@@ -1349,14 +1305,7 @@ export function useAppStore(pb: PocketBase) {
       return invoke<CodeDecompositionAiJobResult>("generate_code_decomposition_with_ollama", {
         request: {
           ...request,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
         },
       });
     },
@@ -1386,14 +1335,7 @@ export function useAppStore(pb: PocketBase) {
       return invoke<CodePositionAiJobResult>("generate_code_position_with_ollama", {
         request: {
           ...request,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
         },
       });
     },
@@ -1423,14 +1365,7 @@ export function useAppStore(pb: PocketBase) {
       const result = await invoke<unknown>("generate_code_unique_annotations_with_ollama", {
         request: {
           ...request,
-          protocol: llmSettings.ollamaProtocol,
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-          model: llmSettings.ollamaSelectedModel,
-          timeoutSeconds: llmSettings.ollamaRequestTimeoutSeconds,
-          temperature: llmSettings.ollamaTemperature,
-          numCtx: llmSettings.ollamaNumCtx,
-          keepAliveMinutes: llmSettings.ollamaKeepAliveMinutes,
+          ...buildLlmInvokeRequestFields(llmSettings),
         },
       });
       return normalizeCodeUniqueAnnotationsAiJobResult(result);
@@ -2233,16 +2168,21 @@ export function useAppStore(pb: PocketBase) {
 
     const llmSettings = readAppSettings().llm;
     let hostLlmConnectionLive = false;
+    const activeRuntime = hasConfiguredActiveLlm(llmSettings);
 
-    if (llmSettings.ollamaEnabled && llmSettings.ollamaSelectedModel) {
-      try {
-        await invoke<number>("ping_address", {
-          host: llmSettings.ollamaHost,
-          port: llmSettings.ollamaPort,
-        });
+    if (activeRuntime) {
+      if (llmSettings.connectionMode === "cloud") {
         hostLlmConnectionLive = true;
-      } catch {
-        hostLlmConnectionLive = false;
+      } else {
+        try {
+          await invoke<number>("ping_address", {
+            host: llmSettings.ollamaHost,
+            port: llmSettings.ollamaPort,
+          });
+          hostLlmConnectionLive = true;
+        } catch {
+          hostLlmConnectionLive = false;
+        }
       }
     }
 
@@ -2264,8 +2204,8 @@ export function useAppStore(pb: PocketBase) {
 
     const nextStatus: ProjectAiAssistRuntimeStatus = {
       hostEmbeddingModelInstalled,
-      hostLlmEnabled: llmSettings.ollamaEnabled,
-      hostLlmModelSelected: Boolean(llmSettings.ollamaSelectedModel),
+      hostLlmEnabled: llmSettings.connectionMode !== "none",
+      hostLlmModelSelected: hasSelectedActiveLlmModel(llmSettings),
       hostLlmConnectionLive,
       hostProjectEmbeddingsReady,
       hostCheckedAt: new Date().toISOString(),

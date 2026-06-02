@@ -48,6 +48,10 @@ export type ProjectEmbeddingBuildPreflight = {
   estimateLabel: string;
 };
 
+const EMBEDDING_CHUNK_TOKEN_LIMIT = 448;
+const CJK_CHARACTER = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/u;
+const TOKEN_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]|[\p{L}\p{N}]+(?:['’_-][\p{L}\p{N}]+)*|[^\s]/gu;
+
 function normalizeEmbeddingText(text: string, normalizeWhitespace: boolean): string {
   return normalizeWhitespace ? text.replace(/\s+/g, " ").trim() : text.trim();
 }
@@ -61,25 +65,104 @@ function hashEmbeddingText(text: string): string {
   return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+type ChunkingToken = {
+  startOffset: number;
+  endOffset: number;
+  estimatedTokens: number;
+};
+
+function estimateTokenWeight(token: string): number {
+  if (!token) return 0;
+  if (CJK_CHARACTER.test(token)) return [...token].length;
+  if (/^[\p{L}\p{N}]+(?:['’_-][\p{L}\p{N}]+)*$/u.test(token)) {
+    return Math.max(1, Math.ceil([...token].length / 4));
+  }
+  return 1;
+}
+
+function tokenizeForChunking(text: string): ChunkingToken[] {
+  const tokens: ChunkingToken[] = [];
+  for (const match of text.matchAll(TOKEN_PATTERN)) {
+    const value = match[0];
+    const startOffset = match.index ?? 0;
+    tokens.push({
+      startOffset,
+      endOffset: startOffset + value.length,
+      estimatedTokens: estimateTokenWeight(value),
+    });
+  }
+  return tokens;
+}
+
+function findNextTokenIndex(tokens: ChunkingToken[], fromIndex: number, desiredStartOffset: number): number {
+  let low = fromIndex;
+  let high = tokens.length - 1;
+  let nextIndex = tokens.length;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (tokens[mid].startOffset >= desiredStartOffset) {
+      nextIndex = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+
+  return nextIndex;
+}
+
 function chunkDocumentText(text: string, chunkSize: number, overlapSize: number): Array<{ text: string; startOffset: number; endOffset: number }> {
   if (!text) return [];
+  const tokens = tokenizeForChunking(text);
+  if (tokens.length === 0) return [];
   const chunks: Array<{ text: string; startOffset: number; endOffset: number }> = [];
-  const step = Math.max(1, chunkSize - overlapSize);
-  for (let start = 0; start < text.length; start += step) {
-    const end = Math.min(text.length, start + chunkSize);
-    const chunk = text.slice(start, end);
+  let tokenStartIndex = 0;
+
+  while (tokenStartIndex < tokens.length) {
+    const chunkStart = tokens[tokenStartIndex].startOffset;
+    let chunkEnd = tokens[tokenStartIndex].endOffset;
+    let estimatedTokens = 0;
+    let tokenEndIndex = tokenStartIndex;
+
+    while (tokenEndIndex < tokens.length) {
+      const token = tokens[tokenEndIndex];
+      const nextEstimatedTokens = estimatedTokens + token.estimatedTokens;
+      const nextChunkEnd = token.endOffset;
+      const nextChunkLength = nextChunkEnd - chunkStart;
+
+      if ((nextEstimatedTokens > EMBEDDING_CHUNK_TOKEN_LIMIT || nextChunkLength > chunkSize) && tokenEndIndex > tokenStartIndex) {
+        break;
+      }
+
+      estimatedTokens = nextEstimatedTokens;
+      chunkEnd = nextChunkEnd;
+      tokenEndIndex += 1;
+
+      if (estimatedTokens >= EMBEDDING_CHUNK_TOKEN_LIMIT || nextChunkLength >= chunkSize) {
+        break;
+      }
+    }
+
+    const chunk = text.slice(chunkStart, chunkEnd);
     const trimmed = chunk.trim();
     if (trimmed) {
       const leadingWhitespace = chunk.length - chunk.trimStart().length;
       const trailingWhitespace = chunk.length - chunk.trimEnd().length;
       chunks.push({
         text: trimmed,
-        startOffset: start + leadingWhitespace,
-        endOffset: end - trailingWhitespace,
+        startOffset: chunkStart + leadingWhitespace,
+        endOffset: chunkEnd - trailingWhitespace,
       });
     }
-    if (start + chunkSize >= text.length) break;
+
+    if (tokenEndIndex >= tokens.length) break;
+
+    const desiredNextStartOffset = Math.max(chunkStart + 1, chunkEnd - overlapSize);
+    const nextTokenIndex = findNextTokenIndex(tokens, tokenStartIndex + 1, desiredNextStartOffset);
+    tokenStartIndex = nextTokenIndex < tokens.length ? nextTokenIndex : tokenEndIndex;
   }
+
   return chunks;
 }
 

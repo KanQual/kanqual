@@ -22,7 +22,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use zeroize::Zeroizing;
 
@@ -762,12 +762,56 @@ struct OllamaDiscoveryResult {
     message: String,
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+enum CloudLlmProvider {
+    Openai,
+    Anthropic,
+    Copilot,
+    Blablador,
+    Ollama,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudLlmDiscoveryRequest {
+    provider: CloudLlmProvider,
+    api_secret: String,
+    timeout_seconds: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudLlmModelSummary {
+    id: String,
+    name: String,
+    publisher: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudLlmDiscoveryResult {
+    ok: bool,
+    provider: String,
+    base_url: String,
+    version: Option<String>,
+    model_count: u64,
+    models: Vec<CloudLlmModelSummary>,
+    message: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OllamaProjectChatRequest {
     project_id: String,
     query: String,
     conversation: Vec<OllamaChatMessage>,
+    #[serde(default)]
+    connection_mode: Option<String>,
+    #[serde(default)]
+    cloud_provider: Option<CloudLlmProvider>,
+    #[serde(default)]
+    cloud_api_secret: Option<String>,
     protocol: String,
     host: String,
     port: u16,
@@ -836,6 +880,12 @@ struct OllamaRelevantSegmentsRequest {
     code_id: String,
     code_label: String,
     code_description: Option<String>,
+    #[serde(default)]
+    connection_mode: Option<String>,
+    #[serde(default)]
+    cloud_provider: Option<CloudLlmProvider>,
+    #[serde(default)]
+    cloud_api_secret: Option<String>,
     protocol: String,
     host: String,
     port: u16,
@@ -859,6 +909,12 @@ struct OllamaAttributeSuggestionRequest {
     #[serde(default)]
     attribute_options: Vec<String>,
     items: Vec<OllamaAttributeSuggestionItemInput>,
+    #[serde(default)]
+    connection_mode: Option<String>,
+    #[serde(default)]
+    cloud_provider: Option<CloudLlmProvider>,
+    #[serde(default)]
+    cloud_api_secret: Option<String>,
     protocol: String,
     host: String,
     port: u16,
@@ -927,6 +983,12 @@ struct OllamaCodeSummaryRequest {
     code_label: String,
     code_description: Option<String>,
     annotations: Vec<OllamaCodeSummaryAnnotationInput>,
+    #[serde(default)]
+    connection_mode: Option<String>,
+    #[serde(default)]
+    cloud_provider: Option<CloudLlmProvider>,
+    #[serde(default)]
+    cloud_api_secret: Option<String>,
     protocol: String,
     host: String,
     port: u16,
@@ -971,6 +1033,12 @@ struct OllamaMostTypicalAnnotationResponse {
 #[serde(rename_all = "camelCase")]
 struct OllamaDocumentProcessingRequest {
     document_content: String,
+    #[serde(default)]
+    connection_mode: Option<String>,
+    #[serde(default)]
+    cloud_provider: Option<CloudLlmProvider>,
+    #[serde(default)]
+    cloud_api_secret: Option<String>,
     protocol: String,
     host: String,
     port: u16,
@@ -986,6 +1054,12 @@ struct OllamaDocumentProcessingRequest {
 struct OllamaDocumentChunkProcessingRequest {
     chunk_text: String,
     chunk_index: usize,
+    #[serde(default)]
+    connection_mode: Option<String>,
+    #[serde(default)]
+    cloud_provider: Option<CloudLlmProvider>,
+    #[serde(default)]
+    cloud_api_secret: Option<String>,
     protocol: String,
     host: String,
     port: u16,
@@ -1067,6 +1141,12 @@ struct OllamaCodePositionRequest {
     code_description: Option<String>,
     annotations: Vec<OllamaCodeSummaryAnnotationInput>,
     codebook: Vec<OllamaCodebookEntry>,
+    #[serde(default)]
+    connection_mode: Option<String>,
+    #[serde(default)]
+    cloud_provider: Option<CloudLlmProvider>,
+    #[serde(default)]
+    cloud_api_secret: Option<String>,
     protocol: String,
     host: String,
     port: u16,
@@ -3328,7 +3408,15 @@ fn build_project_embedding_index(
     app: &tauri::AppHandle,
     request: ProjectEmbeddingBuildRequest,
 ) -> Result<ProjectEmbeddingIndexFile, String> {
+    let total_started = Instant::now();
+    let runtime_started = Instant::now();
     let mut runtime = load_embedding_runtime(app)?;
+    log_embedding_build_timing(
+        &request.project_id,
+        "runtime_load",
+        runtime_started.elapsed(),
+        format!("requested_items={}", request.items.len()),
+    );
     let index_dir = project_embedding_index_dir(app, &request.project_id)?;
     fs::create_dir_all(&index_dir).map_err(|e| e.to_string())?;
     let index_path = index_dir.join(PROJECT_EMBEDDING_INDEX_FILE);
@@ -3338,6 +3426,7 @@ fn build_project_embedding_index(
         .batch_size
         .max(1)
         .min(PROJECT_EMBEDDING_BUILD_BATCH_SIZE_CAP);
+    let reuse_scan_started = Instant::now();
     let existing_index = read_project_embedding_index_file(app, &request.project_id).ok();
     let existing_items_by_id = existing_index
         .as_ref()
@@ -3370,6 +3459,17 @@ fn build_project_embedding_index(
             pending_items.push(source_item.clone());
         }
     }
+    log_embedding_build_timing(
+        &request.project_id,
+        "reuse_scan",
+        reuse_scan_started.elapsed(),
+        format!(
+            "requested_items={}, reused_items={}, pending_items={}",
+            request.items.len(),
+            reused_embeddings.len(),
+            pending_items.len()
+        ),
+    );
 
     let pending_total = pending_items.len() as u64;
     let reused_total = reused_embeddings.len() as u64;
@@ -3418,8 +3518,24 @@ fn build_project_embedding_index(
                 batch_number, batch_count
             ));
         });
+        let batch_started = Instant::now();
         let texts = batch.iter().map(|item| item.text.clone()).collect::<Vec<_>>();
+        let batch_characters = texts.iter().map(|text| text.chars().count()).sum::<usize>();
+        let max_characters = texts.iter().map(|text| text.chars().count()).max().unwrap_or(0);
         let embeddings = embed_text_batch(&mut runtime, &texts)?;
+        log_embedding_build_timing(
+            &request.project_id,
+            "batch_embed",
+            batch_started.elapsed(),
+            format!(
+                "batch_number={}/{}, items={}, chars={}, max_chars={}",
+                batch_number,
+                batch_count,
+                batch.len(),
+                batch_characters,
+                max_characters
+            ),
+        );
 
         for (source_item, embedding) in batch.iter().zip(embeddings.into_iter()) {
             pending_embeddings.insert(source_item.id.clone(), embedding);
@@ -3448,6 +3564,7 @@ fn build_project_embedding_index(
           return Err("Embedding build cancelled.".to_string());
       }
 
+    let assemble_started = Instant::now();
     let mut items = Vec::with_capacity(request.items.len());
     for source_item in request.items {
         let embedding = if let Some(existing_embedding) = reused_embeddings.remove(&source_item.id) {
@@ -3478,6 +3595,12 @@ fn build_project_embedding_index(
             embedding,
         });
     }
+    log_embedding_build_timing(
+        &request.project_id,
+        "index_assembly",
+        assemble_started.elapsed(),
+        format!("items={}", items.len()),
+    );
 
     let generated_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3497,9 +3620,33 @@ fn build_project_embedding_index(
         items,
     };
 
+    let serialize_started = Instant::now();
     let raw = serde_json::to_string(&index_file).map_err(|e| e.to_string())?;
+    log_embedding_build_timing(
+        &request.project_id,
+        "index_serialize",
+        serialize_started.elapsed(),
+        format!("bytes={}", raw.len()),
+    );
+
+    let write_started = Instant::now();
     fs::write(&temp_path, raw).map_err(|e| e.to_string())?;
     fs::rename(&temp_path, &index_path).map_err(|e| e.to_string())?;
+    log_embedding_build_timing(
+        &request.project_id,
+        "index_write",
+        write_started.elapsed(),
+        format!("path={}", index_path.display()),
+    );
+    log_embedding_build_timing(
+        &request.project_id,
+        "build_total",
+        total_started.elapsed(),
+        format!(
+            "final_items={}, pending_items={}, reused_items={}",
+            index_file.item_count, pending_total, reused_total
+        ),
+    );
 
     Ok(index_file)
 }
@@ -3551,6 +3698,24 @@ fn format_embedding_time_range_label(low_seconds: u64, high_seconds: u64) -> Str
         format!("Likely around {}-{} minutes on this device", low_minutes, high_minutes)
     }
 }
+
+#[cfg(debug_assertions)]
+fn log_embedding_build_timing(project_id: &str, phase: &str, elapsed: Duration, detail: impl AsRef<str>) {
+    eprintln!(
+        "[kanqual][embedding-timing][project:{}] {} took {} ms{}",
+        project_id,
+        phase,
+        elapsed.as_millis(),
+        if detail.as_ref().is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", detail.as_ref())
+        }
+    );
+}
+
+#[cfg(not(debug_assertions))]
+fn log_embedding_build_timing(_project_id: &str, _phase: &str, _elapsed: Duration, _detail: impl AsRef<str>) {}
 
 #[tauri::command]
 fn get_project_embedding_build_preflight(
@@ -4235,13 +4400,570 @@ async fn discover_ollama_models(
     })
 }
 
+fn cloud_discovery_client(timeout_seconds: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_seconds.max(5)))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+fn parse_openai_compatible_models(payload: &Value) -> Vec<CloudLlmModelSummary> {
+    payload
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item.get("id").and_then(Value::as_str)?.trim().to_string();
+                    if id.is_empty() || !is_openai_compatible_chat_model(&id) {
+                        return None;
+                    }
+                    Some(CloudLlmModelSummary {
+                        name: id.clone(),
+                        id,
+                        publisher: item.get("owned_by").and_then(Value::as_str).map(ToOwned::to_owned),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn is_openai_compatible_chat_model(model_id: &str) -> bool {
+    let normalized = model_id.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    let has_chat_prefix = normalized.starts_with("gpt-")
+        || normalized.starts_with("chatgpt-")
+        || normalized.starts_with("o1")
+        || normalized.starts_with("o3")
+        || normalized.starts_with("o4")
+        || normalized.starts_with("codex-");
+    if !has_chat_prefix {
+        return false;
+    }
+
+    !normalized.contains("embedding")
+        && !normalized.contains("whisper")
+        && !normalized.contains("tts")
+        && !normalized.contains("transcribe")
+        && !normalized.contains("realtime")
+        && !normalized.contains("audio")
+        && !normalized.contains("image")
+        && !normalized.contains("moderation")
+}
+
+fn is_unsupported_temperature_error(detail: &str) -> bool {
+    let normalized = detail.to_ascii_lowercase();
+    normalized.contains("temperature")
+        && (normalized.contains("unsupported_value")
+            || normalized.contains("does not support")
+            || normalized.contains("only the default"))
+}
+
+fn include_temperature_retry_allowed(provider_label: &str, detail: &str) -> bool {
+    (provider_label == "OpenAI" || provider_label == "GitHub Models")
+        && is_unsupported_temperature_error(detail)
+}
+
+fn anthropic_known_models() -> Vec<CloudLlmModelSummary> {
+    vec![
+        CloudLlmModelSummary {
+            id: "claude-sonnet-4-20250514".to_string(),
+            name: "Claude Sonnet 4".to_string(),
+            publisher: Some("Anthropic".to_string()),
+        },
+        CloudLlmModelSummary {
+            id: "claude-opus-4-20250514".to_string(),
+            name: "Claude Opus 4".to_string(),
+            publisher: Some("Anthropic".to_string()),
+        },
+        CloudLlmModelSummary {
+            id: "claude-3-7-sonnet-20250219".to_string(),
+            name: "Claude Sonnet 3.7".to_string(),
+            publisher: Some("Anthropic".to_string()),
+        },
+        CloudLlmModelSummary {
+            id: "claude-3-5-sonnet-20241022".to_string(),
+            name: "Claude Sonnet 3.5".to_string(),
+            publisher: Some("Anthropic".to_string()),
+        },
+        CloudLlmModelSummary {
+            id: "claude-3-5-haiku-20241022".to_string(),
+            name: "Claude Haiku 3.5".to_string(),
+            publisher: Some("Anthropic".to_string()),
+        },
+    ]
+}
+
+#[tauri::command]
+async fn discover_cloud_llm_models(
+    request: CloudLlmDiscoveryRequest,
+) -> Result<CloudLlmDiscoveryResult, String> {
+    let api_secret = request.api_secret.trim();
+    if api_secret.is_empty() {
+        return Err("Enter an API secret before testing the cloud connection.".to_string());
+    }
+
+    let client = cloud_discovery_client(request.timeout_seconds)?;
+
+    match request.provider {
+        CloudLlmProvider::Openai => {
+            let base_url = "https://api.openai.com/v1".to_string();
+            let payload: Value = client
+                .get(format!("{base_url}/models"))
+                .bearer_auth(api_secret)
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach OpenAI: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("OpenAI responded with an error: {e}"))?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let models = parse_openai_compatible_models(&payload);
+            Ok(CloudLlmDiscoveryResult {
+                ok: true,
+                provider: "openai".to_string(),
+                base_url,
+                version: None,
+                model_count: models.len() as u64,
+                models,
+                message: "Connected to OpenAI.".to_string(),
+            })
+        }
+        CloudLlmProvider::Blablador => {
+            let base_url = "https://api.blablador.fz-juelich.de/v1".to_string();
+            let payload: Value = client
+                .get(format!("{base_url}/models"))
+                .bearer_auth(api_secret)
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach Blablador: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("Blablador responded with an error: {e}"))?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let models = parse_openai_compatible_models(&payload);
+            Ok(CloudLlmDiscoveryResult {
+                ok: true,
+                provider: "blablador".to_string(),
+                base_url,
+                version: None,
+                model_count: models.len() as u64,
+                models,
+                message: "Connected to Blablador.".to_string(),
+            })
+        }
+        CloudLlmProvider::Copilot => {
+            let base_url = "https://models.github.ai".to_string();
+            let payload: Value = client
+                .get(format!("{base_url}/catalog/models"))
+                .header("Accept", "application/vnd.github+json")
+                .header("Authorization", format!("Bearer {api_secret}"))
+                .header("X-GitHub-Api-Version", "2026-03-10")
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach GitHub Models: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("GitHub Models responded with an error: {e}"))?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let models = payload
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| {
+                            let id = item.get("id").and_then(Value::as_str)?.trim().to_string();
+                            if id.is_empty() {
+                                return None;
+                            }
+                            Some(CloudLlmModelSummary {
+                                name: item
+                                    .get("name")
+                                    .and_then(Value::as_str)
+                                    .map(ToOwned::to_owned)
+                                    .unwrap_or_else(|| id.clone()),
+                                id,
+                                publisher: item.get("publisher").and_then(Value::as_str).map(ToOwned::to_owned),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            Ok(CloudLlmDiscoveryResult {
+                ok: true,
+                provider: "copilot".to_string(),
+                base_url,
+                version: Some("2026-03-10".to_string()),
+                model_count: models.len() as u64,
+                models,
+                message: "Connected to GitHub Models.".to_string(),
+            })
+        }
+        CloudLlmProvider::Ollama => {
+            let base_url = "https://ollama.com/api".to_string();
+            let payload: Value = client
+                .get(format!("{base_url}/tags"))
+                .bearer_auth(api_secret)
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach Ollama Cloud: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("Ollama Cloud responded with an error: {e}"))?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let models = payload
+                .get("models")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| {
+                            let id = item.get("name").and_then(Value::as_str)?.trim().to_string();
+                            if id.is_empty() {
+                                return None;
+                            }
+                            Some(CloudLlmModelSummary {
+                                name: id.clone(),
+                                id,
+                                publisher: item
+                                    .get("digest")
+                                    .and_then(Value::as_str)
+                                    .map(|_| "Ollama".to_string())
+                                    .or(Some("Ollama".to_string())),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            Ok(CloudLlmDiscoveryResult {
+                ok: true,
+                provider: "ollama".to_string(),
+                base_url,
+                version: None,
+                model_count: models.len() as u64,
+                models,
+                message: "Connected to Ollama Cloud.".to_string(),
+            })
+        }
+        CloudLlmProvider::Anthropic => {
+            let base_url = "https://api.anthropic.com/v1".to_string();
+            let verification_model = "claude-sonnet-4-20250514";
+            let payload: Value = client
+                .get(format!("{base_url}/models/{verification_model}"))
+                .header("x-api-key", api_secret)
+                .header("anthropic-version", "2023-06-01")
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach Anthropic: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("Anthropic responded with an error: {e}"))?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let version = payload
+                .get("created_at")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            let models = anthropic_known_models();
+
+            Ok(CloudLlmDiscoveryResult {
+                ok: true,
+                provider: "anthropic".to_string(),
+                base_url,
+                version,
+                model_count: models.len() as u64,
+                models,
+                message: "Connected to Anthropic.".to_string(),
+            })
+        }
+    }
+}
+
+enum ResolvedLlmRuntime {
+    Ollama { base_url: String, cloud_auth: Option<String> },
+    OpenAiCompat {
+        provider_label: &'static str,
+        base_url: String,
+        api_key: String,
+        extra_headers: Vec<(&'static str, String)>,
+    },
+    Anthropic { base_url: String, api_key: String },
+}
+
+fn resolve_llm_runtime(
+    connection_mode: Option<&str>,
+    cloud_provider: Option<CloudLlmProvider>,
+    cloud_api_secret: Option<&str>,
+    protocol: &str,
+    host: &str,
+    port: u16,
+) -> Result<ResolvedLlmRuntime, String> {
+    if connection_mode == Some("cloud") {
+        let provider = cloud_provider.ok_or_else(|| "Choose a cloud provider before using AI Assist.".to_string())?;
+        let api_key = cloud_api_secret
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "Enter a cloud API secret before using AI Assist.".to_string())?
+            .to_string();
+        return Ok(match provider {
+            CloudLlmProvider::Openai => ResolvedLlmRuntime::OpenAiCompat {
+                provider_label: "OpenAI",
+                base_url: "https://api.openai.com/v1".to_string(),
+                api_key,
+                extra_headers: vec![],
+            },
+            CloudLlmProvider::Blablador => ResolvedLlmRuntime::OpenAiCompat {
+                provider_label: "Blablador",
+                base_url: "https://api.blablador.fz-juelich.de/v1".to_string(),
+                api_key,
+                extra_headers: vec![],
+            },
+            CloudLlmProvider::Copilot => ResolvedLlmRuntime::OpenAiCompat {
+                provider_label: "GitHub Models",
+                base_url: "https://models.github.ai/inference".to_string(),
+                api_key,
+                extra_headers: vec![
+                    ("Accept", "application/vnd.github+json".to_string()),
+                    ("X-GitHub-Api-Version", "2026-03-10".to_string()),
+                ],
+            },
+            CloudLlmProvider::Ollama => ResolvedLlmRuntime::Ollama {
+                base_url: "https://ollama.com/api".to_string(),
+                cloud_auth: Some(api_key),
+            },
+            CloudLlmProvider::Anthropic => ResolvedLlmRuntime::Anthropic {
+                base_url: "https://api.anthropic.com/v1".to_string(),
+                api_key,
+            },
+        });
+    }
+
+    Ok(ResolvedLlmRuntime::Ollama {
+        base_url: ollama_base_url(protocol, host, port),
+        cloud_auth: None,
+    })
+}
+
+fn runtime_base_url(runtime: &ResolvedLlmRuntime) -> String {
+    match runtime {
+        ResolvedLlmRuntime::Ollama { base_url, .. } => base_url.clone(),
+        ResolvedLlmRuntime::OpenAiCompat { base_url, .. } => base_url.clone(),
+        ResolvedLlmRuntime::Anthropic { base_url, .. } => base_url.clone(),
+    }
+}
+
+async fn run_llm_chat_completion(
+    runtime: &ResolvedLlmRuntime,
+    client: &reqwest::Client,
+    model: &str,
+    system_prompt: &str,
+    messages: Vec<Value>,
+    temperature: f64,
+    num_ctx: u32,
+    keep_alive_minutes: u32,
+    json_mode: bool,
+) -> Result<String, String> {
+    match runtime {
+        ResolvedLlmRuntime::Ollama { base_url, cloud_auth } => {
+            let endpoint = if cloud_auth.is_some() {
+                format!("{base_url}/chat")
+            } else {
+                format!("{base_url}/api/chat")
+            };
+            let mut request = client.post(endpoint);
+            if let Some(api_key) = cloud_auth {
+                request = request.bearer_auth(api_key);
+            }
+            let mut combined_messages = vec![serde_json::json!({
+                "role": "system",
+                "content": system_prompt,
+            })];
+            combined_messages.extend(messages);
+            let mut body = serde_json::json!({
+                "model": model,
+                "stream": false,
+                "messages": combined_messages,
+                "options": {
+                    "temperature": temperature,
+                    "num_ctx": num_ctx,
+                },
+                "keep_alive": format!("{}m", keep_alive_minutes),
+            });
+            if json_mode && cloud_auth.is_none() {
+                body["format"] = Value::String("json".to_string());
+            }
+            let payload: Value = request
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("Ollama returned an error: {e}"))?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+            payload
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| "The configured LLM returned an empty response.".to_string())
+        }
+        ResolvedLlmRuntime::OpenAiCompat {
+            provider_label,
+            base_url,
+            api_key,
+            extra_headers,
+        } => {
+            let mut full_messages = vec![serde_json::json!({"role": "system", "content": system_prompt})];
+            full_messages.extend(messages);
+            let send_request = |include_temperature: bool| {
+                let mut request = client
+                    .post(format!("{base_url}/chat/completions"))
+                    .bearer_auth(api_key);
+                for (header_name, header_value) in extra_headers {
+                    request = request.header(*header_name, header_value);
+                }
+                let mut body = serde_json::json!({
+                    "model": model,
+                    "messages": full_messages.clone(),
+                });
+                if include_temperature {
+                    body["temperature"] = serde_json::json!(temperature);
+                }
+                request.json(&body)
+            };
+
+            let first_response = send_request(true)
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach {provider_label}: {e}"))?;
+
+            let payload: Value = if first_response.status().is_success() {
+                first_response.json().await.map_err(|e| e.to_string())?
+            } else {
+                let status = first_response.status();
+                let detail = first_response
+                    .text()
+                    .await
+                    .ok()
+                    .map(|text| text.trim().chars().take(280).collect::<String>())
+                    .filter(|text| !text.is_empty())
+                    .unwrap_or_else(|| "No response body.".to_string());
+
+                if include_temperature_retry_allowed(provider_label, &detail) {
+                    let retry_response = send_request(false)
+                        .send()
+                        .await
+                        .map_err(|e| format!("Could not reach {provider_label}: {e}"))?;
+                    if !retry_response.status().is_success() {
+                        let retry_status = retry_response.status();
+                        let retry_detail = retry_response
+                            .text()
+                            .await
+                            .ok()
+                            .map(|text| text.trim().chars().take(280).collect::<String>())
+                            .filter(|text| !text.is_empty())
+                            .unwrap_or_else(|| "No response body.".to_string());
+                        return Err(format!("{provider_label} returned an error ({retry_status}): {retry_detail}"));
+                    }
+                    retry_response.json().await.map_err(|e| e.to_string())?
+                } else {
+                    return Err(format!("{provider_label} returned an error ({status}): {detail}"));
+                }
+            };
+            payload
+                .get("choices")
+                .and_then(Value::as_array)
+                .and_then(|choices| choices.first())
+                .and_then(|choice| choice.get("message"))
+                .and_then(|message| message.get("content"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| format!("{provider_label} returned an empty response."))
+        }
+        ResolvedLlmRuntime::Anthropic { base_url, api_key } => {
+            let anthropic_messages = messages
+                .into_iter()
+                .filter_map(|message| {
+                    let role = message.get("role").and_then(Value::as_str)?;
+                    let content = message.get("content").and_then(Value::as_str)?.trim().to_string();
+                    if content.is_empty() {
+                        return None;
+                    }
+                    let normalized_role = if role == "assistant" { "assistant" } else { "user" };
+                    Some(serde_json::json!({
+                        "role": normalized_role,
+                        "content": content,
+                    }))
+                })
+                .collect::<Vec<_>>();
+            let payload: Value = client
+                .post(format!("{base_url}/messages"))
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&serde_json::json!({
+                    "model": model,
+                    "system": system_prompt,
+                    "messages": anthropic_messages,
+                    "temperature": temperature,
+                    "max_tokens": num_ctx.clamp(256, 4096),
+                }))
+                .send()
+                .await
+                .map_err(|e| format!("Could not reach Anthropic: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("Anthropic returned an error: {e}"))?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+            payload
+                .get("content")
+                .and_then(Value::as_array)
+                .and_then(|items| {
+                    let mut combined = String::new();
+                    for item in items {
+                        if item.get("type").and_then(Value::as_str) == Some("text") {
+                            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                                combined.push_str(text);
+                            }
+                        }
+                    }
+                    if combined.trim().is_empty() { None } else { Some(combined) }
+                })
+                .map(|value| value.trim().to_string())
+                .ok_or_else(|| "Anthropic returned an empty response.".to_string())
+        }
+    }
+}
+
 #[tauri::command]
 async fn chat_with_project_ollama(
     app: tauri::AppHandle,
     request: OllamaProjectChatRequest,
 ) -> Result<OllamaProjectChatResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before starting a project chat.".to_string());
+        return Err("Choose an LLM model before starting a project chat.".to_string());
     }
 
     let query = request.query.trim();
@@ -4447,39 +5169,31 @@ async fn chat_with_project_ollama(
         "content": query,
     }));
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(5)))
         .build()
         .map_err(|e| e.to_string())?;
-
-    let response = client
-        .post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "stream": false,
-            "messages": messages,
-            "options": {
-                "temperature": request.temperature,
-                "num_ctx": request.num_ctx,
-            },
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Ollama returned an error: {e}"))?;
-
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = payload
-        .get("message")
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| "Ollama returned an empty chat response.".to_string())?;
+    let content = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        &system_prompt,
+        messages,
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        false,
+    )
+    .await?;
 
     Ok(OllamaProjectChatResponse {
         content,
@@ -4496,7 +5210,7 @@ async fn find_relevant_project_segments_with_ollama(
     request: OllamaRelevantSegmentsRequest,
 ) -> Result<OllamaRelevantSegmentsResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before starting a relevant-segments search.".to_string());
+        return Err("Choose an LLM model before starting a relevant-segments search.".to_string());
     }
     if request.code_id.trim().is_empty() || request.code_label.trim().is_empty() {
         return Err("Select a code before searching for relevant segments.".to_string());
@@ -4577,55 +5291,45 @@ async fn find_relevant_project_segments_with_ollama(
         .join("\n\n");
 
     let system_prompt = format!(
-        "You are Kanqual AI Assist. Review the candidate project segments below and choose the segments that are most relevant to the selected code.\n\nSelected code: {}\nCode description: {}\n\nReturn strict JSON only in this shape:\n{{\"segments\":[{{\"id\":\"candidate-id\",\"reason\":\"short explanation\"}}]}}\n\nRules:\n- Use only candidate ids from the provided list.\n- Prefer document passages and annotations over generic metadata.\n- Return between 0 and {} segments.\n- Keep each reason under 18 words.\n- Do not include markdown fences or extra commentary.\n\nCandidates:\n{}",
+        "You are Kanqual AI Assist. Review candidate project segments and choose the ones most relevant to the selected code.\n\nReturn strict JSON only in this shape:\n{{\"segments\":[{{\"id\":\"candidate-id\",\"reason\":\"short explanation\"}}]}}\n\nRules:\n- Use only candidate ids from the provided list.\n- Prefer document passages and annotations over generic metadata.\n- Return between 0 and {} segments.\n- Keep each reason under 18 words.\n- Do not include markdown fences or extra commentary.",
+        max_results,
+    );
+    let user_message = format!(
+        "Selected code: {}\nCode description: {}\n\nCandidates:\n{}",
         request.code_label.trim(),
         request.code_description.as_deref().unwrap_or("").trim(),
-        max_results,
         candidate_block
     );
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(5)))
         .build()
         .map_err(|e| e.to_string())?;
+    let content = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        &system_prompt,
+        vec![serde_json::json!({ "role": "user", "content": user_message })],
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        true,
+    )
+    .await?;
 
-    let response = client
-        .post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "stream": false,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                }
-            ],
-            "options": {
-                "temperature": request.temperature,
-                "num_ctx": request.num_ctx,
-            },
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-            "format": "json",
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Ollama returned an error: {e}"))?;
-
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = payload
-        .get("message")
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "Ollama returned an empty relevant-segments response.".to_string())?;
-
-    let json_content = extract_json_object(content).unwrap_or(content);
+    let json_content = extract_json_object(&content).unwrap_or(&content);
     let parsed: OllamaRelevantSegmentsModelResponse = serde_json::from_str(json_content)
-        .map_err(|e| format!("Could not parse Ollama's relevant-segments response: {e}"))?;
+        .map_err(|e| format!("Could not parse the configured LLM's relevant-segments response: {e}"))?;
 
     let candidate_map = candidate_items
         .iter()
@@ -4652,7 +5356,7 @@ async fn find_relevant_project_segments_with_ollama(
                     .reason
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| "Marked relevant by Ollama for this code.".to_string()),
+                    .unwrap_or_else(|| "Marked relevant for this code.".to_string()),
                 similarity: *similarity,
                 document_id: item.document_id.clone(),
                 code_id: item.code_id.clone(),
@@ -4678,7 +5382,7 @@ async fn generate_attribute_value_suggestions_with_ollama(
     cancelled_runs: tauri::State<'_, CancelledAttributeSuggestionRuns>,
 ) -> Result<OllamaAttributeSuggestionResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before generating attribute suggestions.".to_string());
+        return Err("Choose an LLM model before generating attribute suggestions.".to_string());
     }
     if request.attribute_name.trim().is_empty() {
         return Err("Choose an attribute before generating suggestions.".to_string());
@@ -4713,7 +5417,15 @@ async fn generate_attribute_value_suggestions_with_ollama(
         String::new()
     };
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(5)))
         .build()
@@ -4759,57 +5471,39 @@ async fn generate_attribute_value_suggestions_with_ollama(
         }
 
         let system_prompt = format!(
-            "You are Kanqual AI Assist. Infer a suggested value for one project attribute from the provided source text.\n\nAttribute name: {}\nAttribute data type: {}\nAttribute description: {}{}\n\nRules:\n- {}\n- Base the suggestion only on the provided text.\n- Also return a short evidence excerpt copied from the text that best supports the suggestion.\n- If the text does not support any value, return empty strings.\n- Return strict JSON only in this exact shape: {{\"value\":\"...\",\"evidence\":\"...\"}}\n- Do not include markdown fences or extra commentary.\n\nSource item: {}\nSource text:\n{}",
+            "You are Kanqual AI Assist. Infer a suggested value for one project attribute from the provided source text.\n\nAttribute name: {}\nAttribute data type: {}\nAttribute description: {}{}\n\nRules:\n- {}\n- Base the suggestion only on the provided text.\n- Also return a short evidence excerpt copied from the text that best supports the suggestion.\n- If the text does not support any value, return empty strings.\n- Return strict JSON only in this exact shape: {{\"value\":\"...\",\"evidence\":\"...\"}}\n- Do not include markdown fences or extra commentary.",
             request.attribute_name.trim(),
             if data_type.is_empty() { "text" } else { data_type.as_str() },
             attribute_description,
             attribute_options_text,
             data_type_instruction,
+        );
+        let user_message = format!(
+            "Source item: {}\nSource text:\n{}",
             item_name,
             content,
         );
-
-        let response = client
-            .post(format!("{base_url}/api/chat"))
-            .json(&serde_json::json!({
-                "model": request.model,
-                "stream": false,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    }
-                ],
-                "options": {
-                    "temperature": request.temperature,
-                    "num_ctx": request.num_ctx,
-                },
-                "keep_alive": format!("{}m", request.keep_alive_minutes),
-                "format": "json",
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-            .error_for_status()
-            .map_err(|e| format!("Ollama returned an error: {e}"))?;
 
         if cancelled_runs.0.lock().unwrap().contains(request.run_id.as_str()) {
             cancelled_runs.0.lock().unwrap().remove(request.run_id.as_str());
             return Err("Attribute suggestion generation was stopped.".to_string());
         }
+        let content = run_llm_chat_completion(
+            &runtime,
+            &client,
+            &request.model,
+            &system_prompt,
+            vec![serde_json::json!({ "role": "user", "content": user_message })],
+            request.temperature,
+            request.num_ctx,
+            request.keep_alive_minutes,
+            true,
+        )
+        .await?;
 
-        let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-        let content = payload
-            .get("message")
-            .and_then(|message| message.get("content"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "Ollama returned an empty attribute-suggestion response.".to_string())?;
-
-        let json_content = extract_json_object(content).unwrap_or(content);
+        let json_content = extract_json_object(&content).unwrap_or(&content);
         let parsed: OllamaAttributeSuggestionModelResponse = serde_json::from_str(json_content)
-            .map_err(|e| format!("Could not parse Ollama's attribute-suggestion response: {e}"))?;
+            .map_err(|e| format!("Could not parse the configured LLM's attribute-suggestion response: {e}"))?;
         let suggested_value = parsed.value.unwrap_or_default().trim().to_string();
         let normalized_value = if data_type == "categorical" {
             canonicalize_categorical_suggestion(&suggested_value, &attribute_options)
@@ -4869,7 +5563,7 @@ async fn generate_code_conceptual_summary_with_ollama(
     request: OllamaCodeSummaryRequest,
 ) -> Result<OllamaCodeSummaryResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before running code analysis.".to_string());
+        return Err("Choose an LLM model before running code analysis.".to_string());
     }
     if request.code_label.trim().is_empty() {
         return Err("No code selected.".to_string());
@@ -4878,7 +5572,15 @@ async fn generate_code_conceptual_summary_with_ollama(
         return Err("This code has no annotations yet. Add some annotations before running analysis.".to_string());
     }
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(10)))
         .build()
@@ -4933,36 +5635,18 @@ async fn generate_code_conceptual_summary_with_ollama(
         annotations_text,
     );
 
-    let response = client
-        .post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "stream": false,
-            "messages": [
-                { "role": "system", "content": system_prompt },
-                { "role": "user",   "content": user_message  },
-            ],
-            "options": {
-                "temperature": request.temperature,
-                "num_ctx": request.num_ctx,
-            },
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Ollama returned an error: {e}"))?;
-
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = payload
-        .get("message")
-        .and_then(|m| m.get("content"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| "Ollama returned an empty response.".to_string())?
-        .to_string();
+    let content = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        system_prompt,
+        vec![serde_json::json!({ "role": "user", "content": user_message })],
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        false,
+    )
+    .await?;
 
     Ok(OllamaCodeSummaryResponse {
         content,
@@ -4976,13 +5660,21 @@ async fn generate_most_typical_annotation_with_ollama(
     request: OllamaCodeSummaryRequest,
 ) -> Result<OllamaMostTypicalAnnotationResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before running code analysis.".to_string());
+        return Err("Choose an LLM model before running code analysis.".to_string());
     }
     if request.annotations.is_empty() {
         return Err("This code has no annotations yet. Add some annotations before running analysis.".to_string());
     }
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(10)))
         .build()
@@ -5026,38 +5718,20 @@ async fn generate_most_typical_annotation_with_ollama(
         return_count,
     );
 
-    let response = client
-        .post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "stream": false,
-            "messages": [
-                { "role": "system", "content": system_prompt },
-                { "role": "user",   "content": user_message  },
-            ],
-            "options": {
-                "temperature": request.temperature,
-                "num_ctx": request.num_ctx,
-            },
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-            "format": "json",
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Ollama returned an error: {e}"))?;
+    let content = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        &system_prompt,
+        vec![serde_json::json!({ "role": "user", "content": user_message })],
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        true,
+    )
+    .await?;
 
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = payload
-        .get("message")
-        .and_then(|m| m.get("content"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| "Ollama returned an empty response.".to_string())?;
-
-    let json_content = extract_json_object(content).unwrap_or(content);
+    let json_content = extract_json_object(&content).unwrap_or(&content);
     let parsed = parse_most_typical_annotation_payload(json_content)?;
 
     let annotations = parsed
@@ -5068,7 +5742,7 @@ async fn generate_most_typical_annotation_with_ollama(
         .collect::<Vec<_>>();
 
     if annotations.is_empty() {
-        return Err("Ollama did not return any valid typical annotation indexes.".to_string());
+        return Err("The configured LLM did not return any valid typical annotation indexes.".to_string());
     }
 
     Ok(OllamaMostTypicalAnnotationResponse {
@@ -5083,7 +5757,7 @@ async fn process_document_with_ollama(
     request: OllamaDocumentProcessingRequest,
 ) -> Result<OllamaDocumentProcessingResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before processing a document.".to_string());
+        return Err("Choose an LLM model before processing a document.".to_string());
     }
     let full_content = request.document_content.trim().to_string();
     if full_content.is_empty() {
@@ -5131,7 +5805,15 @@ async fn process_document_with_ollama(
     let chunk_count = chunks.len();
 
     // ── Build client and system prompt (shared across all chunks) ────────────
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(600)))
         .build()
@@ -5169,48 +5851,32 @@ async fn process_document_with_ollama(
     for (chunk_index, chunk_text) in chunks.iter().enumerate() {
         let user_message = format!("Text content:\n{}", chunk_text.trim());
 
-        let response = client
-            .post(format!("{base_url}/api/chat"))
-            .json(&serde_json::json!({
-                "model": request.model,
-                "stream": false,
-                "messages": [
-                    { "role": "system", "content": system_prompt },
-                    { "role": "user",   "content": user_message  },
-                ],
-                "options": {
-                    "temperature": request.temperature,
-                    "num_ctx": request.num_ctx,
-                },
-                "keep_alive": format!("{}m", request.keep_alive_minutes),
-                "format": "json",
-            }))
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    format!(
-                        "Ollama timed out while processing this document at {base_url}. Transcript processing can take several minutes, especially for longer files."
-                    )
-                } else {
-                    format!("Could not reach Ollama at {base_url}: {e}")
-                }
-            })?
-            .error_for_status()
-            .map_err(|e| format!("Ollama returned an error on chunk {}: {e}", chunk_index + 1))?;
+        let raw = run_llm_chat_completion(
+            &runtime,
+            &client,
+            &request.model,
+            system_prompt,
+            vec![serde_json::json!({ "role": "user", "content": user_message })],
+            request.temperature,
+            request.num_ctx,
+            request.keep_alive_minutes,
+            true,
+        )
+        .await
+        .map_err(|error| {
+            if error.to_ascii_lowercase().contains("timed out") {
+                "The configured LLM timed out while processing this document. Transcript processing can take several minutes, especially for longer files.".to_string()
+            } else {
+                format!("Chunk {} failed: {error}", chunk_index + 1)
+            }
+        })?;
 
-        let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-        let raw = payload
-            .get("message").and_then(|m| m.get("content")).and_then(Value::as_str)
-            .map(str::trim).filter(|v| !v.is_empty())
-            .ok_or_else(|| format!("Ollama returned an empty response for chunk {}.", chunk_index + 1))?;
-
-        let json_part = extract_json_object(raw).unwrap_or(raw);
+        let json_part = extract_json_object(&raw).unwrap_or(&raw);
         let parsed: OllamaDocumentSegmentsModelResponse = serde_json::from_str(json_part)
-            .map_err(|e| format!("Could not parse Ollama's response for chunk {}: {e}", chunk_index + 1))?;
+            .map_err(|e| format!("Could not parse the LLM response for chunk {}: {e}", chunk_index + 1))?;
 
         if parsed.segments.is_empty() {
-            return Err(format!("Ollama returned no segments for chunk {}.", chunk_index + 1));
+            return Err(format!("The configured LLM returned no segments for chunk {}.", chunk_index + 1));
         }
 
         if let Some(proper_names) = parsed.proper_names {
@@ -5258,7 +5924,7 @@ async fn process_document_with_ollama(
     }
 
     if segments_output.is_empty() {
-        return Err("Ollama returned no segments for any chunk.".to_string());
+        return Err("The configured LLM returned no segments for any chunk.".to_string());
     }
 
     // ── Merge same-type/speaker segments at chunk seams ──────────────────────
@@ -5342,61 +6008,53 @@ async fn process_document_chunk_with_ollama(
     request: OllamaDocumentChunkProcessingRequest,
 ) -> Result<OllamaDocumentChunkProcessingResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before processing a document.".to_string());
+        return Err("Choose an LLM model before processing a document.".to_string());
     }
     let chunk_text = request.chunk_text.trim().to_string();
     if chunk_text.is_empty() {
         return Err("This document chunk has no content to process.".to_string());
     }
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(600)))
         .build()
         .map_err(|e| e.to_string())?;
 
     let user_message = format!("Text content:\n{}", chunk_text);
-    let response = client
-        .post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "stream": false,
-            "messages": [
-                { "role": "system", "content": document_processing_system_prompt() },
-                { "role": "user",   "content": user_message  },
-            ],
-            "options": {
-                "temperature": request.temperature,
-                "num_ctx": request.num_ctx,
-            },
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-            "format": "json",
-        }))
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                format!(
-                    "Ollama timed out while processing this document at {base_url}. Transcript processing can take several minutes, especially for longer files."
-                )
-            } else {
-                format!("Could not reach Ollama at {base_url}: {e}")
-            }
-        })?
-        .error_for_status()
-        .map_err(|e| format!("Ollama returned an error on chunk {}: {e}", request.chunk_index + 1))?;
-
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let raw = payload
-        .get("message").and_then(|m| m.get("content")).and_then(Value::as_str)
-        .map(str::trim).filter(|v| !v.is_empty())
-        .ok_or_else(|| format!("Ollama returned an empty response for chunk {}.", request.chunk_index + 1))?;
-    let json_part = extract_json_object(raw).unwrap_or(raw);
+    let raw = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        document_processing_system_prompt(),
+        vec![serde_json::json!({ "role": "user", "content": user_message })],
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        true,
+    )
+    .await
+    .map_err(|error| {
+        if error.to_ascii_lowercase().contains("timed out") {
+            "The configured LLM timed out while processing this document. Transcript processing can take several minutes, especially for longer files.".to_string()
+        } else {
+            format!("Chunk {} failed: {error}", request.chunk_index + 1)
+        }
+    })?;
+    let json_part = extract_json_object(&raw).unwrap_or(&raw);
     let parsed: OllamaDocumentSegmentsModelResponse = serde_json::from_str(json_part)
-        .map_err(|e| format!("Could not parse Ollama's response for chunk {}: {e}", request.chunk_index + 1))?;
+        .map_err(|e| format!("Could not parse the LLM response for chunk {}: {e}", request.chunk_index + 1))?;
 
     if parsed.segments.is_empty() {
-        return Err(format!("Ollama returned no segments for chunk {}.", request.chunk_index + 1));
+        return Err(format!("The configured LLM returned no segments for chunk {}.", request.chunk_index + 1));
     }
 
     let mut processed_content = String::new();
@@ -5425,7 +6083,7 @@ async fn process_document_chunk_with_ollama(
         });
     }
     if segments.is_empty() {
-        return Err(format!("Ollama returned no segments for chunk {}.", request.chunk_index + 1));
+        return Err(format!("The configured LLM returned no segments for chunk {}.", request.chunk_index + 1));
     }
 
     let mut proper_name_map: HashMap<String, String> = HashMap::new();
@@ -5473,13 +6131,21 @@ async fn generate_code_decomposition_with_ollama(
     request: OllamaCodeSummaryRequest,
 ) -> Result<OllamaCodeSummaryResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before running code analysis.".to_string());
+        return Err("Choose an LLM model before running code analysis.".to_string());
     }
     if request.annotations.is_empty() {
         return Err("This code has no annotations yet.".to_string());
     }
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(10)))
         .build()
@@ -5513,20 +6179,18 @@ async fn generate_code_decomposition_with_ollama(
         request.code_label.trim(), description, request.annotations.len(), unique_docs.len(), annotations_text
     );
 
-    let response = client.post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model, "stream": false,
-            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
-            "options": {"temperature": request.temperature, "num_ctx": request.num_ctx},
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-        }))
-        .send().await.map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-        .error_for_status().map_err(|e| format!("Ollama returned an error: {e}"))?;
-
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = payload.get("message").and_then(|m| m.get("content")).and_then(Value::as_str)
-        .map(str::trim).filter(|v| !v.is_empty())
-        .ok_or_else(|| "Ollama returned an empty response.".to_string())?.to_string();
+    let content = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        system_prompt,
+        vec![serde_json::json!({ "role": "user", "content": user_message })],
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        false,
+    )
+    .await?;
 
     Ok(OllamaCodeSummaryResponse { content, model: request.model, base_url })
 }
@@ -5536,10 +6200,18 @@ async fn generate_code_position_with_ollama(
     request: OllamaCodePositionRequest,
 ) -> Result<OllamaCodeSummaryResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before running code analysis.".to_string());
+        return Err("Choose an LLM model before running code analysis.".to_string());
     }
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(10)))
         .build()
@@ -5579,20 +6251,18 @@ async fn generate_code_position_with_ollama(
         request.code_label.trim(), description, request.annotations.len(), annotations_text, codebook_text
     );
 
-    let response = client.post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model, "stream": false,
-            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
-            "options": {"temperature": request.temperature, "num_ctx": request.num_ctx},
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-        }))
-        .send().await.map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-        .error_for_status().map_err(|e| format!("Ollama returned an error: {e}"))?;
-
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = payload.get("message").and_then(|m| m.get("content")).and_then(Value::as_str)
-        .map(str::trim).filter(|v| !v.is_empty())
-        .ok_or_else(|| "Ollama returned an empty response.".to_string())?.to_string();
+    let content = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        system_prompt,
+        vec![serde_json::json!({ "role": "user", "content": user_message })],
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        false,
+    )
+    .await?;
 
     Ok(OllamaCodeSummaryResponse { content, model: request.model, base_url })
 }
@@ -5602,13 +6272,21 @@ async fn generate_code_unique_annotations_with_ollama(
     request: OllamaCodeSummaryRequest,
 ) -> Result<OllamaUniqueAnnotationsResponse, String> {
     if request.model.trim().is_empty() {
-        return Err("Choose an Ollama model in App Settings before running code analysis.".to_string());
+        return Err("Choose an LLM model before running code analysis.".to_string());
     }
     if request.annotations.is_empty() {
         return Err("This code has no annotations yet.".to_string());
     }
 
-    let base_url = ollama_base_url(&request.protocol, &request.host, request.port);
+    let runtime = resolve_llm_runtime(
+        request.connection_mode.as_deref(),
+        request.cloud_provider.clone(),
+        request.cloud_api_secret.as_deref(),
+        &request.protocol,
+        &request.host,
+        request.port,
+    )?;
+    let base_url = runtime_base_url(&runtime);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request.timeout_seconds.max(10)))
         .build()
@@ -5644,23 +6322,20 @@ async fn generate_code_unique_annotations_with_ollama(
         annotations_text
     );
 
-    let response = client.post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-            "model": request.model, "stream": false,
-            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
-            "options": {"temperature": request.temperature, "num_ctx": request.num_ctx},
-            "keep_alive": format!("{}m", request.keep_alive_minutes),
-            "format": "json",
-        }))
-        .send().await.map_err(|e| format!("Could not reach Ollama at {base_url}: {e}"))?
-        .error_for_status().map_err(|e| format!("Ollama returned an error: {e}"))?;
+    let content = run_llm_chat_completion(
+        &runtime,
+        &client,
+        &request.model,
+        &system_prompt,
+        vec![serde_json::json!({ "role": "user", "content": user_message })],
+        request.temperature,
+        request.num_ctx,
+        request.keep_alive_minutes,
+        true,
+    )
+    .await?;
 
-    let payload: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = payload.get("message").and_then(|m| m.get("content")).and_then(Value::as_str)
-        .map(str::trim).filter(|v| !v.is_empty())
-        .ok_or_else(|| "Ollama returned an empty response.".to_string())?;
-
-    let json_content = extract_json_object(content).unwrap_or(content);
+    let json_content = extract_json_object(&content).unwrap_or(&content);
     let parsed = parse_unique_annotations_payload(json_content)?;
 
     let annotations = parsed.annotations.into_iter()
@@ -5673,7 +6348,7 @@ async fn generate_code_unique_annotations_with_ollama(
         .collect::<Vec<_>>();
 
     if annotations.is_empty() {
-        return Err("Ollama did not return any valid unique annotation indexes.".to_string());
+        return Err("The configured LLM did not return any valid unique annotation indexes.".to_string());
     }
 
     Ok(OllamaUniqueAnnotationsResponse { annotations, model: request.model, base_url })
@@ -6038,6 +6713,7 @@ pub fn run() {
             cancel_project_embedding_build,
             build_project_embedding_index_command,
             discover_ollama_models,
+            discover_cloud_llm_models,
             chat_with_project_ollama,
             find_relevant_project_segments_with_ollama,
             generate_attribute_value_suggestions_with_ollama,

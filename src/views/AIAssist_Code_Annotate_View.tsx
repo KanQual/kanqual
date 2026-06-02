@@ -11,6 +11,7 @@ import {
 } from "docx";
 import { useStore } from "../context/StoreContext";
 import { readAppSettings } from "../lib/appSettings";
+import { assertActiveLlmRuntime } from "../lib/llmRuntime";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Code, Annotation } from "../types";
 import {
@@ -1080,12 +1081,10 @@ function RelevantSegmentsPanel({
       return;
     }
     if (isLocalWorkspace) {
-      if (!llmSettings.ollamaEnabled) {
-        setLocalSearchError("Enable Ollama in App Settings before searching for relevant segments.");
-        return;
-      }
-      if (!llmSettings.ollamaSelectedModel) {
-        setLocalSearchError("Choose an Ollama model in App Settings before searching for relevant segments.");
+      try {
+        assertActiveLlmRuntime(llmSettings, "searching for relevant segments");
+      } catch (error) {
+        setLocalSearchError(error instanceof Error ? error.message : "Configure AI Assist before searching for relevant segments.");
         return;
       }
     }
@@ -1173,7 +1172,7 @@ function RelevantSegmentsPanel({
       <ul className="annotation-list">
         {!searching && results.length === 0 && effectiveCode && !searchError && (
           <li className="annotation-list-empty">
-            Start a search to ask Ollama which indexed project segments look most relevant to this code.
+            Start a search to ask AI Assist which indexed project segments look most relevant to this code.
           </li>
         )}
         {results.map((segment) => (
@@ -4166,11 +4165,14 @@ export function AIAnalyzeView({
 
     const llmSettings = readAppSettings().llm;
     const ollamaError = isLocalWorkspace
-      ? !llmSettings.ollamaEnabled
-        ? "Enable Ollama in App Settings before running analyses."
-        : !llmSettings.ollamaSelectedModel
-          ? "Choose an Ollama model in App Settings before running analyses."
-          : null
+      ? (() => {
+          try {
+            assertActiveLlmRuntime(llmSettings, "running analyses");
+            return null;
+          } catch (error) {
+            return error instanceof Error ? error.message : "Configure AI Assist before running analyses.";
+          }
+        })()
       : null;
 
     if (ollamaError) {
@@ -4245,7 +4247,7 @@ export function AIAnalyzeView({
               return ref ? { annotationRef: ref, reasoning } : null;
             })
             .filter((item): item is { annotationRef: SummaryAnnotationRef; reasoning: string } => item !== null);
-          if (items.length === 0) throw new Error("Ollama returned no valid typical annotation indexes.");
+          if (items.length === 0) throw new Error("The configured LLM returned no valid typical annotation indexes.");
           const nextResult = { items, model: response.model, codeId: selectedCodeId };
           typicalAnnotationResultRef.current = nextResult;
           setTypicalAnnotationState({ busy: false, result: nextResult, error: "" });
@@ -4304,7 +4306,7 @@ export function AIAnalyzeView({
               return ref ? { annotationRef: ref, reasoning } : null;
             })
             .filter((item): item is { annotationRef: SummaryAnnotationRef; reasoning: string } => item !== null);
-          if (items.length === 0) throw new Error("Ollama returned no valid unique annotation indexes.");
+          if (items.length === 0) throw new Error("The configured LLM returned no valid unique annotation indexes.");
           const nextResult = { items, model: response.model, codeId: selectedCodeId };
           uniqueAnnotationsResultRef.current = nextResult;
           setUniqueAnnotationsState({ busy: false, result: nextResult, error: "" });

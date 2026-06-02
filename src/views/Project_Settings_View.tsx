@@ -1087,13 +1087,6 @@ export function ProjectSettingsView() {
       tone: "default",
     },
     {
-      id: "ai-assist",
-      title: "AI Assist",
-      description: "Turn project AI Assist on or off and manage the embeddings it depends on.",
-      visible: canManageProjectAiAssist,
-      tone: "ai",
-    },
-    {
       id: "uploaded-files",
       title: "Uploaded Source Files",
       description: "Review retained uploaded files and explicitly delete them without affecting derived documents or cases.",
@@ -1138,7 +1131,7 @@ export function ProjectSettingsView() {
       eyebrow: "Project Setup",
       title: "Manage the shared defaults that shape this project's day-to-day work.",
       description: "Start here for project metadata, default import behavior, and project-level AI Assist controls.",
-      cardIds: ["details", "document-import", "ai-assist"],
+      cardIds: ["details", "document-import"],
     },
     {
       id: "project-data",
