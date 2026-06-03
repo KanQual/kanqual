@@ -1310,7 +1310,10 @@ function NewDocumentModal({
 }) {
   const {
     addDocument,
+    addCaseDocument,
+    canCurrentUser,
     createProjectUploadedFileRecord,
+    createCase,
     updateProjectUploadedFileStatus,
     pb,
     activeProject,
@@ -1321,6 +1324,7 @@ function NewDocumentModal({
     ...readAppSettings().documentImport,
     storeOriginalFileName: projectDocumentImportSettings.storeOriginalFileName,
   };
+  const canCreateCases = canCurrentUser("createCase");
   const [name,      setName]      = useState(initialName);
   const [mode,      setMode]      = useState<InputMode>(
     initialMode && allowedModes.includes(initialMode)
@@ -1342,9 +1346,37 @@ function NewDocumentModal({
   const dragDepthRef = useRef(0);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
+  const [autoCreateCases, setAutoCreateCases] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
+
+  async function getNextGeneratedCaseNumber() {
+    if (!activeProject) return 1;
+    const records = await pb.collection("cases").getFullList({
+      filter: `project="${activeProject.id}"&&deleted_at=""`,
+      fields: "name",
+    });
+    let maxCaseNumber = 0;
+    for (const record of records) {
+      const name = String(record.name ?? "").trim();
+      const match = /^new case\s+(\d+)$/i.exec(name);
+      if (!match) continue;
+      const parsed = Number.parseInt(match[1] ?? "", 10);
+      if (Number.isFinite(parsed)) {
+        maxCaseNumber = Math.max(maxCaseNumber, parsed);
+      }
+    }
+    return maxCaseNumber + 1;
+  }
+
+  async function createAndAssociateGeneratedCase(documentId: string, nextCaseNumber: number) {
+    const generatedCase = await createCase(`new case ${nextCaseNumber}`, currentUser?.id);
+    if (!generatedCase?.id) {
+      throw new Error("The document was created, but Kanqual could not create its generated case.");
+    }
+    await addCaseDocument(generatedCase.id, documentId);
+  }
 
   useEffect(() => {
     if (!allowedModes.includes(mode)) {
@@ -1634,6 +1666,11 @@ function NewDocumentModal({
     setLoading(true);
     setError(null);
     try {
+      const nextGeneratedCaseNumber = autoCreateCases
+        ? await getNextGeneratedCaseNumber()
+        : null;
+      let generatedCaseNumber = nextGeneratedCaseNumber ?? 0;
+
       if (mode === "upload" || mode === "paste") {
         const rawContent = mode === "upload" ? extracted : (pastedRef.current?.innerHTML ?? "");
         const content = importSettings.trimImportedText ? rawContent.trim() : rawContent;
@@ -1654,6 +1691,10 @@ function NewDocumentModal({
             ? { mode: "upload", originalFileName: file.name }
             : undefined,
         });
+        if (autoCreateCases && document?.id) {
+          await createAndAssociateGeneratedCase(document.id, generatedCaseNumber);
+          generatedCaseNumber += 1;
+        }
         if (document?.id && onCreated) {
           await onCreated(document.id);
         }
@@ -1676,7 +1717,8 @@ function NewDocumentModal({
               failures.push(`${currentFile.name}: skipped because no text was extracted`);
               continue;
             }
-            await addDocument(
+            const document = await addDocument(
+              // Documents created through batch import are named from each file.
               currentFile.name.replace(/\.[^/.]+$/, ""),
               importSettings.storeOriginalFileName ? currentFile.name : "",
               content,
@@ -1689,6 +1731,10 @@ function NewDocumentModal({
                 importSummary: { mode: "batch-upload", originalFileName: currentFile.name },
               },
             );
+            if (autoCreateCases && document?.id) {
+              await createAndAssociateGeneratedCase(document.id, generatedCaseNumber);
+              generatedCaseNumber += 1;
+            }
             createdCount += 1;
           } catch (err) {
             failures.push(`${currentFile.name}: ${err instanceof Error ? err.message : "failed"}`);
@@ -1733,6 +1779,10 @@ function NewDocumentModal({
           },
         );
         if (!document?.id) continue;
+        if (autoCreateCases) {
+          await createAndAssociateGeneratedCase(document.id, generatedCaseNumber);
+          generatedCaseNumber += 1;
+        }
         createdCount += 1;
 
         for (const mapping of csvMappings) {
@@ -2069,6 +2119,25 @@ function NewDocumentModal({
             </>
           )}
 
+          <label
+            className="settings-toggle-row"
+            style={{ marginTop: 12, justifyContent: "flex-start", gap: 10 }}
+          >
+            <input
+              type="checkbox"
+              checked={autoCreateCases}
+              onChange={(e) => setAutoCreateCases(e.target.checked)}
+              disabled={!canCreateCases}
+            />
+            <span>
+              <strong>
+                {mode === "paste" || mode === "upload"
+                  ? "Auto-create a case for this document"
+                  : "Auto-create cases for imported documents"}
+              </strong>
+            </span>
+          </label>
+
           {error && <p className="auth-error">{error}</p>}
 
           <div className="form-actions">
@@ -2153,7 +2222,6 @@ export function DocumentsView() {
   const [assocCaseDoc,  setAssocCaseDoc]  = useState<DocRow | null>(null);
   const [memoForDoc,    setMemoForDoc]    = useState<DocRow | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
   const [showAttributesTable, setShowAttributesTable] = useState(false);
   const [attributeDefs, setAttributeDefs] = useState<AttributeDefinition[]>([]);
   const [attributeValues, setAttributeValues] = useState<Record<string, AttributeValue>>({});
@@ -2166,8 +2234,6 @@ export function DocumentsView() {
   const [attributeContextMenu, setAttributeContextMenu] = useState<{ x: number; y: number; attr: AttributeDefinition } | null>(null);
   const attributeContextMenuRef = useRef<HTMLDivElement>(null);
   const attributeContextMenuStyle = useViewportContextMenuStyle(attributeContextMenu, attributeContextMenuRef);
-  const headerActionsRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     if (!activeProject || !canManageDocumentAttributes) return;
     try {
@@ -2184,27 +2250,6 @@ export function DocumentsView() {
       // Best-effort handoff only.
     }
   }, [activeProject, canManageDocumentAttributes]);
-
-  useEffect(() => {
-    if (!headerActionsOpen) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!headerActionsRef.current?.contains(event.target as Node)) {
-        setHeaderActionsOpen(false);
-      }
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setHeaderActionsOpen(false);
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [headerActionsOpen]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -2675,39 +2720,35 @@ export function DocumentsView() {
           >
             {showAttributesTable ? "+ Add Attribute" : "+ New Document"}
           </button>
-          <div className="user-detail-menu-wrap" ref={headerActionsRef}>
-            <button
-              type="button"
-              className="btn"
-              aria-label="Document workspace actions"
-              aria-haspopup="menu"
-              aria-expanded={headerActionsOpen}
-              onClick={() => setHeaderActionsOpen((open) => !open)}
-            >
-              Actions
-            </button>
-            {headerActionsOpen && (
-              <div className="context-menu user-detail-menu" role="menu">
-                <button
-                  type="button"
-                  className="context-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setHeaderActionsOpen(false);
-                    setShowAttributesTable((show) => !show);
-                  }}
-                >
-                  {showAttributesTable ? "Show Documents" : "Show Attributes"}
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </header>
 
       {error && <p className="users-error">{error}</p>}
 
       <div className="users-content">
+      <div className="ai-assist-home-tabbar" style={{ marginBottom: 16 }}>
+        <div className="segmented-control" role="tablist" aria-label="Document workspace views">
+          <button
+            type="button"
+            className={showAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+            role="tab"
+            aria-selected={!showAttributesTable}
+            onClick={() => setShowAttributesTable(false)}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            className={showAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+            role="tab"
+            aria-selected={showAttributesTable}
+            onClick={() => setShowAttributesTable(true)}
+          >
+            Attributes
+          </button>
+        </div>
+      </div>
+
       {showAttributesTable && (
         <div className="users-table-wrap case-attributes-table-wrap">
           <table
@@ -2877,7 +2918,7 @@ export function DocumentsView() {
             {showAttributesTable ? (
               <>
                 <p className="users-guide-copy">
-                  Review document attributes across documents, create or edit attributes, set values, delete attributes, and switch back to the document list.
+                  Review document attributes across documents, create or edit attributes, set values, delete attributes, and switch back to the details tab.
                 </p>
                 <p className="users-guide-copy">
                   Use the attribute table when you want a structured cross-document comparison view. Define an attribute once and then compare values across many documents.
@@ -2889,7 +2930,7 @@ export function DocumentsView() {
             ) : (
               <>
                 <p className="users-guide-copy">
-                  Create, upload, import, edit, or delete documents; edit metadata; create an editable copy; associate cases; switch to document attributes; and open a document for coding or review.
+                  Create, upload, import, edit, or delete documents; edit metadata; create an editable copy; associate cases; switch between the details and attributes tabs; and open a document for coding or review.
                 </p>
                 <p className="users-guide-copy">
                   Use Documents as the source-management page for the project. Bring documents in, inspect metadata, connect them to cases, and move into coding or other analysis workflows from there.

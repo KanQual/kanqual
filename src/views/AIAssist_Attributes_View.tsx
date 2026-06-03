@@ -1702,23 +1702,25 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
                 </button>
               </div>
 
-              <div className="segmented-control ai-attribute-mode-toggle" role="tablist" aria-label="Attribute target">
-                {(["case", "document"] as const).map((targetKind) => (
-                  <button
-                    key={targetKind}
-                    type="button"
-                    role="tab"
-                    aria-selected={currentTargetKind === targetKind}
-                    className={
-                      currentTargetKind === targetKind
-                        ? "segmented-control-option segmented-control-option--active"
-                        : "segmented-control-option"
-                    }
-                    onClick={() => setView(targetKind === "case" ? "ai-assist-case-attributes" : "ai-assist-document-attributes")}
-                  >
-                    {targetKind === "case" ? "Cases" : "Documents"}
-                  </button>
-                ))}
+              <div className="ai-attribute-mode-toggle">
+                <div className="segmented-control" role="tablist" aria-label="Attribute target">
+                  {(["case", "document"] as const).map((targetKind) => (
+                    <button
+                      key={targetKind}
+                      type="button"
+                      role="tab"
+                      aria-selected={currentTargetKind === targetKind}
+                      className={
+                        currentTargetKind === targetKind
+                          ? "segmented-control-option segmented-control-option--active"
+                          : "segmented-control-option"
+                      }
+                      onClick={() => setView(targetKind === "case" ? "ai-assist-case-attributes" : "ai-assist-document-attributes")}
+                    >
+                      {targetKind === "case" ? "Cases" : "Documents"}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {currentCoverageError && <div className="form-error" style={{ marginTop: 16 }}>{currentCoverageError}</div>}

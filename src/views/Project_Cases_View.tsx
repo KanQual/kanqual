@@ -885,7 +885,6 @@ export function CasesView() {
   const [assocDocCase,   setAssocDocCase]   = useState<CaseRow | null>(null);
   const [memoForCase,    setMemoForCase]    = useState<CaseRow | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
   const [showAttributesTable, setShowAttributesTable] = useState(false);
   const [attributeDefs, setAttributeDefs] = useState<AttributeDefinition[]>([]);
   const [attributeValues, setAttributeValues] = useState<Record<string, AttributeValue>>({});
@@ -898,8 +897,6 @@ export function CasesView() {
   const [attributeContextMenu, setAttributeContextMenu] = useState<{ x: number; y: number; attr: AttributeDefinition } | null>(null);
   const attributeContextMenuRef = useRef<HTMLDivElement>(null);
   const attributeContextMenuStyle = useViewportContextMenuStyle(attributeContextMenu, attributeContextMenuRef);
-  const headerActionsRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     if (!activeProject || !canManageCaseAttributes) return;
     try {
@@ -916,27 +913,6 @@ export function CasesView() {
       // Best-effort handoff only.
     }
   }, [activeProject, canManageCaseAttributes]);
-
-  useEffect(() => {
-    if (!headerActionsOpen) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!headerActionsRef.current?.contains(event.target as Node)) {
-        setHeaderActionsOpen(false);
-      }
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setHeaderActionsOpen(false);
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [headerActionsOpen]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -1424,39 +1400,35 @@ export function CasesView() {
           >
             {showAttributesTable ? "+ Add Attribute" : "+ New Case"}
           </button>
-          <div className="user-detail-menu-wrap" ref={headerActionsRef}>
-            <button
-              type="button"
-              className="btn"
-              aria-label="Case workspace actions"
-              aria-haspopup="menu"
-              aria-expanded={headerActionsOpen}
-              onClick={() => setHeaderActionsOpen((open) => !open)}
-            >
-              Actions
-            </button>
-            {headerActionsOpen && (
-              <div className="context-menu user-detail-menu" role="menu">
-                <button
-                  type="button"
-                  className="context-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setHeaderActionsOpen(false);
-                    setShowAttributesTable((show) => !show);
-                  }}
-                >
-                  {showAttributesTable ? "Show Cases" : "Show Attributes"}
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </header>
 
       {error && <p className="users-error">{error}</p>}
 
       <div className="users-content">
+          <div className="ai-assist-home-tabbar" style={{ marginBottom: 16 }}>
+            <div className="segmented-control" role="tablist" aria-label="Case workspace views">
+              <button
+                type="button"
+                className={showAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+                role="tab"
+                aria-selected={!showAttributesTable}
+                onClick={() => setShowAttributesTable(false)}
+              >
+                Details
+              </button>
+              <button
+                type="button"
+                className={showAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                role="tab"
+                aria-selected={showAttributesTable}
+                onClick={() => setShowAttributesTable(true)}
+              >
+                Attributes
+              </button>
+            </div>
+          </div>
+
           {showAttributesTable && (
             <div className="users-table-wrap case-attributes-table-wrap">
               <table
@@ -1617,7 +1589,7 @@ export function CasesView() {
             {showAttributesTable ? (
               <>
                 <p className="users-guide-copy">
-                  Review case attributes across cases, create a new attribute, edit attribute definitions, edit values, delete attributes when permitted, and switch back to the case list.
+                  Review case attributes across cases, create a new attribute, edit attribute definitions, edit values, delete attributes when permitted, and switch back to the details tab.
                 </p>
                 <p className="users-guide-copy">
                   Use the attribute table when you need a cross-case structured view instead of individual case cards. Create an attribute once, then fill or compare its values across cases.
@@ -1629,7 +1601,7 @@ export function CasesView() {
             ) : (
               <>
                 <p className="users-guide-copy">
-                  Create, open, edit, or delete cases, associate documents to cases, switch to the case attributes table, create or edit case attributes, and review structured case values.
+                  Create, open, edit, or delete cases, associate documents to cases, switch between the details and attributes tabs, create or edit case attributes, and review structured case values.
                 </p>
                 <p className="users-guide-copy">
                   Use Cases to manage the units of analysis in the project. Open a case for details, connect supporting documents, and switch to attribute view when you need structured case comparisons.
