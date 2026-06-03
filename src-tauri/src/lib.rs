@@ -22,7 +22,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use zeroize::Zeroizing;
 
@@ -38,8 +38,9 @@ const EMBEDDING_MODEL_REPO_ID: &str = "intfloat/multilingual-e5-large";
 const EMBEDDING_MODEL_DISPLAY_NAME: &str = "multilingual-e5-large";
 const EMBEDDING_MODEL_METADATA_FILE: &str = ".kanqual-model.json";
 const EMBEDDING_MODEL_EXPECTED_SIZE_BYTES: u64 = 4_499_523_339;
-const PROJECT_EMBEDDING_INDEX_FILE: &str = "multilingual-e5-index.json";
+const PROJECT_EMBEDDING_METADATA_FILE: &str = "multilingual-e5-metadata.json";
 const PROJECT_EMBEDDING_BUILD_BATCH_SIZE_CAP: usize = 8;
+const PROJECT_EMBEDDING_CHUNKING_VERSION: u32 = 2;
 const ENCRYPTED_BACKUP_KIND: &str = "kanqual-encrypted-backup";
 const ENCRYPTED_BACKUP_VERSION: u32 = 1;
 const ENCRYPTED_BACKUP_CIPHER: &str = "aes-256-gcm";
@@ -652,12 +653,22 @@ struct ProjectEmbeddingBuildPreflight {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ProjectEmbeddingIndexStatus {
+struct ProjectEmbeddingStoreStatus {
     exists: bool,
     generated_at_ms: Option<u64>,
     item_count: u64,
     model_repo_id: Option<String>,
     model_display_name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProjectEmbeddingBuildSource {
+    source_type: String,
+    source_id: String,
+    title: String,
+    source_hash: String,
+    items: Vec<ProjectEmbeddingBuildItem>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -687,12 +698,12 @@ struct ProjectEmbeddingBuildRequest {
     overlap_size: usize,
     prefix_passages: bool,
     normalize_whitespace: bool,
-    items: Vec<ProjectEmbeddingBuildItem>,
+    sources: Vec<ProjectEmbeddingBuildSource>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ProjectEmbeddingIndexItem {
+struct ProjectEmbeddingStoreItem {
     id: String,
     item_type: String,
     source_id: String,
@@ -712,7 +723,7 @@ struct ProjectEmbeddingIndexItem {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ProjectEmbeddingIndexFile {
+struct ProjectEmbeddingStoreSnapshot {
     project_id: String,
     model_repo_id: String,
     model_display_name: String,
@@ -722,7 +733,42 @@ struct ProjectEmbeddingIndexFile {
     overlap_size: usize,
     prefix_passages: bool,
     normalize_whitespace: bool,
-    items: Vec<ProjectEmbeddingIndexItem>,
+    items: Vec<ProjectEmbeddingStoreItem>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProjectEmbeddingMetadataSource {
+    source_type: String,
+    source_id: String,
+    title: String,
+    source_hash: String,
+    active: bool,
+    chunk_count: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProjectEmbeddingMetadataChunk {
+    vector_id: u64,
+    source_type: String,
+    source_id: String,
+    active: bool,
+    item: ProjectEmbeddingStoreItem,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProjectEmbeddingMetadataFile {
+    project_id: String,
+    model_repo_id: String,
+    model_display_name: String,
+    generated_at_ms: u64,
+    chunking_version: u32,
+    settings_hash: String,
+    next_vector_id: u64,
+    sources: Vec<ProjectEmbeddingMetadataSource>,
+    chunks: Vec<ProjectEmbeddingMetadataChunk>,
 }
 
 struct LocalEmbeddingRuntime {
@@ -3118,8 +3164,8 @@ fn project_embedding_index_dir(app: &tauri::AppHandle, project_id: &str) -> Resu
     Ok(app_data_dir.join("ai").join("project_indexes").join(project_id))
 }
 
-fn project_embedding_index_path(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
-    Ok(project_embedding_index_dir(app, project_id)?.join(PROJECT_EMBEDDING_INDEX_FILE))
+fn project_embedding_metadata_path(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+    Ok(project_embedding_index_dir(app, project_id)?.join(PROJECT_EMBEDDING_METADATA_FILE))
 }
 
 fn collect_directory_stats(path: &Path) -> Result<(u64, u64), String> {
@@ -3315,7 +3361,10 @@ fn load_embedding_runtime(app: &tauri::AppHandle) -> Result<LocalEmbeddingRuntim
     })
 }
 
-fn embed_text_batch(runtime: &mut LocalEmbeddingRuntime, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+fn embed_text_batch(
+    runtime: &mut LocalEmbeddingRuntime,
+    texts: &[String],
+) -> Result<Vec<Vec<f32>>, String> {
     if texts.is_empty() {
         return Ok(Vec::new());
     }
@@ -3345,7 +3394,6 @@ fn embed_text_batch(runtime: &mut LocalEmbeddingRuntime, texts: &[String]) -> Re
         .iter()
         .map(|encoding| encoding.get_attention_mask().to_vec())
         .collect::<Vec<_>>();
-
     let max_len = input_ids.iter().map(Vec::len).max().unwrap_or(0);
     let token_type_ids = vec![vec![0_u32; max_len]; input_ids.len()];
 
@@ -3404,75 +3452,181 @@ fn embed_text_batch(runtime: &mut LocalEmbeddingRuntime, texts: &[String]) -> Re
     Ok(pooled)
 }
 
+struct PlannedProjectEmbeddingChunk {
+    vector_id: u64,
+    source_type: String,
+    source_id: String,
+    item: ProjectEmbeddingStoreItem,
+    embedding: Option<Vec<f32>>,
+}
+
+fn project_embedding_store_item_from_build_item(source_item: &ProjectEmbeddingBuildItem) -> ProjectEmbeddingStoreItem {
+    ProjectEmbeddingStoreItem {
+        id: source_item.id.clone(),
+        item_type: source_item.item_type.clone(),
+        source_id: source_item.source_id.clone(),
+        title: source_item.title.clone(),
+        text: source_item.text.clone(),
+        content_hash: source_item.content_hash.clone(),
+        document_id: source_item.document_id.clone(),
+        case_id: source_item.case_id.clone(),
+        code_id: source_item.code_id.clone(),
+        annotation_id: source_item.annotation_id.clone(),
+        memo_id: source_item.memo_id.clone(),
+        start_offset: source_item.start_offset,
+        end_offset: source_item.end_offset,
+        embedding: Vec::new(),
+    }
+}
+
 fn build_project_embedding_index(
     app: &tauri::AppHandle,
     request: ProjectEmbeddingBuildRequest,
-) -> Result<ProjectEmbeddingIndexFile, String> {
-    let total_started = Instant::now();
-    let runtime_started = Instant::now();
+) -> Result<ProjectEmbeddingStoreSnapshot, String> {
+    let total_requested_items = request.sources.iter().map(|source| source.items.len()).sum::<usize>();
     let mut runtime = load_embedding_runtime(app)?;
-    log_embedding_build_timing(
-        &request.project_id,
-        "runtime_load",
-        runtime_started.elapsed(),
-        format!("requested_items={}", request.items.len()),
-    );
     let index_dir = project_embedding_index_dir(app, &request.project_id)?;
     fs::create_dir_all(&index_dir).map_err(|e| e.to_string())?;
-    let index_path = index_dir.join(PROJECT_EMBEDDING_INDEX_FILE);
-    let temp_path = index_dir.join(format!("{PROJECT_EMBEDDING_INDEX_FILE}.tmp"));
 
     let batch_size = request
         .batch_size
         .max(1)
         .min(PROJECT_EMBEDDING_BUILD_BATCH_SIZE_CAP);
-    let reuse_scan_started = Instant::now();
-    let existing_index = read_project_embedding_index_file(app, &request.project_id).ok();
-    let existing_items_by_id = existing_index
+    let settings_hash = project_embedding_settings_hash(&request);
+    let existing_metadata = read_project_embedding_metadata_file(app, &request.project_id).ok();
+    let metadata_is_compatible = existing_metadata
         .as_ref()
-        .map(|index| {
-            index
-                .items
+        .map(|metadata| {
+            metadata.settings_hash == settings_hash
+                && metadata.model_repo_id == EMBEDDING_MODEL_REPO_ID
+                && metadata.chunking_version == PROJECT_EMBEDDING_CHUNKING_VERSION
+        })
+        .unwrap_or(false);
+    let reusable_metadata = if metadata_is_compatible {
+        existing_metadata.as_ref()
+    } else {
+        None
+    };
+
+    let existing_active_sources_by_key = reusable_metadata
+        .map(|metadata| {
+            metadata
+                .sources
                 .iter()
-                .map(|item| (item.id.as_str(), item))
+                .filter(|source| source.active)
+                .map(|source| {
+                    (
+                        project_embedding_source_key(&source.source_type, &source.source_id),
+                        source.clone(),
+                    )
+                })
                 .collect::<HashMap<_, _>>()
         })
         .unwrap_or_default();
+    let existing_active_chunks_by_source = reusable_metadata
+        .map(|metadata| {
+            let mut grouped = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
+            for chunk in metadata.chunks.iter().filter(|chunk| chunk.active) {
+                grouped
+                    .entry(project_embedding_source_key(&chunk.source_type, &chunk.source_id))
+                    .or_default()
+                    .push(chunk.clone());
+            }
+            grouped
+        })
+        .unwrap_or_default();
 
-    let mut reused_embeddings = HashMap::<String, Vec<f32>>::new();
-    let mut pending_items = Vec::new();
+    let mut next_vector_id = existing_metadata
+        .as_ref()
+        .map(|metadata| metadata.next_vector_id)
+        .unwrap_or(1);
+    let mut planned_chunks = Vec::<PlannedProjectEmbeddingChunk>::new();
+    let mut pending_chunk_indexes = Vec::<usize>::new();
+    let mut active_sources = Vec::<ProjectEmbeddingMetadataSource>::new();
+    let mut reused_total = 0_u64;
+    let mut pending_total = 0_u64;
 
-    for source_item in &request.items {
-        let existing_matches = existing_items_by_id
-            .get(source_item.id.as_str())
-            .map(|existing_item| {
-                (!existing_item.content_hash.is_empty() && existing_item.content_hash == source_item.content_hash)
-                    || (existing_item.content_hash.is_empty() && existing_item.text == source_item.text)
-            })
+    for source in &request.sources {
+        let source_key = project_embedding_source_key(&source.source_type, &source.source_id);
+        let unchanged = existing_active_sources_by_key
+            .get(&source_key)
+            .map(|existing_source| existing_source.source_hash == source.source_hash)
             .unwrap_or(false);
 
-        if existing_matches {
-            if let Some(existing_item) = existing_items_by_id.get(source_item.id.as_str()) {
-                reused_embeddings.insert(source_item.id.clone(), existing_item.embedding.clone());
+        if unchanged {
+            if let Some(existing_chunks) = existing_active_chunks_by_source.get(&source_key) {
+                reused_total += existing_chunks.len() as u64;
+                for chunk in existing_chunks {
+                    planned_chunks.push(PlannedProjectEmbeddingChunk {
+                        vector_id: chunk.vector_id,
+                        source_type: chunk.source_type.clone(),
+                        source_id: chunk.source_id.clone(),
+                        item: chunk.item.clone(),
+                        embedding: Some(chunk.item.embedding.clone()),
+                    });
+                }
             }
-        } else {
-            pending_items.push(source_item.clone());
+            active_sources.push(ProjectEmbeddingMetadataSource {
+                source_type: source.source_type.clone(),
+                source_id: source.source_id.clone(),
+                title: source.title.clone(),
+                source_hash: source.source_hash.clone(),
+                active: true,
+                chunk_count: source.items.len() as u64,
+            });
+            continue;
         }
-    }
-    log_embedding_build_timing(
-        &request.project_id,
-        "reuse_scan",
-        reuse_scan_started.elapsed(),
-        format!(
-            "requested_items={}, reused_items={}, pending_items={}",
-            request.items.len(),
-            reused_embeddings.len(),
-            pending_items.len()
-        ),
-    );
 
-    let pending_total = pending_items.len() as u64;
-    let reused_total = reused_embeddings.len() as u64;
+        let mut reusable_chunks_by_hash = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
+        if let Some(existing_chunks) = existing_active_chunks_by_source.get(&source_key) {
+            for chunk in existing_chunks {
+                reusable_chunks_by_hash
+                    .entry(chunk.item.content_hash.clone())
+                    .or_default()
+                    .push(chunk.clone());
+            }
+        }
+
+        for source_item in &source.items {
+            if let Some(reusable_chunks) = reusable_chunks_by_hash.get_mut(&source_item.content_hash) {
+                if let Some(existing_chunk) = reusable_chunks.pop() {
+                    reused_total += 1;
+                    let mut item = project_embedding_store_item_from_build_item(source_item);
+                    item.embedding = existing_chunk.item.embedding.clone();
+                    planned_chunks.push(PlannedProjectEmbeddingChunk {
+                        vector_id: existing_chunk.vector_id,
+                        source_type: source.source_type.clone(),
+                        source_id: source.source_id.clone(),
+                        item,
+                        embedding: Some(existing_chunk.item.embedding.clone()),
+                    });
+                    continue;
+                }
+            }
+
+            let chunk_index = planned_chunks.len();
+            planned_chunks.push(PlannedProjectEmbeddingChunk {
+                vector_id: next_vector_id,
+                source_type: source.source_type.clone(),
+                source_id: source.source_id.clone(),
+                item: project_embedding_store_item_from_build_item(source_item),
+                embedding: None,
+            });
+            pending_chunk_indexes.push(chunk_index);
+            next_vector_id += 1;
+            pending_total += 1;
+        }
+
+        active_sources.push(ProjectEmbeddingMetadataSource {
+            source_type: source.source_type.clone(),
+            source_id: source.source_id.clone(),
+            title: source.title.clone(),
+            source_hash: source.source_hash.clone(),
+            active: true,
+            chunk_count: source.items.len() as u64,
+        });
+    }
+
     let started_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -3486,7 +3640,7 @@ fn build_project_embedding_index(
         status.message = Some(if pending_total == 0 {
             format!(
                 "All {} current project items already have matching embeddings. Reusing the existing local index.",
-                request.items.len()
+                total_requested_items
             )
         } else if reused_total > 0 {
             format!(
@@ -3501,113 +3655,141 @@ fn build_project_embedding_index(
         });
     });
 
-    let mut pending_embeddings = HashMap::<String, Vec<f32>>::new();
-
-    for batch_start in (0..pending_items.len()).step_by(batch_size) {
+    for batch_start in (0..pending_chunk_indexes.len()).step_by(batch_size) {
         if is_project_embedding_build_cancel_requested(app) {
             return Err("Embedding build cancelled.".to_string());
         }
-        let batch_end = (batch_start + batch_size).min(pending_items.len());
-        let batch = &pending_items[batch_start..batch_end];
+        let batch_end = (batch_start + batch_size).min(pending_chunk_indexes.len());
+        let batch_indexes = &pending_chunk_indexes[batch_start..batch_end];
         let batch_number = (batch_start / batch_size) + 1;
-        let batch_count = pending_items.len().div_ceil(batch_size);
+        let batch_count = pending_chunk_indexes.len().div_ceil(batch_size);
         update_project_embedding_build_status_from_handle(app, |status| {
-            status.current_label = batch.first().map(|item| item.title.clone());
+            status.current_label = batch_indexes
+                .first()
+                .map(|index| planned_chunks[*index].item.title.clone());
             status.message = Some(format!(
                 "Embedding batch {} of {} for this project's current content.",
                 batch_number, batch_count
             ));
         });
-        let batch_started = Instant::now();
-        let texts = batch.iter().map(|item| item.text.clone()).collect::<Vec<_>>();
-        let batch_characters = texts.iter().map(|text| text.chars().count()).sum::<usize>();
-        let max_characters = texts.iter().map(|text| text.chars().count()).max().unwrap_or(0);
+        let texts = batch_indexes
+            .iter()
+            .map(|index| planned_chunks[*index].item.text.clone())
+            .collect::<Vec<_>>();
         let embeddings = embed_text_batch(&mut runtime, &texts)?;
-        log_embedding_build_timing(
-            &request.project_id,
-            "batch_embed",
-            batch_started.elapsed(),
-            format!(
-                "batch_number={}/{}, items={}, chars={}, max_chars={}",
-                batch_number,
-                batch_count,
-                batch.len(),
-                batch_characters,
-                max_characters
-            ),
-        );
-
-        for (source_item, embedding) in batch.iter().zip(embeddings.into_iter()) {
-            pending_embeddings.insert(source_item.id.clone(), embedding);
+        for (planned_index, embedding) in batch_indexes.iter().zip(embeddings.into_iter()) {
+            planned_chunks[*planned_index].item.embedding = embedding.clone();
+            planned_chunks[*planned_index].embedding = Some(embedding);
         }
 
         update_project_embedding_build_status_from_handle(app, |status| {
             status.completed_items = batch_end as u64;
-            status.current_label = batch.last().map(|item| item.title.clone());
-            status.message = Some(
-                if reused_total > 0 {
-                    format!(
-                        "Reusing {} unchanged embeddings. Generating {} new or updated multilingual-e5 embeddings.",
-                        reused_total, pending_total
-                    )
-                } else {
-                    format!(
-                        "Generating {} multilingual-e5 embeddings for this project's current content.",
-                        pending_total
-                    )
-                },
-              );
-          });
-      }
-
-      if is_project_embedding_build_cancel_requested(app) {
-          return Err("Embedding build cancelled.".to_string());
-      }
-
-    let assemble_started = Instant::now();
-    let mut items = Vec::with_capacity(request.items.len());
-    for source_item in request.items {
-        let embedding = if let Some(existing_embedding) = reused_embeddings.remove(&source_item.id) {
-            existing_embedding
-        } else if let Some(new_embedding) = pending_embeddings.remove(&source_item.id) {
-            new_embedding
-        } else {
-            return Err(format!(
-                "Missing embedding payload for project item {} while building the local index.",
-                source_item.id
-            ));
-        };
-
-        items.push(ProjectEmbeddingIndexItem {
-            id: source_item.id,
-            item_type: source_item.item_type,
-            source_id: source_item.source_id,
-            title: source_item.title,
-            text: source_item.text,
-            content_hash: source_item.content_hash,
-            document_id: source_item.document_id,
-            case_id: source_item.case_id,
-            code_id: source_item.code_id,
-            annotation_id: source_item.annotation_id,
-            memo_id: source_item.memo_id,
-            start_offset: source_item.start_offset,
-            end_offset: source_item.end_offset,
-            embedding,
+            status.current_label = batch_indexes
+                .last()
+                .map(|index| planned_chunks[*index].item.title.clone());
+            status.message = Some(if reused_total > 0 {
+                format!(
+                    "Reusing {} unchanged embeddings. Generating {} new or updated multilingual-e5 embeddings.",
+                    reused_total, pending_total
+                )
+            } else {
+                format!(
+                    "Generating {} multilingual-e5 embeddings for this project's current content.",
+                    pending_total
+                )
+            });
         });
     }
-    log_embedding_build_timing(
-        &request.project_id,
-        "index_assembly",
-        assemble_started.elapsed(),
-        format!("items={}", items.len()),
-    );
+
+    if is_project_embedding_build_cancel_requested(app) {
+        return Err("Embedding build cancelled.".to_string());
+    }
+
+    let active_vector_ids = planned_chunks
+        .iter()
+        .map(|chunk| chunk.vector_id)
+        .collect::<HashSet<_>>();
+    let active_source_keys = active_sources
+        .iter()
+        .map(|source| project_embedding_source_key(&source.source_type, &source.source_id))
+        .collect::<HashSet<_>>();
+    let mut metadata_chunks = existing_metadata
+        .as_ref()
+        .map(|metadata| {
+            metadata
+                .chunks
+                .iter()
+                .filter_map(|chunk| {
+                    if !chunk.active {
+                        return Some(chunk.clone());
+                    }
+                    if active_vector_ids.contains(&chunk.vector_id) {
+                        None
+                    } else {
+                        let mut tombstone = chunk.clone();
+                        tombstone.active = false;
+                        Some(tombstone)
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    metadata_chunks.extend(planned_chunks.iter().map(|chunk| ProjectEmbeddingMetadataChunk {
+        vector_id: chunk.vector_id,
+        source_type: chunk.source_type.clone(),
+        source_id: chunk.source_id.clone(),
+        active: true,
+        item: chunk.item.clone(),
+    }));
+
+    let mut metadata_sources = existing_metadata
+        .as_ref()
+        .map(|metadata| {
+            metadata
+                .sources
+                .iter()
+                .filter_map(|source| {
+                    let source_key = project_embedding_source_key(&source.source_type, &source.source_id);
+                    if !source.active {
+                        return Some(source.clone());
+                    }
+                    if active_source_keys.contains(&source_key) {
+                        None
+                    } else {
+                        let mut tombstone = source.clone();
+                        tombstone.active = false;
+                        Some(tombstone)
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    metadata_sources.extend(active_sources.iter().cloned());
+
+    let items = planned_chunks
+        .iter()
+        .map(|chunk| chunk.item.clone())
+        .collect::<Vec<_>>();
 
     let generated_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis() as u64;
 
-    let index_file = ProjectEmbeddingIndexFile {
+    let metadata = ProjectEmbeddingMetadataFile {
+        project_id: request.project_id.clone(),
+        model_repo_id: EMBEDDING_MODEL_REPO_ID.to_string(),
+        model_display_name: EMBEDDING_MODEL_DISPLAY_NAME.to_string(),
+        generated_at_ms,
+        chunking_version: PROJECT_EMBEDDING_CHUNKING_VERSION,
+        settings_hash: settings_hash.clone(),
+        next_vector_id,
+        sources: metadata_sources,
+        chunks: metadata_chunks,
+    };
+    write_project_embedding_metadata_file(app, &request.project_id, &metadata)?;
+
+    let index_file = ProjectEmbeddingStoreSnapshot {
         project_id: request.project_id.clone(),
         model_repo_id: EMBEDDING_MODEL_REPO_ID.to_string(),
         model_display_name: EMBEDDING_MODEL_DISPLAY_NAME.to_string(),
@@ -3619,45 +3801,57 @@ fn build_project_embedding_index(
         normalize_whitespace: request.normalize_whitespace,
         items,
     };
-
-    let serialize_started = Instant::now();
-    let raw = serde_json::to_string(&index_file).map_err(|e| e.to_string())?;
-    log_embedding_build_timing(
-        &request.project_id,
-        "index_serialize",
-        serialize_started.elapsed(),
-        format!("bytes={}", raw.len()),
-    );
-
-    let write_started = Instant::now();
-    fs::write(&temp_path, raw).map_err(|e| e.to_string())?;
-    fs::rename(&temp_path, &index_path).map_err(|e| e.to_string())?;
-    log_embedding_build_timing(
-        &request.project_id,
-        "index_write",
-        write_started.elapsed(),
-        format!("path={}", index_path.display()),
-    );
-    log_embedding_build_timing(
-        &request.project_id,
-        "build_total",
-        total_started.elapsed(),
-        format!(
-            "final_items={}, pending_items={}, reused_items={}",
-            index_file.item_count, pending_total, reused_total
-        ),
-    );
-
     Ok(index_file)
 }
 
-fn read_project_embedding_index_status(
+fn hash_embedding_text(text: &str) -> String {
+    let mut hash = 0x811c9dc5_u32;
+    for &byte in text.as_bytes() {
+        hash ^= byte as u32;
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    format!("fnv1a32:{hash:08x}")
+}
+
+fn project_embedding_settings_hash(request: &ProjectEmbeddingBuildRequest) -> String {
+    hash_embedding_text(&format!(
+        "chunk:{}|overlap:{}|prefix:{}|normalize:{}|chunking:{}",
+        request.chunk_size,
+        request.overlap_size,
+        request.prefix_passages,
+        request.normalize_whitespace,
+        PROJECT_EMBEDDING_CHUNKING_VERSION
+    ))
+}
+
+fn project_embedding_source_key(source_type: &str, source_id: &str) -> String {
+    format!("{source_type}::{source_id}")
+}
+
+fn read_project_embedding_store_status(
     app: &tauri::AppHandle,
     project_id: &str,
-) -> Result<ProjectEmbeddingIndexStatus, String> {
-    let index_path = project_embedding_index_path(app, project_id)?;
-    if !index_path.exists() {
-        return Ok(ProjectEmbeddingIndexStatus {
+) -> Result<ProjectEmbeddingStoreStatus, String> {
+    let metadata = match read_project_embedding_metadata_file(app, project_id) {
+        Ok(metadata) => metadata,
+        Err(_) => {
+            return Ok(ProjectEmbeddingStoreStatus {
+                exists: false,
+                generated_at_ms: None,
+                item_count: 0,
+                model_repo_id: None,
+                model_display_name: None,
+            });
+        }
+    };
+
+    let active_item_count = metadata
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.active)
+        .count() as u64;
+    if active_item_count == 0 {
+        return Ok(ProjectEmbeddingStoreStatus {
             exists: false,
             generated_at_ms: None,
             item_count: 0,
@@ -3665,28 +3859,52 @@ fn read_project_embedding_index_status(
             model_display_name: None,
         });
     }
-
-    let raw = fs::read_to_string(index_path).map_err(|e| e.to_string())?;
-    let index: ProjectEmbeddingIndexFile = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    Ok(ProjectEmbeddingIndexStatus {
+    Ok(ProjectEmbeddingStoreStatus {
         exists: true,
-        generated_at_ms: Some(index.generated_at_ms),
-        item_count: index.item_count,
-        model_repo_id: Some(index.model_repo_id),
-        model_display_name: Some(index.model_display_name),
+        generated_at_ms: Some(metadata.generated_at_ms),
+        item_count: active_item_count,
+        model_repo_id: Some(metadata.model_repo_id),
+        model_display_name: Some(metadata.model_display_name),
     })
 }
 
-fn read_project_embedding_index_file(
+fn read_project_embedding_metadata_file(
     app: &tauri::AppHandle,
     project_id: &str,
-) -> Result<ProjectEmbeddingIndexFile, String> {
-    let index_path = project_embedding_index_path(app, project_id)?;
-    if !index_path.exists() {
-        return Err("No local project embedding index exists yet. Re-run project embeddings first.".to_string());
+) -> Result<ProjectEmbeddingMetadataFile, String> {
+    let metadata_path = project_embedding_metadata_path(app, project_id)?;
+    if !metadata_path.exists() {
+        return Err("No local project embedding metadata exists yet.".to_string());
     }
-    let raw = fs::read_to_string(index_path).map_err(|e| e.to_string())?;
+    let raw = fs::read_to_string(metadata_path).map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| e.to_string())
+}
+
+fn write_project_embedding_metadata_file(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    metadata: &ProjectEmbeddingMetadataFile,
+) -> Result<(), String> {
+    let metadata_path = project_embedding_metadata_path(app, project_id)?;
+    let metadata_dir = project_embedding_index_dir(app, project_id)?;
+    fs::create_dir_all(&metadata_dir).map_err(|e| e.to_string())?;
+    let temp_path = metadata_dir.join(format!("{PROJECT_EMBEDDING_METADATA_FILE}.tmp"));
+    let raw = serde_json::to_string(metadata).map_err(|e| e.to_string())?;
+    fs::write(&temp_path, raw).map_err(|e| e.to_string())?;
+    fs::rename(&temp_path, &metadata_path).map_err(|e| e.to_string())
+}
+
+fn load_active_project_embedding_items(
+    app: &tauri::AppHandle,
+    project_id: &str,
+) -> Result<Vec<ProjectEmbeddingStoreItem>, String> {
+    let metadata = read_project_embedding_metadata_file(app, project_id)?;
+    Ok(metadata
+        .chunks
+        .into_iter()
+        .filter(|chunk| chunk.active)
+        .map(|chunk| chunk.item)
+        .collect::<Vec<_>>())
 }
 
 fn format_embedding_time_range_label(low_seconds: u64, high_seconds: u64) -> String {
@@ -3699,57 +3917,90 @@ fn format_embedding_time_range_label(low_seconds: u64, high_seconds: u64) -> Str
     }
 }
 
-#[cfg(debug_assertions)]
-fn log_embedding_build_timing(project_id: &str, phase: &str, elapsed: Duration, detail: impl AsRef<str>) {
-    eprintln!(
-        "[kanqual][embedding-timing][project:{}] {} took {} ms{}",
-        project_id,
-        phase,
-        elapsed.as_millis(),
-        if detail.as_ref().is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", detail.as_ref())
-        }
-    );
-}
-
-#[cfg(not(debug_assertions))]
-fn log_embedding_build_timing(_project_id: &str, _phase: &str, _elapsed: Duration, _detail: impl AsRef<str>) {}
-
 #[tauri::command]
-fn get_project_embedding_build_preflight(
+fn get_project_embedding_store_build_preflight(
     app: tauri::AppHandle,
     request: ProjectEmbeddingBuildRequest,
 ) -> Result<ProjectEmbeddingBuildPreflight, String> {
-    let existing_index = read_project_embedding_index_file(&app, &request.project_id).ok();
-    let existing_items_by_id = existing_index
+    let settings_hash = project_embedding_settings_hash(&request);
+    let existing_metadata = read_project_embedding_metadata_file(&app, &request.project_id).ok();
+    let metadata_is_compatible = existing_metadata
         .as_ref()
-        .map(|index| {
-            index
-                .items
+        .map(|metadata| {
+            metadata.settings_hash == settings_hash
+                && metadata.model_repo_id == EMBEDDING_MODEL_REPO_ID
+                && metadata.chunking_version == PROJECT_EMBEDDING_CHUNKING_VERSION
+        })
+        .unwrap_or(false);
+    let reusable_metadata = if metadata_is_compatible {
+        existing_metadata.as_ref()
+    } else {
+        None
+    };
+
+    let existing_active_sources_by_key = reusable_metadata
+        .map(|metadata| {
+            metadata
+                .sources
                 .iter()
-                .map(|item| (item.id.as_str(), item))
+                .filter(|source| source.active)
+                .map(|source| {
+                    (
+                        project_embedding_source_key(&source.source_type, &source.source_id),
+                        source.clone(),
+                    )
+                })
                 .collect::<HashMap<_, _>>()
         })
         .unwrap_or_default();
+    let existing_active_chunks_by_source = reusable_metadata
+        .map(|metadata| {
+            let mut grouped = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
+            for chunk in metadata.chunks.iter().filter(|chunk| chunk.active) {
+                grouped
+                    .entry(project_embedding_source_key(&chunk.source_type, &chunk.source_id))
+                    .or_default()
+                    .push(chunk.clone());
+            }
+            grouped
+        })
+        .unwrap_or_default();
 
+    let mut total_items = 0_u64;
     let mut pending_items = 0_u64;
     let mut pending_characters = 0_u64;
     let mut reused_items = 0_u64;
 
-    for source_item in &request.items {
-        let existing_matches = existing_items_by_id
-            .get(source_item.id.as_str())
-            .map(|existing_item| {
-                (!existing_item.content_hash.is_empty() && existing_item.content_hash == source_item.content_hash)
-                    || (existing_item.content_hash.is_empty() && existing_item.text == source_item.text)
-            })
+    for source in &request.sources {
+        total_items += source.items.len() as u64;
+        let source_key = project_embedding_source_key(&source.source_type, &source.source_id);
+        let unchanged = existing_active_sources_by_key
+            .get(&source_key)
+            .map(|existing_source| existing_source.source_hash == source.source_hash)
             .unwrap_or(false);
 
-        if existing_matches {
-            reused_items += 1;
-        } else {
+        if unchanged {
+            reused_items += source.items.len() as u64;
+            continue;
+        }
+
+        let mut reusable_chunks_by_hash = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
+        if let Some(existing_chunks) = existing_active_chunks_by_source.get(&source_key) {
+            for chunk in existing_chunks {
+                reusable_chunks_by_hash
+                    .entry(chunk.item.content_hash.clone())
+                    .or_default()
+                    .push(chunk.clone());
+            }
+        }
+
+        for source_item in &source.items {
+            if let Some(reusable_chunks) = reusable_chunks_by_hash.get_mut(&source_item.content_hash) {
+                if reusable_chunks.pop().is_some() {
+                    reused_items += 1;
+                    continue;
+                }
+            }
             pending_items += 1;
             pending_characters += source_item.text.chars().count() as u64;
         }
@@ -3791,7 +4042,7 @@ fn get_project_embedding_build_preflight(
     };
 
     Ok(ProjectEmbeddingBuildPreflight {
-        total_items: request.items.len() as u64,
+        total_items,
         pending_items,
         reused_items,
         pending_characters,
@@ -3940,7 +4191,7 @@ fn truncate_for_ollama_prompt(text: &str, max_chars: usize) -> String {
     format!("{truncated}\n\n[Content truncated for length]")
 }
 
-fn relevant_segment_match_text(item: &ProjectEmbeddingIndexItem) -> Option<String> {
+fn relevant_segment_match_text(item: &ProjectEmbeddingStoreItem) -> Option<String> {
     match item.item_type.as_str() {
         "document" => {
             let text = item
@@ -4971,9 +5222,9 @@ async fn chat_with_project_ollama(
         return Err("Enter a message before sending it to Ollama.".to_string());
     }
 
-    let index = read_project_embedding_index_file(&app, &request.project_id)?;
-    if index.items.is_empty() {
-        return Err("The local project embedding index is empty. Re-run project embeddings first.".to_string());
+    let indexed_items = load_active_project_embedding_items(&app, &request.project_id)?;
+    if indexed_items.is_empty() {
+        return Err("The local project embedding store is empty. Re-run project embeddings first.".to_string());
     }
 
     let query_text = if request.prefix_queries {
@@ -4996,7 +5247,7 @@ async fn chat_with_project_ollama(
         || !request.selected_memo_ids.is_empty();
     let restrict_to_selected_context = request.selected_context_mode.trim().eq_ignore_ascii_case("restrict");
 
-    let matches_selected_context = |item: &ProjectEmbeddingIndexItem| {
+    let matches_selected_context = |item: &ProjectEmbeddingStoreItem| {
         request
             .selected_document_ids
             .iter()
@@ -5019,8 +5270,7 @@ async fn chat_with_project_ollama(
                 .any(|selected_id| item.memo_id.as_deref() == Some(selected_id.as_str()))
     };
 
-    let mut ranked_items = index
-        .items
+    let mut ranked_items = indexed_items
         .iter()
         .map(|item| {
             let base_score = dot_similarity(&query_embedding, &item.embedding);
@@ -5222,9 +5472,9 @@ async fn find_relevant_project_segments_with_ollama(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Open a document before searching for relevant segments.".to_string())?;
 
-    let index = read_project_embedding_index_file(&app, &request.project_id)?;
-    if index.items.is_empty() {
-        return Err("The local project embedding index is empty. Re-run project embeddings first.".to_string());
+    let indexed_items = load_active_project_embedding_items(&app, &request.project_id)?;
+    if indexed_items.is_empty() {
+        return Err("The local project embedding store is empty. Re-run project embeddings first.".to_string());
     }
 
     let query = match request.code_description.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
@@ -5242,13 +5492,13 @@ async fn find_relevant_project_segments_with_ollama(
     };
 
     let mut runtime = load_embedding_runtime(&app)?;
-    let query_embedding = embed_text_batch(&mut runtime, &[query_text])?
+    let query_embeddings = embed_text_batch(&mut runtime, &[query_text])?;
+    let query_embedding = query_embeddings
         .into_iter()
         .next()
         .ok_or_else(|| "Could not generate an embedding for the selected code.".to_string())?;
 
-    let mut ranked_items = index
-        .items
+    let mut ranked_items = indexed_items
         .iter()
         .filter(|item| {
             item.item_type != "code"
@@ -6355,20 +6605,20 @@ async fn generate_code_unique_annotations_with_ollama(
 }
 
 #[tauri::command]
-fn get_project_embedding_index_status(
+fn get_project_embedding_store_status(
     app: tauri::AppHandle,
     project_id: String,
-) -> Result<ProjectEmbeddingIndexStatus, String> {
-    read_project_embedding_index_status(&app, &project_id)
+) -> Result<ProjectEmbeddingStoreStatus, String> {
+    read_project_embedding_store_status(&app, &project_id)
 }
 
 #[tauri::command]
-fn delete_project_embedding_index(
+fn delete_project_embedding_store(
     auth_token: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
     project_id: String,
-) -> Result<ProjectEmbeddingIndexStatus, String> {
+) -> Result<ProjectEmbeddingStoreStatus, String> {
     let client = reqwest::Client::new();
     let requester = tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
     if requester.app_role != "administrator" {
@@ -6394,18 +6644,18 @@ fn delete_project_embedding_index(
     if index_dir.exists() {
         fs::remove_dir_all(&index_dir).map_err(|e| e.to_string())?;
     }
-    read_project_embedding_index_status(&app, &project_id)
+    read_project_embedding_store_status(&app, &project_id)
 }
 
 #[tauri::command]
-fn get_project_embedding_build_status(
+fn get_project_embedding_store_build_status(
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
 ) -> ProjectEmbeddingBuildStatus {
     state.0.lock().unwrap().clone().into()
 }
 
 #[tauri::command]
-fn cancel_project_embedding_build(
+fn cancel_project_embedding_store_build(
     auth_token: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
@@ -6437,7 +6687,7 @@ fn cancel_project_embedding_build(
 }
 
 #[tauri::command]
-fn build_project_embedding_index_command(
+fn build_project_embedding_store_command(
     auth_token: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
@@ -6465,7 +6715,7 @@ fn build_project_embedding_index_command(
     set_project_embedding_build_status(&state, ProjectEmbeddingBuildStatusState {
         phase: "running".to_string(),
         project_id: Some(request.project_id.clone()),
-        total_items: request.items.len() as u64,
+        total_items: request.sources.iter().map(|source| source.items.len() as u64).sum(),
         completed_items: 0,
         started_at_ms: Some(
             SystemTime::now()
@@ -6706,12 +6956,12 @@ pub fn run() {
             get_multilingual_e5_status,
             get_multilingual_e5_download_preflight,
             get_multilingual_e5_download_status,
-            get_project_embedding_index_status,
-            get_project_embedding_build_preflight,
-            delete_project_embedding_index,
-            get_project_embedding_build_status,
-            cancel_project_embedding_build,
-            build_project_embedding_index_command,
+            get_project_embedding_store_status,
+            get_project_embedding_store_build_preflight,
+            delete_project_embedding_store,
+            get_project_embedding_store_build_status,
+            cancel_project_embedding_store_build,
+            build_project_embedding_store_command,
             discover_ollama_models,
             discover_cloud_llm_models,
             chat_with_project_ollama,

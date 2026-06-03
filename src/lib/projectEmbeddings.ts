@@ -18,7 +18,15 @@ export type ProjectEmbeddingBuildItem = {
   endOffset?: number;
 };
 
-export type ProjectEmbeddingIndexStatus = {
+export type ProjectEmbeddingBuildSource = {
+  sourceType: "document" | "case" | "code" | "annotation" | "memo";
+  sourceId: string;
+  title: string;
+  sourceHash: string;
+  items: ProjectEmbeddingBuildItem[];
+};
+
+export type ProjectEmbeddingStoreStatus = {
   exists: boolean;
   generatedAtMs: number | null;
   itemCount: number;
@@ -50,7 +58,7 @@ export type ProjectEmbeddingBuildPreflight = {
 
 const EMBEDDING_CHUNK_TOKEN_LIMIT = 448;
 const CJK_CHARACTER = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/u;
-const TOKEN_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]|[\p{L}\p{N}]+(?:['’_-][\p{L}\p{N}]+)*|[^\s]/gu;
+const TOKEN_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]|[\p{L}\p{N}]+(?:['_-][\p{L}\p{N}]+)*|[^\s]/gu;
 
 function normalizeEmbeddingText(text: string, normalizeWhitespace: boolean): string {
   return normalizeWhitespace ? text.replace(/\s+/g, " ").trim() : text.trim();
@@ -74,7 +82,7 @@ type ChunkingToken = {
 function estimateTokenWeight(token: string): number {
   if (!token) return 0;
   if (CJK_CHARACTER.test(token)) return [...token].length;
-  if (/^[\p{L}\p{N}]+(?:['’_-][\p{L}\p{N}]+)*$/u.test(token)) {
+  if (/^[\p{L}\p{N}]+(?:['_-][\p{L}\p{N}]+)*$/u.test(token)) {
     return Math.max(1, Math.ceil([...token].length / 4));
   }
   return 1;
@@ -166,39 +174,60 @@ function chunkDocumentText(text: string, chunkSize: number, overlapSize: number)
   return chunks;
 }
 
-export function buildProjectEmbeddingItems(
+function buildDocumentSource(document: Document, llmSettings: LlmSettings): ProjectEmbeddingBuildSource | null {
+  const chunks = chunkDocumentText(document.content || "", llmSettings.chunkSize, llmSettings.overlapSize);
+  const normalizeWhitespace = llmSettings.normalizeWhitespace;
+  const passagePrefix = llmSettings.prefixPassages ? "passage: " : "";
+  const items: ProjectEmbeddingBuildItem[] = [];
+
+  chunks.forEach((chunk, index) => {
+    const normalizedChunk = normalizeEmbeddingText(chunk.text, normalizeWhitespace);
+    if (!normalizedChunk) return;
+    const embeddingText = `${passagePrefix}${normalizedChunk}`;
+    items.push({
+      id: `${document.id}::chunk-${index + 1}`,
+      itemType: "document",
+      sourceId: document.id,
+      title: `${document.name} (chunk ${index + 1})`,
+      text: embeddingText,
+      contentHash: hashEmbeddingText(embeddingText),
+      documentId: document.id,
+      startOffset: chunk.startOffset,
+      endOffset: chunk.endOffset,
+    });
+  });
+
+  if (items.length === 0) return null;
+
+  return {
+    sourceType: "document",
+    sourceId: document.id,
+    title: document.name,
+    sourceHash: hashEmbeddingText(
+      `document\n${document.name}\n${normalizeEmbeddingText(document.content || "", normalizeWhitespace)}`,
+    ),
+    items,
+  };
+}
+
+export function buildProjectEmbeddingSources(
   documents: Document[],
   cases: Case[],
   codes: Code[],
   annotations: Annotation[],
   memos: Memo[],
   llmSettings: LlmSettings = readAppSettings().llm,
-): ProjectEmbeddingBuildItem[] {
+): ProjectEmbeddingBuildSource[] {
   const normalizeWhitespace = llmSettings.normalizeWhitespace;
   const passagePrefix = llmSettings.prefixPassages ? "passage: " : "";
   const codeById = new Map(codes.map((code) => [code.id, code]));
   const annotationById = new Map(annotations.map((annotation) => [annotation.id, annotation]));
   const documentById = new Map(documents.map((document) => [document.id, document]));
-  const items: ProjectEmbeddingBuildItem[] = [];
+  const sources: ProjectEmbeddingBuildSource[] = [];
 
   for (const document of documents) {
-    const chunks = chunkDocumentText(document.content || "", llmSettings.chunkSize, llmSettings.overlapSize);
-    chunks.forEach((chunk, index) => {
-      const normalizedChunk = normalizeEmbeddingText(chunk.text, normalizeWhitespace);
-      if (!normalizedChunk) return;
-      const embeddingText = `${passagePrefix}${normalizedChunk}`;
-      items.push({
-        id: `${document.id}::chunk-${index + 1}`,
-        itemType: "document",
-        sourceId: document.id,
-        title: `${document.name} (chunk ${index + 1})`,
-        text: embeddingText,
-        contentHash: hashEmbeddingText(embeddingText),
-        documentId: document.id,
-        startOffset: chunk.startOffset,
-        endOffset: chunk.endOffset,
-      });
-    });
+    const source = buildDocumentSource(document, llmSettings);
+    if (source) sources.push(source);
   }
 
   for (const caseItem of cases) {
@@ -211,14 +240,20 @@ export function buildProjectEmbeddingItems(
     );
     if (!caseText) continue;
     const embeddingText = `${passagePrefix}${caseText}`;
-    items.push({
-      id: `case::${caseItem.id}`,
-      itemType: "case",
+    sources.push({
+      sourceType: "case",
       sourceId: caseItem.id,
       title: `Case: ${caseItem.name}`,
-      text: embeddingText,
-      contentHash: hashEmbeddingText(embeddingText),
-      caseId: caseItem.id,
+      sourceHash: hashEmbeddingText(`case\n${caseItem.name}\n${caseText}`),
+      items: [{
+        id: `case::${caseItem.id}`,
+        itemType: "case",
+        sourceId: caseItem.id,
+        title: `Case: ${caseItem.name}`,
+        text: embeddingText,
+        contentHash: hashEmbeddingText(embeddingText),
+        caseId: caseItem.id,
+      }],
     });
   }
 
@@ -229,14 +264,20 @@ export function buildProjectEmbeddingItems(
     );
     if (!codeText) continue;
     const embeddingText = `${passagePrefix}${codeText}`;
-    items.push({
-      id: `code::${code.id}`,
-      itemType: "code",
+    sources.push({
+      sourceType: "code",
       sourceId: code.id,
       title: `Code: ${code.label}`,
-      text: embeddingText,
-      contentHash: hashEmbeddingText(embeddingText),
-      codeId: code.id,
+      sourceHash: hashEmbeddingText(`code\n${code.label}\n${codeText}`),
+      items: [{
+        id: `code::${code.id}`,
+        itemType: "code",
+        sourceId: code.id,
+        title: `Code: ${code.label}`,
+        text: embeddingText,
+        contentHash: hashEmbeddingText(embeddingText),
+        codeId: code.id,
+      }],
     });
   }
 
@@ -254,18 +295,26 @@ export function buildProjectEmbeddingItems(
     );
     if (!annotationText) continue;
     const embeddingText = `${passagePrefix}${annotationText}`;
-    items.push({
-      id: `annotation::${annotation.id}`,
-      itemType: "annotation",
+    sources.push({
+      sourceType: "annotation",
       sourceId: annotation.id,
       title: `Annotation in ${document?.name ?? "document"}`,
-      text: embeddingText,
-      contentHash: hashEmbeddingText(embeddingText),
-      documentId: annotation.documentId,
-      codeId: annotation.codeId,
-      annotationId: annotation.id,
-      startOffset: annotation.startOffset,
-      endOffset: annotation.endOffset,
+      sourceHash: hashEmbeddingText(
+        `annotation\n${annotation.id}\n${document?.name ?? ""}\n${code?.label ?? ""}\n${annotationText}`,
+      ),
+      items: [{
+        id: `annotation::${annotation.id}`,
+        itemType: "annotation",
+        sourceId: annotation.id,
+        title: `Annotation in ${document?.name ?? "document"}`,
+        text: embeddingText,
+        contentHash: hashEmbeddingText(embeddingText),
+        documentId: annotation.documentId,
+        codeId: annotation.codeId,
+        annotationId: annotation.id,
+        startOffset: annotation.startOffset,
+        endOffset: annotation.endOffset,
+      }],
     });
   }
 
@@ -290,19 +339,39 @@ export function buildProjectEmbeddingItems(
     );
     if (!memoText) continue;
     const embeddingText = `${passagePrefix}${memoText}`;
-    items.push({
-      id: `memo::${memo.id}`,
-      itemType: "memo",
+    sources.push({
+      sourceType: "memo",
       sourceId: memo.id,
       title: `Memo: ${memo.title}`,
-      text: embeddingText,
-      contentHash: hashEmbeddingText(embeddingText),
-      documentId: document?.id,
-      codeId: code?.id,
-      annotationId: annotation?.id,
-      memoId: memo.id,
+      sourceHash: hashEmbeddingText(
+        `memo\n${memo.title}\n${document?.name ?? ""}\n${code?.label ?? ""}\n${memoText}`,
+      ),
+      items: [{
+        id: `memo::${memo.id}`,
+        itemType: "memo",
+        sourceId: memo.id,
+        title: `Memo: ${memo.title}`,
+        text: embeddingText,
+        contentHash: hashEmbeddingText(embeddingText),
+        documentId: document?.id,
+        codeId: code?.id,
+        annotationId: annotation?.id,
+        memoId: memo.id,
+      }],
     });
   }
 
-  return items;
+  return sources;
+}
+
+export function buildProjectEmbeddingItems(
+  documents: Document[],
+  cases: Case[],
+  codes: Code[],
+  annotations: Annotation[],
+  memos: Memo[],
+  llmSettings: LlmSettings = readAppSettings().llm,
+): ProjectEmbeddingBuildItem[] {
+  return buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, llmSettings)
+    .flatMap((source) => source.items);
 }

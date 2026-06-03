@@ -79,10 +79,10 @@ import {
 } from "../lib/projectUploadedFiles";
 import { createProjectBackup } from "../lib/projectBackups";
 import type {
-  ProjectEmbeddingBuildItem,
+  ProjectEmbeddingBuildSource,
   ProjectEmbeddingBuildStatus,
 } from "../lib/projectEmbeddings";
-import { buildProjectEmbeddingItems } from "../lib/projectEmbeddings";
+import { buildProjectEmbeddingSources } from "../lib/projectEmbeddings";
 import {
   DEFAULT_PROJECT_AI_ASSIST_SETTINGS,
   DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS,
@@ -536,7 +536,7 @@ type DocumentLockInfo = {
 type EmbeddingBuildStartRequest = {
   projectId: string;
   llmSettings: Pick<LlmSettings, "batchSize" | "chunkSize" | "overlapSize" | "prefixPassages" | "normalizeWhitespace">;
-  items: ProjectEmbeddingBuildItem[];
+  sources: ProjectEmbeddingBuildSource[];
   pendingAiAssistEnable?: {
     projectId: string;
     settings: ProjectAiAssistSettings;
@@ -1427,7 +1427,7 @@ export function useAppStore(pb: PocketBase) {
       .map(toAnnotation)
       .filter((annotation) => documentIds.has(annotation.documentId) && codeIds.has(annotation.codeId));
     const memos = memoRecords.map(toMemo);
-    const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, llmSettings);
+    const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, llmSettings);
     return {
       projectId,
       llmSettings: {
@@ -1437,7 +1437,7 @@ export function useAppStore(pb: PocketBase) {
         prefixPassages: llmSettings.prefixPassages,
         normalizeWhitespace: llmSettings.normalizeWhitespace,
       },
-      items,
+      sources,
     };
   }
 
@@ -1546,7 +1546,7 @@ export function useAppStore(pb: PocketBase) {
           if (job.jobType === "embedding_build") {
             const request = JSON.parse(job.requestJson) as EmbeddingBuildAiJobRequest;
             const embeddingRequest = await buildHostEmbeddingRequestForProject(request.projectId);
-            if (embeddingRequest.items.length === 0) {
+            if (embeddingRequest.sources.length === 0) {
               await pb.collection(AI_JOB_COLLECTION).update(job.id, {
                 status: "error",
                 error_message: "There is no project content available to embed yet.",
@@ -1558,7 +1558,7 @@ export function useAppStore(pb: PocketBase) {
             await pb.collection(AI_JOB_COLLECTION).update(job.id, {
               host_message: "Host AI is starting the project embedding build.",
             });
-            await invoke<ProjectEmbeddingBuildStatus>("build_project_embedding_index_command", {
+            await invoke<ProjectEmbeddingBuildStatus>("build_project_embedding_store_command", {
               authToken: pb.authStore.token,
               request: {
                 projectId: embeddingRequest.projectId,
@@ -1567,12 +1567,12 @@ export function useAppStore(pb: PocketBase) {
                 overlapSize: embeddingRequest.llmSettings.overlapSize,
                 prefixPassages: embeddingRequest.llmSettings.prefixPassages,
                 normalizeWhitespace: embeddingRequest.llmSettings.normalizeWhitespace,
-                items: embeddingRequest.items,
+                sources: embeddingRequest.sources,
               },
             });
 
             for (;;) {
-              const buildStatus = await invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_build_status");
+              const buildStatus = await invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_store_build_status");
               await pb.collection(AI_JOB_COLLECTION).update(job.id, {
                 status: buildStatus.phase === "error" || buildStatus.phase === "cancelled" ? "error" : "running",
                 result_json: JSON.stringify({
@@ -1736,7 +1736,7 @@ export function useAppStore(pb: PocketBase) {
         message: null,
       };
     }
-    const status = await invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_build_status");
+    const status = await invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_store_build_status");
     const previousPhase = projectEmbeddingLastPhaseRef.current;
     projectEmbeddingLastPhaseRef.current = status.phase;
     setProjectEmbeddingBuildStatus(status);
@@ -1852,7 +1852,7 @@ export function useAppStore(pb: PocketBase) {
       projectEmbeddingRemoteJobRef.current = run;
       return initialStatus;
     }
-    const status = await invoke<ProjectEmbeddingBuildStatus>("build_project_embedding_index_command", {
+    const status = await invoke<ProjectEmbeddingBuildStatus>("build_project_embedding_store_command", {
       authToken: pb.authStore.token,
       request: {
         projectId: request.projectId,
@@ -1861,7 +1861,7 @@ export function useAppStore(pb: PocketBase) {
         overlapSize: request.llmSettings.overlapSize,
         prefixPassages: request.llmSettings.prefixPassages,
         normalizeWhitespace: request.llmSettings.normalizeWhitespace,
-        items: request.items,
+        sources: request.sources,
       },
     });
     projectEmbeddingLastPhaseRef.current = status.phase;
@@ -1870,7 +1870,7 @@ export function useAppStore(pb: PocketBase) {
   }, [logAction, pb, syncProjectEmbeddingBuildStatus]);
 
   const cancelProjectEmbeddingBuild = useCallback(async () => {
-    const status = await invoke<ProjectEmbeddingBuildStatus>("cancel_project_embedding_build", {
+    const status = await invoke<ProjectEmbeddingBuildStatus>("cancel_project_embedding_store_build", {
       authToken: pb.authStore.token,
     });
     projectEmbeddingLastPhaseRef.current = status.phase;
@@ -2196,7 +2196,7 @@ export function useAppStore(pb: PocketBase) {
 
     let hostProjectEmbeddingsReady = false;
     try {
-      const indexStatus = await invoke<{ exists: boolean }>("get_project_embedding_index_status", { projectId });
+      const indexStatus = await invoke<{ exists: boolean }>("get_project_embedding_store_status", { projectId });
       hostProjectEmbeddingsReady = Boolean(indexStatus.exists);
     } catch {
       hostProjectEmbeddingsReady = false;

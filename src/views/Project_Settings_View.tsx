@@ -37,9 +37,9 @@ import {
   type ProjectAiAssistSettings,
 } from "../lib/projectSettings";
 import {
-  buildProjectEmbeddingItems,
+  buildProjectEmbeddingSources,
   type ProjectEmbeddingBuildPreflight,
-  type ProjectEmbeddingIndexStatus,
+  type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { readAppSettings } from "../lib/appSettings";
 import {
@@ -340,7 +340,7 @@ export function ProjectSettingsView() {
   const [aiAssistError, setAiAssistError] = useState("");
   const [documentImportNotice, setDocumentImportNotice] = useState("");
   const [documentImportError, setDocumentImportError] = useState("");
-  const [aiAssistIndexStatus, setAiAssistIndexStatus] = useState<ProjectEmbeddingIndexStatus | null>(null);
+  const [aiAssistIndexStatus, setAiAssistIndexStatus] = useState<ProjectEmbeddingStoreStatus | null>(null);
   const [aiAssistBuildPreflight, setAiAssistBuildPreflight] = useState<ProjectEmbeddingBuildPreflight | null>(null);
   const [aiAssistDeletingIndex, setAiAssistDeletingIndex] = useState(false);
   const [aiAssistRequirementOpen, setAiAssistRequirementOpen] = useState(false);
@@ -461,14 +461,14 @@ export function ProjectSettingsView() {
       return;
     }
     let cancelled = false;
-    void invoke<ProjectEmbeddingIndexStatus>("get_project_embedding_index_status", {
+    void invoke<ProjectEmbeddingStoreStatus>("get_project_embedding_store_status", {
       projectId: activeProject.id,
     })
       .then((status) => {
         if (!cancelled) setAiAssistIndexStatus(status);
       })
       .catch((error) => {
-        console.error("Failed to load project embedding index status:", error);
+        console.error("Failed to load project embedding store status:", error);
         if (!cancelled) setAiAssistIndexStatus(null);
       });
     return () => {
@@ -493,8 +493,8 @@ export function ProjectSettingsView() {
     }
     let cancelled = false;
     const appSettings = readAppSettings();
-    const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, appSettings.llm);
-    void invoke<ProjectEmbeddingBuildPreflight>("get_project_embedding_build_preflight", {
+    const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, appSettings.llm);
+    void invoke<ProjectEmbeddingBuildPreflight>("get_project_embedding_store_build_preflight", {
       request: {
         projectId: activeProject.id,
         batchSize: appSettings.llm.batchSize,
@@ -502,7 +502,7 @@ export function ProjectSettingsView() {
         overlapSize: appSettings.llm.overlapSize,
         prefixPassages: appSettings.llm.prefixPassages,
         normalizeWhitespace: appSettings.llm.normalizeWhitespace,
-        items,
+        sources,
       },
     })
       .then((preflight) => {
@@ -917,7 +917,7 @@ export function ProjectSettingsView() {
         setAiAssistRequirementOpen(true);
         return;
       }
-      const indexStatus = await invoke<ProjectEmbeddingIndexStatus>("get_project_embedding_index_status", {
+      const indexStatus = await invoke<ProjectEmbeddingStoreStatus>("get_project_embedding_store_status", {
         projectId: activeProject.id,
       });
       if (indexStatus.exists) {
@@ -929,8 +929,8 @@ export function ProjectSettingsView() {
         return;
       }
 
-      const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos);
-      if (items.length === 0) {
+      const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos);
+      if (sources.length === 0) {
         await persistAiAssistSettings(
           nextSettings,
           "AI Assist enabled. No project content was available to index yet.",
@@ -966,7 +966,7 @@ export function ProjectSettingsView() {
             prefixPassages: false,
             normalizeWhitespace: true,
           },
-          items: [],
+          sources: [],
           successLog: {
             projectId: activeProject.id,
             action: "ai_assist.index",
@@ -986,8 +986,8 @@ export function ProjectSettingsView() {
       }
 
       const appSettings = readAppSettings();
-      const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, appSettings.llm);
-      if (items.length === 0) {
+      const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, appSettings.llm);
+      if (sources.length === 0) {
         persistAiAssistSettings(
           { ...projectAiAssistSettings, enabled: true },
           "AI Assist enabled. No project content was available to index yet.",
@@ -999,7 +999,7 @@ export function ProjectSettingsView() {
       await startProjectEmbeddingBuild({
         projectId: activeProject.id,
         llmSettings: appSettings.llm,
-        items,
+        sources,
         successLog: {
           projectId: activeProject.id,
           action: "ai_assist.index",
@@ -1021,7 +1021,7 @@ export function ProjectSettingsView() {
     setAiAssistError("");
     setAiAssistNotice("");
     try {
-      const nextStatus = await invoke<ProjectEmbeddingIndexStatus>("delete_project_embedding_index", {
+      const nextStatus = await invoke<ProjectEmbeddingStoreStatus>("delete_project_embedding_store", {
         authToken: pb.authStore.token,
         projectId: activeProject.id,
       });
@@ -1192,7 +1192,7 @@ export function ProjectSettingsView() {
                 : aiAssistIndexStatus?.exists
                   ? [
                       aiAssistIndexStatus.itemCount
-                        ? `${aiAssistIndexStatus.itemCount} indexed items`
+                        ? `${aiAssistIndexStatus.itemCount} embedded items`
                         : "Indexed items available",
                       aiAssistIndexStatus.generatedAtMs
                         ? `Last generated ${new Date(aiAssistIndexStatus.generatedAtMs).toLocaleString()}`

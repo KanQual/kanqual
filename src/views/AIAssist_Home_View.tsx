@@ -12,7 +12,8 @@ import {
 } from "../lib/appSettings";
 import {
   buildProjectEmbeddingItems,
-  type ProjectEmbeddingIndexStatus,
+  buildProjectEmbeddingSources,
+  type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { HelpIcon } from "../components/AppIcons";
 
@@ -135,7 +136,7 @@ function useEmbeddingRunState() {
     isLocalWorkspace,
     startProjectEmbeddingBuild,
   } = useStore();
-  const [indexStatus, setIndexStatus] = useState<ProjectEmbeddingIndexStatus | null>(null);
+  const [indexStatus, setIndexStatus] = useState<ProjectEmbeddingStoreStatus | null>(null);
   const [error, setError] = useState("");
   const [buildModalOpen, setBuildModalOpen] = useState(false);
   const busy =
@@ -168,8 +169,8 @@ function useEmbeddingRunState() {
     let cancelled = false;
     async function refreshStatuses() {
       try {
-        const nextIndexStatus = await invoke<ProjectEmbeddingIndexStatus>(
-          "get_project_embedding_index_status",
+        const nextIndexStatus = await invoke<ProjectEmbeddingStoreStatus>(
+          "get_project_embedding_store_status",
           { projectId },
         );
         if (cancelled) return;
@@ -206,8 +207,8 @@ function useEmbeddingRunState() {
         }
 
         const llmSettings = readAppSettings().llm;
-        const items = buildProjectEmbeddingItems(documents, cases, codes, annotations, memos, llmSettings);
-        if (items.length === 0) {
+        const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, llmSettings);
+        if (sources.length === 0) {
           setError("There is no project content available to embed yet.");
           return false;
         }
@@ -215,7 +216,7 @@ function useEmbeddingRunState() {
         await startProjectEmbeddingBuild({
           projectId: activeProject.id,
           llmSettings,
-          items,
+          sources,
           successLog: {
             projectId: activeProject.id,
             action: "ai_assist.reindex",
@@ -236,7 +237,7 @@ function useEmbeddingRunState() {
             prefixPassages: false,
             normalizeWhitespace: true,
           },
-          items: [],
+          sources: [],
           successLog: {
             projectId: activeProject.id,
             action: "ai_assist.reindex",
@@ -868,7 +869,7 @@ export function AIAssistView() {
     setProjectError("");
     setProjectNotice("");
     try {
-      await invoke<ProjectEmbeddingIndexStatus>("delete_project_embedding_index", {
+      await invoke<ProjectEmbeddingStoreStatus>("delete_project_embedding_store", {
         authToken: pb.authStore.token,
         projectId: activeProject.id,
       });
