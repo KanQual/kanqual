@@ -12,3 +12,5 @@
 
 * the new case modal doesn't allow the user to type in information, check what's going on 
 
+*project home last updated date is not accurate
+

@@ -5,6 +5,14 @@ import {
   createProjectBackup,
   shouldCreateAutomaticBackup,
 } from "../lib/projectBackups";
+import {
+  clearPendingProjectBackupAttempt,
+  clearProjectBackupBannerIssue,
+  markPendingProjectBackupAttempt,
+  notifyProjectBackupsChanged,
+  readPendingProjectBackupAttempt,
+  writeProjectBackupBannerIssue,
+} from "../lib/projectBackupBanner";
 import type { Project, ProjectLogEntry } from "../types";
 
 const BACKUP_DEBOUNCE_MS = 60 * 1000;
@@ -39,7 +47,7 @@ const BACKUP_REQUIRED_ACTIONS = new Set([
 ]);
 
 export function useAutomaticProjectBackups() {
-  const { pb, activeProject, userRole, logEntries } = useStore();
+  const { pb, activeProject, userRole, canCurrentUser, logEntries } = useStore();
   const inFlightProjectId = useRef<string | null>(null);
   const previousProject = useRef<{ project: Project; sourceLogAt: string; sourceLog?: ProjectLogEntry } | null>(null);
   const forcedBackupLogIds = useRef<Set<string>>(new Set());
@@ -58,18 +66,42 @@ export function useAutomaticProjectBackups() {
     if (userRole !== "owner") return false;
     if (inFlightProjectId.current === project.id) return false;
     inFlightProjectId.current = project.id;
+    markPendingProjectBackupAttempt(project.id, reason, logStamp);
     try {
       if (force || await shouldCreateAutomaticBackup(pb, project, logStamp)) {
         await createProjectBackup(pb, project, reason, logStamp, logEntry);
+        clearPendingProjectBackupAttempt(project.id);
+        clearProjectBackupBannerIssue(project.id);
+        notifyProjectBackupsChanged(project.id);
       }
       return true;
     } catch (error) {
       console.warn("Automatic project backup failed:", error);
+      clearPendingProjectBackupAttempt(project.id);
+      writeProjectBackupBannerIssue(
+        project.id,
+        "failed",
+        error instanceof Error ? error.message : "Automatic backup failed. Review backup settings and try again.",
+      );
+      notifyProjectBackupsChanged(project.id);
       return false;
     } finally {
       if (inFlightProjectId.current === project.id) inFlightProjectId.current = null;
     }
   }
+
+  useEffect(() => {
+    if (!activeProject || !canCurrentUser("manageBackupsAndRestores")) return;
+    const pendingAttempt = readPendingProjectBackupAttempt(activeProject.id);
+    if (!pendingAttempt) return;
+    clearPendingProjectBackupAttempt(activeProject.id);
+    writeProjectBackupBannerIssue(
+      activeProject.id,
+      "interrupted",
+      "A project backup may have been interrupted before it completed. Review the backup list and create a fresh backup if needed.",
+    );
+    notifyProjectBackupsChanged(activeProject.id);
+  }, [activeProject?.id, canCurrentUser]);
 
   useEffect(() => {
     const previous = previousProject.current;

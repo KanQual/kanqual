@@ -1,5 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "../context/StoreContext";
+import {
+  loadProjectBackupBannerIssue,
+  OPEN_PROJECT_SETTINGS_MODAL_EVENT,
+  PROJECT_BACKUPS_CHANGED_EVENT,
+  type ProjectBackupBannerIssue,
+} from "../lib/projectBackupBanner";
+import { loadProjectBackupManifest } from "../lib/projectBackups";
 import type { Project, View } from "../types";
 import { hasHtmlText } from "../lib/htmlText";
 import { HelpIcon } from "../components/AppIcons";
@@ -110,8 +117,11 @@ function StatCard({
 }
 
 export function HomeView() {
-  const { pb, activeProject, documents, codes, memos, setView, userRole, deleteProject, updateProject, closeProject } = useStore();
+  const { pb, activeProject, documents, codes, memos, logEntries, setView, userRole, canCurrentUser, deleteProject, updateProject, closeProject } = useStore();
   const [remote, setRemote] = useState<RemoteStats | null>(null);
+  const [backupCardIssue, setBackupCardIssue] = useState<ProjectBackupBannerIssue | null>(null);
+  const [backupCount, setBackupCount] = useState(0);
+  const [latestBackupAt, setLatestBackupAt] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
@@ -169,6 +179,13 @@ export function HomeView() {
   const memoCount = memos.length;
   const linkedMemos = memos.filter((m) => m.documentId || m.annotationId).length;
   const showRestrictedInfo = userRole === "owner" || userRole === "editor";
+  const canAccessBackups = canCurrentUser("manageBackupsAndRestores") || canCurrentUser("restoreProjectBackup");
+  const lastProjectUpdateAt =
+    logEntries.find((entry) => entry.action !== "project.open" && entry.action !== "project.close")?.occurredAt
+    || logEntries[0]?.occurredAt
+    || activeProject?.updatedAt
+    || activeProject?.createdAt
+    || "";
 
   const nav = (v: View) => () => setView(v);
 
@@ -208,6 +225,45 @@ export function HomeView() {
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshBackupCard() {
+      if (!activeProject || !canAccessBackups) {
+        if (!cancelled) {
+          setBackupCardIssue(null);
+          setBackupCount(0);
+          setLatestBackupAt("");
+        }
+        return;
+      }
+
+      const [manifest, issue] = await Promise.all([
+        loadProjectBackupManifest(activeProject),
+        loadProjectBackupBannerIssue(activeProject),
+      ]);
+
+      if (cancelled) return;
+      setBackupCount(manifest.backups.length);
+      setLatestBackupAt(manifest.latestBackupAt || manifest.backups[0]?.createdAt || "");
+      setBackupCardIssue(issue);
+    }
+
+    void refreshBackupCard();
+
+    function handleBackupsChanged(event: Event) {
+      const detail = event instanceof CustomEvent ? event.detail as { projectId?: string } | undefined : undefined;
+      if (detail?.projectId && activeProject && detail.projectId !== activeProject.id) return;
+      void refreshBackupCard();
+    }
+
+    window.addEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
+    };
+  }, [activeProject, canAccessBackups]);
+
   async function handleDeleteProject() {
     if (!confirmDelete) return;
     setDeleteBusy(true);
@@ -246,6 +302,12 @@ export function HomeView() {
     } finally {
       setEditProjectSaving(false);
     }
+  }
+
+  function openBackupSettings() {
+    sessionStorage.setItem("kanqual:open-project-settings-modal", "backups");
+    window.dispatchEvent(new CustomEvent(OPEN_PROJECT_SETTINGS_MODAL_EVENT));
+    setView("project-settings");
   }
 
   return (
@@ -358,10 +420,47 @@ export function HomeView() {
                 </div>
                 <div className="home-restricted-item">
                   <span className="home-restricted-label">Last Updated</span>
-                  <span className="home-restricted-value">{fmtDate(activeProject.updatedAt)}</span>
+                  <span className="home-restricted-value">{fmtDate(lastProjectUpdateAt)}</span>
                 </div>
               </div>
             </section>
+          )}
+
+          {activeProject && canAccessBackups && (
+            <button
+              type="button"
+              className={`home-project-card home-project-card--interactive home-project-card--backup${
+                backupCardIssue ? " home-project-card--backup-error" : ""
+              }`}
+              aria-label="Open project backups"
+              onClick={openBackupSettings}
+            >
+              <div className="home-project-card-header">
+                <h2>Backups</h2>
+              </div>
+              <div className="home-restricted-list">
+                <div className="home-restricted-item">
+                  <span className="home-restricted-label">Most Recent</span>
+                  <span className="home-restricted-value">{fmtDate(latestBackupAt)}</span>
+                </div>
+                <div className="home-restricted-item">
+                  <span className="home-restricted-label">Total Backups</span>
+                  <span className="home-restricted-value">{backupCount}</span>
+                </div>
+              </div>
+              {backupCardIssue ? (
+                <div className="home-backup-card-alert">
+                  <strong>
+                    {backupCardIssue.kind === "failed"
+                      ? "Backup attention needed"
+                      : backupCardIssue.kind === "interrupted"
+                        ? "Backup may be incomplete"
+                        : "No backups available"}
+                  </strong>
+                  <span>{backupCardIssue.message}</span>
+                </div>
+              ) : null}
+            </button>
           )}
         </div>
 

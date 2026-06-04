@@ -203,6 +203,10 @@ body {
   background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
 }
 
+.embedding-build-banner--warning {
+  background: color-mix(in srgb, #f59e0b 12%, var(--color-surface));
+}
+
 .embedding-build-banner--completed {
   background: color-mix(in srgb, #16a34a 10%, var(--color-surface));
 }
@@ -1314,6 +1318,25 @@ body {
   box-shadow: 0 1px 0 rgba(0,0,0,0.03);
 }
 
+.home-project-card--interactive {
+  appearance: none;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.home-project-card--interactive:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+
+.home-project-card--interactive:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .home-project-card-header {
   display: flex;
   align-items: center;
@@ -1334,6 +1357,57 @@ body {
   font-size: var(--text-sm);
   line-height: 1.4;
   color: var(--color-text-muted);
+}
+
+.home-project-card--backup {
+  border-style: dashed;
+}
+
+.home-project-card--backup-error {
+  border-color: #dc2626;
+  background: color-mix(in srgb, #dc2626 7%, var(--color-surface));
+}
+
+.home-project-card--backup-error:hover {
+  border-color: #b91c1c;
+  box-shadow: 0 4px 18px rgba(185, 28, 28, 0.18);
+}
+
+.home-project-card--backup-error .home-project-card-header h2,
+.home-project-card--backup-error .home-restricted-label,
+.home-project-card--backup-error .home-restricted-value {
+  color: #991b1b;
+}
+
+.home-backup-card-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid #fca5a5;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+:root[data-theme="dark"] .home-project-card--backup-error {
+  border-color: #f87171;
+  background: color-mix(in srgb, #7f1d1d 38%, var(--color-surface));
+}
+
+:root[data-theme="dark"] .home-project-card--backup-error .home-project-card-header h2,
+:root[data-theme="dark"] .home-project-card--backup-error .home-restricted-label,
+:root[data-theme="dark"] .home-project-card--backup-error .home-restricted-value {
+  color: #fecaca;
+}
+
+:root[data-theme="dark"] .home-backup-card-alert {
+  border-color: #b91c1c;
+  background: #7f1d1d;
+  color: #fecaca;
 }
 
 .ai-assist-inline-help {

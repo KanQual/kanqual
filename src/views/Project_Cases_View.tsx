@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useId } from "react";
+import { useState, useEffect, useCallback, useRef, useId, useMemo } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
@@ -100,17 +100,17 @@ const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
 function RichTextEditor({
   initialHtml,
   editorRef,
+  resetKey,
 }: {
   initialHtml: string;
   editorRef: React.RefObject<HTMLDivElement | null>;
+  resetKey: string;
 }) {
   const id = useId();
 
-  // Seed content once on mount
   useEffect(() => {
     if (editorRef.current) editorRef.current.innerHTML = initialHtml;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialHtml, editorRef, resetKey]);
 
   function execCmd(cmd: string) {
     document.getElementById(id)?.focus();
@@ -153,6 +153,8 @@ function CaseEditorModal({
   initialValues,
   saving,
   error,
+  saveLabel,
+  resetKey,
   onCancel,
   onSave,
 }: {
@@ -163,6 +165,8 @@ function CaseEditorModal({
   initialValues: Record<string, string>;
   saving: boolean;
   error: string | null;
+  saveLabel?: string;
+  resetKey: string;
   onCancel: () => void;
   onSave: (payload: {
     name: string;
@@ -177,7 +181,7 @@ function CaseEditorModal({
   useEffect(() => {
     setName(initialName);
     setValuesByAttribute(initialValues);
-  }, [initialName, initialValues]);
+  }, [resetKey]);
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -193,10 +197,10 @@ function CaseEditorModal({
               autoFocus
             />
           </label>
-          <label className="form-label">
-            <span className="form-label">Description</span>
-            <RichTextEditor initialHtml={initialNotes} editorRef={notesRef} />
-          </label>
+          <div className="form-label">
+            <span>Description</span>
+            <RichTextEditor initialHtml={initialNotes} editorRef={notesRef} resetKey={resetKey} />
+          </div>
           {attributeDefs.length > 0 && (
             <div>
               <h3 className="case-card-title" style={{ marginBottom: 10 }}>Attributes</h3>
@@ -248,7 +252,7 @@ function CaseEditorModal({
             })}
             disabled={saving || !name.trim()}
           >
-            {saving ? "Saving…" : "Save Changes"}
+            {saving ? "Saving…" : (saveLabel ?? "Save Changes")}
           </button>
         </div>
       </div>
@@ -303,6 +307,11 @@ function CaseDetail({
   const editing = false;
   function handleToggleEdit(_on: boolean) {}
   function handleSave() {}
+  const editorResetKey = row.id;
+  const editorInitialValues = useMemo(
+    () => Object.fromEntries(attributeDefs.map((attr) => [attr.id, caseAttributeValues[attr.id]?.value ?? ""])),
+    [attributeDefs, caseAttributeValues],
+  );
 
   useEffect(() => {
     pb.collection("memos")
@@ -577,9 +586,10 @@ function CaseDetail({
           initialName={row.name}
           initialNotes={row.notes}
           attributeDefs={attributeDefs}
-          initialValues={Object.fromEntries(attributeDefs.map((attr) => [attr.id, caseAttributeValues[attr.id]?.value ?? ""]))}
+          initialValues={editorInitialValues}
           saving={saving}
           error={error}
+          resetKey={editorResetKey}
           onCancel={() => {
             if (saving) return;
             setShowEditModal(false);
@@ -882,6 +892,9 @@ export function CasesView() {
   const [deleteLoading,  setDeleteLoading]  = useState(false);
   const [selectedRow,    setSelectedRow]    = useState<CaseRow | null>(null);
   const [editStartRow,   setEditStartRow]   = useState<CaseRow | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [assocDocCase,   setAssocDocCase]   = useState<CaseRow | null>(null);
   const [memoForCase,    setMemoForCase]    = useState<CaseRow | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -1265,22 +1278,58 @@ export function CasesView() {
   // ── New case ──────────────────────────────────────────────────────────────
 
   async function handleNewCase() {
-    if (!activeProject) return;
+    setCreateError(null);
+    setShowCreateModal(true);
+  }
+
+  async function handleCreateCase(payload: {
+    name: string;
+    notes: string;
+    valuesByAttribute: Record<string, string>;
+  }) {
+    if (!activeProject || !pb) return;
+    setCreateSaving(true);
+    setCreateError(null);
     try {
-      const record = await createCase("New Case", currentUser?.id);
+      const record = await createCase(payload.name, currentUser?.id, payload.notes);
       if (!record) return;
       const newRow: CaseRow = {
-        id:            record.id,
-        name:          record.name as string,
-        notes:         "",
-        documents:     [],
-        memoCount:     0,
+        id: record.id,
+        name: record.name as string,
+        notes: payload.notes,
+        documents: [],
+        memoCount: 0,
         createdByName: currentUser?.name || currentUser?.email || "—",
-        createdAt:     record.created as string,
+        createdAt: record.created as string,
       };
-      setEditStartRow(newRow);
+
+      const nextAttributeValues = { ...attributeValues };
+      await Promise.all(attributeDefs.map(async (attr) => {
+        const nextValue = payload.valuesByAttribute[attr.id] ?? "";
+        if (!nextValue.trim()) return;
+        const valueRecord = await pb.collection("case_attribute_values").create({
+          case: record.id,
+          attribute: attr.id,
+          value: nextValue,
+          deleted_at: "",
+        });
+        nextAttributeValues[`${record.id}:${attr.id}`] = {
+          id: valueRecord.id,
+          caseId: record.id,
+          attributeId: attr.id,
+          value: nextValue,
+        };
+      }));
+
+      setRows((prev) => [newRow, ...prev]);
+      setAttributeValues(nextAttributeValues);
+      setSelectedRow(newRow);
+      setEditStartRow(null);
+      setShowCreateModal(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create case.");
+      setCreateError(e instanceof Error ? e.message : "Failed to create case.");
+    } finally {
+      setCreateSaving(false);
     }
   }
 
@@ -1581,6 +1630,26 @@ export function CasesView() {
             </table>
           </div>
       </div>
+
+      {showCreateModal && (
+        <CaseEditorModal
+          title="New Case"
+          initialName=""
+          initialNotes=""
+          attributeDefs={attributeDefs}
+          initialValues={Object.fromEntries(attributeDefs.map((attr) => [attr.id, ""]))}
+          saving={createSaving}
+          error={createError}
+          saveLabel="Create Case"
+          resetKey={`new-case:${attributeDefs.map((attr) => attr.id).join(",")}`}
+          onCancel={() => {
+            if (createSaving) return;
+            setShowCreateModal(false);
+            setCreateError(null);
+          }}
+          onSave={handleCreateCase}
+        />
+      )}
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>

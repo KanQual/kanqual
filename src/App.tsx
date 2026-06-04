@@ -3,6 +3,12 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { StoreProvider, useStore } from "./context/StoreContext";
 import { readAppSettings } from "./lib/appSettings";
 import { getAppRuntimeInfo } from "./lib/dataRoot";
+import {
+  loadProjectBackupBannerIssue,
+  OPEN_PROJECT_SETTINGS_MODAL_EVENT,
+  PROJECT_BACKUPS_CHANGED_EVENT,
+  type ProjectBackupBannerIssue,
+} from "./lib/projectBackupBanner";
 import { getSmokeTestConfig, updateSmokeTestState } from "./lib/smokeTest";
 import { initTheme } from "./theme";
 import { Sidebar } from "./components/Sidebar";
@@ -155,6 +161,87 @@ function UpdateAvailableBanner({
         </a>
         <button type="button" className="btn" onClick={onDismiss}>
           Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProjectBackupBanner() {
+  const { activeProject, canCurrentUser, setView } = useStore();
+  const [issue, setIssue] = useState<ProjectBackupBannerIssue | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshBackupBanner() {
+      if (
+        !activeProject
+        || !(canCurrentUser("manageBackupsAndRestores")
+          || canCurrentUser("exportProject")
+          || canCurrentUser("restoreProjectBackup"))
+      ) {
+        if (!cancelled) setIssue(null);
+        return;
+      }
+
+      const nextIssue = await loadProjectBackupBannerIssue(activeProject);
+      if (!cancelled) setIssue(nextIssue);
+    }
+
+    void refreshBackupBanner();
+
+    function handleBackupsChanged(event: Event) {
+      const detail = event instanceof CustomEvent ? event.detail as { projectId?: string } | undefined : undefined;
+      if (detail?.projectId && activeProject && detail.projectId !== activeProject.id) return;
+      void refreshBackupBanner();
+    }
+
+    window.addEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
+    };
+  }, [activeProject, canCurrentUser]);
+
+  if (!activeProject || !issue) return null;
+
+  const toneClass = issue.kind === "failed" ? "embedding-build-banner--error" : "embedding-build-banner--warning";
+  const bannerCopy =
+    issue.kind === "failed"
+      ? {
+          title: "Automatic backup failed",
+          detail: "Review backup settings and create a fresh backup to restore protection for this project.",
+          actionLabel: "Open Backups",
+        }
+      : issue.kind === "interrupted"
+        ? {
+            title: "Backup interrupted",
+            detail: "Review the backup list and create a new backup to confirm the project is protected.",
+            actionLabel: "Review Backups",
+          }
+        : {
+            title: "No backups yet",
+            detail: "Open Backups to create the first backup for this project and confirm retention settings.",
+            actionLabel: "Set Up Backups",
+          };
+
+  function openBackupSettings() {
+    sessionStorage.setItem("kanqual:open-project-settings-modal", "backups");
+    window.dispatchEvent(new CustomEvent(OPEN_PROJECT_SETTINGS_MODAL_EVENT));
+    setView("project-settings");
+  }
+
+  return (
+    <div className={`embedding-build-banner ${toneClass}`}>
+      <div className="embedding-build-banner-copy">
+        <strong>{bannerCopy.title}</strong>
+        <span>{issue.message}</span>
+        <span>{bannerCopy.detail}</span>
+      </div>
+      <div className="embedding-build-banner-actions">
+        <button type="button" className="btn btn--primary" onClick={openBackupSettings}>
+          {bannerCopy.actionLabel}
         </button>
       </div>
     </div>
@@ -792,6 +879,7 @@ function AppShell() {
             onDismiss={dismissAvailableUpdate}
           />
         )}
+        <ProjectBackupBanner />
         <ProjectEmbeddingBuildBanner />
         <DocumentProcessingBanner />
         <EmbeddingModelDownloadBanner />

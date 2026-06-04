@@ -43,6 +43,13 @@ import {
 } from "../lib/projectEmbeddings";
 import { readAppSettings } from "../lib/appSettings";
 import {
+  writeProjectBackupBannerIssue,
+  clearPendingProjectBackupAttempt,
+  clearProjectBackupBannerIssue,
+  notifyProjectBackupsChanged,
+  OPEN_PROJECT_SETTINGS_MODAL_EVENT,
+} from "../lib/projectBackupBanner";
+import {
   formatProjectLogDateTime,
   projectLogAccessModeLabel,
   projectLogActionCategory,
@@ -533,6 +540,20 @@ export function ProjectSettingsView() {
   }, []);
 
   useEffect(() => {
+    function handleOpenProjectSettingsModal() {
+      const requestedModal = sessionStorage.getItem("kanqual:open-project-settings-modal");
+      if (!requestedModal) return;
+      sessionStorage.removeItem("kanqual:open-project-settings-modal");
+      setActiveProjectSettingsModal(requestedModal);
+    }
+
+    window.addEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    return () => {
+      window.removeEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    };
+  }, []);
+
+  useEffect(() => {
     function onPointerDown(e: MouseEvent) {
       if (backupContextMenuRef.current && !backupContextMenuRef.current.contains(e.target as Node)) {
         setBackupContextMenu(null);
@@ -711,11 +732,17 @@ export function ProjectSettingsView() {
     try {
       const { manifest } = await createProjectBackup(pb, activeProject, "manual", logEntries[0]?.occurredAt ?? "");
       setBackupManifest(manifest);
+      clearPendingProjectBackupAttempt(activeProject.id);
+      clearProjectBackupBannerIssue(activeProject.id);
+      notifyProjectBackupsChanged(activeProject.id);
       await logAction(activeProject.id, "project.backup.create", "Created a manual project backup");
       setBackupNotice("Manual backup created. It will be retained indefinitely.");
     } catch (error) {
       console.error("Manual backup failed:", error);
-      setBackupError(error instanceof Error ? error.message : "Manual backup failed. Please try again.");
+      const message = error instanceof Error ? error.message : "Manual backup failed. Please try again.";
+      writeProjectBackupBannerIssue(activeProject.id, "failed", message);
+      notifyProjectBackupsChanged(activeProject.id);
+      setBackupError(message);
     } finally {
       setBackupBusy(null);
     }
@@ -749,6 +776,7 @@ export function ProjectSettingsView() {
         automaticIntervalMinutes: automaticIntervalDraft,
       });
       setBackupManifest(manifest);
+      notifyProjectBackupsChanged(activeProject.id);
       await logAction(
         activeProject.id,
         "project.backup.settings",
@@ -803,6 +831,7 @@ export function ProjectSettingsView() {
     try {
       const manifest = await deleteManualProjectBackup(activeProject, deleteBackup);
       setBackupManifest(manifest);
+      notifyProjectBackupsChanged(activeProject.id);
       await logAction(
         activeProject.id,
         "project.backup.delete",
