@@ -115,6 +115,21 @@ export async function getRegisteredUserCount(): Promise<number> {
   return invoke<number>("get_registered_user_count_command");
 }
 
+export type RegisteredUserAccount = {
+  id: string;
+  name: string;
+  email: string;
+  appRole: "administrator" | "standard";
+};
+
+export async function listRegisteredUserAccounts(pb: PocketBase): Promise<RegisteredUserAccount[]> {
+  return invoke<RegisteredUserAccount[]>("list_registered_user_accounts_command", {
+    request: {
+      authToken: pb.authStore.token,
+    },
+  });
+}
+
 export async function deleteUserAccount(pb: PocketBase, userId: string): Promise<void> {
   await invoke("delete_user_account_command", { authToken: pb.authStore.token, userId });
 }

@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type PocketBase from "pocketbase";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../types";
-import type { PendingImportedUser, Role } from "../types";
+import type { PendingImportedUser, ProjectLogEntry, ProjectPresenceEntry, Role } from "../types";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { createUserAccount } from "../lib/pb";
 import { HelpIcon } from "../components/AppIcons";
@@ -24,6 +24,30 @@ interface MemberRow {
 
 type SortCol = keyof MemberRow;
 type SortDir = "asc" | "desc";
+
+type ActivityRow = {
+  userId: string;
+  userIdentifier: string;
+  name: string;
+  active: boolean;
+  cumulativeActiveMinutes: number;
+  loginCount: number;
+  casesCreated: number;
+  documentsCreated: number;
+  codesCreated: number;
+  annotationsCreated: number;
+  memosCreated: number;
+  reportsCreated: number;
+};
+
+type ActivityCounts = {
+  casesCreated: number;
+  documentsCreated: number;
+  codesCreated: number;
+  annotationsCreated: number;
+  memosCreated: number;
+  reportsCreated: number;
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +82,79 @@ function parseStringArray(value: unknown): string[] {
   } catch {
     return [];
   }
+}
+
+function parseIsoMs(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatRoundedMinutes(minutes: number): string {
+  if (minutes <= 0) return "0 min";
+  return `${minutes} min`;
+}
+
+function countUserProjectLogins(entries: ProjectLogEntry[], userId: string): number {
+  return entries.filter((entry) => entry.userId === userId && entry.action === "project.open").length;
+}
+
+function countUserActiveMinutes(
+  entries: ProjectLogEntry[],
+  userId: string,
+  currentlyActive: boolean,
+  nowMs: number,
+): number {
+  const relevantEntries = entries
+    .filter((entry) =>
+      entry.userId === userId
+      && (entry.action === "project.open" || entry.action === "project.close" || entry.action === "presence.inactive"))
+    .sort((left, right) => (parseIsoMs(left.occurredAt) ?? 0) - (parseIsoMs(right.occurredAt) ?? 0));
+
+  let openAtMs: number | null = null;
+  let totalMs = 0;
+
+  for (const entry of relevantEntries) {
+    const occurredAtMs = parseIsoMs(entry.occurredAt);
+    if (occurredAtMs == null) continue;
+
+    if (entry.action === "project.open") {
+      if (openAtMs == null) openAtMs = occurredAtMs;
+      continue;
+    }
+
+    if (openAtMs != null && occurredAtMs >= openAtMs) {
+      totalMs += occurredAtMs - openAtMs;
+      openAtMs = null;
+    }
+  }
+
+  if (currentlyActive && openAtMs != null && nowMs >= openAtMs) {
+    totalMs += nowMs - openAtMs;
+  }
+
+  return Math.max(0, Math.round(totalMs / 60_000));
+}
+
+function buildEmptyActivityCounts(): ActivityCounts {
+  return {
+    casesCreated: 0,
+    documentsCreated: 0,
+    codesCreated: 0,
+    annotationsCreated: 0,
+    memosCreated: 0,
+    reportsCreated: 0,
+  };
+}
+
+function incrementActivityCount(
+  next: Record<string, ActivityCounts>,
+  key: string,
+  field: keyof ActivityCounts,
+): void {
+  if (!key) return;
+  const current = next[key] ?? buildEmptyActivityCounts();
+  current[field] += 1;
+  next[key] = current;
 }
 
 const ALL_PROJECT_ROLES: Role[] = ["owner", "editor", "coder", "viewer"];
@@ -478,12 +575,27 @@ const COLS: { key: SortCol; label: string; width: string }[] = [
   { key: "lastLogin",     label: "Last Login", width: "16%" },
 ];
 
+const ACTIVITY_COLS: Array<{ key: keyof ActivityRow | "active"; label: string; width: string }> = [
+  { key: "name", label: "User Name", width: "18%" },
+  { key: "active", label: "Currently Active", width: "10%" },
+  { key: "cumulativeActiveMinutes", label: "Active Time", width: "11%" },
+  { key: "loginCount", label: "Logins", width: "8%" },
+  { key: "casesCreated", label: "Cases", width: "8%" },
+  { key: "documentsCreated", label: "Documents", width: "9%" },
+  { key: "codesCreated", label: "Codes", width: "8%" },
+  { key: "annotationsCreated", label: "Annotations", width: "9%" },
+  { key: "memosCreated", label: "Memos", width: "8%" },
+  { key: "reportsCreated", label: "Reports", width: "8%" },
+];
+
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function UsersView() {
   const {
     activeProject,
+    activeProjectPresenceUsers,
+    logEntries,
     pb,
     canCurrentUser,
     ensureProjectSafetyBackup,
@@ -503,6 +615,9 @@ export function UsersView() {
 
   const [sortCol, setSortCol] = useState<SortCol>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [showActivityTable, setShowActivityTable] = useState(false);
+  const [activityCountsByUser, setActivityCountsByUser] = useState<Record<string, ActivityCounts>>({});
+  const [activityLoading, setActivityLoading] = useState(false);
 
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -799,6 +914,58 @@ export function UsersView() {
   }, [loadMembers]);
 
   useEffect(() => {
+    if (!activeProject || !pb) {
+      setActivityCountsByUser({});
+      setActivityLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setActivityLoading(true);
+
+    const fields = "id,created_by,created_by_identifier";
+    Promise.all([
+      pb.collection("cases").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, fields }),
+      pb.collection("documents").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, fields }),
+      pb.collection("codes").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, fields }),
+      pb.collection("annotations").getFullList({ filter: `document.project="${activeProject.id}"&&deleted_at=""`, fields }),
+      pb.collection("memos").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, fields }),
+      pb.collection("code_reports").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, fields }),
+      pb.collection("coder_reports").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, fields }),
+      pb.collection("ai_analyses").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, fields }),
+    ])
+      .then(([caseRecords, documentRecords, codeRecords, annotationRecords, memoRecords, codeReportRecords, coderReportRecords, analysisRecords]) => {
+        if (cancelled) return;
+        const next: Record<string, ActivityCounts> = {};
+        const addRecord = (record: Record<string, unknown>, field: keyof ActivityCounts) => {
+          const userId = typeof record.created_by === "string" ? record.created_by : "";
+          const userIdentifier = typeof record.created_by_identifier === "string" ? record.created_by_identifier : "";
+          if (userId) incrementActivityCount(next, userId, field);
+          else if (userIdentifier) incrementActivityCount(next, `identifier:${userIdentifier}`, field);
+        };
+
+        caseRecords.forEach((record) => addRecord(record as Record<string, unknown>, "casesCreated"));
+        documentRecords.forEach((record) => addRecord(record as Record<string, unknown>, "documentsCreated"));
+        codeRecords.forEach((record) => addRecord(record as Record<string, unknown>, "codesCreated"));
+        annotationRecords.forEach((record) => addRecord(record as Record<string, unknown>, "annotationsCreated"));
+        memoRecords.forEach((record) => addRecord(record as Record<string, unknown>, "memosCreated"));
+        [...codeReportRecords, ...coderReportRecords, ...analysisRecords].forEach((record) => addRecord(record as Record<string, unknown>, "reportsCreated"));
+        setActivityCountsByUser(next);
+      })
+      .catch((loadError) => {
+        console.error("Failed to load user activity counts:", loadError);
+        if (!cancelled) setActivityCountsByUser({});
+      })
+      .finally(() => {
+        if (!cancelled) setActivityLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject, pb]);
+
+  useEffect(() => {
     if (selectedImportedUser && availableUsers.length === 0 && !availableUsersLoading) {
       void loadAvailableUsers();
     }
@@ -847,6 +1014,35 @@ export function UsersView() {
 
   const ownerCount = rows.filter((row) => row.role === "owner").length;
   const assignableRoles = getAssignableRoles(canTransferOwnership);
+  const nowMs = Date.now();
+  const activePresenceUserIds = useMemo(
+    () => new Set(activeProjectPresenceUsers.map((entry: ProjectPresenceEntry) => entry.userId)),
+    [activeProjectPresenceUsers],
+  );
+  const activityRows = useMemo<ActivityRow[]>(() => (
+    rows
+      .map((row) => {
+        const counts = activityCountsByUser[row.userId]
+          ?? activityCountsByUser[`identifier:${row.userIdentifier}`]
+          ?? buildEmptyActivityCounts();
+        const active = activePresenceUserIds.has(row.userId);
+        return {
+          userId: row.userId,
+          userIdentifier: row.userIdentifier,
+          name: row.name,
+          active,
+          cumulativeActiveMinutes: countUserActiveMinutes(logEntries, row.userId, active, nowMs),
+          loginCount: countUserProjectLogins(logEntries, row.userId),
+          casesCreated: counts.casesCreated,
+          documentsCreated: counts.documentsCreated,
+          codesCreated: counts.codesCreated,
+          annotationsCreated: counts.annotationsCreated,
+          memosCreated: counts.memosCreated,
+          reportsCreated: counts.reportsCreated,
+        };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+  ), [activityCountsByUser, activePresenceUserIds, logEntries, nowMs, rows]);
 
   function getEditableRolesForRow(row: MemberRow): Role[] {
     if (row.role === "owner" && (!canTransferOwnership || ownerCount <= 1)) return ["owner"];
@@ -1009,7 +1205,29 @@ export function UsersView() {
       {error && <p className="users-error">{error}</p>}
 
       <div className="users-content">
-      <div
+        <div className="segmented-control" role="tablist" aria-label="User workspace views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!showActivityTable}
+            className={showActivityTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+            onClick={() => setShowActivityTable(false)}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={showActivityTable}
+            className={showActivityTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+            onClick={() => setShowActivityTable(true)}
+          >
+            Activity
+          </button>
+        </div>
+
+        {!showActivityTable ? (
+          <div
             className="users-table-wrap"
             style={{
               maxHeight:
@@ -1078,7 +1296,56 @@ export function UsersView() {
                   ))}
               </tbody>
             </table>
-      </div>
+          </div>
+        ) : (
+          <div className="users-table-wrap users-table-wrap--activity">
+            <table className="users-table users-table--activity">
+              <thead>
+                <tr>
+                  {ACTIVITY_COLS.map((col) => (
+                    <th key={col.key} style={{ width: col.width }} className="users-th">
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {activityLoading && (
+                  <tr>
+                    <td colSpan={ACTIVITY_COLS.length} className="users-td-msg">
+                      Loading activity...
+                    </td>
+                  </tr>
+                )}
+                {!activityLoading && activityRows.length === 0 && (
+                  <tr>
+                    <td colSpan={ACTIVITY_COLS.length} className="users-td-msg">
+                      No user activity yet.
+                    </td>
+                  </tr>
+                )}
+                {!activityLoading && activityRows.map((row) => (
+                  <tr key={row.userId} className="users-row">
+                    <td className="users-td users-td--name">{row.name}</td>
+                    <td className="users-td">
+                      <span className={`users-activity-status ${row.active ? "users-activity-status--active" : "users-activity-status--inactive"}`}>
+                        {row.active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="users-td">{formatRoundedMinutes(row.cumulativeActiveMinutes)}</td>
+                    <td className="users-td">{row.loginCount}</td>
+                    <td className="users-td">{row.casesCreated}</td>
+                    <td className="users-td">{row.documentsCreated}</td>
+                    <td className="users-td">{row.codesCreated}</td>
+                    <td className="users-td">{row.annotationsCreated}</td>
+                    <td className="users-td">{row.memosCreated}</td>
+                    <td className="users-td">{row.reportsCreated}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {helpOpen && (
@@ -1089,7 +1356,7 @@ export function UsersView() {
               Review members and roles, add a member, open row details, edit a member role, remove a member, resolve imported users, and create a temporary password when needed.
             </p>
             <p className="users-guide-copy">
-              Use this page to manage who can access the project. Add registered users to the project, inspect current roles, and resolve user-account issues after imports or restores.
+              Use this page to manage who can access the project. Add registered users to the project, inspect current roles, switch between the details and activity tabs, and resolve user-account issues after imports or restores.
             </p>
             <p className="users-guide-copy">
               User-management actions depend on project role and app role. Some imported-user flows create or reassociate workspace accounts.

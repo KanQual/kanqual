@@ -109,6 +109,20 @@ export interface ProjectMember {
   role: Role;
 }
 
+export interface ProjectPresenceEntry {
+  id: string;
+  projectId: string;
+  userId: string;
+  userIdentifier: string;
+  userName: string;
+  clientId: string;
+  view: string;
+  lastSeen: string;
+  sessionStartedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ImportedUserResolutionStatus =
   | "no_access"
   | "associated_current_user"

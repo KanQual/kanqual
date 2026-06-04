@@ -11,6 +11,7 @@ import networkIconRaw from "../assets/network--2.svg?raw";
 import remoteWorkIconRaw from "../assets/link-45deg.svg?raw";
 import aiAssistReadyIconRaw from "../assets/cog-line.svg?raw";
 import aiAssistUnavailableIconRaw from "../assets/cog-outline-alerted.svg?raw";
+import closeProjectIconRaw from "../assets/x.svg?raw";
 import sidebarLogo from "../assets/logo-no-background.png";
 
 const NAV_SECTIONS: {
@@ -79,6 +80,7 @@ export function Sidebar() {
     view,
     setView,
     activeProject,
+    closeProject,
     userRole,
     networkMode,
     canCurrentUser,
@@ -93,7 +95,7 @@ export function Sidebar() {
   const projectNameFontSize = useMemo(() => {
     if (!activeProject) return 22;
 
-    const availablePx = 168;
+    const availablePx = 144;
     const maxPx = 22;
     const minPx = 10;
     const longestWord = activeProject.name
@@ -240,9 +242,24 @@ export function Sidebar() {
       {activeProject ? (
         <div className="sidebar-project-badge">
           <span className="project-badge-label">Project</span>
-          <span className="project-badge-name" style={{ fontSize: projectNameFontSize }}>
-            {activeProject.name}
-          </span>
+          <div className="project-badge-row">
+            <span className="project-badge-name" style={{ fontSize: projectNameFontSize }}>
+              {activeProject.name}
+            </span>
+            <button
+              type="button"
+              className="project-badge-close"
+              title="Close Project"
+              aria-label="Close Project"
+              onClick={() => void closeProject(activeProject)}
+            >
+              <span
+                aria-hidden="true"
+                className="project-badge-close-icon"
+                dangerouslySetInnerHTML={{ __html: closeProjectIconRaw }}
+              />
+            </button>
+          </div>
         </div>
       ) : (
         <button

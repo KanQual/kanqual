@@ -464,6 +464,12 @@ struct AuthenticatedUpdateUserAccountRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthenticatedRegisteredUsersRequest {
+    auth_token: String,
+}
+
+#[derive(Deserialize)]
 struct PocketBaseAdminAuthResponse {
     token: String,
 }
@@ -480,6 +486,15 @@ struct PocketBaseAuthRefreshResponse {
 #[serde(rename_all = "camelCase")]
 struct RegisterUserAccountCommandResponse {
     id: String,
+    app_role: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegisteredUserAccountSummary {
+    id: String,
+    name: String,
+    email: String,
     app_role: String,
 }
 
@@ -2631,6 +2646,36 @@ async fn ensure_backend_setup_http(
         ]
     }), false).await?;
 
+    if get_collection_by_name(client, token, "project_presence").await?.is_none() {
+        create_collection(
+            client,
+            token,
+            &serde_json::json!({
+                "name": "project_presence",
+                "type": "base",
+                "listRule": AUTH_RULE,
+                "viewRule": AUTH_RULE,
+                "createRule": "@request.auth.id != '' && user = @request.auth.id",
+                "updateRule": "@request.auth.id != '' && user = @request.auth.id",
+                "deleteRule": "@request.auth.id != '' && user = @request.auth.id",
+                "indexes": [
+                    "CREATE UNIQUE INDEX `idx_project_presence_session` ON `project_presence` (`project`, `user`, `client_id`)"
+                ],
+                "fields": [
+                    { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
+                    { "name": "user", "type": "relation", "collectionId": "_pb_users_auth_", "required": true, "maxSelect": 1 },
+                    { "name": "user_identifier", "type": "text" },
+                    { "name": "user_name", "type": "text" },
+                    { "name": "client_id", "type": "text", "required": true },
+                    { "name": "view", "type": "text", "required": true },
+                    { "name": "last_seen", "type": "text", "required": true },
+                    { "name": "session_started_at", "type": "text", "required": true }
+                ]
+            }),
+        )
+        .await?;
+    }
+
     upsert_collection_http(client, token, "code_reports", serde_json::json!({
         "fields": [
             { "name": "project", "type": "relation", "collectionId": projects_id, "required": true, "maxSelect": 1 },
@@ -2993,6 +3038,52 @@ async fn get_registered_user_count_command(app: tauri::AppHandle) -> Result<u32,
 }
 
 #[tauri::command]
+async fn list_registered_user_accounts_command(
+    app: tauri::AppHandle,
+    request: AuthenticatedRegisteredUsersRequest,
+) -> Result<Vec<RegisteredUserAccountSummary>, String> {
+    let client = reqwest::Client::new();
+    ensure_requesting_administrator(&client, &request.auth_token).await?;
+    let token = authenticate_internal_superuser(&app, &client).await?;
+
+    let mut page = 1_u32;
+    let mut users = Vec::new();
+
+    loop {
+        let response = client
+            .get(format!("{PB_URL}/api/collections/users/records"))
+            .bearer_auth(&token)
+            .query(&[
+                ("page", page.to_string()),
+                ("perPage", "500".to_string()),
+                ("sort", "created".to_string()),
+                ("fields", "id,name,email,app_role".to_string()),
+            ])
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let response = response.error_for_status().map_err(|e| e.to_string())?;
+        let payload: PocketBaseListResponse<Value> = response.json().await.map_err(|e| e.to_string())?;
+
+        for record in payload.items {
+            users.push(RegisteredUserAccountSummary {
+                id: value_id(&record)?,
+                name: value_string(&record, "name").unwrap_or_default(),
+                email: value_string(&record, "email").unwrap_or_default(),
+                app_role: normalized_app_role(value_string(&record, "app_role")),
+            });
+        }
+
+        if page >= payload.total_pages.max(1) {
+            break;
+        }
+        page += 1;
+    }
+
+    Ok(users)
+}
+
+#[tauri::command]
 async fn ensure_backend_setup_command(_app: tauri::AppHandle) -> Result<bool, String> {
     let client = reqwest::Client::new();
     let token = authenticate_internal_superuser(&_app, &client).await?;
@@ -3168,6 +3259,48 @@ fn project_embedding_metadata_path(app: &tauri::AppHandle, project_id: &str) -> 
     Ok(project_embedding_index_dir(app, project_id)?.join(PROJECT_EMBEDDING_METADATA_FILE))
 }
 
+fn project_embedding_metadata_temp_path(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+    Ok(project_embedding_index_dir(app, project_id)?.join(format!("{PROJECT_EMBEDDING_METADATA_FILE}.tmp")))
+}
+
+fn cleanup_stale_project_embedding_metadata_temp_file(
+    app: &tauri::AppHandle,
+    project_id: &str,
+) -> Result<(), String> {
+    let temp_path = project_embedding_metadata_temp_path(app, project_id)?;
+    if temp_path.exists() {
+        fs::remove_file(&temp_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn cleanup_stale_embedding_model_partial_files(model_dir: &Path) -> Result<(), String> {
+    if !model_dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(model_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let child_path = entry.path();
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        if metadata.is_dir() {
+            cleanup_stale_embedding_model_partial_files(&child_path)?;
+            continue;
+        }
+
+        let is_partial = child_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.ends_with(".part"))
+            .unwrap_or(false);
+        if is_partial {
+            fs::remove_file(&child_path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 fn collect_directory_stats(path: &Path) -> Result<(u64, u64), String> {
     if !path.exists() {
         return Ok((0, 0));
@@ -3304,6 +3437,7 @@ fn is_embedding_download_cancel_requested(
 
 fn embedding_model_status(app: &tauri::AppHandle) -> Result<EmbeddingModelStatus, String> {
     let model_dir = embedding_model_dir(app)?;
+    cleanup_stale_embedding_model_partial_files(&model_dir)?;
     let installed = model_dir.join("config.json").exists()
         && model_dir.join("modules.json").exists()
         && model_dir.join("tokenizer_config.json").exists()
@@ -3872,6 +4006,7 @@ fn read_project_embedding_metadata_file(
     app: &tauri::AppHandle,
     project_id: &str,
 ) -> Result<ProjectEmbeddingMetadataFile, String> {
+    cleanup_stale_project_embedding_metadata_temp_file(app, project_id)?;
     let metadata_path = project_embedding_metadata_path(app, project_id)?;
     if !metadata_path.exists() {
         return Err("No local project embedding metadata exists yet.".to_string());
@@ -3885,10 +4020,11 @@ fn write_project_embedding_metadata_file(
     project_id: &str,
     metadata: &ProjectEmbeddingMetadataFile,
 ) -> Result<(), String> {
+    cleanup_stale_project_embedding_metadata_temp_file(app, project_id)?;
     let metadata_path = project_embedding_metadata_path(app, project_id)?;
     let metadata_dir = project_embedding_index_dir(app, project_id)?;
     fs::create_dir_all(&metadata_dir).map_err(|e| e.to_string())?;
-    let temp_path = metadata_dir.join(format!("{PROJECT_EMBEDDING_METADATA_FILE}.tmp"));
+    let temp_path = project_embedding_metadata_temp_path(app, project_id)?;
     let raw = serde_json::to_string(metadata).map_err(|e| e.to_string())?;
     fs::write(&temp_path, raw).map_err(|e| e.to_string())?;
     fs::rename(&temp_path, &metadata_path).map_err(|e| e.to_string())
@@ -4333,9 +4469,10 @@ fn get_multilingual_e5_status(app: tauri::AppHandle) -> Result<EmbeddingModelSta
 async fn get_multilingual_e5_download_preflight(
     app: tauri::AppHandle,
 ) -> Result<EmbeddingModelDownloadPreflight, String> {
-    let status = embedding_model_status(&app)?;
     let model_dir = embedding_model_dir(&app)?;
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
+    cleanup_stale_embedding_model_partial_files(&model_dir)?;
+    let status = embedding_model_status(&app)?;
     let (existing_files_total, existing_bytes) = collect_directory_stats(&model_dir)?;
     let total_bytes = EMBEDDING_MODEL_EXPECTED_SIZE_BYTES;
     let remaining_bytes = total_bytes.saturating_sub(existing_bytes);
@@ -4467,6 +4604,7 @@ async fn download_multilingual_e5_model(
 
     let model_dir = embedding_model_dir(&app)?;
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
+    cleanup_stale_embedding_model_partial_files(&model_dir)?;
 
     let files = fetch_model_file_list().await?;
     let client = reqwest::Client::new();
@@ -6949,6 +7087,7 @@ pub fn run() {
             update_user_account_command,
             clear_app_data_records_command,
             get_registered_user_count_command,
+            list_registered_user_accounts_command,
             ensure_backend_setup_command,
             encrypt_project_backup,
             decrypt_project_backup_payload,

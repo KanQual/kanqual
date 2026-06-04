@@ -1,5 +1,4 @@
-import { useState, useCallback, useRef, type ReactNode } from "react";
-import type { RecordModel } from "pocketbase";
+import { useState, useCallback, useMemo, useRef, type ReactNode } from "react";
 import {
   type Theme,
   type ColorVar,
@@ -32,7 +31,13 @@ import {
 } from "../lib/appSettings";
 import { clearLocalAccounts, clearRemoteSessions } from "../lib/authHistory";
 import { getAppRuntimeInfo, joinFsPath, type AppRuntimeInfo } from "../lib/dataRoot";
-import { clearAppDataRecords, deleteUserAccount } from "../lib/pb";
+import {
+  clearAppDataRecords,
+  deleteUserAccount,
+  listRegisteredUserAccounts,
+  type RegisteredUserAccount,
+} from "../lib/pb";
+import { isLocalBackendUrl } from "../lib/aiJobs";
 import { permissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
 import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
 import { HelpIcon } from "../components/AppIcons";
@@ -148,14 +153,13 @@ const GITHUB_RELEASES_URL = "https://github.com/KanQual/kanqual/releases";
 
 type SettingsModalSectionProps = {
   title: string;
-  description: ReactNode;
+  description?: ReactNode;
   children?: ReactNode;
   tone?: "default" | "warning" | "danger";
 };
 
 function SettingsModalSection({
   title,
-  description,
   children,
   tone = "default",
 }: SettingsModalSectionProps) {
@@ -163,7 +167,6 @@ function SettingsModalSection({
     <section className="app-settings-modal-section">
       <div className={`app-settings-modal-section-header app-settings-modal-section-header--${tone}`}>
         <h3>{title}</h3>
-        <div className="app-settings-modal-section-description">{description}</div>
       </div>
       {children ? <div className="app-settings-modal-section-body">{children}</div> : null}
     </section>
@@ -852,6 +855,19 @@ function formatDownloadDate(value: number | null | undefined): string {
   });
 }
 
+function formatAdminDateTime(value: string | null | undefined): string {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never";
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatCompletionStatus(status: EmbeddingModelDownloadStatus | null, modelStatus: EmbeddingModelStatus | null): string {
   if (status?.phase === "downloading") return "Downloading";
   if (status?.phase === "cancelling") return "Cancelling";
@@ -865,6 +881,25 @@ function formatCompletionStatus(status: EmbeddingModelDownloadStatus | null, mod
 function clampInteger(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+async function loadRegisteredUserActivityData(pb: NonNullable<ReturnType<typeof useAuth>["pb"]>) {
+  const [presenceResult, logResult] = await Promise.allSettled([
+    pb.collection("project_presence").getFullList({ sort: "-last_seen" }),
+    pb.collection("project_log").getFullList({
+      filter: 'action="project.open"',
+      sort: "-occurred_at",
+    }),
+  ]);
+
+  return {
+    presenceRecords: presenceResult.status === "fulfilled" ? presenceResult.value : [],
+    logRecords: logResult.status === "fulfilled" ? logResult.value : [],
+    activityWarning:
+      presenceResult.status === "rejected" || logResult.status === "rejected"
+        ? "User activity details are temporarily unavailable, but registered users can still be managed."
+        : "",
+  };
 }
 
 export function AppSettingsView() {
@@ -909,7 +944,8 @@ export function AppSettingsView() {
   const [ollamaModels, setOllamaModels] = useState<OllamaModelSummary[]>([]);
   const [aboutCardExpanded, setAboutCardExpanded] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [registeredUsers, setRegisteredUsers] = useState<RecordModel[]>([]);
+  const [registeredUsers, setRegisteredUsers] = useState<RegisteredUserAccount[]>([]);
+  const [registeredUserActivity, setRegisteredUserActivity] = useState<Record<string, { active: boolean; lastLoginAt: string | null }>>({});
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminNotice, setAdminNotice] = useState("");
   const canOpenAppSettings = canCurrentUser("openAppSettings");
@@ -1001,28 +1037,24 @@ export function AppSettingsView() {
       id: "everyday",
       eyebrow: "Everyday Use",
       title: "Change the app behaviors people are most likely to notice in daily work.",
-      description: "These settings affect how Kanqual launches, how documents start, and whether local AI tools are ready to support the workflow.",
       cardIds: ["startup", "import"],
     },
     {
       id: "privacy-data",
       eyebrow: "Privacy & Data",
       title: "Control what is stored locally and how the device handles sensitive research work.",
-      description: "Use these cards to review local storage, privacy defaults, and the folders Kanqual depends on.",
       cardIds: ["privacy", "storage"],
     },
     {
       id: "maintenance",
       eyebrow: "Maintenance",
       title: "Review health, diagnostics, and release behavior for this installation.",
-      description: "These cards help you inspect the local runtime, confirm the database is healthy, and keep track of newer releases.",
       cardIds: ["updates", "diagnostics"],
     },
     {
       id: "advanced",
       eyebrow: "Advanced",
       title: "Use these tools for permissions, collaboration, and administrator-only device actions.",
-      description: "These settings carry broader impact across accounts or the local machine, so they are grouped separately from daily app behavior.",
       cardIds: ["permissions", "network", "administration"],
     },
   ]
@@ -1033,6 +1065,20 @@ export function AppSettingsView() {
         .filter((card): card is NonNullable<typeof card> => Boolean(card)),
     }))
     .filter((section) => section.cards.length > 0);
+
+  const registeredUserTableRows = useMemo(() => {
+    return registeredUsers.map((entry) => {
+      const activity = registeredUserActivity[entry.id] ?? { active: entry.id === user?.id, lastLoginAt: null };
+      return {
+        id: entry.id,
+        name: String(entry.name || entry.email || "Unnamed user"),
+        email: String(entry.email || "No email"),
+        active: activity.active || entry.id === user?.id,
+        lastLoginAt: activity.lastLoginAt,
+        isCurrentUser: entry.id === user?.id,
+      };
+    });
+  }, [registeredUserActivity, registeredUsers, user]);
 
   const openRequestedSettingsModal = useCallback(() => {
     const requestedModal = sessionStorage.getItem("kanqual:open-app-settings-modal");
@@ -1202,12 +1248,58 @@ export function AppSettingsView() {
     async function loadRegisteredUsers() {
       setAdminBusy(true);
       try {
-        const records = await currentPb.collection("users").getFullList({
-          sort: "created",
-        });
+        const userRecordsPromise = isLocalBackendUrl(currentPb.baseURL)
+          ? listRegisteredUserAccounts(currentPb)
+          : currentPb.collection("users").getFullList<RegisteredUserAccount>({ sort: "created" });
+        const [records, activityData] = await Promise.all([
+          userRecordsPromise,
+          loadRegisteredUserActivityData(currentPb),
+        ]);
         if (!cancelled) {
           setRegisteredUsers(records);
-          setAdminNotice("");
+          const { presenceRecords, logRecords, activityWarning } = activityData;
+          const nowMs = Date.now();
+          const nextActivity: Record<string, { active: boolean; lastLoginAt: string | null }> = {};
+
+          for (const record of records) {
+            nextActivity[record.id] = {
+              active: record.id === user?.id,
+              lastLoginAt: null,
+            };
+          }
+
+          for (const record of presenceRecords) {
+            const userId = typeof record.user === "string" ? record.user : "";
+            const lastSeen = typeof record.last_seen === "string" ? record.last_seen : "";
+            if (!userId || !lastSeen) continue;
+            const lastSeenMs = Date.parse(lastSeen);
+            if (!Number.isFinite(lastSeenMs)) continue;
+            if (lastSeenMs >= nowMs - 45_000) {
+              nextActivity[userId] = {
+                active: true,
+                lastLoginAt: nextActivity[userId]?.lastLoginAt ?? null,
+              };
+            }
+          }
+
+          for (const record of logRecords) {
+            const userId = typeof record.user === "string" ? record.user : "";
+            const occurredAt = typeof record.occurred_at === "string" ? record.occurred_at : "";
+            if (!userId || !occurredAt) continue;
+            if (!nextActivity[userId]) {
+              nextActivity[userId] = { active: false, lastLoginAt: occurredAt };
+              continue;
+            }
+            if (!nextActivity[userId].lastLoginAt) {
+              nextActivity[userId] = {
+                ...nextActivity[userId],
+                lastLoginAt: occurredAt,
+              };
+            }
+          }
+
+          setRegisteredUserActivity(nextActivity);
+          setAdminNotice(activityWarning);
         }
       } catch (error) {
         if (!cancelled) {
@@ -1224,12 +1316,57 @@ export function AppSettingsView() {
     return () => {
       cancelled = true;
     };
-  }, [activeSettingsModal, pb, canViewLocalUsers]);
+  }, [activeSettingsModal, pb, canViewLocalUsers, user?.id]);
 
   async function refreshRegisteredUsers() {
     if (!pb || !canViewLocalUsers) return;
-    const records = await pb.collection("users").getFullList({ sort: "created" });
+    const userRecordsPromise = isLocalBackendUrl(pb.baseURL)
+      ? listRegisteredUserAccounts(pb)
+      : pb.collection("users").getFullList<RegisteredUserAccount>({ sort: "created" });
+    const [records, activityData] = await Promise.all([
+      userRecordsPromise,
+      loadRegisteredUserActivityData(pb),
+    ]);
+    const { presenceRecords, logRecords, activityWarning } = activityData;
     setRegisteredUsers(records);
+    const nowMs = Date.now();
+    const nextActivity: Record<string, { active: boolean; lastLoginAt: string | null }> = {};
+    for (const record of records) {
+      nextActivity[record.id] = {
+        active: record.id === user?.id,
+        lastLoginAt: null,
+      };
+    }
+    for (const record of presenceRecords) {
+      const userId = typeof record.user === "string" ? record.user : "";
+      const lastSeen = typeof record.last_seen === "string" ? record.last_seen : "";
+      if (!userId || !lastSeen) continue;
+      const lastSeenMs = Date.parse(lastSeen);
+      if (!Number.isFinite(lastSeenMs)) continue;
+      if (lastSeenMs >= nowMs - 45_000) {
+        nextActivity[userId] = {
+          active: true,
+          lastLoginAt: nextActivity[userId]?.lastLoginAt ?? null,
+        };
+      }
+    }
+    for (const record of logRecords) {
+      const userId = typeof record.user === "string" ? record.user : "";
+      const occurredAt = typeof record.occurred_at === "string" ? record.occurred_at : "";
+      if (!userId || !occurredAt) continue;
+      if (!nextActivity[userId]) {
+        nextActivity[userId] = { active: false, lastLoginAt: occurredAt };
+        continue;
+      }
+      if (!nextActivity[userId].lastLoginAt) {
+        nextActivity[userId] = {
+          ...nextActivity[userId],
+          lastLoginAt: occurredAt,
+        };
+      }
+    }
+    setRegisteredUserActivity(nextActivity);
+    setAdminNotice(activityWarning);
   }
 
   async function handleDeleteRegisteredUser(userId: string) {
@@ -1819,34 +1956,60 @@ export function AppSettingsView() {
               title="Registered Users"
               description="Delete local KanQual accounts from this device. Your current administrator account cannot be removed here."
             >
-              <div className="settings-list">
-                {registeredUsers.map((entry) => {
-                  const role = String(entry.app_role ?? "standard");
-                  const isCurrentUser = entry.id === user?.id;
-                  return (
-                    <div key={entry.id} className="settings-list-item">
-                      <div className="settings-list-item-info">
-                        <strong>{String(entry.name || entry.email || "Unnamed user")}</strong>
-                        <small>{String(entry.email || "No email")}</small>
-                        <small>{role === "administrator" ? "Administrator" : "Standard user"}</small>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn btn--danger"
-                        onClick={() => void handleDeleteRegisteredUser(entry.id)}
-                        disabled={adminBusy || isCurrentUser || !canDeleteLocalUsers}
-                      >
-                        {isCurrentUser ? "Current Account" : !canDeleteLocalUsers ? "No Permission" : "Delete"}
-                      </button>
-                    </div>
-                  );
-                })}
-                {!registeredUsers.length && !adminBusy && canViewLocalUsers && (
-                  <div className="settings-empty-state">No registered users found.</div>
-                )}
-                {!canViewLocalUsers && (
-                  <div className="settings-empty-state">You do not have permission to view local users.</div>
-                )}
+              <div className="users-table-wrap app-settings-admin-users-table-wrap">
+                <table className="users-table app-settings-admin-users-table">
+                  <thead>
+                    <tr>
+                      <th className="users-th" style={{ width: "42%" }}>Username</th>
+                      <th className="users-th" style={{ width: "18%" }}>Status</th>
+                      <th className="users-th" style={{ width: "24%" }}>Last Login</th>
+                      <th className="users-th" style={{ width: "16%" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminBusy && (
+                      <tr>
+                        <td colSpan={4} className="users-td-msg">Loading users...</td>
+                      </tr>
+                    )}
+                    {!adminBusy && !registeredUserTableRows.length && canViewLocalUsers && (
+                      <tr>
+                        <td colSpan={4} className="users-td-msg">No registered users found.</td>
+                      </tr>
+                    )}
+                    {!canViewLocalUsers && (
+                      <tr>
+                        <td colSpan={4} className="users-td-msg">You do not have permission to view local users.</td>
+                      </tr>
+                    )}
+                    {!adminBusy && canViewLocalUsers && registeredUserTableRows.map((entry) => (
+                      <tr key={entry.id} className="users-row">
+                        <td className="users-td users-td--name">
+                          <div className="app-settings-admin-user-cell">
+                            <strong>{entry.name}</strong>
+                            <span className="users-td--muted">{entry.email}</span>
+                          </div>
+                        </td>
+                        <td className="users-td">
+                          <span className={`users-activity-status ${entry.active ? "users-activity-status--active" : "users-activity-status--inactive"}`}>
+                            {entry.active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td className="users-td users-td--muted">{formatAdminDateTime(entry.lastLoginAt)}</td>
+                        <td className="users-td">
+                          <button
+                            type="button"
+                            className="btn btn--danger"
+                            onClick={() => void handleDeleteRegisteredUser(entry.id)}
+                            disabled={adminBusy || entry.isCurrentUser || !canDeleteLocalUsers}
+                          >
+                            {entry.isCurrentUser ? "Current Account" : !canDeleteLocalUsers ? "No Permission" : "Delete"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </SettingsModalSection>
 
@@ -2602,7 +2765,6 @@ export function AppSettingsView() {
                 <div className="app-settings-overview-section-header">
                   <p className="app-settings-overview-section-eyebrow">{section.eyebrow}</p>
                   <h2>{section.title}</h2>
-                  <p>{section.description}</p>
                 </div>
 
                 <div className="app-settings-overview-grid">
@@ -2630,10 +2792,6 @@ export function AppSettingsView() {
         <div className="settings-section-header">
           <div>
             <h2 className="settings-section-title">Network & Collaboration</h2>
-            <p className="settings-section-desc">
-              Control whether this device's database is accessible to other computers on your local network.
-              Kanqual always starts in local-only mode and reverts on next launch.
-            </p>
           </div>
         </div>
 
@@ -2715,7 +2873,6 @@ export function AppSettingsView() {
         <div className="settings-section-header">
           <div>
             <h2 className="settings-section-title">Data Location & Storage</h2>
-            <p className="settings-section-desc">Where Kanqual stores its local database and project backups on this device.</p>
           </div>
           {appInfo?.appDataDir && (
             <button
@@ -2771,7 +2928,6 @@ export function AppSettingsView() {
         <div className="settings-section-header">
           <div>
             <h2 className="settings-section-title">Startup & Session</h2>
-            <p className="settings-section-desc">Controls for what happens when the app opens and how the workspace resumes.</p>
           </div>
         </div>
 
@@ -2795,7 +2951,6 @@ export function AppSettingsView() {
         <div className="settings-section-header">
           <div>
             <h2 className="settings-section-title">Document Import</h2>
-            <p className="settings-section-desc">Default behavior for new document creation and file-based text extraction.</p>
           </div>
         </div>
 
@@ -2871,7 +3026,6 @@ export function AppSettingsView() {
         <div className="settings-section-header">
           <div>
             <h2 className="settings-section-title">Privacy & Security</h2>
-            <p className="settings-section-desc">Local privacy controls for shared machines and sensitive research workspaces.</p>
           </div>
         </div>
 
@@ -2925,7 +3079,6 @@ export function AppSettingsView() {
         <div className="settings-section-header">
           <div>
             <h2 className="settings-section-title">Diagnostics</h2>
-            <p className="settings-section-desc">Quick checks for local app health and environment details.</p>
           </div>
         </div>
 
@@ -2960,7 +3113,6 @@ export function AppSettingsView() {
         <div className="settings-section-header">
           <div>
             <h2 className="settings-section-title">Update Behavior</h2>
-            <p className="settings-section-desc">Early placeholders for desktop update preferences as bundling and distribution mature.</p>
           </div>
         </div>
 

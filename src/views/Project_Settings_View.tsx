@@ -63,14 +63,13 @@ const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
 
 type SettingsModalSectionProps = {
   title: string;
-  description: ReactNode;
+  description?: ReactNode;
   children?: ReactNode;
   tone?: "default" | "warning" | "danger";
 };
 
 function SettingsModalSection({
   title,
-  description,
   children,
   tone = "default",
 }: SettingsModalSectionProps) {
@@ -78,7 +77,6 @@ function SettingsModalSection({
     <section className="app-settings-modal-section">
       <div className={`app-settings-modal-section-header app-settings-modal-section-header--${tone}`}>
         <h3>{title}</h3>
-        <div className="app-settings-modal-section-description">{description}</div>
       </div>
       {children ? <div className="app-settings-modal-section-body">{children}</div> : null}
     </section>
@@ -1130,28 +1128,24 @@ export function ProjectSettingsView() {
       id: "setup",
       eyebrow: "Project Setup",
       title: "Manage the shared defaults that shape this project's day-to-day work.",
-      description: "Start here for project metadata, default import behavior, and project-level AI Assist controls.",
       cardIds: ["details", "document-import"],
     },
     {
       id: "project-data",
       eyebrow: "Project Data",
       title: "Review the files, backups, and audit history that belong to this project.",
-      description: "These tools help you manage retained source files, backup snapshots, and project activity over time.",
       cardIds: ["uploaded-files", "backups", "log"],
     },
     {
       id: "exchange",
       eyebrow: "Exchange",
       title: "Move project materials into or out of Kanqual.",
-      description: "Use these cards when you need to export the project or exchange only the shared code hierarchy.",
       cardIds: ["export", "codebook"],
     },
   ] satisfies Array<{
     id: string;
     eyebrow: string;
     title: string;
-    description: string;
     cardIds: Array<(typeof projectSettingsCards)[number]["id"]>;
   }>;
 
@@ -1667,12 +1661,6 @@ export function ProjectSettingsView() {
                 </button>
               </div>
               <div className="app-settings-modal-section-body">
-                <p className="settings-section-desc">
-                  <strong>JSON Backup:</strong> Best for a full Kanqual-native backup or technical inspection.
-                </p>
-                <p className="settings-section-desc">
-                  <strong>REFI-QDA Project:</strong> Best for moving the project to other qualitative analysis tools that support REFI-QDA.
-                </p>
               </div>
             </SettingsModalSection>
             <SettingsModalSection
@@ -1684,9 +1672,6 @@ export function ProjectSettingsView() {
                   {exporting === "xlsx" ? "Exporting..." : "Export Excel Workbook"}
                 </button>
               </div>
-              <p className="settings-section-desc">
-                <strong>Excel Workbook:</strong> Best for review, reporting, and external analysis outside Kanqual.
-              </p>
             </SettingsModalSection>
           </div>
         );
@@ -1767,7 +1752,6 @@ export function ProjectSettingsView() {
                 <div className="app-settings-overview-section-header">
                   <p className="app-settings-overview-section-eyebrow">{section.eyebrow}</p>
                   <h2>{section.title}</h2>
-                  <p>{section.description}</p>
                 </div>
 
                 <div className="app-settings-overview-grid">
@@ -1898,9 +1882,6 @@ export function ProjectSettingsView() {
             <div className="settings-section-header">
               <div>
                 <h2 id="ai-assist-build-title" className="settings-section-title">Preparing AI Assist</h2>
-                <p className="settings-section-desc">
-                  Kanqual is generating local multilingual-e5 embeddings for this project's cases, documents, codes, annotations, and memos.
-                </p>
               </div>
             </div>
             <div className="app-settings-modal-body">
@@ -2100,9 +2081,6 @@ export function ProjectSettingsView() {
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>Project Settings Help</h2>
             <div className="app-settings-modal-body">
-                <p className="settings-section-desc">
-                  Open shared settings cards, export the project, manage backups, restore backups, configure AI Assist at the project level, review the project log, exchange codebooks, and edit project details.
-                </p>
                 <ul className="settings-help-list">
                   <li>Use this page to manage settings and maintenance tasks that belong to the project as a whole. Open a card, complete the action in the modal, and close when finished.</li>
                   <li>Many actions here are permission-gated, and some are sensitive or destructive. Backup, restore, and AI Assist operations may depend on host-side capabilities.</li>

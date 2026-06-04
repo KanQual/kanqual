@@ -515,13 +515,6 @@ export function AIAssistView() {
           : projectEmbeddingNeedsRerun
             ? "Re-run recommended"
             : "Up to date";
-  const embeddingStatusDetail =
-    indexStatus?.generatedAtMs
-      ? `Last run ${new Date(indexStatus.generatedAtMs).toLocaleString()}`
-      : isLocalWorkspace
-        ? "No local project embeddings have been built yet."
-        : "No host project embeddings have been built yet.";
-
   const refreshEmbeddingModelStatus = useCallback(() => {
     if (!isLocalWorkspace) return;
     invoke<EmbeddingModelStatus>("get_multilingual_e5_status")
@@ -1479,8 +1472,7 @@ export function AIAssistView() {
                   {projectNotice && <div className="settings-success project-settings-success">{projectNotice}</div>}
                   <label className="settings-toggle-row">
                     <span>
-                      <strong>Enable AI assistance in this project</strong>
-                      <small>When disabled, project AI features stay off even if the device runtime is configured.</small>
+                      <strong>Enable</strong>
                     </span>
                     <input
                       type="checkbox"
@@ -1498,13 +1490,6 @@ export function AIAssistView() {
                       <p className="ai-assist-card-subcopy">
                         Review the current index for this project and rebuild or delete embeddings when the project changes.
                       </p>
-                    </div>
-                  </div>
-                  <div className="app-settings-stats ai-assist-embedding-stats">
-                    <div className="app-settings-stat-card">
-                      <strong>{embeddingStatusLabel}</strong>
-                      <span>{indexStatus?.modelDisplayName ?? "multilingual-e5"}</span>
-                      <small>{embeddingStatusDetail}</small>
                     </div>
                   </div>
                   <div className="form-actions" style={{ marginTop: 16, justifyContent: "flex-start" }}>

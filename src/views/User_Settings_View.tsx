@@ -27,14 +27,13 @@ type RecentProject = {
 
 type SettingsModalSectionProps = {
   title: string;
-  description: ReactNode;
+  description?: ReactNode;
   children?: ReactNode;
   tone?: "default" | "warning" | "danger";
 };
 
 function SettingsModalSection({
   title,
-  description,
   children,
   tone = "default",
 }: SettingsModalSectionProps) {
@@ -42,7 +41,6 @@ function SettingsModalSection({
     <section className="app-settings-modal-section">
       <div className={`app-settings-modal-section-header app-settings-modal-section-header--${tone}`}>
         <h3>{title}</h3>
-        <div className="app-settings-modal-section-description">{description}</div>
       </div>
       {children ? <div className="app-settings-modal-section-body">{children}</div> : null}
     </section>
@@ -215,21 +213,18 @@ export function UserSettingsView() {
       id: "account",
       eyebrow: "Account",
       title: "Manage the identity and security details that belong to you.",
-      description: "Use these settings to update how your account appears across Kanqual and how you sign in.",
       cardIds: ["profile", "password"],
     },
     {
       id: "preferences",
       eyebrow: "Preferences",
       title: "Adjust the way Kanqual looks and feels on this device.",
-      description: "These settings change your personal display and local convenience preferences without affecting shared project content.",
       cardIds: ["appearance", "recent"],
     },
   ] satisfies Array<{
     id: string;
     eyebrow: string;
     title: string;
-    description: string;
     cardIds: Array<NonNullable<UserSettingsModal>>;
   }>;
 
@@ -260,7 +255,6 @@ export function UserSettingsView() {
                 <div className="app-settings-overview-section-header">
                   <p className="app-settings-overview-section-eyebrow">{section.eyebrow}</p>
                   <h2>{section.title}</h2>
-                  <p>{section.description}</p>
                 </div>
 
                 <div className="app-settings-overview-grid">
@@ -597,9 +591,6 @@ export function UserSettingsView() {
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
             <h2>User Settings Help</h2>
             <div className="app-settings-modal-body">
-                <p className="settings-section-desc">
-                  Update your profile, change your password, adjust personal appearance settings, and manage locally remembered recent projects.
-                </p>
                 <ul className="settings-help-list">
                   <li>Use User Settings for personal account and preference changes that belong to the signed-in person rather than the shared project or host device.</li>
                   <li>Changes here are personal unless they update your shared account identity, such as name or email.</li>

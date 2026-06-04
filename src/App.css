@@ -411,6 +411,50 @@ body {
   color: var(--color-sidebar-muted);
 }
 
+.project-badge-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.project-badge-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-sidebar-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.project-badge-close:hover {
+  background: color-mix(in srgb, var(--color-sidebar-text) 10%, transparent);
+  color: var(--color-sidebar-text);
+}
+
+.project-badge-close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-sidebar-text) 82%, transparent);
+  outline-offset: 2px;
+}
+
+.project-badge-close-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.project-badge-close-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
 .project-badge-name {
   font-weight: 600;
   color: var(--color-sidebar-text);
@@ -421,6 +465,8 @@ body {
   word-break: keep-all;
   overflow-wrap: normal;
   line-height: 1.3;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .project-badge-empty-text {
@@ -3885,6 +3931,51 @@ body {
   font-size: var(--text-md);
 }
 
+.users-table-wrap--activity {
+  margin-top: 0;
+}
+
+.users-table--activity {
+  min-width: 1100px;
+  table-layout: auto;
+}
+
+.users-activity-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.users-activity-status--active {
+  background: color-mix(in srgb, var(--color-success, #2e7d32) 14%, transparent);
+  color: var(--color-success, #2e7d32);
+}
+
+.users-activity-status--inactive {
+  background: color-mix(in srgb, var(--color-text-muted) 12%, transparent);
+  color: var(--color-text-muted);
+}
+
+.app-settings-admin-users-table-wrap {
+  margin-top: 0;
+}
+
+.app-settings-admin-users-table {
+  table-layout: auto;
+}
+
+.app-settings-admin-user-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .code-doc-lock-cell {
   display: flex;
   flex-direction: column;
@@ -5663,7 +5754,9 @@ body {
 }
 
 .app-settings-overview-section-header h2 {
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
+  font-weight: 400;
+  font-style: italic;
   line-height: 1.25;
 }
 

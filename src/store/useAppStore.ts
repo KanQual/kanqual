@@ -13,6 +13,7 @@ import type {
   View,
   Role,
   ProjectLogEntry,
+  ProjectPresenceEntry,
   PendingImportedUserResolution,
 } from "../types";
 import {
@@ -101,6 +102,10 @@ import {
 } from "../lib/projectSettings";
 
 const RECENT_PROJECTS_KEY = "kq_recent_projects";
+const PROJECT_PRESENCE_COLLECTION = "project_presence";
+const PROJECT_PRESENCE_HEARTBEAT_MS = 20_000;
+const PROJECT_PRESENCE_ACTIVE_WINDOW_MS = 45_000;
+const PROJECT_PRESENCE_REFRESH_MS = 15_000;
 
 function rememberRecentProject(project: Project): void {
   try {
@@ -136,6 +141,18 @@ function isSnapshotTooLongError(error: unknown): boolean {
   const snapshotError = maybe.response?.data?.snapshot;
   const message = `${snapshotError?.message || ""} ${snapshotError?.code || ""}`.toLowerCase();
   return message.includes("no more than 5000") || message.includes("validation_max_text_constraint");
+}
+
+function generatePresenceClientId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `presence_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+}
+
+function parseTimestampMs(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function describeUnknownError(error: unknown, fallback: string): string {
@@ -430,6 +447,36 @@ function toProject(r: RecordModel): Project {
   };
 }
 
+function toProjectPresenceEntry(r: RecordModel): ProjectPresenceEntry {
+  return {
+    id: r.id,
+    projectId: r.project,
+    userId: r.user,
+    userIdentifier: String(r.user_identifier ?? ""),
+    userName: String(r.user_name ?? ""),
+    clientId: String(r.client_id ?? ""),
+    view: String(r.view ?? ""),
+    lastSeen: String(r.last_seen ?? r.updated ?? r.created ?? ""),
+    sessionStartedAt: String(r.session_started_at ?? r.created ?? ""),
+    createdAt: r.created,
+    updatedAt: r.updated,
+  };
+}
+
+function isProjectPresenceEntryActive(entry: ProjectPresenceEntry, nowMs: number): boolean {
+  const lastSeenMs = parseTimestampMs(entry.lastSeen);
+  return lastSeenMs != null && lastSeenMs >= nowMs - PROJECT_PRESENCE_ACTIVE_WINDOW_MS;
+}
+
+function sortProjectPresenceEntries(entries: ProjectPresenceEntry[]): ProjectPresenceEntry[] {
+  return [...entries].sort((left, right) => {
+    const leftSeen = parseTimestampMs(left.lastSeen) ?? 0;
+    const rightSeen = parseTimestampMs(right.lastSeen) ?? 0;
+    if (leftSeen !== rightSeen) return rightSeen - leftSeen;
+    return left.userName.localeCompare(right.userName);
+  });
+}
+
 function toDocument(r: RecordModel): Document {
   return {
     id: r.id,
@@ -690,6 +737,8 @@ export function useAppStore(pb: PocketBase) {
   const [projectDocumentImportSettings, setProjectDocumentImportSettings] = useState<ProjectDocumentImportSettings>(
     DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS,
   );
+  const [projectPresenceEntries, setProjectPresenceEntries] = useState<ProjectPresenceEntry[]>([]);
+  const [projectPresenceClockMs, setProjectPresenceClockMs] = useState(() => Date.now());
   const [documentProcessingStatus, setDocumentProcessingStatus] =
     useState<BackgroundDocumentProcessingStatus | null>(null);
   const [documentProcessingBannerOpen, setDocumentProcessingBannerOpen] = useState(false);
@@ -706,6 +755,13 @@ export function useAppStore(pb: PocketBase) {
   const documentProcessingJobRef = useRef<Promise<void> | null>(null);
   const aiJobWorkerRunningRef = useRef(false);
   const startupRestoreAttempted = useRef(false);
+  const presenceClientIdRef = useRef(generatePresenceClientId());
+  const presenceRecordIdRef = useRef<string | null>(null);
+  const presenceProjectIdRef = useRef<string | null>(null);
+  const presenceSessionStartedAtRef = useRef<string | null>(null);
+  const projectPresenceActivityStateRef = useRef<Record<string, { lastSeen: string; active: boolean }>>({});
+  const projectPresenceInactiveLogRef = useRef<Record<string, string>>({});
+  const currentViewRef = useRef<View>(view);
   const appRole = normalizeAppRole(pb.authStore.record?.app_role);
   const isAdministrator = appRole === "administrator";
 
@@ -723,6 +779,10 @@ export function useAppStore(pb: PocketBase) {
   useEffect(() => {
     projectAiAssistRuntimeStatusRef.current = projectAiAssistRuntimeStatus;
   }, [projectAiAssistRuntimeStatus]);
+
+  useEffect(() => {
+    currentViewRef.current = view;
+  }, [view]);
 
   // ── Logging ───────────────────────────────────────────────────────────────
 
@@ -748,6 +808,97 @@ export function useAppStore(pb: PocketBase) {
       }
     },
     [pb]
+  );
+
+  const syncProjectPresence = useCallback(
+    async (project: Project, currentView: View) => {
+      const userId = pb.authStore.record?.id;
+      if (!userId) return;
+
+      const now = new Date().toISOString();
+      const userIdentifier = String(pb.authStore.record?.user_identifier ?? "");
+      const userName = String(pb.authStore.record?.name || pb.authStore.record?.email || "");
+      const clientId = presenceClientIdRef.current;
+      const sessionStartedAt = presenceSessionStartedAtRef.current ?? now;
+      presenceSessionStartedAtRef.current = sessionStartedAt;
+
+      const payload = {
+        project: project.id,
+        user: userId,
+        user_identifier: userIdentifier,
+        user_name: userName,
+        client_id: clientId,
+        view: currentView,
+        last_seen: now,
+        session_started_at: sessionStartedAt,
+      };
+
+      const existingId = presenceProjectIdRef.current === project.id ? presenceRecordIdRef.current : null;
+      if (existingId) {
+        const updated = await pb.collection(PROJECT_PRESENCE_COLLECTION).update(existingId, payload);
+        presenceRecordIdRef.current = updated.id;
+        presenceProjectIdRef.current = project.id;
+        setProjectPresenceEntries((prev) => {
+          const next = toProjectPresenceEntry(updated);
+          const withoutCurrent = prev.filter((entry) => entry.id !== updated.id);
+          return sortProjectPresenceEntries([...withoutCurrent, next]);
+        });
+        setProjectPresenceClockMs(Date.now());
+        return;
+      }
+
+      let existing: RecordModel | null = null;
+      try {
+        existing = await pb.collection(PROJECT_PRESENCE_COLLECTION).getFirstListItem(
+          `project="${project.id}" && user="${userId}" && client_id="${clientId}"`,
+        );
+      } catch {
+        existing = null;
+      }
+
+      const record = existing
+        ? await pb.collection(PROJECT_PRESENCE_COLLECTION).update(existing.id, payload)
+        : await pb.collection(PROJECT_PRESENCE_COLLECTION).create(payload);
+
+      presenceRecordIdRef.current = record.id;
+      presenceProjectIdRef.current = project.id;
+      setProjectPresenceEntries((prev) => {
+        const next = toProjectPresenceEntry(record);
+        const withoutCurrent = prev.filter((entry) => entry.id !== record.id);
+        return sortProjectPresenceEntries([...withoutCurrent, next]);
+      });
+      setProjectPresenceClockMs(Date.now());
+    },
+    [pb],
+  );
+
+  const clearProjectPresence = useCallback(
+    async (projectId?: string | null) => {
+      const currentProjectId = presenceProjectIdRef.current;
+      const recordId = presenceRecordIdRef.current;
+      if (projectId && currentProjectId && currentProjectId !== projectId) {
+        return;
+      }
+      if (!recordId) {
+        if (!projectId || currentProjectId === projectId) {
+          presenceProjectIdRef.current = null;
+          presenceSessionStartedAtRef.current = null;
+        }
+        return;
+      }
+      try {
+        await pb.collection(PROJECT_PRESENCE_COLLECTION).delete(recordId);
+      } catch {
+        // Presence cleanup is best-effort only.
+      } finally {
+        if (!projectId || currentProjectId === projectId) {
+          presenceRecordIdRef.current = null;
+          presenceProjectIdRef.current = null;
+          presenceSessionStartedAtRef.current = null;
+        }
+      }
+    },
+    [pb],
   );
 
   const runProjectChatRequestLocally = useCallback(
@@ -1738,11 +1889,16 @@ export function useAppStore(pb: PocketBase) {
     }
     const status = await invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_store_build_status");
     const previousPhase = projectEmbeddingLastPhaseRef.current;
+    const isInitialHydration = previousPhase === null;
     projectEmbeddingLastPhaseRef.current = status.phase;
     setProjectEmbeddingBuildStatus(status);
 
     if (status.phase === "running" || status.phase === "cancelling") {
       setProjectEmbeddingBuildBannerOpen(true);
+      return status;
+    }
+
+    if (isInitialHydration) {
       return status;
     }
 
@@ -2458,6 +2614,106 @@ export function useAppStore(pb: PocketBase) {
       unsubMembers.then((fn) => fn()).catch(() => {});
     };
   }, [pb, isAdministrator]);
+
+  useEffect(() => {
+    if (!activeProject) {
+      setProjectPresenceEntries([]);
+      setProjectPresenceClockMs(Date.now());
+      projectPresenceActivityStateRef.current = {};
+      projectPresenceInactiveLogRef.current = {};
+      return;
+    }
+
+    const project = activeProject;
+    const projectId = project.id;
+    let cancelled = false;
+
+    void syncProjectPresence(project, currentViewRef.current).catch(console.error);
+
+    pb.collection(PROJECT_PRESENCE_COLLECTION)
+      .getFullList({ filter: `project="${projectId}"`, sort: "-last_seen,user_name" })
+      .then((records) => {
+        if (cancelled) return;
+        setProjectPresenceEntries(sortProjectPresenceEntries(records.map(toProjectPresenceEntry)));
+      })
+      .catch(console.error);
+
+    const unsubPresence = pb.collection(PROJECT_PRESENCE_COLLECTION).subscribe("*", (event) => {
+      if (event.record.project !== projectId) return;
+      const next = toProjectPresenceEntry(event.record);
+      setProjectPresenceEntries((prev) => {
+        if (event.action === "delete") {
+          return prev.filter((entry) => entry.id !== event.record.id);
+        }
+        const withoutCurrent = prev.filter((entry) => entry.id !== event.record.id);
+        return sortProjectPresenceEntries([...withoutCurrent, next]);
+      });
+    });
+
+    const heartbeatId = window.setInterval(() => {
+      if (cancelled) return;
+      void syncProjectPresence(project, currentViewRef.current).catch(console.error);
+    }, PROJECT_PRESENCE_HEARTBEAT_MS);
+
+    const refreshId = window.setInterval(() => {
+      if (cancelled) return;
+      setProjectPresenceClockMs(Date.now());
+    }, PROJECT_PRESENCE_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(heartbeatId);
+      window.clearInterval(refreshId);
+      setProjectPresenceEntries([]);
+      setProjectPresenceClockMs(Date.now());
+      projectPresenceActivityStateRef.current = {};
+      projectPresenceInactiveLogRef.current = {};
+      unsubPresence.then((fn) => fn()).catch(() => {});
+      void clearProjectPresence(projectId);
+    };
+  }, [activeProject, pb, clearProjectPresence, syncProjectPresence]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    void syncProjectPresence(activeProject, view).catch(console.error);
+  }, [activeProject, view, syncProjectPresence]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+
+    const nextState: Record<string, { lastSeen: string; active: boolean }> = {};
+    const previousState = projectPresenceActivityStateRef.current;
+
+    for (const entry of projectPresenceEntries) {
+      const currentlyActive = isProjectPresenceEntryActive(entry, projectPresenceClockMs);
+      nextState[entry.id] = { lastSeen: entry.lastSeen, active: currentlyActive };
+
+      const previous = previousState[entry.id];
+      const staleTransition = previous?.active && !currentlyActive;
+      if (staleTransition && projectPresenceInactiveLogRef.current[entry.id] !== entry.lastSeen) {
+        const userLabel = entry.userName || entry.userIdentifier || "Unknown user";
+        void logAction(
+          activeProject.id,
+          "presence.inactive",
+          `Marked "${userLabel}" inactive after presence heartbeat timeout`,
+          entry.id,
+        );
+        projectPresenceInactiveLogRef.current[entry.id] = entry.lastSeen;
+      }
+
+      if (currentlyActive && previous?.lastSeen !== entry.lastSeen) {
+        delete projectPresenceInactiveLogRef.current[entry.id];
+      }
+    }
+
+    for (const entryId of Object.keys(projectPresenceInactiveLogRef.current)) {
+      if (!nextState[entryId]) {
+        delete projectPresenceInactiveLogRef.current[entryId];
+      }
+    }
+
+    projectPresenceActivityStateRef.current = nextState;
+  }, [activeProject, logAction, projectPresenceClockMs, projectPresenceEntries]);
 
   // ── Load project data + real-time when active project changes ─────────────
 
@@ -3781,12 +4037,44 @@ export function useAppStore(pb: PocketBase) {
     setAiCodingRelevantSegmentsSessions({});
   }, [activeProject?.id]);
 
+  const activeProjectPresence = sortProjectPresenceEntries((() => {
+    const activeEntries = projectPresenceEntries.filter((entry) => isProjectPresenceEntryActive(entry, projectPresenceClockMs));
+    const currentUserId = pb.authStore.record?.id;
+    if (!activeProject || !currentUserId) return activeEntries;
+
+    const hasLocalUserEntry = activeEntries.some((entry) => entry.userId === currentUserId);
+    if (hasLocalUserEntry) return activeEntries;
+
+    const nowIso = new Date(projectPresenceClockMs).toISOString();
+    return [
+      ...activeEntries,
+      {
+        id: presenceRecordIdRef.current ?? `local-${currentUserId}`,
+        projectId: activeProject.id,
+        userId: currentUserId,
+        userIdentifier: String(pb.authStore.record?.user_identifier ?? ""),
+        userName: String(pb.authStore.record?.name || pb.authStore.record?.email || ""),
+        clientId: presenceClientIdRef.current,
+        view: currentViewRef.current,
+        lastSeen: nowIso,
+        sessionStartedAt: presenceSessionStartedAtRef.current ?? nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ];
+  })());
+  const activeProjectPresenceUsers = [...new Map(
+    activeProjectPresence.map((entry) => [entry.userId, entry]),
+  ).values()];
+
   return {
     pb,
     isLocalWorkspace: isLocalBackendUrl(pb.baseURL),
     view, setView,
     projects, projectsLoading,
     activeProject,
+    activeProjectPresence,
+    activeProjectPresenceUsers,
     userRole,
     appRole,
     isAdministrator,
