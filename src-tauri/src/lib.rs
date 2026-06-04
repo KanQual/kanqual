@@ -1151,6 +1151,7 @@ struct OllamaDocumentSegmentsModelResponse {
 struct OllamaDocumentSegmentOutput {
     segment_type: String,
     speaker_id: String,
+    timestamp_text: String,
     start_offset: usize,
     end_offset: usize,
     sort_order: usize,
@@ -1314,6 +1315,141 @@ fn looks_like_named_speaker_label(value: &str) -> bool {
         return false;
     }
     true
+}
+
+fn is_interviewer_style_speaker_label(value: &str) -> bool {
+    let normalized = value
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '(' | ')' | '[' | ']'))
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "interviewer" | "moderator" | "facilitator" | "host" | "researcher" | "q" | "q1"
+    )
+}
+
+fn infer_inline_speaker_label(text: &str) -> Option<String> {
+    let first_line = text.lines().next()?.trim_start();
+    if first_line.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = first_line.strip_prefix('[') {
+        let end = rest.find(']')?;
+        let candidate = rest[..end].trim();
+        let after = rest[end + 1..].trim_start();
+        if candidate.len() < 1 || candidate.len() > 40 {
+            return None;
+        }
+        if !after.starts_with(':') && !after.starts_with('-') && !after.starts_with('—') {
+            return None;
+        }
+        if !candidate.chars().any(|ch| ch.is_alphabetic()) {
+            return None;
+        }
+        if !candidate
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || matches!(ch, ' ' | '_' | '-' | '.'))
+        {
+            return None;
+        }
+        return Some(candidate.to_string());
+    }
+
+    let delimiter_index = first_line
+        .find(':')
+        .or_else(|| first_line.find(" - "))
+        .or_else(|| first_line.find(" – "))
+        .or_else(|| first_line.find(" — "))?;
+    if delimiter_index == 0 || delimiter_index > 32 {
+        return None;
+    }
+    let candidate = first_line[..delimiter_index].trim();
+    if candidate.len() < 1 || candidate.len() > 32 {
+        return None;
+    }
+    if !candidate.chars().any(|ch| ch.is_alphabetic()) {
+        return None;
+    }
+    if !candidate
+        .chars()
+        .all(|ch| ch.is_alphanumeric() || matches!(ch, ' ' | '_' | '-' | '.'))
+    {
+        return None;
+    }
+    Some(candidate.to_string())
+}
+
+fn split_text_on_inline_speaker_labels(text: &str) -> Vec<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    for line in trimmed.split_inclusive('\n') {
+        let has_inline_label = infer_inline_speaker_label(line.trim_start()).is_some();
+        if has_inline_label && !current.trim().is_empty() {
+            segments.push(current.trim().to_string());
+            current.clear();
+        }
+        current.push_str(line);
+    }
+
+    if !current.trim().is_empty() {
+        segments.push(current.trim().to_string());
+    }
+
+    if segments.is_empty() {
+        vec![trimmed.to_string()]
+    } else {
+        segments
+    }
+}
+
+fn is_supported_timestamp_body(body: &str) -> bool {
+    let parts = body.split('-').map(str::trim).collect::<Vec<_>>();
+    if parts.is_empty() || parts.len() > 2 {
+        return false;
+    }
+    parts.iter().all(|part| {
+        let fields = part.split(':').collect::<Vec<_>>();
+        (fields.len() == 2 || fields.len() == 3)
+            && fields.iter().all(|field| !field.is_empty() && field.chars().all(|ch| ch.is_ascii_digit()))
+    })
+}
+
+fn extract_leading_timestamp_metadata(text: &str) -> (String, String) {
+    let trimmed = text.trim_start();
+    let leading_ws_len = text.len().saturating_sub(trimmed.len());
+    let leading_ws = &text[..leading_ws_len];
+    let mut remaining = trimmed;
+    let mut timestamps: Vec<String> = Vec::new();
+
+    loop {
+        let Some(rest) = remaining.strip_prefix('[') else {
+            break;
+        };
+        let Some(end) = rest.find(']') else {
+            break;
+        };
+        let candidate = rest[..end].trim();
+        if !is_supported_timestamp_body(candidate) {
+            break;
+        }
+        timestamps.push(format!("[{}]", candidate));
+        remaining = rest[end + 1..].trim_start();
+    }
+
+    let cleaned = if timestamps.is_empty() {
+        text.trim().to_string()
+    } else {
+        format!("{}{}", leading_ws, remaining).trim().to_string()
+    };
+
+    (cleaned, timestamps.join(" "))
 }
 
 #[derive(Deserialize)]
@@ -2641,6 +2777,7 @@ async fn ensure_backend_setup_http(
             { "name": "action", "type": "text", "required": true },
             { "name": "label", "type": "text", "required": true },
             { "name": "record_id", "type": "text" },
+            { "name": "details_json", "type": "json" },
             { "name": "occurred_at", "type": "autodate", "system": false, "hidden": false, "presentable": false, "onCreate": true, "onUpdate": false },
             { "name": "restored_at", "type": "text" }
         ]
@@ -5531,7 +5668,7 @@ async fn chat_with_project_ollama(
     };
 
     let system_prompt = format!(
-        "You are Kanqual AI Assist. {} If the context does not support a claim, say that you do not know. Be concise and grounded. When you use retrieved context, add inline citation markers like [1] or [2] that refer to the numbered context blocks below. Only cite numbers that appear in the retrieved context, and place citations immediately after the supported claim.\n\nRetrieved project context:\n{}",
+        "You are Kanqual AI Assist. {} If the context does not support a claim, say that you do not know. Do not infer facts, intent, prevalence, or chronology beyond the retrieved context. If the retrieved context is incomplete or mixed, say so plainly. Answer the user's question directly first, then add only the shortest necessary explanation. Use 1-3 short paragraphs or a short bullet list when that is clearer. When you use retrieved context, add inline citation markers like [1] or [2] that refer to the numbered context blocks below. Only cite numbers that appear in the retrieved context, place citations immediately after the supported claim, and do not cite unsupported claims.\n\nRetrieved project context:\n{}",
         context_rule,
         context_block
     );
@@ -6000,14 +6137,15 @@ async fn generate_code_conceptual_summary_with_ollama(
     let system_prompt =
         "You are a qualitative research assistant helping analyse coded data from a research project.\n\n\
         Given a code and its associated annotations, provide:\n\
-        1. A narrative conceptual summary of ~200 words describing what this code represents, the themes and patterns visible across its annotations, and how the code appears to be used in the data.\n\
-        2. Up to 5 key insights or standout observations drawn from the data. These can cover: recurring themes, notable patterns, how many documents mention specific aspects, interesting contrasts, or any other meaningful dimension.\n\n\
+        1. A short conceptual summary of about 120-180 words describing what this code appears to represent, the main themes visible across its annotations, and how the code seems to function in the data.\n\
+        2. 3 to 5 key insights or standout observations drawn from the annotations. These can cover recurring themes, notable contrasts, edge cases, or other meaningful qualitative patterns.\n\n\
+        Stay strictly within the provided annotations. Do not infer prevalence, frequency, or project-wide importance unless the annotations clearly support that claim. If the evidence is mixed or limited, say so directly.\n\n\
         Each annotation is identified by a number in square brackets (e.g. [1], [2]). \
         Cite specific annotations inline wherever they support your points — for example: \"resilience appears across multiple accounts [1][4]\". \
         Cite as many annotations as are genuinely relevant. Citations should appear naturally within sentences, not only at the end.\n\n\
         Format your response exactly as:\n\
         ## Summary\n\
-        [narrative with inline citations]\n\n\
+        [1 short paragraph with inline citations]\n\n\
         ## Key Insights\n\
         1. [insight with inline citations]\n\
         2. [insight with inline citations]\n\
@@ -6092,6 +6230,7 @@ async fn generate_most_typical_annotation_with_ollama(
         "You are a qualitative research assistant. Given a code and its annotations, identify the \
         {return_count} annotations that best exemplify the core meaning of this code - the most canonical, \
         representative examples a researcher would use to illustrate it.\n\n\
+        Base your judgment only on the provided annotations. Do not infer missing context.\n\n\
         Return strict JSON only in this exact shape (no markdown fences, no extra keys):\n\
         {{\"annotations\": [{{\"annotation_index\": N, \"reasoning\": \"1-2 sentence explanation\"}}]}}\n\
         Return exactly {return_count} items. N must be a number between 1 and the total number of annotations provided."
@@ -6215,14 +6354,16 @@ async fn process_document_with_ollama(
         - \"metadata\": document header information such as title, date, location, participant names, or other framing text before the interview begins\n\
         - \"question\": a question, prompt, or speaking turn from the interviewer, moderator, or facilitator\n\
         - \"answer\": a response or speaking turn from an interviewee, participant, or respondent\n\n\
+        Treat inline speaker labels such as \"[S01]:\", \"S01:\", \"P1:\", \"Interviewer:\", or similar turn prefixes as part of question or answer turns, not as metadata, when they introduce spoken content.\n\
         Also identify only speaker names that appear in the transcript format itself, meaning real names used as speaker labels or turn labels.\n\
         Do not identify names mentioned only inside the body text.\n\
         Do not include generic role words by themselves, such as \"Interviewer\", \"Participant\", or \"Moderator\", unless they are clearly used as actual names in the speaker label.\n\n\
         Return strict JSON only, with no markdown fences and no extra keys, in exactly this shape:\n\
         {\"segments\": [{\"segmentType\": \"...\", \"speakerId\": \"...\", \"text\": \"...\"}, ...], \"properNames\": [\"...\", \"...\"]}\n\n\
         Rules:\n\
-        - The segments must cover the entire text; every character must appear in exactly one segment\n\
+        - The segments should cover the entire text in order, with no substantive omissions or duplication\n\
         - Preserve the original text verbatim within each segment; do not rephrase, summarize, or modify wording\n\
+        - Minor boundary differences are acceptable only if the original text is still preserved exactly\n\
         - speakerId is the speaker label exactly as it appears in the text, for example \"Interviewer\", \"I\", or \"P1\"; use an empty string if not applicable\n\
         - properNames must be exact text snippets copied from the source text, not paraphrases\n\
         - properNames should contain only likely real speaker names worth reviewing for anonymization\n\
@@ -6282,27 +6423,53 @@ async fn process_document_with_ollama(
         let mut chunk_built = String::new();
 
         for seg in parsed.segments.into_iter() {
-            let text = seg.text.unwrap_or_default();
-            let text = text.trim();
-            if text.is_empty() { continue; }
-            if !chunk_built.is_empty() { chunk_built.push_str("\n\n"); }
-            let start_offset = base_offset + chunk_built.len();
-            chunk_built.push_str(text);
-            let end_offset = base_offset + chunk_built.len();
-            let segment_type = match seg.segment_type.trim().to_ascii_lowercase().as_str() {
+            let original_text = seg.text.unwrap_or_default();
+            let pieces = split_text_on_inline_speaker_labels(&original_text);
+            if pieces.is_empty() { continue; }
+            let model_speaker_id = seg.speaker_id
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let model_segment_type = match seg.segment_type.trim().to_ascii_lowercase().as_str() {
                 "metadata" => "metadata",
                 "question"  => "question",
                 _ => "answer",
             };
-            segments_output.push(OllamaDocumentSegmentOutput {
-                segment_type: segment_type.to_string(),
-                speaker_id: seg.speaker_id.unwrap_or_default().trim().to_string(),
-                start_offset,
-                end_offset,
-                sort_order: segments_output.len(),
-                text: text.to_string(),
-                chunk_index,
-            });
+
+            for (piece_index, text) in pieces.into_iter().enumerate() {
+                if !chunk_built.is_empty() { chunk_built.push_str("\n\n"); }
+                let start_offset = base_offset + chunk_built.len();
+                chunk_built.push_str(&text);
+                let end_offset = base_offset + chunk_built.len();
+                let inferred_speaker_id = infer_inline_speaker_label(&text);
+                let mut segment_type = model_segment_type;
+                let speaker_id = if !model_speaker_id.is_empty() && piece_index == 0 {
+                    model_speaker_id.clone()
+                } else {
+                    inferred_speaker_id.unwrap_or_default()
+                };
+                let (text, timestamp_text) = extract_leading_timestamp_metadata(&text);
+                if text.trim().is_empty() {
+                    continue;
+                }
+                if segment_type == "metadata" && !speaker_id.is_empty() {
+                    segment_type = if is_interviewer_style_speaker_label(&speaker_id) {
+                        "question"
+                    } else {
+                        "answer"
+                    };
+                }
+                segments_output.push(OllamaDocumentSegmentOutput {
+                    segment_type: segment_type.to_string(),
+                    speaker_id,
+                    timestamp_text,
+                    start_offset,
+                    end_offset,
+                    sort_order: segments_output.len(),
+                    text,
+                    chunk_index,
+                });
+            }
         }
 
         if !processed_content.is_empty() && !chunk_built.is_empty() {
@@ -6374,14 +6541,16 @@ fn document_processing_system_prompt() -> &'static str {
     - \"metadata\": document header information such as title, date, location, participant names, or other framing text before the interview begins\n\
     - \"question\": a question, prompt, or speaking turn from the interviewer, moderator, or facilitator\n\
     - \"answer\": a response or speaking turn from an interviewee, participant, or respondent\n\n\
+    Treat inline speaker labels such as \"[S01]:\", \"S01:\", \"P1:\", \"Interviewer:\", or similar turn prefixes as part of question or answer turns, not as metadata, when they introduce spoken content.\n\
     Also identify only speaker names that appear in the transcript format itself, meaning real names used as speaker labels or turn labels.\n\
     Do not identify names mentioned only inside the body text.\n\
     Do not include generic role words by themselves, such as \"Interviewer\", \"Participant\", or \"Moderator\", unless they are clearly used as actual names in the speaker label.\n\n\
     Return strict JSON only, with no markdown fences and no extra keys, in exactly this shape:\n\
     {\"segments\": [{\"segmentType\": \"...\", \"speakerId\": \"...\", \"text\": \"...\"}, ...], \"properNames\": [\"...\", \"...\"]}\n\n\
     Rules:\n\
-    - The segments must cover the entire text; every character must appear in exactly one segment\n\
+    - The segments should cover the entire text in order, with no substantive omissions or duplication\n\
     - Preserve the original text verbatim within each segment; do not rephrase, summarize, or modify wording\n\
+    - Minor boundary differences are acceptable only if the original text is still preserved exactly\n\
     - speakerId is the speaker label exactly as it appears in the text, for example \"Interviewer\", \"I\", or \"P1\"; use an empty string if not applicable\n\
     - properNames must be exact text snippets copied from the source text, not paraphrases\n\
     - properNames should contain only likely real speaker names worth reviewing for anonymization\n\
@@ -6448,27 +6617,53 @@ async fn process_document_chunk_with_ollama(
     let mut processed_content = String::new();
     let mut segments: Vec<OllamaDocumentSegmentOutput> = Vec::new();
     for seg in parsed.segments.into_iter() {
-        let text = seg.text.unwrap_or_default();
-        let text = text.trim();
-        if text.is_empty() { continue; }
-        if !processed_content.is_empty() { processed_content.push_str("\n\n"); }
-        let start_offset = processed_content.len();
-        processed_content.push_str(text);
-        let end_offset = processed_content.len();
-        let segment_type = match seg.segment_type.trim().to_ascii_lowercase().as_str() {
+        let original_text = seg.text.unwrap_or_default();
+        let pieces = split_text_on_inline_speaker_labels(&original_text);
+        if pieces.is_empty() { continue; }
+        let model_speaker_id = seg.speaker_id
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let model_segment_type = match seg.segment_type.trim().to_ascii_lowercase().as_str() {
             "metadata" => "metadata",
             "question" => "question",
             _ => "answer",
         };
-        segments.push(OllamaDocumentSegmentOutput {
-            segment_type: segment_type.to_string(),
-            speaker_id: seg.speaker_id.unwrap_or_default().trim().to_string(),
-            start_offset,
-            end_offset,
-            sort_order: segments.len(),
-            text: text.to_string(),
-            chunk_index: request.chunk_index,
-        });
+
+        for (piece_index, text) in pieces.into_iter().enumerate() {
+            if !processed_content.is_empty() { processed_content.push_str("\n\n"); }
+            let start_offset = processed_content.len();
+            processed_content.push_str(&text);
+            let end_offset = processed_content.len();
+            let inferred_speaker_id = infer_inline_speaker_label(&text);
+            let mut segment_type = model_segment_type;
+            let speaker_id = if !model_speaker_id.is_empty() && piece_index == 0 {
+                model_speaker_id.clone()
+            } else {
+                inferred_speaker_id.unwrap_or_default()
+            };
+            let (text, timestamp_text) = extract_leading_timestamp_metadata(&text);
+            if text.trim().is_empty() {
+                continue;
+            }
+            if segment_type == "metadata" && !speaker_id.is_empty() {
+                segment_type = if is_interviewer_style_speaker_label(&speaker_id) {
+                    "question"
+                } else {
+                    "answer"
+                };
+            }
+            segments.push(OllamaDocumentSegmentOutput {
+                segment_type: segment_type.to_string(),
+                speaker_id,
+                timestamp_text,
+                start_offset,
+                end_offset,
+                sort_order: segments.len(),
+                text,
+                chunk_index: request.chunk_index,
+            });
+        }
     }
     if segments.is_empty() {
         return Err(format!("The configured LLM returned no segments for chunk {}.", request.chunk_index + 1));
@@ -6553,13 +6748,15 @@ async fn generate_code_decomposition_with_ollama(
         "You are a qualitative research assistant. Analyse whether a code's annotations form a \
         coherent whole or whether some are outliers, or whether there are distinct sub-clusters \
         that do not fit the core concept.\n\n\
-        Each annotation is identified by [N]. Cite specific annotations inline when discussing them.\n\n\
+        Each annotation is identified by [N]. Cite specific annotations inline when discussing them. \
+        Stay strictly within the provided annotations. Do not infer broader project patterns unless the evidence here clearly supports them.\n\n\
         Format your response exactly as:\n\
         ## Decomposition Analysis\n\
-        [narrative — does the code hold together? Any internal tensions or sub-themes?]\n\n\
+        [1 short paragraph - does the code hold together? Any internal tensions or sub-themes?]\n\n\
         ## Outliers or Sub-clusters\n\
-        [Describe specific outlier annotations or sub-clusters with citation numbers, \
-        or write \"None identified — the code appears cohesive.\" if all annotations fit well]\n\n\
+        1. [specific outlier, sub-cluster, or tension with citation numbers]\n\
+        2. [specific outlier, sub-cluster, or tension with citation numbers]\n\
+        Or write exactly: \"None identified - the code appears cohesive.\"\n\n\
         Use plain prose only. No markdown beyond the ## headers and [N] citation markers.";
 
     let user_message = format!(
@@ -6627,11 +6824,14 @@ async fn generate_code_position_with_ollama(
         a sample of its annotations, and the full codebook hierarchy, analyse whether this code is \
         well-positioned. Consider: Does it overlap with other codes? Should it be a child of another \
         code, or move to a higher level? Could it be merged with or split from another code?\n\n\
+        Base your reasoning only on the provided annotations and codebook. Do not infer unseen project usage. If the evidence is limited, say so.\n\n\
         Format your response exactly as:\n\
         ## Position Analysis\n\
-        [narrative about the code's current placement and fit within the codebook]\n\n\
+        [1 short paragraph about the code's current placement and fit within the codebook]\n\n\
         ## Suggestions\n\
-        1. [concrete suggestion, or \"No changes suggested.\" if the position is appropriate]\n\n\
+        1. [concrete suggestion]\n\
+        2. [optional second suggestion]\n\
+        Or write exactly: \"No changes suggested.\"\n\n\
         Use plain prose only. No markdown beyond the ## headers and numbered list.";
 
     let user_message = format!(
@@ -6698,6 +6898,7 @@ async fn generate_code_unique_annotations_with_ollama(
         "You are a qualitative research assistant. Identify the {return_count} annotations that are most \
         semantically unique - the ones most distinct from all others for this code, capturing edge \
         cases, unusual dimensions, or aspects underrepresented by the rest.\n\n\
+        Base your judgment only on the provided annotations. Do not infer missing context.\n\n\
         Return strict JSON only in this exact shape (no markdown fences, no extra keys):\n\
         {{\"annotations\": [{{\"annotation_index\": N, \"reasoning\": \"1-2 sentence explanation\"}}]}}\n\
         Return exactly {return_count} items. N must be a number between 1 and the total number of annotations provided."

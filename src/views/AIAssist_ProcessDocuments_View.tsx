@@ -161,6 +161,11 @@ function ReviewResultsPanel({
                             placeholder="Unlabeled speaker"
                           />
                         </label>
+                        {segment.timestampText.trim() && (
+                          <div className="ai-process-doc-segment-timestamp">
+                            {segment.timestampText.trim()}
+                          </div>
+                        )}
                       </div>
                       <label className="form-label ai-process-doc-segment-text-field">
                         Element text

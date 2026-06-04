@@ -5,6 +5,7 @@ export type ProcessedTranscriptSegmentType = "metadata" | "question" | "answer";
 export type ProcessedTranscriptSegment = {
   segmentType: ProcessedTranscriptSegmentType;
   speakerId: string;
+  timestampText: string;
   startOffset: number;
   endOffset: number;
   sortOrder: number;
@@ -32,6 +33,7 @@ export function parseProcessedTranscriptSegments(value: unknown): ProcessedTrans
         return {
           segmentType: normalizeSegmentType(record.segmentType),
           speakerId: String(record.speakerId ?? "").trim(),
+          timestampText: String(record.timestampText ?? "").trim(),
           startOffset: Number(record.startOffset ?? 0),
           endOffset: Number(record.endOffset ?? 0),
           sortOrder: Number(record.sortOrder ?? index),
@@ -55,6 +57,7 @@ export function buildProcessedTranscriptContent(
       ...segment,
       segmentType: normalizeSegmentType(segment.segmentType),
       speakerId: String(segment.speakerId ?? "").trim(),
+      timestampText: String(segment.timestampText ?? "").trim(),
       text: String(segment.text ?? "").trim(),
       sortOrder: index,
       chunkIndex: Number(segment.chunkIndex ?? 0),
@@ -113,6 +116,11 @@ export function ProcessedTranscriptView({
               aria-hidden="true"
             />
             <div className="processed-transcript-body">
+              {segment.timestampText.trim() && (
+                <div className="processed-transcript-timestamp">
+                  {segment.timestampText.trim()}
+                </div>
+              )}
               <div className="processed-transcript-text">
                 {renderSegmentText(segment)}
               </div>

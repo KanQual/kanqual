@@ -410,7 +410,44 @@ function DocumentDetail({
         "document.create",
         `Created editable copy of "${row.name}"`,
         newDocumentId,
+        {
+          entityType: "document",
+          copiedFromDocumentId: row.id,
+          copiedCaseCount: caseDocs.length,
+          copiedCaseIds: caseDocs.map((record) => String(record.case ?? "")),
+          copiedAttributeValueCount: attributeValues.length,
+          copiedAttributeIds: attributeValues.map((record) => String(record.attribute ?? "")),
+          copiedNotes: Boolean(row.notes),
+        },
       );
+      if (caseDocs.length > 0) {
+        await logAction(
+          activeProject.id,
+          "document.associations",
+          `Copied ${caseDocs.length} case association${caseDocs.length === 1 ? "" : "s"} to editable copy of "${row.name}"`,
+          newDocumentId,
+          {
+            entityType: "document_associations",
+            copiedFromDocumentId: row.id,
+            copiedCaseIds: caseDocs.map((record) => String(record.case ?? "")),
+            copiedAssociationCount: caseDocs.length,
+          },
+        );
+      }
+      if (attributeValues.length > 0) {
+        await logAction(
+          activeProject.id,
+          "document_attribute.update",
+          `Copied ${attributeValues.length} document attribute value${attributeValues.length === 1 ? "" : "s"} to editable copy of "${row.name}"`,
+          newDocumentId,
+          {
+            entityType: "document_attribute_values",
+            copiedFromDocumentId: row.id,
+            changedAttributeIds: attributeValues.map((record) => String(record.attribute ?? "")),
+            changedValueCount: attributeValues.length,
+          },
+        );
+      }
     }
   }
 
@@ -1314,6 +1351,7 @@ function NewDocumentModal({
     canCurrentUser,
     createProjectUploadedFileRecord,
     createCase,
+    logAction,
     updateProjectUploadedFileStatus,
     pb,
     activeProject,
@@ -1638,6 +1676,7 @@ function NewDocumentModal({
     const definitionsByName = new Map(
       attributeDefs.map((definition) => [definition.name.trim().toLowerCase(), definition.id]),
     );
+    const createdDefinitions: Array<{ id: string; name: string }> = [];
     const attributeMappings = csvMappings.filter((mapping) =>
       mapping.role === "attribute" && mapping.attributeName.trim(),
     );
@@ -1655,6 +1694,24 @@ function NewDocumentModal({
         deleted_at: "",
       });
       definitionsByName.set(normalized, created.id);
+      createdDefinitions.push({ id: created.id, name: String(created.name ?? mapping.attributeName.trim()) });
+    }
+
+    if (createdDefinitions.length > 0) {
+      await logAction(
+        activeProject.id,
+        "document_attribute.create",
+        `Added ${createdDefinitions.length} document attribute definition${createdDefinitions.length === 1 ? "" : "s"} from CSV import`,
+        createdDefinitions[0]?.id,
+        {
+          entityType: "document_attribute",
+          importMode: "csv",
+          createdAttributeIds: createdDefinitions.map((definition) => definition.id),
+          createdAttributeNames: createdDefinitions.map((definition) => definition.name),
+          createdAttributeCount: createdDefinitions.length,
+          dataType: "text",
+        },
+      );
     }
 
     return definitionsByName;
@@ -1766,6 +1823,9 @@ function NewDocumentModal({
         : null;
 
       let createdCount = 0;
+      const changedDocumentIds = new Set<string>();
+      const changedAttributeIds = new Set<string>();
+      let changedValueCount = 0;
       for (let index = 0; index < csvRows.length; index += 1) {
         const row = csvRows[index];
         const document = await addDocument(
@@ -1797,6 +1857,9 @@ function NewDocumentModal({
             value,
             deleted_at: "",
           });
+          changedDocumentIds.add(document.id);
+          changedAttributeIds.add(attributeId);
+          changedValueCount += 1;
         }
       }
 
@@ -1808,6 +1871,21 @@ function NewDocumentModal({
           csvUploadedFileRecord.id,
           "processed",
           `Created ${createdCount} document${createdCount === 1 ? "" : "s"} from retained CSV upload.`,
+        );
+      }
+      if (activeProject && changedValueCount > 0) {
+        await logAction(
+          activeProject.id,
+          "document_attribute.update",
+          `Imported ${changedValueCount} document attribute value${changedValueCount === 1 ? "" : "s"} from CSV`,
+          Array.from(changedDocumentIds)[0],
+          {
+            entityType: "document_attribute_values",
+            importMode: "csv",
+            changedDocumentIds: Array.from(changedDocumentIds),
+            changedAttributeIds: Array.from(changedAttributeIds),
+            changedValueCount,
+          },
         );
       }
       onDone();
@@ -2520,6 +2598,7 @@ export function DocumentsView() {
       };
 
       const nextValues = { ...attributeValues };
+      const touchedDocumentIds: string[] = [];
       await Promise.all(rows.map(async (row) => {
         const key = valueKey(row.id, attrId);
         const existing = nextValues[key];
@@ -2531,6 +2610,7 @@ export function DocumentsView() {
           });
           if (value.trim()) nextValues[key] = { ...existing, value };
           else delete nextValues[key];
+          touchedDocumentIds.push(row.id);
         } else if (value.trim()) {
           const valueRecord = await pb.collection("document_attribute_values").create({
             document: row.id,
@@ -2539,6 +2619,7 @@ export function DocumentsView() {
             deleted_at: "",
           });
           nextValues[key] = { id: valueRecord.id, documentId: row.id, attributeId: attrId, value };
+          touchedDocumentIds.push(row.id);
         }
       }));
 
@@ -2554,6 +2635,13 @@ export function DocumentsView() {
         draft.id ? "document_attribute.update" : "document_attribute.create",
         `${draft.id ? "Updated" : "Added"} document attribute "${nextDef.name}"`,
         attrId,
+        {
+          entityType: "document_attribute",
+          changedDocumentIds: touchedDocumentIds,
+          changedValueCount: touchedDocumentIds.length,
+          dataType: nextDef.dataType,
+          isDefinitionUpdate: Boolean(draft.id),
+        },
       );
       setAttributeValueDraft(null);
     } catch (e) {

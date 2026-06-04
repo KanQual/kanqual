@@ -7,6 +7,7 @@ import type { AppRole, PendingImportedUser, ProjectLogEntry, ProjectPresenceEntr
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { createUserAccount } from "../lib/pb";
 import { HelpIcon } from "../components/AppIcons";
+type ProjectLogDetails = Record<string, unknown>;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -353,7 +354,7 @@ function AddMemberModal({
   pb: PocketBase;
   onDone: () => void;
   onClose: () => void;
-  onLog: (action: string, label: string) => void;
+  onLog: (action: string, label: string, recordId?: string, details?: ProjectLogDetails) => void;
 }) {
   const [allUsers, setAllUsers]   = useState<{ id: string; name: string; email: string; userIdentifier: string }[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -393,7 +394,7 @@ function AddMemberModal({
     setLoading(true);
     setError(null);
     try {
-      await pb.collection("project_members").create({
+      const record = await pb.collection("project_members").create({
         project:    projectId,
         user:       selectedId,
         user_identifier: allUsers.find((u) => u.id === selectedId)?.userIdentifier || "",
@@ -401,7 +402,12 @@ function AddMemberModal({
         created_by: currentUserId,
       });
       const added = allUsers.find((u) => u.id === selectedId);
-      if (added) onLog("member.add", `Added "${added.name}" as ${role}`);
+      if (added) onLog("member.add", `Added "${added.name}" as ${role}`, record.id, {
+        entityType: "project_member",
+        userId: selectedId,
+        userIdentifier: added.userIdentifier,
+        role,
+      });
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add member.");
@@ -496,7 +502,7 @@ function EditMemberModal({
   allowedRoles: Role[];
   soleOwnerLocked: boolean;
   onDone: (updatedRole: Role) => void;
-  onLog: (action: string, label: string) => void;
+  onLog: (action: string, label: string, recordId?: string, details?: ProjectLogDetails) => void;
   onClose: () => void;
 }) {
   const [role, setRole] = useState<Role>(
@@ -519,7 +525,13 @@ function EditMemberModal({
     try {
       if (role !== row.role) {
         await pb.collection("project_members").update(row.memberId, { role });
-        onLog("member.update", `Changed "${row.name}" role from ${row.role} to ${role}`);
+        onLog("member.update", `Changed "${row.name}" role from ${row.role} to ${role}`, row.memberId, {
+          entityType: "project_member",
+          userId: row.userId,
+          userIdentifier: row.userIdentifier,
+          previousRole: row.role,
+          nextRole: role,
+        });
       }
       onDone(role);
     } catch (e) {
@@ -1124,7 +1136,12 @@ export function UsersView() {
         `Removed "${confirmDelete.name}" from project`,
       );
       await pb.collection("project_members").delete(confirmDelete.memberId);
-      if (activeProject) await logAction(activeProject.id, "member.remove", `Removed "${confirmDelete.name}" from project`);
+      if (activeProject) await logAction(activeProject.id, "member.remove", `Removed "${confirmDelete.name}" from project`, confirmDelete.memberId, {
+        entityType: "project_member",
+        userId: confirmDelete.userId,
+        userIdentifier: confirmDelete.userIdentifier,
+        role: confirmDelete.role,
+      });
       setRows((prev) => prev.filter((r) => r.memberId !== confirmDelete.memberId));
       setSelectedRow((prev) => (prev?.memberId === confirmDelete.memberId ? null : prev));
       setConfirmDelete(null);
@@ -1159,7 +1176,7 @@ export function UsersView() {
           canEdit={canEditRoleForRow(editRow)}
           allowedRoles={getEditableRolesForRow(editRow)}
           soleOwnerLocked={editRow.role === "owner" && ownerCount <= 1}
-          onLog={(action, label) => activeProject && logAction(activeProject.id, action, label)}
+          onLog={(action, label, recordId, details) => activeProject && logAction(activeProject.id, action, label, recordId, details)}
           onDone={(updatedRole) => {
               setRows((prev) =>
                 prev.map((row) => (row.memberId === editRow.memberId ? { ...row, role: updatedRole } : row)),
@@ -1713,7 +1730,7 @@ export function UsersView() {
           pb={pb}
           onDone={() => { setAddMemberOpen(false); loadMembers(); }}
           onClose={() => setAddMemberOpen(false)}
-          onLog={(action, label) => activeProject && logAction(activeProject.id, action, label)}
+          onLog={(action, label, recordId, details) => activeProject && logAction(activeProject.id, action, label, recordId, details)}
         />
       )}
 
@@ -1725,7 +1742,7 @@ export function UsersView() {
           canEdit={canEditRoleForRow(editRow)}
           allowedRoles={getEditableRolesForRow(editRow)}
           soleOwnerLocked={editRow.role === "owner" && ownerCount <= 1}
-          onLog={(action, label) => activeProject && logAction(activeProject.id, action, label)}
+          onLog={(action, label, recordId, details) => activeProject && logAction(activeProject.id, action, label, recordId, details)}
           onDone={(updatedRole) => {
             setRows((prev) =>
               prev.map((row) => (row.memberId === editRow.memberId ? { ...row, role: updatedRole } : row)),

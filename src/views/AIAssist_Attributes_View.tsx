@@ -1091,35 +1091,57 @@ function AIAssistAttributeWorkspace({
     setSuggestionError("");
     try {
       if (kind === "case") {
+        let recordId = existingValueRow?.recordId;
         if (existingValueRow?.recordId) {
           await pb.collection("case_attribute_values").update(existingValueRow.recordId, {
             value: row.suggestedValue,
             deleted_at: "",
           });
         } else {
-          await pb.collection("case_attribute_values").create({
+          const created = await pb.collection("case_attribute_values").create({
             case: row.ownerId,
             attribute: selectedAttribute.id,
             value: row.suggestedValue,
             deleted_at: "",
           });
+          recordId = created.id;
         }
-        await logAction(activeProject.id, "case_attribute.update", `Accepted AI suggestion for case attribute "${selectedAttribute.name}"`, selectedAttribute.id);
+        await logAction(activeProject.id, "case_attribute.update", `Accepted AI suggestion for case attribute "${selectedAttribute.name}"`, recordId ?? selectedAttribute.id, {
+          entityType: "case_attribute_value",
+          attributeId: selectedAttribute.id,
+          attributeName: selectedAttribute.name,
+          ownerId: row.ownerId,
+          ownerName: row.ownerName,
+          source: "ai_suggestion",
+          operation: existingValueRow?.recordId ? "update" : "create",
+          changedValueCount: 1,
+        });
       } else {
+        let recordId = existingValueRow?.recordId;
         if (existingValueRow?.recordId) {
           await pb.collection("document_attribute_values").update(existingValueRow.recordId, {
             value: row.suggestedValue,
             deleted_at: "",
           });
         } else {
-          await pb.collection("document_attribute_values").create({
+          const created = await pb.collection("document_attribute_values").create({
             document: row.ownerId,
             attribute: selectedAttribute.id,
             value: row.suggestedValue,
             deleted_at: "",
           });
+          recordId = created.id;
         }
-        await logAction(activeProject.id, "document_attribute.update", `Accepted AI suggestion for document attribute "${selectedAttribute.name}"`, selectedAttribute.id);
+        await logAction(activeProject.id, "document_attribute.update", `Accepted AI suggestion for document attribute "${selectedAttribute.name}"`, recordId ?? selectedAttribute.id, {
+          entityType: "document_attribute_value",
+          attributeId: selectedAttribute.id,
+          attributeName: selectedAttribute.name,
+          ownerId: row.ownerId,
+          ownerName: row.ownerName,
+          source: "ai_suggestion",
+          operation: existingValueRow?.recordId ? "update" : "create",
+          changedValueCount: 1,
+        });
       }
       reloadValueRows();
     } catch (nextError) {
@@ -1450,6 +1472,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
     pb,
     canCurrentUser,
     deleteAiAttributeSuggestionRun,
+    logAction,
     setView,
   } = useStore();
   const [openRow, setOpenRow] = useState<SavedAttributeSuggestionRow | null>(null);
@@ -1629,6 +1652,23 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
               deleted_at: "",
             }),
           ),
+      );
+      const changedOwnerIds = Object.entries(valuesByOwner)
+        .map(([ownerId, value]) => [ownerId, value.trim()] as const)
+        .filter(([, value]) => Boolean(value))
+        .map(([ownerId]) => ownerId);
+      await logAction(
+        activeProject.id,
+        currentTargetKind === "case" ? "case_attribute.create" : "document_attribute.create",
+        `Added ${currentTargetKind} attribute "${draft.name.trim()}"`,
+        created.id,
+        {
+          entityType: currentTargetKind === "case" ? "case_attribute" : "document_attribute",
+          dataType: draft.dataType,
+          changedOwnerIds,
+          changedValueCount: changedOwnerIds.length,
+          createdWithAiAssist: true,
+        },
       );
       if (currentTargetKind === "case") {
         reloadCaseCoverage();

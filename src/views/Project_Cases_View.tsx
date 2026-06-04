@@ -378,9 +378,14 @@ function CaseDetail({
       await updateCase(row.id, { name: payload.name, notes: payload.notes });
 
       const nextAttributeValues = { ...caseAttributeValues };
+      const changedAttributes: Array<{ id: string; name: string; dataType: AttributeDataType }> = [];
       await Promise.all(attributeDefs.map(async (attr) => {
         const nextValue = payload.valuesByAttribute[attr.id] ?? "";
         const existing = nextAttributeValues[attr.id];
+        const previousValue = existing?.value ?? "";
+        if (previousValue === nextValue) {
+          return;
+        }
         if (existing?.id) {
           await pb.collection("case_attribute_values").update(existing.id, {
             value: nextValue,
@@ -388,6 +393,7 @@ function CaseDetail({
           });
           if (nextValue.trim()) nextAttributeValues[attr.id] = { ...existing, value: nextValue };
           else delete nextAttributeValues[attr.id];
+          changedAttributes.push({ id: attr.id, name: attr.name, dataType: attr.dataType });
         } else if (nextValue.trim()) {
           const record = await pb.collection("case_attribute_values").create({
             case: row.id,
@@ -401,8 +407,27 @@ function CaseDetail({
             attributeId: attr.id,
             value: nextValue,
           };
+          changedAttributes.push({ id: attr.id, name: attr.name, dataType: attr.dataType });
         }
       }));
+
+      if (activeProject && changedAttributes.length > 0) {
+        await logAction(
+          activeProject.id,
+          "case_attribute.update",
+          `Updated ${changedAttributes.length} case attribute value${changedAttributes.length === 1 ? "" : "s"} for "${payload.name}"`,
+          row.id,
+          {
+            entityType: "case_attribute_values",
+            caseId: row.id,
+            caseName: payload.name,
+            changedAttributeIds: changedAttributes.map((attr) => attr.id),
+            changedAttributeNames: changedAttributes.map((attr) => attr.name),
+            changedAttributeCount: changedAttributes.length,
+            changedDataTypes: changedAttributes.map((attr) => attr.dataType),
+          },
+        );
+      }
 
       setRow((prev) => ({ ...prev, name: payload.name, notes: payload.notes }));
       setCaseAttributeValues(nextAttributeValues);
@@ -1178,6 +1203,7 @@ export function CasesView() {
       };
 
       const nextValues = { ...attributeValues };
+      const touchedCaseIds: string[] = [];
       await Promise.all(rows.map(async (row) => {
         const key = valueKey(row.id, attrId);
         const existing = nextValues[key];
@@ -1189,6 +1215,7 @@ export function CasesView() {
           });
           if (value.trim()) nextValues[key] = { ...existing, value };
           else delete nextValues[key];
+          touchedCaseIds.push(row.id);
         } else if (value.trim()) {
           const valueRecord = await pb.collection("case_attribute_values").create({
             case: row.id,
@@ -1197,6 +1224,7 @@ export function CasesView() {
             deleted_at: "",
           });
           nextValues[key] = { id: valueRecord.id, caseId: row.id, attributeId: attrId, value };
+          touchedCaseIds.push(row.id);
         }
       }));
 
@@ -1212,6 +1240,13 @@ export function CasesView() {
         draft.id ? "case_attribute.update" : "case_attribute.create",
         `${draft.id ? "Updated" : "Added"} case attribute "${nextDef.name}"`,
         attrId,
+        {
+          entityType: "case_attribute",
+          changedCaseIds: touchedCaseIds,
+          changedValueCount: touchedCaseIds.length,
+          dataType: nextDef.dataType,
+          isDefinitionUpdate: Boolean(draft.id),
+        },
       );
       setAttributeValueDraft(null);
     } catch (e) {

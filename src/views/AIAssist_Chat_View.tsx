@@ -660,6 +660,17 @@ export function AIAssistChatView() {
         "project.ai_chat.message",
         `Sent AI chat message in "${targetChatTitle}"`,
         nextChatId ?? createdChatId ?? undefined,
+        {
+          entityType: "project_ai_chat",
+          chatId: nextChatId ?? createdChatId ?? null,
+          contextMode: selectedContextMode,
+          messageCharCount: messageText.length,
+          selectedDocumentIds: selectedContext.documentIds,
+          selectedCaseIds: selectedContext.caseIds,
+          selectedCodeIds: selectedContext.codeIds,
+          selectedAnnotationIds: selectedContext.annotationIds,
+          selectedMemoIds: selectedContext.memoIds,
+        },
       );
       setDraft("");
 
@@ -699,6 +710,18 @@ export function AIAssistChatView() {
         "project.ai_chat.response",
         `Received AI chat response in "${targetChatTitle}"`,
         nextChatId ?? createdChatId ?? undefined,
+        {
+          entityType: "project_ai_chat",
+          chatId: nextChatId ?? createdChatId ?? null,
+          model: response.model,
+          usedContextItemCount: Array.isArray(response.usedContextItems)
+            ? response.usedContextItems.length
+            : response.usedContextItems,
+          citationCount: Array.isArray(response.citations)
+            ? response.citations.length
+            : response.citations,
+          responseCharCount: response.content.length,
+        },
       );
 
       const refreshedChats = nextChats.map((chat) => (

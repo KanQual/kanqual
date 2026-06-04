@@ -143,6 +143,11 @@ function ReviewResultsPanel({
                             placeholder="Unlabeled speaker"
                           />
                         </label>
+                        {segment.timestampText.trim() && (
+                          <div className="ai-process-doc-segment-timestamp">
+                            {segment.timestampText.trim()}
+                          </div>
+                        )}
                       </div>
                       <label className="form-label ai-process-doc-segment-text-field">
                         Element text
@@ -198,6 +203,7 @@ function ReviewResultsPanel({
 export function AIAssistProcessDocumentsReviewView() {
   const {
     activeProject,
+    addDocument,
     pb,
     setView,
     deleteDocument,
@@ -330,18 +336,20 @@ export function AIAssistProcessDocumentsReviewView() {
     setExportError("");
     try {
       const processedTranscript = buildProcessedTranscriptContent(selectedReviewSegments);
-      const created = await pb.collection("documents").create({
-        project: activeProject.id,
-        name: nextName,
-        type: "Processed Transcript",
-        file_path: selectedReviewRecord.filePath,
-        content: processedTranscript.content,
-        structured_content_json: JSON.stringify(processedTranscript.segments),
-        notes: exportDescription.trim(),
-        created_by: pb.authStore.record?.id ?? "",
-        created_by_identifier: String(pb.authStore.record?.user_identifier ?? ""),
-        deleted_at: "",
-      });
+      const created = await addDocument(
+        nextName,
+        selectedReviewRecord.filePath,
+        processedTranscript.content,
+        pb.authStore.record?.id ?? "",
+        {
+          type: "Processed Transcript",
+          notes: exportDescription.trim(),
+          structuredContentJson: JSON.stringify(processedTranscript.segments),
+        },
+      );
+      if (!created?.id) {
+        throw new Error("Processed document could not be exported because the document was not created.");
+      }
 
       await pb.collection(PROCESSED_DOCUMENT_REVIEW_COLLECTION).update(selectedReviewRecord.id, {
         exported_to_project: true,
@@ -353,9 +361,18 @@ export function AIAssistProcessDocumentsReviewView() {
 
       await logAction(
         activeProject.id,
-        "document.create",
+        "project.ai_processed_document.export",
         `Exported processed document "${nextName}"`,
         created.id,
+        {
+          entityType: "document",
+          name: nextName,
+          type: "Processed Transcript",
+          sourceProcessedReviewId: selectedReviewRecord.id,
+          sourceDocumentId: selectedReviewRecord.documentId,
+          segmentCount: processedTranscript.segments.length,
+          deletedOriginalDocument: deleteOriginalOnExport && canDeleteOriginalDocument,
+        },
       );
 
       const nextRecord: ProcessedDocumentReviewRecord = {

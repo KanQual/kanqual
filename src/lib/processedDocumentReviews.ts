@@ -5,6 +5,7 @@ export const PROCESSED_DOCUMENT_REVIEW_COLLECTION = "processed_document_reviews"
 export type TranscriptProcessingSegment = {
   segmentType: "metadata" | "question" | "answer";
   speakerId: string;
+  timestampText: string;
   startOffset: number;
   endOffset: number;
   sortOrder: number;
@@ -81,6 +82,32 @@ function parseJsonValue<T>(value: unknown, fallback: T): T {
   }
 }
 
+function normalizeTranscriptSegments(value: unknown): TranscriptProcessingSegment[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((segment, index) => {
+      if (!segment || typeof segment !== "object") return null;
+      const record = segment as Record<string, unknown>;
+      const text = String(record.text ?? "").trim();
+      if (!text) return null;
+      return {
+        segmentType:
+          record.segmentType === "metadata" || record.segmentType === "question"
+            ? record.segmentType
+            : "answer",
+        speakerId: String(record.speakerId ?? "").trim(),
+        timestampText: String(record.timestampText ?? "").trim(),
+        startOffset: Number(record.startOffset ?? 0),
+        endOffset: Number(record.endOffset ?? 0),
+        sortOrder: Number(record.sortOrder ?? index),
+        text,
+        chunkIndex: Number(record.chunkIndex ?? 0),
+      } satisfies TranscriptProcessingSegment;
+    })
+    .filter((segment): segment is TranscriptProcessingSegment => segment !== null)
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.startOffset - right.startOffset);
+}
+
 function normalizeReviewLenses(value: unknown): Record<ProcessedDocumentReviewLensId, boolean> {
   const fallback = DEFAULT_PROCESSED_DOCUMENT_REVIEW_LENSES;
   if (!value || typeof value !== "object") return fallback;
@@ -112,9 +139,11 @@ export function formatProcessedReviewDate(iso: string): string {
 }
 
 export function segmentContainsTimestamp(segment: TranscriptProcessingSegment): boolean {
+  if (segment.timestampText.trim()) return true;
   const patterns = [
     /\b\d{1,2}:\d{2}(?::\d{2})?\b/g,
     /\[\d{1,2}:\d{2}(?::\d{2})?\]/g,
+    /\[\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\]/g,
     /\b\d{1,2}\.\d{2}(?::\d{2})?\b/g,
   ];
   return patterns.some((pattern) => pattern.test(segment.text));
@@ -167,7 +196,7 @@ export function toProcessedReviewRecord(record: RecordModel): ProcessedDocumentR
     processingError: String(record.processing_error ?? ""),
     processedChunkCount: Number(record.processed_chunk_count ?? 0),
     processedContent: String(record.processed_content ?? ""),
-    segments: parseJsonValue<TranscriptProcessingSegment[]>(record.segments_json, []),
+    segments: normalizeTranscriptSegments(parseJsonValue<unknown[]>(record.segments_json, [])),
     properNameCandidates: parseJsonValue<TranscriptNameCandidate[]>(record.proper_name_candidates_json, []),
     enabledReviewLenses: normalizeReviewLenses(
       parseJsonValue<Record<string, boolean> | null>(record.enabled_review_lenses_json, null),

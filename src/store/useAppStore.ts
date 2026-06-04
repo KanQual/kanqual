@@ -241,6 +241,7 @@ type ProcessingSegmentType = "metadata" | "question" | "answer";
 type DocumentProcessingSegment = {
   segmentType: ProcessingSegmentType;
   speakerId: string;
+  timestampText: string;
   startOffset: number;
   endOffset: number;
   sortOrder: number;
@@ -358,6 +359,7 @@ function appendChunkAggregate(
   const rebasedSegments = (response.segments as Array<Record<string, unknown>>).map((segment, index) => ({
     segmentType: segment.segmentType === "metadata" || segment.segmentType === "question" ? segment.segmentType : "answer",
     speakerId: typeof segment.speakerId === "string" ? segment.speakerId : "",
+    timestampText: typeof segment.timestampText === "string" ? segment.timestampText : "",
     startOffset: baseOffset + Number(segment.startOffset ?? 0),
     endOffset: baseOffset + Number(segment.endOffset ?? 0),
     sortOrder: aggregate.segments.length + index,
@@ -539,6 +541,7 @@ function toLogEntry(r: RecordModel): ProjectLogEntry {
     action: r.action,
     label: r.label,
     recordId: r.record_id || undefined,
+    detailsJson: typeof r.details_json === "string" && r.details_json.trim() ? r.details_json : undefined,
     occurredAt: r.occurred_at,
     restoredAt: r.restored_at || undefined,
   };
@@ -786,8 +789,16 @@ export function useAppStore(pb: PocketBase) {
 
   // ── Logging ───────────────────────────────────────────────────────────────
 
+  type ProjectLogDetails = Record<string, unknown>;
+
   const logAction = useCallback(
-    async (projectId: string, action: string, label: string, recordId?: string) => {
+    async (
+      projectId: string,
+      action: string,
+      label: string,
+      recordId?: string,
+      details?: ProjectLogDetails,
+    ) => {
       const uid  = pb.authStore.record?.id;
       const name = pb.authStore.record?.name || pb.authStore.record?.email || "";
       try {
@@ -800,6 +811,7 @@ export function useAppStore(pb: PocketBase) {
           action,
           label,
           record_id:   recordId ?? "",
+          details_json: details ? JSON.stringify(details) : "",
         });
         const entry = toLogEntry(r);
         setLogEntries((prev) => (prev.some((existing) => existing.id === entry.id) ? prev : [entry, ...prev]));
@@ -3120,7 +3132,16 @@ export function useAppStore(pb: PocketBase) {
       const project = toProject(record);
       setProjects((prev) => prev.map((p) => p.id === id ? { ...project, createdBy: p.createdBy } : p));
       setActiveProject((current) => current?.id === id ? project : current);
-      await logAction(id, "project.update", `Updated project details for "${data.name}"`);
+      await logAction(
+        id,
+        "project.update",
+        `Updated project details for "${data.name}"`,
+        id,
+        {
+          entityType: "project",
+          changedFields: ["name", "description"],
+        },
+      );
       return project;
     },
     [pb, logAction]
@@ -3345,9 +3366,22 @@ export function useAppStore(pb: PocketBase) {
         created_by_identifier: actorIdentifier,
         deleted_at: "",
       });
+      await logAction(
+        activeProject.id,
+        "project_uploaded_file.create",
+        `Retained uploaded source file "${file.name}"`,
+        record.id,
+        {
+          entityType: "project_uploaded_file",
+          sourceKind,
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+        },
+      );
       return toProjectUploadedFile(record);
     },
-    [activeProject, pb],
+    [activeProject, logAction, pb],
   );
 
   const updateProjectUploadedFileStatus = useCallback(
@@ -3382,8 +3416,21 @@ export function useAppStore(pb: PocketBase) {
         status: nextStatus,
         status_history_json: JSON.stringify(nextHistory),
       });
+      await logAction(
+        current.projectId,
+        "project_uploaded_file.status",
+        reason,
+        uploadedFileId,
+        {
+          entityType: "project_uploaded_file",
+          fromStatus: current.status,
+          toStatus: nextStatus,
+          documentId: options?.documentId ?? current.documentId ?? "",
+          caseId: options?.caseId ?? current.caseId ?? "",
+        },
+      );
     },
-    [pb],
+    [logAction, pb],
   );
 
   const deleteProjectUploadedFile = useCallback(
@@ -3431,6 +3478,7 @@ export function useAppStore(pb: PocketBase) {
       options?: {
         notes?: string;
         type?: string;
+        structuredContentJson?: string;
         setActive?: boolean;
         sourceFile?: File | null;
         sourceKind?: ProjectUploadedFileSourceKind;
@@ -3453,6 +3501,9 @@ export function useAppStore(pb: PocketBase) {
         content,
         notes: options?.notes ?? "",
       };
+        if (typeof options?.structuredContentJson === "string") {
+          payload.structured_content_json = options.structuredContentJson;
+        }
         if (createdBy) payload.created_by = createdBy;
         payload.created_by_identifier = createdBy
           ? createdBy === pb.authStore.record?.id
@@ -3472,7 +3523,13 @@ export function useAppStore(pb: PocketBase) {
       if (options?.setActive !== false) {
         setActiveDocument(doc);
       }
-      await logAction(activeProject.id, "document.create", `Added document "${name}"`);
+      await logAction(activeProject.id, "document.create", `Added document "${name}"`, record.id, {
+        entityType: "document",
+        name,
+        type: options?.type ?? "Text",
+        importedFromRetainedUpload: Boolean(uploadedFileRecord?.id),
+        structuredContentIncluded: typeof options?.structuredContentJson === "string" && options.structuredContentJson.trim().length > 0,
+      });
       return doc;
     },
     [pb, activeProject, createProjectUploadedFileRecord, logAction, updateProjectUploadedFileStatus]
@@ -3484,8 +3541,17 @@ export function useAppStore(pb: PocketBase) {
     async (id: string, data: { name?: string; notes?: string; content?: string }) => {
       await pb.collection("documents").update(id, data);
 
-      if (activeProject && data.name) await logAction(activeProject.id, "document.update", `Renamed document to "${data.name}"`);
-      else if (activeProject) await logAction(activeProject.id, "document.update", "Updated document");
+      if (activeProject && data.name) {
+        await logAction(activeProject.id, "document.update", `Renamed document to "${data.name}"`, id, {
+          entityType: "document",
+          changedFields: Object.keys(data),
+        });
+      } else if (activeProject) {
+        await logAction(activeProject.id, "document.update", "Updated document", id, {
+          entityType: "document",
+          changedFields: Object.keys(data),
+        });
+      }
     },
     [pb, activeProject, logAction]
   );
@@ -3549,7 +3615,11 @@ export function useAppStore(pb: PocketBase) {
               : ""
             : pb.authStore.record?.user_identifier || "",
         });
-      await logAction(activeProject.id, "code.create", `Added code "${label}"`);
+      await logAction(activeProject.id, "code.create", `Added code "${label}"`, record.id, {
+        entityType: "code",
+        label,
+        parentId: parentId || null,
+      });
       return toCode(record);
     },
     [pb, activeProject, logAction]
@@ -3563,7 +3633,12 @@ export function useAppStore(pb: PocketBase) {
         description: data.description,
         parent: data.parentId || null,
       });
-      if (activeProject) await logAction(activeProject.id, "code.update", `Updated code "${data.label}"`);
+      if (activeProject) {
+        await logAction(activeProject.id, "code.update", `Updated code "${data.label}"`, id, {
+          entityType: "code",
+          changedFields: ["label", "color", "description", "parentId"],
+        });
+      }
     },
     [pb, activeProject, logAction]
   );
@@ -3652,7 +3727,15 @@ export function useAppStore(pb: PocketBase) {
         created_by_identifier: pb.authStore.record?.user_identifier || "",
       });
       const truncated = normalizedQuote.length > 40 ? normalizedQuote.slice(0, 40) + "…" : normalizedQuote;
-      if (activeProject) await logAction(activeProject.id, "annotation.create", `Annotated "${truncated}"`);
+      if (activeProject) {
+        await logAction(activeProject.id, "annotation.create", `Annotated "${truncated}"`, record.id, {
+          entityType: "annotation",
+          documentId,
+          codeId,
+          startOffset: normalizedStart,
+          endOffset: normalizedEnd,
+        });
+      }
       return toAnnotation(record);
     },
     [pb, activeProject, logAction, ensureCurrentUserDocumentLock, activeDocument, documents]
@@ -3661,7 +3744,12 @@ export function useAppStore(pb: PocketBase) {
   const updateAnnotationNote = useCallback(
     async (id: string, note: string) => {
       await pb.collection("annotations").update(id, { note });
-      if (activeProject) await logAction(activeProject.id, "annotation.update", "Updated annotation note");
+      if (activeProject) {
+        await logAction(activeProject.id, "annotation.update", "Updated annotation note", id, {
+          entityType: "annotation",
+          changedFields: ["note"],
+        });
+      }
     },
     [pb, activeProject, logAction]
   );
@@ -3691,7 +3779,10 @@ export function useAppStore(pb: PocketBase) {
               : ""
             : pb.authStore.record?.user_identifier || "",
         });
-      await logAction(activeProject.id, "case.create", `Created case "${name}"`);
+      await logAction(activeProject.id, "case.create", `Created case "${name}"`, record.id, {
+        entityType: "case",
+        name,
+      });
       return record;
     },
     [pb, activeProject, logAction]
@@ -3700,7 +3791,12 @@ export function useAppStore(pb: PocketBase) {
   const updateCase = useCallback(
     async (id: string, data: { name: string; notes: string }) => {
       await pb.collection("cases").update(id, data);
-      if (activeProject) await logAction(activeProject.id, "case.update", `Updated case "${data.name}"`);
+      if (activeProject) {
+        await logAction(activeProject.id, "case.update", `Updated case "${data.name}"`, id, {
+          entityType: "case",
+          changedFields: ["name", "notes"],
+        });
+      }
     },
     [pb, activeProject, logAction]
   );
@@ -3746,7 +3842,10 @@ export function useAppStore(pb: PocketBase) {
               : ""
             : pb.authStore.record?.user_identifier || "",
         });
-      await logAction(activeProject.id, "memo.create", `Created memo "${data.title}"`);
+      await logAction(activeProject.id, "memo.create", `Created memo "${data.title}"`, record.id, {
+        entityType: "memo",
+        title: data.title,
+      });
       return toMemo(record);
     },
     [pb, activeProject, logAction]
@@ -3773,7 +3872,21 @@ export function useAppStore(pb: PocketBase) {
         case_attribute_defs: data.caseAttributeDefIds ?? [],
         document_attribute_defs: data.documentAttributeDefIds ?? [],
       });
-      if (activeProject) await logAction(activeProject.id, "memo.update", `Updated memo "${data.title}"`);
+      if (activeProject) {
+        await logAction(activeProject.id, "memo.update", `Updated memo "${data.title}"`, id, {
+          entityType: "memo",
+          changedFields: [
+            "title",
+            "body",
+            "documentIds",
+            "annotationIds",
+            "caseIds",
+            "codeIds",
+            "caseAttributeDefIds",
+            "documentAttributeDefIds",
+          ],
+        });
+      }
     },
     [pb, activeProject, logAction]
   );
@@ -3814,7 +3927,17 @@ export function useAppStore(pb: PocketBase) {
         await ensureSetup(pb);
         record = await pb.collection("code_reports").create(payload);
       }
-      await logAction(activeProject.id, "code_report.create", `Created report "${data.name}"`);
+      await logAction(activeProject.id, "code_report.create", `Created report "${data.name}"`, record.id, {
+        entityType: "code_report",
+        name: data.name,
+        caseIds: data.caseIds,
+        caseCount: data.caseIds.length,
+        documentIds: data.documentIds,
+        documentCount: data.documentIds.length,
+        codeIds: data.codeIds,
+        codeCount: data.codeIds.length,
+        snapshotIncluded: Boolean(data.snapshot),
+      });
       return record;
     },
     [pb, activeProject, logAction]
@@ -3828,7 +3951,17 @@ export function useAppStore(pb: PocketBase) {
         documents: data.documentIds,
         codes: data.codeIds,
       });
-      if (activeProject) await logAction(activeProject.id, "code_report.update", `Updated report "${data.name}"`);
+      if (activeProject) await logAction(activeProject.id, "code_report.update", `Updated report "${data.name}"`, id, {
+        entityType: "code_report",
+        changedFields: ["name", "cases", "documents", "codes"],
+        name: data.name,
+        caseIds: data.caseIds,
+        caseCount: data.caseIds.length,
+        documentIds: data.documentIds,
+        documentCount: data.documentIds.length,
+        codeIds: data.codeIds,
+        codeCount: data.codeIds.length,
+      });
     },
     [pb, activeProject, logAction]
   );
@@ -3837,7 +3970,10 @@ export function useAppStore(pb: PocketBase) {
     async (id: string, name?: string) => {
       await ensureProjectSafetyBackup("code_report.delete", `Deleted report${name ? ` "${name}"` : ""}`);
       await pb.collection("code_reports").update(id, { deleted_at: new Date().toISOString() });
-      if (activeProject) await logAction(activeProject.id, "code_report.delete", `Deleted report${name ? ` "${name}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "code_report.delete", `Deleted report${name ? ` "${name}"` : ""}`, id, {
+        entityType: "code_report",
+        name: name ?? "",
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
@@ -3875,7 +4011,19 @@ export function useAppStore(pb: PocketBase) {
         await ensureSetup(pb);
         record = await pb.collection("coder_reports").create(payload);
       }
-      await logAction(activeProject.id, "coder_report.create", `Created coder report "${data.name}"`);
+      await logAction(activeProject.id, "coder_report.create", `Created coder report "${data.name}"`, record.id, {
+        entityType: "coder_report",
+        name: data.name,
+        coderIds: data.coderIds,
+        coderCount: data.coderIds.length,
+        caseIds: data.caseIds,
+        caseCount: data.caseIds.length,
+        documentIds: data.documentIds,
+        documentCount: data.documentIds.length,
+        codeIds: data.codeIds,
+        codeCount: data.codeIds.length,
+        snapshotIncluded: Boolean(data.snapshot),
+      });
       return record;
     },
     [pb, activeProject, logAction]
@@ -3890,7 +4038,19 @@ export function useAppStore(pb: PocketBase) {
         documents: data.documentIds,
         codes: data.codeIds,
       });
-      if (activeProject) await logAction(activeProject.id, "coder_report.update", `Updated coder report "${data.name}"`);
+      if (activeProject) await logAction(activeProject.id, "coder_report.update", `Updated coder report "${data.name}"`, id, {
+        entityType: "coder_report",
+        changedFields: ["name", "coders", "cases", "documents", "codes"],
+        name: data.name,
+        coderIds: data.coderIds,
+        coderCount: data.coderIds.length,
+        caseIds: data.caseIds,
+        caseCount: data.caseIds.length,
+        documentIds: data.documentIds,
+        documentCount: data.documentIds.length,
+        codeIds: data.codeIds,
+        codeCount: data.codeIds.length,
+      });
     },
     [pb, activeProject, logAction]
   );
@@ -3899,7 +4059,10 @@ export function useAppStore(pb: PocketBase) {
     async (id: string, name?: string) => {
       await ensureProjectSafetyBackup("coder_report.delete", `Deleted coder report${name ? ` "${name}"` : ""}`);
       await pb.collection("coder_reports").update(id, { deleted_at: new Date().toISOString() });
-      if (activeProject) await logAction(activeProject.id, "coder_report.delete", `Deleted coder report${name ? ` "${name}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "coder_report.delete", `Deleted coder report${name ? ` "${name}"` : ""}`, id, {
+        entityType: "coder_report",
+        name: name ?? "",
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
@@ -3927,7 +4090,12 @@ export function useAppStore(pb: PocketBase) {
         await ensureSetup(pb);
         record = await pb.collection("ai_analyses").create(payload);
       }
-      await logAction(activeProject.id, "ai_analysis.create", `Created analysis "${data.name}"`);
+      await logAction(activeProject.id, "ai_analysis.create", `Created analysis "${data.name}"`, record.id, {
+        entityType: "ai_analysis",
+        name: data.name,
+        codeId: data.codeId ?? null,
+        snapshotIncluded: Boolean(data.snapshot),
+      });
       return record;
     },
     [pb, activeProject, logAction]
@@ -3947,7 +4115,13 @@ export function useAppStore(pb: PocketBase) {
         await ensureSetup(pb);
         await pb.collection("ai_analyses").update(id, payload);
       }
-      if (activeProject) await logAction(activeProject.id, "ai_analysis.update", `Updated analysis "${data.name}"`, id);
+      if (activeProject) await logAction(activeProject.id, "ai_analysis.update", `Updated analysis "${data.name}"`, id, {
+        entityType: "ai_analysis",
+        changedFields: typeof data.snapshot === "string" ? ["name", "code", "snapshot"] : ["name", "code"],
+        name: data.name,
+        codeId: data.codeId ?? null,
+        snapshotIncluded: typeof data.snapshot === "string",
+      });
     },
     [pb, activeProject, logAction]
   );
@@ -3956,7 +4130,10 @@ export function useAppStore(pb: PocketBase) {
     async (id: string, name?: string) => {
       await ensureProjectSafetyBackup("ai_analysis.delete", `Deleted analysis${name ? ` "${name}"` : ""}`);
       await pb.collection("ai_analyses").update(id, { deleted_at: new Date().toISOString() });
-      if (activeProject) await logAction(activeProject.id, "ai_analysis.delete", `Deleted analysis${name ? ` "${name}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "ai_analysis.delete", `Deleted analysis${name ? ` "${name}"` : ""}`, id, {
+        entityType: "ai_analysis",
+        name: name ?? "",
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
@@ -3986,7 +4163,14 @@ export function useAppStore(pb: PocketBase) {
         await ensureSetup(pb);
         record = await pb.collection("ai_attribute_suggestion_runs").create(payload);
       }
-      await logAction(activeProject.id, "ai_attribute_suggestion_run.create", `Created saved suggestions "${data.name}"`);
+      await logAction(activeProject.id, "ai_attribute_suggestion_run.create", `Created saved suggestions "${data.name}"`, record.id, {
+        entityType: "ai_attribute_suggestion_run",
+        name: data.name,
+        targetKind: data.targetKind,
+        attributeId: data.attributeId ?? "",
+        attributeName: data.attributeName ?? "",
+        snapshotIncluded: Boolean(data.snapshot),
+      });
       return record;
     },
     [pb, activeProject, logAction]
@@ -4008,7 +4192,17 @@ export function useAppStore(pb: PocketBase) {
         await ensureSetup(pb);
         await pb.collection("ai_attribute_suggestion_runs").update(id, payload);
       }
-      if (activeProject) await logAction(activeProject.id, "ai_attribute_suggestion_run.update", `Updated saved suggestions "${data.name}"`, id);
+      if (activeProject) await logAction(activeProject.id, "ai_attribute_suggestion_run.update", `Updated saved suggestions "${data.name}"`, id, {
+        entityType: "ai_attribute_suggestion_run",
+        changedFields: typeof data.snapshot === "string"
+          ? ["name", "target_kind", "attribute_id", "attribute_name", "snapshot"]
+          : ["name", "target_kind", "attribute_id", "attribute_name"],
+        name: data.name,
+        targetKind: data.targetKind,
+        attributeId: data.attributeId ?? "",
+        attributeName: data.attributeName ?? "",
+        snapshotIncluded: typeof data.snapshot === "string",
+      });
     },
     [pb, activeProject, logAction]
   );
@@ -4017,7 +4211,10 @@ export function useAppStore(pb: PocketBase) {
     async (id: string, name?: string) => {
       await ensureProjectSafetyBackup("ai_attribute_suggestion_run.delete", `Deleted saved suggestions${name ? ` "${name}"` : ""}`);
       await pb.collection("ai_attribute_suggestion_runs").update(id, { deleted_at: new Date().toISOString() });
-      if (activeProject) await logAction(activeProject.id, "ai_attribute_suggestion_run.delete", `Deleted saved suggestions${name ? ` "${name}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "ai_attribute_suggestion_run.delete", `Deleted saved suggestions${name ? ` "${name}"` : ""}`, id, {
+        entityType: "ai_attribute_suggestion_run",
+        name: name ?? "",
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );

@@ -182,6 +182,7 @@ export interface ProjectLogEntry {
   action: string;
   label: string;
   recordId?: string;
+  detailsJson?: string;
   occurredAt: string;
   restoredAt?: string;
 }

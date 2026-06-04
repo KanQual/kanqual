@@ -673,7 +673,12 @@ export function ProjectSettingsView() {
       });
 
       await writeTextFile(path, encryptedBackup);
-      await logAction(activeProject.id, "project.encrypted_backup.export", "Exported encrypted project backup");
+      await logAction(activeProject.id, "project.encrypted_backup.export", "Exported encrypted project backup", undefined, {
+        entityType: "encrypted_project_backup",
+        fileName: path.split(/[/\\]/).pop() ?? path,
+        exportFormat: "kqbe",
+        passwordProtected: true,
+      });
       setEncryptedBackupPassword("");
       setEncryptedBackupPasswordConfirm("");
       setActiveProjectSettingsModal(null);
@@ -730,12 +735,23 @@ export function ProjectSettingsView() {
     setBackupError("");
     setBackupNotice("");
     try {
-      const { manifest } = await createProjectBackup(pb, activeProject, "manual", logEntries[0]?.occurredAt ?? "");
+      const { entry, manifest } = await createProjectBackup(pb, activeProject, "manual", logEntries[0]?.occurredAt ?? "");
       setBackupManifest(manifest);
       clearPendingProjectBackupAttempt(activeProject.id);
       clearProjectBackupBannerIssue(activeProject.id);
       notifyProjectBackupsChanged(activeProject.id);
-      await logAction(activeProject.id, "project.backup.create", "Created a manual project backup");
+      await logAction(activeProject.id, "project.backup.create", "Created a manual project backup", entry.file, {
+        entityType: "project_backup",
+        backupKind: "manual",
+        backupFile: entry.file,
+        backupCreatedAt: entry.createdAt,
+        backupReason: entry.reason,
+        sourceLogAt: entry.sourceLogAt,
+        sourceLogAction: entry.sourceLogAction,
+        sourceLogLabel: entry.sourceLogLabel,
+        sizeBytes: entry.sizeBytes,
+        manual: entry.manual,
+      });
       setBackupNotice("Manual backup created. It will be retained indefinitely.");
     } catch (error) {
       console.error("Manual backup failed:", error);
@@ -781,6 +797,17 @@ export function ProjectSettingsView() {
         activeProject.id,
         "project.backup.settings",
         `Updated backup settings (interval ${automaticIntervalDraft} min, hourly ${retentionDraft.hourlyHours}h, daily ${retentionDraft.dailyDays}d, weekly ${retentionDraft.weeklyWeeks}w)`,
+        undefined,
+        {
+          entityType: "project_backup_settings",
+          automaticIntervalMinutes: automaticIntervalDraft,
+          retention: {
+            hourlyHours: retentionDraft.hourlyHours,
+            dailyDays: retentionDraft.dailyDays,
+            weeklyWeeks: retentionDraft.weeklyWeeks,
+          },
+          backupCount: manifest.backups.length,
+        },
       );
       setBackupNotice("Backup settings saved.");
     } catch (error) {
@@ -804,7 +831,24 @@ export function ProjectSettingsView() {
       const description = typeof data.project.description === "string" ? data.project.description : "";
       const project = await createProject(restoredProjectName(backupName, projects), description);
       const summary = await importProjectBackupIntoProject(pb, data, project.id);
-      await logAction(project.id, "project.restore_backup", `Restored backup from ${formatBackupDate(restoreBackup.createdAt)}`);
+      await logAction(project.id, "project.restore_backup", `Restored backup from ${formatBackupDate(restoreBackup.createdAt)}`, restoreBackup.file, {
+        entityType: "project_backup",
+        backupFile: restoreBackup.file,
+        backupCreatedAt: restoreBackup.createdAt,
+        backupReason: restoreBackup.reason,
+        sourceProjectId: restoreBackup.projectId,
+        sourceProjectName: restoreBackup.projectName,
+        sourceLogAt: restoreBackup.sourceLogAt,
+        sourceLogAction: restoreBackup.sourceLogAction,
+        sourceLogLabel: restoreBackup.sourceLogLabel,
+        sizeBytes: restoreBackup.sizeBytes,
+        manual: restoreBackup.manual,
+        restoredProjectId: project.id,
+        restoredProjectName: project.name,
+        importedTableCounts: summary.tableCounts,
+        importedUsersCount: summary.importedUsers.length,
+        requiresUserResolution: summary.requiresUserResolution,
+      });
       setRestoreBackup(null);
       if (summary.requiresUserResolution) {
         setRestoreResolutionIntro({
@@ -836,6 +880,19 @@ export function ProjectSettingsView() {
         activeProject.id,
         "project.backup.delete",
         `Deleted manual backup from ${formatBackupDate(deleteBackup.createdAt)}`,
+        deleteBackup.file,
+        {
+          entityType: "project_backup",
+          backupKind: "manual",
+          backupFile: deleteBackup.file,
+          backupCreatedAt: deleteBackup.createdAt,
+          backupReason: deleteBackup.reason,
+          sourceLogAt: deleteBackup.sourceLogAt,
+          sourceLogAction: deleteBackup.sourceLogAction,
+          sourceLogLabel: deleteBackup.sourceLogLabel,
+          sizeBytes: deleteBackup.sizeBytes,
+          manual: deleteBackup.manual,
+        },
       );
       setDeleteBackup(null);
       setBackupNotice("Manual backup deleted.");

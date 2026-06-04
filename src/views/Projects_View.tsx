@@ -288,7 +288,16 @@ export function ProjectsView() {
 
       const project = await createProject(importedName, importedDescription);
       const summary = await importProjectBackupIntoProject(pb, data, project.id);
-      await logAction(project.id, "project.encrypted_backup.import", "Imported project from encrypted Kanqual backup");
+      await logAction(project.id, "project.encrypted_backup.import", "Imported project from encrypted Kanqual backup", undefined, {
+        entityType: "encrypted_project_backup",
+        importFormat: "kqbe",
+        passwordProtected: true,
+        importedProjectId: project.id,
+        importedProjectName: project.name,
+        importedTableCounts: summary.tableCounts,
+        importedUsersCount: summary.importedUsers.length,
+        requiresUserResolution: summary.requiresUserResolution,
+      });
       setEncryptedImportPassword("");
       setEncryptedImportSource(null);
       setEncryptedImportPreview(null);

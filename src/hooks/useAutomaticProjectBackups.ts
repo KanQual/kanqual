@@ -47,7 +47,7 @@ const BACKUP_REQUIRED_ACTIONS = new Set([
 ]);
 
 export function useAutomaticProjectBackups() {
-  const { pb, activeProject, userRole, canCurrentUser, logEntries } = useStore();
+  const { pb, activeProject, userRole, canCurrentUser, logEntries, logAction } = useStore();
   const inFlightProjectId = useRef<string | null>(null);
   const previousProject = useRef<{ project: Project; sourceLogAt: string; sourceLog?: ProjectLogEntry } | null>(null);
   const forcedBackupLogIds = useRef<Set<string>>(new Set());
@@ -69,7 +69,27 @@ export function useAutomaticProjectBackups() {
     markPendingProjectBackupAttempt(project.id, reason, logStamp);
     try {
       if (force || await shouldCreateAutomaticBackup(pb, project, logStamp)) {
-        await createProjectBackup(pb, project, reason, logStamp, logEntry);
+        const { entry } = await createProjectBackup(pb, project, reason, logStamp, logEntry);
+        await logAction(
+          project.id,
+          "project.backup.create",
+          reason === "session"
+            ? "Created a session backup"
+            : "Created an automatic project backup",
+          entry.file,
+          {
+            entityType: "project_backup",
+            backupKind: reason,
+            backupFile: entry.file,
+            backupCreatedAt: entry.createdAt,
+            backupReason: entry.reason,
+            sourceLogAt: entry.sourceLogAt,
+            sourceLogAction: entry.sourceLogAction,
+            sourceLogLabel: entry.sourceLogLabel,
+            sizeBytes: entry.sizeBytes,
+            manual: entry.manual,
+          },
+        );
         clearPendingProjectBackupAttempt(project.id);
         clearProjectBackupBannerIssue(project.id);
         notifyProjectBackupsChanged(project.id);
@@ -139,5 +159,5 @@ export function useAutomaticProjectBackups() {
       void maybeBackup(activeProject, "automatic", sourceLogAt, false, sourceLog);
     }, AUTO_BACKUP_CHECK_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [activeProject?.id, userRole, sourceLogAt, sourceLog]);
+  }, [activeProject?.id, userRole, sourceLogAt, sourceLog, logAction]);
 }
