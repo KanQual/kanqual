@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../types";
@@ -11,6 +11,8 @@ import networkIconRaw from "../assets/network--2.svg?raw";
 import remoteWorkIconRaw from "../assets/link-45deg.svg?raw";
 import aiAssistReadyIconRaw from "../assets/cog-line.svg?raw";
 import aiAssistUnavailableIconRaw from "../assets/cog-outline-alerted.svg?raw";
+import aiAssistDisabledIconRaw from "../assets/cog-line-disabled.svg?raw";
+import usersGroupIconRaw from "../assets/users-group-line.svg?raw";
 import closeProjectIconRaw from "../assets/x.svg?raw";
 import sidebarLogo from "../assets/logo-no-background.png";
 
@@ -75,6 +77,16 @@ function createDefaultSidebarOpenState() {
   return Object.fromEntries(NAV_SECTIONS.map((section) => [section.key, false])) as Record<string, boolean>;
 }
 
+type SidebarTooltipState = {
+  text: string;
+  anchorRect: DOMRect;
+};
+
+type SidebarTooltipPlacement = {
+  left: number;
+  top: number;
+};
+
 export function Sidebar() {
   const {
     view,
@@ -84,13 +96,17 @@ export function Sidebar() {
     userRole,
     networkMode,
     canCurrentUser,
+    activeProjectPresenceUsers,
     projectAiAssistSettings,
     projectAiAssistRuntimeStatus,
-    isLocalWorkspace,
+    projectEmbeddingBuildStatus,
+    embeddingModelDownloadStatus,
   } = useStore();
   const { user, logout, serverUrl } = useAuth();
-  const [aiAssistStatus, setAiAssistStatus] = useState<"checking" | "ready" | "unavailable">("checking");
   const aiAssistEnabledForProject = projectAiAssistSettings.enabled;
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const [activeTooltip, setActiveTooltip] = useState<SidebarTooltipState | null>(null);
+  const [tooltipPlacement, setTooltipPlacement] = useState<SidebarTooltipPlacement | null>(null);
 
   const projectNameFontSize = useMemo(() => {
     if (!activeProject) return 22;
@@ -119,16 +135,101 @@ export function Sidebar() {
   const isRemoteBackendSession = serverUrl !== LOCAL_PB_URL;
   const networkBadgeState = isRemoteBackendSession ? "remote" : networkMode;
   const networkBadgeTitle = isRemoteBackendSession
-    ? `Remote workspace session - connected to ${serverUrl}`
+    ? `Remote workspace connected (${serverUrl}). Open network settings.`
     : networkMode === "lan"
-      ? "Network mode - other devices on your local network can connect to this instance"
-      : "Local only - data is not accessible from other devices";
-  
+      ? "LAN workspace available to other devices. Open network settings."
+      : "Local workspace only. Open network settings.";
+  const aiBackgroundJobRunning =
+    embeddingModelDownloadStatus?.phase === "downloading"
+    || embeddingModelDownloadStatus?.phase === "cancelling"
+    || (activeProject != null
+      && projectEmbeddingBuildStatus?.projectId === activeProject.id
+      && (projectEmbeddingBuildStatus.phase === "running" || projectEmbeddingBuildStatus.phase === "cancelling"));
+  const aiRuntimeReady =
+    Boolean(activeProject)
+    && Boolean(projectAiAssistRuntimeStatus.hostLlmEnabled)
+    && Boolean(projectAiAssistRuntimeStatus.hostLlmModelSelected)
+    && Boolean(projectAiAssistRuntimeStatus.hostLlmConnectionLive)
+    && Boolean(projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled);
+  const aiBadgeState = aiBackgroundJobRunning
+    ? "running"
+    : !activeProject
+      ? "unavailable"
+      : !aiAssistEnabledForProject
+        ? "disabled"
+        : aiRuntimeReady
+          ? "ready"
+          : "unavailable";
+  const aiBadgeTitle =
+    aiBadgeState === "running"
+      ? "AI task running in background. Open AI Assist Home."
+      : !activeProject
+        ? "Open a project to view project AI status. Open AI Assist Home."
+      : aiBadgeState === "disabled"
+        ? "AI Assist disabled for this project. Open AI Assist Home."
+        : aiBadgeState === "ready"
+          ? "AI Assist ready for this project. Open AI Assist Home."
+          : "AI Assist setup incomplete. Open AI Assist Home.";
+  const otherActiveUsersCount = activeProject
+    ? activeProjectPresenceUsers.filter((entry) => entry.userId !== user?.id).length
+    : 0;
+  const collaborationBadgeState = !activeProject
+    ? "disabled"
+    : otherActiveUsersCount > 0
+      ? "active"
+      : "idle";
+  const collaborationBadgeTitle = !activeProject
+    ? "No active project. Open a project to view user activity."
+    : otherActiveUsersCount === 0
+      ? "No other users currently active. Open Project Users activity."
+      : otherActiveUsersCount === 1
+        ? "1 other user active in this project. Open Project Users activity."
+        : `${otherActiveUsersCount} other users active in this project. Open Project Users activity.`;
+
+  function showTooltip(text: string, element: HTMLElement) {
+    setActiveTooltip({
+      text,
+      anchorRect: element.getBoundingClientRect(),
+    });
+  }
+
+  function hideTooltip() {
+    setActiveTooltip(null);
+    setTooltipPlacement(null);
+  }
+
+  function bindTooltip(text: string | undefined) {
+    if (!text) return {};
+    return {
+      onMouseEnter: (event: React.MouseEvent<HTMLElement>) => showTooltip(text, event.currentTarget),
+      onMouseLeave: hideTooltip,
+      onFocus: (event: React.FocusEvent<HTMLElement>) => showTooltip(text, event.currentTarget),
+      onBlur: hideTooltip,
+    };
+  }
 
   function openAppSettingsModal(modalId: "network" | "llm") {
     sessionStorage.setItem("kanqual:open-app-settings-modal", modalId);
     window.dispatchEvent(new CustomEvent("kanqual:open-app-settings-modal"));
     setView("app-settings");
+  }
+
+  function openProjectUsersActivity() {
+    sessionStorage.setItem("kanqual:open-project-users-tab", "activity");
+    setView("users");
+  }
+
+  function handleNetworkBadgeActivate() {
+    openAppSettingsModal("network");
+  }
+
+  function handleAiBadgeActivate() {
+    setView("ai-assist");
+  }
+
+  function handleUsersBadgeActivate() {
+    if (!activeProject) return;
+    openProjectUsersActivity();
   }
 
   function toggleSection(key: string) {
@@ -147,6 +248,76 @@ export function Sidebar() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!activeTooltip) return;
+
+    const refreshTooltipAnchor = () => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      if (
+        activeElement &&
+        (activeElement.classList.contains("brand-network-badge")
+          || activeElement.classList.contains("brand-ai-badge")
+          || activeElement.classList.contains("brand-collaboration-badge"))
+      ) {
+        setActiveTooltip((prev) =>
+          prev
+            ? {
+                ...prev,
+                anchorRect: activeElement.getBoundingClientRect(),
+              }
+            : prev,
+        );
+      }
+    };
+
+    window.addEventListener("resize", refreshTooltipAnchor);
+    window.addEventListener("scroll", refreshTooltipAnchor, true);
+    return () => {
+      window.removeEventListener("resize", refreshTooltipAnchor);
+      window.removeEventListener("scroll", refreshTooltipAnchor, true);
+    };
+  }, [activeTooltip]);
+
+  useLayoutEffect(() => {
+    if (!activeTooltip || !tooltipRef.current) return;
+
+    const tooltipRect = tooltipRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const offset = 10;
+    const margin = 12;
+
+    const fitsLeft = activeTooltip.anchorRect.left - offset - tooltipRect.width >= margin;
+    const fitsRight = activeTooltip.anchorRect.right + offset + tooltipRect.width <= viewportWidth - margin;
+
+    const left = fitsLeft
+      ? activeTooltip.anchorRect.left - offset - tooltipRect.width
+      : fitsRight
+        ? activeTooltip.anchorRect.right + offset
+        : Math.max(
+            margin,
+            Math.min(
+              activeTooltip.anchorRect.left + (activeTooltip.anchorRect.width - tooltipRect.width) / 2,
+              viewportWidth - tooltipRect.width - margin,
+            ),
+          );
+
+    const centeredTop = activeTooltip.anchorRect.top + (activeTooltip.anchorRect.height - tooltipRect.height) / 2;
+    const fitsCentered = centeredTop >= margin && centeredTop + tooltipRect.height <= viewportHeight - margin;
+    const fitsBelow = activeTooltip.anchorRect.bottom + offset + tooltipRect.height <= viewportHeight - margin;
+    const fitsAbove = activeTooltip.anchorRect.top - offset - tooltipRect.height >= margin;
+
+    const top = fitsCentered
+      ? centeredTop
+      : fitsBelow
+        ? activeTooltip.anchorRect.bottom + offset
+        : fitsAbove
+          ? activeTooltip.anchorRect.top - offset - tooltipRect.height
+          : Math.max(margin, Math.min(centeredTop, viewportHeight - tooltipRect.height - margin));
+
+    setTooltipPlacement({ left, top });
+  }, [activeTooltip]);
+
   function isNavItemActive(targetView: View): boolean {
     return view === targetView;
   }
@@ -161,50 +332,18 @@ export function Sidebar() {
     return true;
   }
 
-  useEffect(() => {
-    if (!activeProject) {
-      setAiAssistStatus("checking");
-      return;
-    }
-
-    if (isLocalWorkspace) {
-      const ready =
-        projectAiAssistRuntimeStatus.hostLlmEnabled
-        && projectAiAssistRuntimeStatus.hostLlmModelSelected
-        && projectAiAssistRuntimeStatus.hostLlmConnectionLive
-        && projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled;
-      setAiAssistStatus(ready ? "ready" : "unavailable");
-      return;
-    }
-
-    if (
-      projectAiAssistRuntimeStatus.hostLlmEnabled == null
-      || projectAiAssistRuntimeStatus.hostLlmModelSelected == null
-      || projectAiAssistRuntimeStatus.hostLlmConnectionLive == null
-      || projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled == null
-    ) {
-      setAiAssistStatus("checking");
-      return;
-    }
-
-    const ready =
-      projectAiAssistRuntimeStatus.hostLlmEnabled
-      && projectAiAssistRuntimeStatus.hostLlmModelSelected
-      && projectAiAssistRuntimeStatus.hostLlmConnectionLive
-      && projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled;
-    setAiAssistStatus(ready ? "ready" : "unavailable");
-  }, [activeProject, isLocalWorkspace, projectAiAssistRuntimeStatus, view]);
-
   return (
     <aside className="sidebar">
       <div className="sidebar-brand" title="KanQual">
         <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
         <button
           type="button"
-          className={`brand-network-badge brand-network-badge--${networkBadgeState}`}
+          className={`sidebar-icon-button brand-network-badge brand-status-badge brand-network-badge--${networkBadgeState}`}
           title={networkBadgeTitle}
-          aria-label="Open network and collaboration settings"
-          onClick={() => openAppSettingsModal("network")}
+          aria-label={networkBadgeTitle}
+          onClick={handleNetworkBadgeActivate}
+          onPointerUp={handleNetworkBadgeActivate}
+          {...bindTooltip(networkBadgeTitle)}
         >
           <span
             aria-hidden="true"
@@ -220,23 +359,68 @@ export function Sidebar() {
         </button>
         <button
           type="button"
-          className={`brand-ai-badge brand-ai-badge--${aiAssistStatus === "ready" ? "ready" : "unavailable"}`}
-          title={
-            aiAssistStatus === "ready"
-              ? "AI Assist ready"
-              : "AI Assist not available, check app settings"
-          }
-          aria-label="Open AI Assist settings"
-          onClick={() => openAppSettingsModal("llm")}
+          className={`sidebar-icon-button brand-ai-badge brand-status-badge brand-ai-badge--${aiBadgeState}`}
+          title={aiBadgeTitle}
+          aria-label={aiBadgeTitle}
+          onClick={handleAiBadgeActivate}
+          onPointerUp={handleAiBadgeActivate}
+          {...bindTooltip(aiBadgeTitle)}
         >
           <span
             aria-hidden="true"
             className="brand-ai-icon"
             dangerouslySetInnerHTML={{
-              __html: aiAssistStatus === "ready" ? aiAssistReadyIconRaw : aiAssistUnavailableIconRaw,
+              __html:
+                aiBadgeState === "disabled"
+                  ? aiAssistDisabledIconRaw
+                  : aiBadgeState === "ready"
+                    ? aiAssistReadyIconRaw
+                    : aiAssistUnavailableIconRaw,
             }}
           />
         </button>
+        <button
+          type="button"
+          className={`sidebar-icon-button brand-collaboration-badge brand-status-badge brand-collaboration-badge--${collaborationBadgeState}`}
+          title={collaborationBadgeTitle}
+          aria-label={collaborationBadgeTitle}
+          onClick={handleUsersBadgeActivate}
+          onPointerUp={handleUsersBadgeActivate}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleUsersBadgeActivate();
+            }
+          }}
+          aria-disabled={!activeProject}
+          {...bindTooltip(collaborationBadgeTitle)}
+        >
+          <span
+            aria-hidden="true"
+            className="brand-collaboration-icon"
+            dangerouslySetInnerHTML={{ __html: usersGroupIconRaw }}
+          />
+        </button>
+        {activeTooltip && (
+          <div
+            ref={tooltipRef}
+            className="brand-status-tooltip"
+            style={
+              tooltipPlacement
+                ? {
+                    left: tooltipPlacement.left,
+                    top: tooltipPlacement.top,
+                  }
+                : {
+                    left: -9999,
+                    top: -9999,
+                  }
+            }
+            role="tooltip"
+          >
+            {activeTooltip.text}
+          </div>
+        )}
       </div>
 
       {activeProject ? (
@@ -248,7 +432,7 @@ export function Sidebar() {
             </span>
             <button
               type="button"
-              className="project-badge-close"
+              className="sidebar-icon-button project-badge-close"
               title="Close Project"
               aria-label="Close Project"
               onClick={() => void closeProject(activeProject)}

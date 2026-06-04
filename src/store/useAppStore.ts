@@ -3163,7 +3163,11 @@ export function useAppStore(pb: PocketBase) {
   }, [openProjectToView]);
 
   const closeProject = useCallback(async (project: Project) => {
-    await logAction(project.id, "project.close", `Left project "${project.name}"`);
+    try {
+      await logAction(project.id, "project.close", `Left project "${project.name}"`);
+    } catch (error) {
+      console.error("Failed to log project close:", error);
+    }
     clearLastProjectId();
     setActiveProject(null);
     setActiveDocument(null);

@@ -917,6 +917,7 @@ export function AppSettingsView() {
   const [settings, setSettings] = useState<AppSettings>(readAppSettings);
   const [notice, setNotice] = useState("");
   const [networkSwitching, setNetworkSwitching] = useState(false);
+  const [confirmEnableNetworkMode, setConfirmEnableNetworkMode] = useState(false);
   const [localIp, setLocalIp] = useState<string | null>(null);
   const [localIpError, setLocalIpError] = useState(false);
   const [externalIp, setExternalIp] = useState<string | null>(null);
@@ -1126,7 +1127,7 @@ export function AppSettingsView() {
     }
   }
 
-  async function handleNetworkModeToggle(mode: "local" | "lan") {
+  async function applyNetworkMode(mode: "local" | "lan") {
     if (mode === networkMode || networkSwitching) return;
     setNetworkSwitching(true);
     setNotice("");
@@ -1142,6 +1143,20 @@ export function AppSettingsView() {
     } finally {
       setNetworkSwitching(false);
     }
+  }
+
+  async function handleNetworkModeToggle(mode: "local" | "lan") {
+    if (mode === networkMode || networkSwitching) return;
+    if (mode === "lan" && networkMode !== "lan") {
+      setConfirmEnableNetworkMode(true);
+      return;
+    }
+    await applyNetworkMode(mode);
+  }
+
+  async function handleConfirmEnableNetworkMode() {
+    setConfirmEnableNetworkMode(false);
+    await applyNetworkMode("lan");
   }
 
   function persist(next: AppSettings, message: string) {
@@ -1613,20 +1628,6 @@ export function AppSettingsView() {
                 </div>
               </div>
             </SettingsModalSection>
-            <SettingsModalSection
-              title="Safety Notes"
-              tone={networkMode === "lan" ? "danger" : "warning"}
-              description={
-                <>
-                  <strong>{networkMode === "lan" ? "LAN mode is live for this session." : "Local-only mode is recommended for routine work."}</strong>{" "}
-                  {networkMode === "lan"
-                    ? "Anyone on the same trusted network who can reach this device can attempt to connect to Kanqual until the app closes or you switch back to local-only mode."
-                    : "Other devices cannot reach this Kanqual database while local-only mode is active."}{" "}
-                  Kanqual always reverts to local-only mode on next launch, and when a project is open these mode changes are written to that project's log.
-                </>
-              }
-            />
-
             {networkMode === "lan" && (
               <SettingsModalSection
                 title="Connection Addresses"
@@ -3173,6 +3174,38 @@ export function AppSettingsView() {
               )}
               <button className="btn btn--primary" type="button" onClick={() => setActiveSettingsModal(null)}>
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmEnableNetworkMode && (
+        <div className="modal-overlay" onClick={() => !networkSwitching && setConfirmEnableNetworkMode(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Enable Network Mode</h2>
+            <p className="import-project-copy">
+              Other devices on your trusted local network will be able to attempt to connect to this Kanqual session until you switch back to local-only mode or close the app.
+            </p>
+            <div className="settings-warning settings-warning--danger">
+              Only enable network mode on a network you trust. Kanqual will return to local-only mode the next time the app launches.
+            </div>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setConfirmEnableNetworkMode(false)}
+                disabled={networkSwitching}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                onClick={() => void handleConfirmEnableNetworkMode()}
+                disabled={networkSwitching}
+              >
+                {networkSwitching ? "Enabling..." : "Enable Network Mode"}
               </button>
             </div>
           </div>

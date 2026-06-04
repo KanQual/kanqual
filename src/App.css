@@ -302,6 +302,7 @@ body {
   object-fit: contain;
   object-position: left center;
   flex-shrink: 1;
+  pointer-events: none;
 }
 
 .sidebar-brand--clickable:hover .brand-name {
@@ -322,20 +323,50 @@ body {
   text-align: left;
 }
 
+.sidebar-icon-button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .brand-network-badge {
   font-size: var(--text-xs);
   line-height: 1.2;
   position: absolute;
   top: 10px;
-  right: 16px;
-  width: 22px;
-  height: 22px;
+  right: 14px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
   cursor: pointer;
   text-align: right;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  z-index: 2;
+}
+
+.brand-status-tooltip {
+  position: fixed;
+  min-width: max-content;
+  max-width: 220px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  z-index: 1000;
 }
 
 .brand-network-badge--local {
@@ -359,14 +390,15 @@ body {
 
 .brand-ai-badge {
   position: absolute;
-  top: 40px;
-  right: 16px;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  background: transparent;
-  border: 0;
+  top: 62px;
+  right: 14px;
+  width: 18px;
+  height: 18px;
   cursor: pointer;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  z-index: 2;
 }
 
 .brand-ai-icon {
@@ -376,12 +408,59 @@ body {
 }
 .brand-ai-icon svg { width: 100%; height: 100%; fill: currentColor; }
 
+.brand-ai-badge--running .brand-ai-icon {
+  animation: brand-icon-spin 1.1s linear infinite;
+  transform-origin: center;
+}
+
+.brand-collaboration-badge {
+  position: absolute;
+  top: 36px;
+  right: 14px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  z-index: 2;
+}
+
+.brand-collaboration-icon {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.brand-collaboration-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
 .brand-network-badge--local { color: rgba(255,255,255,0.35); }
 .brand-network-badge--lan { color: #4ade80; }
 .brand-network-badge--remote { color: #60a5fa; }
 
 .brand-ai-badge--ready { color: #a3e635; }
+.brand-ai-badge--disabled { color: rgba(255,255,255,0.45); }
+.brand-ai-badge--running { color: #fbbf24; }
 .brand-ai-badge--unavailable { color: rgba(255,255,255,0.5); }
+
+.brand-collaboration-badge--idle { color: rgba(255,255,255,0.35); }
+.brand-collaboration-badge--active { color: #34d399; }
+.brand-collaboration-badge--disabled {
+  color: rgba(255,255,255,0.24);
+  cursor: default;
+}
+
+@keyframes brand-icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 .sidebar-project-badge {
   padding: 12px 16px;
@@ -424,10 +503,7 @@ body {
   width: 14px;
   height: 14px;
   margin: 2px 0 0;
-  padding: 0;
-  border: none;
   border-radius: 4px;
-  background: transparent;
   color: var(--color-sidebar-muted);
   cursor: pointer;
   flex: 0 0 auto;
@@ -1382,6 +1458,11 @@ body {
   padding-top: 60px;
 }
 
+.ai-assist-home-actions-column {
+  border-left: 2px solid var(--color-sidebar);
+  padding-left: 24px;
+}
+
 .ai-assist-home-action-group {
   display: flex;
   flex-direction: column;
@@ -1569,6 +1650,11 @@ body {
 
   .ai-assist-home-layout {
     grid-template-columns: 1fr;
+  }
+
+  .ai-assist-home-actions-column {
+    border-left: none;
+    padding-left: 0;
   }
 
   .ai-assist-home-card-row,

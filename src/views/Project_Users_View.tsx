@@ -3,7 +3,7 @@ import type PocketBase from "pocketbase";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../types";
-import type { PendingImportedUser, ProjectLogEntry, ProjectPresenceEntry, Role } from "../types";
+import type { AppRole, PendingImportedUser, ProjectLogEntry, ProjectPresenceEntry, Role } from "../types";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { createUserAccount } from "../lib/pb";
 import { HelpIcon } from "../components/AppIcons";
@@ -162,6 +162,25 @@ const NON_OWNER_PROJECT_ROLES: Role[] = ["editor", "coder", "viewer"];
 
 function getAssignableRoles(canTransferOwnership: boolean): Role[] {
   return canTransferOwnership ? ALL_PROJECT_ROLES : NON_OWNER_PROJECT_ROLES;
+}
+
+function canViewActivityRow(args: {
+  appRole: AppRole;
+  projectRole: Role | null;
+  currentUserId: string | null;
+  row: MemberRow;
+}): boolean {
+  const { appRole, projectRole, currentUserId, row } = args;
+
+  if (appRole === "administrator" || projectRole === "owner") return true;
+  if (!currentUserId) return false;
+  if (row.userId === currentUserId) return true;
+
+  if (projectRole === "editor") {
+    return row.role === "coder" || row.role === "viewer";
+  }
+
+  return false;
 }
 
 // ─── User Detail sub-view ────────────────────────────────────────────────────
@@ -597,6 +616,8 @@ export function UsersView() {
     activeProjectPresenceUsers,
     logEntries,
     pb,
+    appRole,
+    userRole,
     canCurrentUser,
     ensureProjectSafetyBackup,
     logAction,
@@ -639,6 +660,13 @@ export function UsersView() {
   const [availableUsersLoading, setAvailableUsersLoading] = useState(false);
   const [resolutionBusy, setResolutionBusy] = useState(false);
   const [removeImportedUser, setRemoveImportedUser] = useState<PendingImportedUser | null>(null);
+
+  useEffect(() => {
+    const requestedTab = sessionStorage.getItem("kanqual:open-project-users-tab");
+    if (!requestedTab) return;
+    sessionStorage.removeItem("kanqual:open-project-users-tab");
+    setShowActivityTable(requestedTab === "activity");
+  }, []);
   const [tempPasswordUser, setTempPasswordUser] = useState<PendingImportedUser | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [confirmTemporaryPassword, setConfirmTemporaryPassword] = useState("");
@@ -1019,8 +1047,19 @@ export function UsersView() {
     () => new Set(activeProjectPresenceUsers.map((entry: ProjectPresenceEntry) => entry.userId)),
     [activeProjectPresenceUsers],
   );
+  const visibleActivityMembers = useMemo(
+    () =>
+      rows.filter((row) =>
+        canViewActivityRow({
+          appRole,
+          projectRole: userRole,
+          currentUserId: currentUser?.id ?? null,
+          row,
+        })),
+    [appRole, currentUser?.id, rows, userRole],
+  );
   const activityRows = useMemo<ActivityRow[]>(() => (
-    rows
+    visibleActivityMembers
       .map((row) => {
         const counts = activityCountsByUser[row.userId]
           ?? activityCountsByUser[`identifier:${row.userIdentifier}`]
@@ -1042,7 +1081,7 @@ export function UsersView() {
         };
       })
       .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
-  ), [activityCountsByUser, activePresenceUserIds, logEntries, nowMs, rows]);
+  ), [activityCountsByUser, activePresenceUserIds, logEntries, nowMs, visibleActivityMembers]);
 
   function getEditableRolesForRow(row: MemberRow): Role[] {
     if (row.role === "owner" && (!canTransferOwnership || ownerCount <= 1)) return ["owner"];
