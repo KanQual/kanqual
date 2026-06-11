@@ -16,6 +16,8 @@ import {
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 type EmbeddingModelStatus = {
   installed: boolean;
@@ -109,12 +111,12 @@ const CLOUD_PROVIDER_OPTIONS: Array<{
   },
 ];
 
-function formatDownloadDate(value: number | null | undefined): string {
-  if (!value) return "Not downloaded yet";
+function formatDownloadDate(value: number | null | undefined, fallback: string): string {
+  if (!value) return fallback;
   try {
-    return new Date(value).toLocaleString();
+    return formatCurrentDateTime(value);
   } catch {
-    return "Not downloaded yet";
+    return fallback;
   }
 }
 
@@ -124,6 +126,7 @@ function clampInteger(value: number, min: number, max: number): number {
 }
 
 function useEmbeddingRunState() {
+  const { t } = useI18n();
   const {
     activeProject,
     documents,
@@ -178,7 +181,7 @@ function useEmbeddingRunState() {
         setError("");
       } catch (nextError) {
         console.error("Failed to load AI Assist embedding status:", nextError);
-        if (!cancelled) setError("Could not load the latest embedding run details.");
+        if (!cancelled) setError(t("aiAssist.home.messages.couldNotLoadEmbeddingRunDetails"));
       }
     }
 
@@ -192,6 +195,7 @@ function useEmbeddingRunState() {
     projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady,
     projectEmbeddingBuildStatus?.phase,
     projectEmbeddingBuildStatus?.projectId,
+    t,
   ]);
 
   async function handleRunEmbedding() {
@@ -202,14 +206,14 @@ function useEmbeddingRunState() {
       if (isLocalWorkspace) {
         const latestModelStatus = await invoke<EmbeddingModelStatus>("get_multilingual_e5_status");
         if (!latestModelStatus.installed) {
-          setError("Download the multilingual-e5 model in Device-Level Setup before building embeddings.");
+          setError(t("aiAssist.home.messages.downloadModelBeforeBuildingEmbeddings"));
           return false;
         }
 
         const llmSettings = readAppSettings().llm;
         const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, llmSettings);
         if (sources.length === 0) {
-          setError("There is no project content available to embed yet.");
+          setError(t("aiAssist.home.messages.noProjectContentToEmbed"));
           return false;
         }
 
@@ -225,7 +229,7 @@ function useEmbeddingRunState() {
         });
       } else {
         if (projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled === false) {
-          setError("The host device still needs the multilingual-e5 model before it can build project embeddings.");
+          setError(t("aiAssist.home.messages.hostNeedsModelBeforeBuilding"));
           return false;
         }
         await startProjectEmbeddingBuild({
@@ -248,7 +252,7 @@ function useEmbeddingRunState() {
       return true;
     } catch (nextError) {
       console.error("Failed to rerun project embeddings:", nextError);
-      setError(nextError instanceof Error ? nextError.message : "Could not rerun project embeddings.");
+      setError(nextError instanceof Error ? nextError.message : t("aiAssist.home.messages.couldNotRerunProjectEmbeddings"));
       return false;
     }
   }
@@ -275,6 +279,7 @@ function EmbeddingBuildModal({
   onClose: () => void;
   onRun: () => void;
 }) {
+  const { t } = useI18n();
   if (!buildModalOpen) return null;
   return (
     <div className="modal-overlay">
@@ -288,26 +293,23 @@ function EmbeddingBuildModal({
         <div className="settings-section-header">
           <div>
             <h2 id="ai-assist-rerun-title" className="settings-section-title">
-              {hasExistingIndex ? "Rebuild Project Embeddings" : "Run Project Embeddings"}
+              {hasExistingIndex ? t("aiAssist.home.buildModal.rebuildTitle") : t("aiAssist.home.buildModal.runTitle")}
             </h2>
             <p className="settings-section-desc">
-              Kanqual is refreshing the multilingual-e5 index for this project.
+              {t("aiAssist.home.buildModal.description")}
             </p>
           </div>
         </div>
         <div className="app-settings-modal-body">
           <div className="project-model-modal-copy">
-            <p>
-              This is usually a first-run setup task, but you can rerun it any time the project
-              changes enough that you want a fresh AI Assist index.
-            </p>
+            <p>{t("aiAssist.home.buildModal.body")}</p>
           </div>
           <div className="form-actions">
             <button type="button" className="btn" onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button type="button" className="btn btn--primary" onClick={onRun}>
-              {hasExistingIndex ? "Re-run" : "Run"}
+              {hasExistingIndex ? t("aiAssist.home.buildModal.rerun") : t("aiAssist.home.buildModal.run")}
             </button>
           </div>
         </div>
@@ -327,6 +329,7 @@ function DeviceDetailsModal({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   if (!open) return null;
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -346,7 +349,7 @@ function DeviceDetailsModal({
           {children}
           <div className="form-actions">
             <button type="button" className="btn btn--primary" onClick={onClose}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </div>
@@ -356,6 +359,7 @@ function DeviceDetailsModal({
 }
 
 export function AIAssistView() {
+  const { t } = useI18n();
   const {
     pb,
     canCurrentUser,
@@ -419,12 +423,12 @@ export function AIAssistView() {
   const embeddingModelInstalled = Boolean(embeddingModelStatus?.installed);
   const embeddingRuntimeStatusLabel =
     embeddingDownloadPhase === "downloading"
-      ? "Downloading"
+      ? t("aiAssist.home.statuses.downloading")
       : embeddingDownloadPhase === "cancelling"
-        ? "Cancelling"
+        ? t("aiAssist.home.statuses.cancelling")
         : embeddingModelInstalled
-          ? "Downloaded"
-          : "None";
+          ? t("aiAssist.home.statuses.downloaded")
+          : t("aiAssist.home.statuses.none");
   const llmConnectionMode = appSettings.llm.connectionMode;
   const selectedCloudProvider = CLOUD_PROVIDER_OPTIONS.find(
     (provider) => provider.value === appSettings.llm.cloudProvider,
@@ -432,10 +436,10 @@ export function AIAssistView() {
   const activeSelectedModel =
     llmConnectionMode === "cloud" ? appSettings.llm.cloudSelectedModel : appSettings.llm.ollamaSelectedModel;
   const runtimeConnectionModeLabel = llmConnectionMode === "none"
-    ? "None"
+    ? t("aiAssist.home.statuses.none")
     : llmConnectionMode === "cloud"
-      ? "Cloud"
-      : "Local";
+      ? t("aiAssist.home.statuses.cloud")
+      : t("aiAssist.home.statuses.local");
   const generationModelOptions = llmConnectionMode === "cloud"
     ? cloudModels.map((model) => ({
       id: model.id,
@@ -467,8 +471,8 @@ export function AIAssistView() {
   const canDeleteProjectEmbeddings = canCurrentUser("deleteEmbeddings");
   const embeddingTuningAvailable = embeddingModelInstalled;
   const generationDefaultsAvailable = llmConnectionMode !== "none";
-  const embeddingTuningBlockedMessage = "Download the embedding model first.";
-  const generationDefaultsBlockedMessage = "Set up an LLM connection first.";
+  const embeddingTuningBlockedMessage = t("aiAssist.home.messages.downloadModelFirst");
+  const generationDefaultsBlockedMessage = t("aiAssist.home.messages.setUpLlmFirst");
 
   const remoteEmbeddingModelInstalled = projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled;
   const remoteEmbeddingsReady = projectAiAssistRuntimeStatus.hostProjectEmbeddingsReady;
@@ -485,20 +489,20 @@ export function AIAssistView() {
   ).length;
   const embeddingStatusLabel =
     projectBuildPhase === "running"
-      ? "Building in background"
+      ? t("aiAssist.home.statuses.buildingInBackground")
       : projectBuildPhase === "cancelling"
-        ? "Cancelling build"
+        ? t("aiAssist.home.statuses.cancellingBuild")
         : indexStatus?.exists
-          ? "Generated"
-          : "Not built";
+          ? t("aiAssist.home.statuses.generated")
+          : t("aiAssist.home.statuses.notBuilt");
   const embeddingLastRunLabel =
     projectBuildPhase === "running"
-      ? "Running now"
+      ? t("aiAssist.home.statuses.runningNow")
       : projectBuildPhase === "cancelling"
-        ? "Stopping current run"
+        ? t("aiAssist.home.statuses.stoppingCurrentRun")
         : indexStatus?.generatedAtMs
-          ? new Date(indexStatus.generatedAtMs).toLocaleString()
-          : "No run yet";
+          ? formatCurrentDateTime(indexStatus.generatedAtMs)
+          : t("aiAssist.home.statuses.noRunYet");
   const projectEmbeddingNeedsRerun =
     projectBuildPhase === "running" || projectBuildPhase === "cancelling"
       ? false
@@ -507,14 +511,14 @@ export function AIAssistView() {
         : true;
   const projectEmbeddingRerunLabel =
     projectBuildPhase === "running"
-      ? "Updating now"
+      ? t("aiAssist.home.statuses.updatingNow")
       : projectBuildPhase === "cancelling"
-        ? "Stopping current run"
+        ? t("aiAssist.home.statuses.stoppingCurrentRun")
         : !indexStatus?.exists
-          ? "Needs first run"
+          ? t("aiAssist.home.statuses.needsFirstRun")
           : projectEmbeddingNeedsRerun
-            ? "Re-run recommended"
-            : "Up to date";
+            ? t("aiAssist.home.statuses.rerunRecommended")
+            : t("aiAssist.home.statuses.upToDate");
   const refreshEmbeddingModelStatus = useCallback(() => {
     if (!isLocalWorkspace) return;
     invoke<EmbeddingModelStatus>("get_multilingual_e5_status")
@@ -523,9 +527,9 @@ export function AIAssistView() {
       })
       .catch((error) => {
         console.error("Failed to load embedding model status:", error);
-        setDeviceError("Could not load embedding model status.");
+        setDeviceError(t("aiAssist.home.messages.couldNotLoadEmbeddingModelStatus"));
       });
-  }, [isLocalWorkspace]);
+  }, [isLocalWorkspace, t]);
 
   const refreshEmbeddingModelPreflight = useCallback(() => {
     if (!isLocalWorkspace) return;
@@ -673,10 +677,10 @@ export function AIAssistView() {
     setDeviceNotice("");
     try {
       await startEmbeddingModelDownload();
-      setDeviceNotice("Embedding model download started in the background.");
+      setDeviceNotice(t("aiAssist.home.messages.downloadStarted"));
     } catch (error) {
       console.error("Embedding model download failed:", error);
-      setDeviceError(error instanceof Error ? error.message : "Embedding model download failed. Please try again.");
+      setDeviceError(error instanceof Error ? error.message : t("aiAssist.home.messages.downloadFailed"));
     }
   }
 
@@ -687,11 +691,11 @@ export function AIAssistView() {
     try {
       const status = await cancelEmbeddingModelDownload();
       if (status.phase === "cancelling") {
-        setDeviceNotice("Embedding model download is cancelling in the background.");
+        setDeviceNotice(t("aiAssist.home.messages.downloadCancelling"));
       }
     } catch (error) {
       console.error("Embedding model cancel failed:", error);
-      setDeviceError(error instanceof Error ? error.message : "Could not cancel the embedding model download.");
+      setDeviceError(error instanceof Error ? error.message : t("aiAssist.home.messages.couldNotCancelDownload"));
     }
   }
 
@@ -706,10 +710,10 @@ export function AIAssistView() {
       setEmbeddingModelStatus(status);
       refreshEmbeddingModelStatus();
       refreshEmbeddingModelPreflight();
-      setDeviceNotice("Local multilingual-e5 files cleared.");
+      setDeviceNotice(t("aiAssist.home.messages.localModelFilesCleared"));
     } catch (error) {
       console.error("Embedding model clear failed:", error);
-      setDeviceError(error instanceof Error ? error.message : "Could not clear local multilingual-e5 files.");
+      setDeviceError(error instanceof Error ? error.message : t("aiAssist.home.messages.couldNotClearLocalModelFiles"));
     }
   }
 
@@ -758,7 +762,7 @@ export function AIAssistView() {
       setOllamaDiscovery(null);
       setOllamaModels([]);
       setOllamaTestFlash("error");
-      setOllamaError(error instanceof Error ? error.message : "Could not connect to the configured LLM server.");
+      setOllamaError(error instanceof Error ? error.message : t("aiAssist.home.messages.couldNotConnectConfiguredLlmServer"));
     } finally {
       setOllamaBusy(false);
     }
@@ -809,7 +813,7 @@ export function AIAssistView() {
       setCloudDiscovery(null);
       setCloudModels([]);
       setCloudTestFlash("error");
-      setCloudError(error instanceof Error ? error.message : "Could not connect to the selected cloud provider.");
+      setCloudError(error instanceof Error ? error.message : t("aiAssist.home.messages.couldNotConnectSelectedCloudProvider"));
     } finally {
       setCloudBusy(false);
     }
@@ -829,30 +833,42 @@ export function AIAssistView() {
     if (!activeProject || !canEnableProjectAiAssist) return;
     setProjectError("");
     if (!enabled) {
-      await persistProjectAiAssist(false, "Project AI Assist disabled.");
-      await logAction(activeProject.id, "project.ai_assist.update", "Disabled AI Assist for this project");
+      await persistProjectAiAssist(false, t("aiAssist.home.messages.projectAiAssistDisabled"));
+      await logAction(
+        activeProject.id,
+        "project.ai_assist.update",
+        t("projectLog.labels.projectAiAssistDisabled"),
+        undefined,
+        { enabled: false },
+      );
       return;
     }
 
     await persistProjectAiAssist(
       true,
-      "Project AI Assist enabled. Finish the remaining setup steps below if this project is not ready yet.",
+      t("aiAssist.home.messages.projectAiAssistEnabled"),
     );
-    await logAction(activeProject.id, "project.ai_assist.update", "Enabled AI Assist for this project");
+    await logAction(
+      activeProject.id,
+      "project.ai_assist.update",
+      t("projectLog.labels.projectAiAssistEnabled"),
+      undefined,
+      { enabled: true },
+    );
 
     if (isLocalWorkspace) {
       if (!embeddingModelStatus?.installed) {
-        setProjectError("Download the multilingual-e5 model in Device-Level Setup before building project embeddings.");
+        setProjectError(t("aiAssist.home.messages.downloadModelBeforeProjectEmbeddings"));
       } else if (!indexStatus?.exists) {
-        setProjectNotice("Project AI Assist is on. Run project embeddings below to finish setup.");
+        setProjectNotice(t("aiAssist.home.messages.runProjectEmbeddingsToFinish"));
       }
       return;
     }
 
     if (remoteEmbeddingModelInstalled === false) {
-      setProjectError("The host device still needs the multilingual-e5 model before project AI Assist can finish setup.");
+      setProjectError(t("aiAssist.home.messages.hostNeedsModelBeforeProjectSetup"));
     } else if (remoteEmbeddingsReady === false) {
-      setProjectNotice("Project AI Assist is on. Run project embeddings below to finish setup.");
+      setProjectNotice(t("aiAssist.home.messages.runProjectEmbeddingsToFinish"));
     }
   }
 
@@ -873,12 +889,12 @@ export function AIAssistView() {
       await logAction(
         activeProject.id,
         "project.ai_assist.embeddings.delete",
-        "Deleted AI Assist embeddings and disabled AI Assist",
+        t("projectLog.labels.projectAiAssistEmbeddingsDeleted"),
       );
-      setProjectNotice("Deleted project embeddings. AI Assist has been turned off until embeddings are rebuilt.");
+      setProjectNotice(t("aiAssist.home.messages.deletedProjectEmbeddings"));
     } catch (error) {
       console.error("Failed to delete project embeddings:", error);
-      setProjectError(error instanceof Error ? error.message : "Could not delete project embeddings.");
+      setProjectError(error instanceof Error ? error.message : t("aiAssist.home.messages.couldNotDeleteProjectEmbeddings"));
     } finally {
       setAiAssistDeletingIndex(false);
     }
@@ -892,10 +908,10 @@ export function AIAssistView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>AI Assist</h1>
+          <h1>{t("aiAssist.title")}</h1>
         </header>
         <div className="empty-state">
-          <p>Open a project first.</p>
+          <p>{t("aiAssist.home.empty.openProjectFirst")}</p>
         </div>
       </div>
     );
@@ -905,10 +921,10 @@ export function AIAssistView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>AI Assist</h1>
+          <h1>{t("aiAssist.title")}</h1>
         </header>
         <div className="empty-state">
-          <p>You do not have permission to view AI Assist for this project.</p>
+          <p>{t("aiAssist.home.empty.noPermission")}</p>
         </div>
       </div>
     );
@@ -918,12 +934,12 @@ export function AIAssistView() {
     <div className="view home-view ai-assist-home-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>AI Assist</h1>
+          <h1>{t("aiAssist.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show AI Assist help"
-            title="Show Help"
+            aria-label={t("aiAssist.home.openHelp")}
+            title={t("aiAssist.home.showHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -947,41 +963,41 @@ export function AIAssistView() {
           >
             <div className="home-project-card-header">
               <div>
-                <h2>Runtime Status</h2>
+                <h2>{t("aiAssist.home.runtimeStatusTitle")}</h2>
                 <p className="ai-assist-card-subcopy">
-                  Check whether the runtime pieces AI Assist depends on are available right now.
+                  {t("aiAssist.home.runtimeStatusBody")}
                 </p>
               </div>
             </div>
             <div className="home-restricted-list">
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Embedding model</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.embeddingModel")}</span>
                 <span className={`home-restricted-value${(isLocalWorkspace ? embeddingModelStatus?.installed : remoteEmbeddingModelInstalled) ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
                   {isLocalWorkspace
-                    ? (embeddingModelStatus?.installed ? "Ready" : "Missing")
+                    ? (embeddingModelStatus?.installed ? t("aiAssist.home.statuses.ready") : t("aiAssist.home.statuses.missing"))
                     : remoteEmbeddingModelInstalled == null
-                      ? "Checking..."
+                      ? t("aiAssist.home.statuses.checking")
                       : remoteEmbeddingModelInstalled
-                        ? "Ready"
-                        : "Missing"}
+                        ? t("aiAssist.home.statuses.ready")
+                        : t("aiAssist.home.statuses.missing")}
                 </span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">{isLocalWorkspace ? "LLM connection" : "Host LLM"}</span>
+                <span className="home-restricted-label">{isLocalWorkspace ? t("aiAssist.home.labels.llmConnection") : t("aiAssist.home.labels.hostLlm")}</span>
                 <span className={`home-restricted-value${llmConnectionMode === "none" ? " home-restricted-value--pending" : " home-restricted-value--ready"}`}>
                   {runtimeConnectionModeLabel}
                 </span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Selected model</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.selectedModel")}</span>
                 <span className={`home-restricted-value${activeSelectedModel ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
                   {isLocalWorkspace
-                    ? (activeSelectedModel || "None selected")
+                    ? (activeSelectedModel || t("aiAssist.home.statuses.noneSelected"))
                     : projectAiAssistRuntimeStatus.hostLlmModelSelected == null
-                      ? "Checking..."
+                      ? t("aiAssist.home.statuses.checking")
                       : projectAiAssistRuntimeStatus.hostLlmModelSelected
-                        ? "Selected on host"
-                        : "None selected"}
+                        ? t("aiAssist.home.statuses.selectedOnHost")
+                        : t("aiAssist.home.statuses.noneSelected")}
                 </span>
               </div>
             </div>
@@ -1001,31 +1017,31 @@ export function AIAssistView() {
           >
             <div className="home-project-card-header">
               <div>
-                <h2>Project Readiness</h2>
-                <p className="ai-assist-card-subcopy">
-                  These are the project-specific checks that need to be ready before AI workflows can use the current project.
+                    <h2>{t("aiAssist.home.projectReadinessTitle")}</h2>
+                    <p className="ai-assist-card-subcopy">
+                  {t("aiAssist.home.projectReadinessBody")}
                 </p>
               </div>
             </div>
             <div className="home-restricted-list">
               <div className="home-restricted-item">
-                <span className="home-restricted-label">AI Assist enabled</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.aiAssistEnabled")}</span>
                 <span className={`home-restricted-value${projectAiAssistSettings.enabled ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                  {projectAiAssistSettings.enabled ? "Enabled" : "Disabled"}
+                  {projectAiAssistSettings.enabled ? t("aiAssist.home.statuses.enabled") : t("aiAssist.home.statuses.disabled")}
                 </span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Embeddings</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.embeddings")}</span>
                 <span className={`home-restricted-value${indexStatus?.exists ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
                   {embeddingStatusLabel}
                 </span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Last run</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.lastRun")}</span>
                 <span className="home-restricted-value">{embeddingLastRunLabel}</span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Re-run needed</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.rerunNeeded")}</span>
                 <span className={`home-restricted-value${projectEmbeddingNeedsRerun ? " home-restricted-value--pending" : " home-restricted-value--ready"}`}>
                   {projectEmbeddingRerunLabel}
                 </span>
@@ -1036,7 +1052,7 @@ export function AIAssistView() {
 
         <div className="ai-assist-home-actions-column">
           <div className="ai-assist-home-tabbar">
-            <div className="segmented-control" role="tablist" aria-label="AI Assist setup views">
+            <div className="segmented-control" role="tablist" aria-label={t("aiAssist.home.labels.setupViews")}>
               <button
                 type="button"
                 role="tab"
@@ -1044,7 +1060,7 @@ export function AIAssistView() {
                 className={setupTab === "device" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => setSetupTab("device")}
               >
-                Device-Level
+                {t("aiAssist.home.labels.deviceLevel")}
               </button>
               <button
                 type="button"
@@ -1053,7 +1069,7 @@ export function AIAssistView() {
                 className={setupTab === "project" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => setSetupTab("project")}
               >
-                Project-Level
+                {t("aiAssist.home.labels.projectLevel")}
               </button>
             </div>
           </div>
@@ -1064,23 +1080,23 @@ export function AIAssistView() {
                 <section className="home-project-card ai-assist-home-card">
                   <div className="home-project-card-header">
                     <div>
-                      <h2>Host Runtime</h2>
+                      <h2>{t("aiAssist.home.labels.hostRuntime")}</h2>
                       <p className="ai-assist-card-subcopy">
-                        This project is using a host-managed AI runtime, so device-level setup is managed on the host machine.
+                        {t("aiAssist.home.labels.hostRuntimeBody")}
                       </p>
                     </div>
                   </div>
                   <div className="home-restricted-list">
                     <div className="home-restricted-item">
-                      <span className="home-restricted-label">Embedding model</span>
+                      <span className="home-restricted-label">{t("aiAssist.home.labels.embeddingModel")}</span>
                       <span className={`home-restricted-value${remoteEmbeddingModelInstalled ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                        {remoteEmbeddingModelInstalled == null ? "Checking..." : remoteEmbeddingModelInstalled ? "Ready" : "Missing"}
+                        {remoteEmbeddingModelInstalled == null ? t("aiAssist.home.statuses.checking") : remoteEmbeddingModelInstalled ? t("aiAssist.home.statuses.ready") : t("aiAssist.home.statuses.missing")}
                       </span>
                     </div>
                     <div className="home-restricted-item">
-                      <span className="home-restricted-label">Host LLM</span>
+                      <span className="home-restricted-label">{t("aiAssist.home.labels.hostLlm")}</span>
                       <span className={`home-restricted-value${llmConnectionStatus === "live" ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                        {llmConnectionStatus === "checking" ? "Checking..." : llmConnectionStatus === "live" ? "Connected" : "Not ready"}
+                        {llmConnectionStatus === "checking" ? t("aiAssist.home.statuses.checking") : llmConnectionStatus === "live" ? t("aiAssist.home.statuses.connected") : t("aiAssist.home.statuses.notReady")}
                       </span>
                     </div>
                   </div>
@@ -1091,9 +1107,9 @@ export function AIAssistView() {
                   <section className="home-project-card ai-assist-home-card ai-assist-home-card--balanced">
                     <div className="home-project-card-header">
                       <div>
-                        <h2>AI Runtime</h2>
+                        <h2>{t("aiAssist.home.labels.aiRuntime")}</h2>
                         <p className="ai-assist-card-subcopy">
-                          Download or clear the embedding model Kanqual uses for retrieval, then open the extra details only when you need them.
+                          {t("aiAssist.home.labels.aiRuntimeBody")}
                         </p>
                       </div>
                     </div>
@@ -1103,13 +1119,13 @@ export function AIAssistView() {
                       <div>
                         <div className="project-model-name">{embeddingModelStatus?.displayName ?? "multilingual-e5-large"}</div>
                         <p className="project-model-description">
-                          Status: {embeddingRuntimeStatusLabel}
+                          {t("aiAssist.home.labels.status")}: {embeddingRuntimeStatusLabel}
                         </p>
                         <p className="project-model-description">
-                          Size: {embeddingModelStatus?.bytes ? formatBytes(embeddingModelStatus.bytes) : "Not available yet"}
+                          {t("aiAssist.home.labels.size")}: {embeddingModelStatus?.bytes ? formatBytes(embeddingModelStatus.bytes) : t("aiAssist.home.statuses.notAvailableYet")}
                         </p>
                         <p className="project-model-description">
-                          Files: {embeddingModelStatus?.files ? `${embeddingModelStatus.files} files` : "Not available yet"}
+                          {t("aiAssist.home.labels.files")}: {embeddingModelStatus?.files ? t("aiAssist.home.labels.filesCount", { count: embeddingModelStatus.files }) : t("aiAssist.home.statuses.notAvailableYet")}
                         </p>
                       </div>
                     </div>
@@ -1121,7 +1137,7 @@ export function AIAssistView() {
                           onClick={() => void handleEmbeddingModelDownload()}
                           disabled={projectBuildBusy || !canDownloadEmbeddingModel}
                         >
-                          {projectBuildBusy ? "Busy..." : "Download"}
+                          {projectBuildBusy ? t("aiAssist.home.statuses.busy") : t("aiAssist.home.actions.download")}
                         </button>
                       ) : null}
                       {embeddingDownloadActive ? (
@@ -1131,7 +1147,7 @@ export function AIAssistView() {
                           onClick={() => void handleEmbeddingModelCancel()}
                           disabled={!canDownloadEmbeddingModel}
                         >
-                          {embeddingDownloadPhase === "cancelling" ? "Cancelling..." : "Cancel"}
+                          {embeddingDownloadPhase === "cancelling" ? t("aiAssist.home.statuses.cancellingAction") : t("aiAssist.home.actions.cancel")}
                         </button>
                       ) : null}
                       {embeddingModelInstalled && !embeddingDownloadActive ? (
@@ -1141,7 +1157,7 @@ export function AIAssistView() {
                             className="btn"
                             onClick={() => setActiveDeviceModal("download-details")}
                           >
-                            Details
+                            {t("aiAssist.home.actions.details")}
                           </button>
                           <button
                             className="btn btn--primary"
@@ -1153,7 +1169,7 @@ export function AIAssistView() {
                             }
                             style={{ marginLeft: "auto" }}
                           >
-                            Clear
+                            {t("aiAssist.home.actions.clear")}
                           </button>
                         </>
                       ) : null}
@@ -1163,23 +1179,23 @@ export function AIAssistView() {
                   <section className={`home-project-card ai-assist-home-card ai-assist-home-card--balanced${embeddingTuningAvailable ? "" : " ai-assist-home-card--disabled"}`}>
                     <div className="home-project-card-header">
                       <div>
-                        <h2>Embedding Tuning</h2>
+                        <h2>{t("aiAssist.home.labels.embeddingTuning")}</h2>
                         <p className="ai-assist-card-subcopy">
-                          Adjust how Kanqual chunks and batches project content before it builds embeddings.
+                          {t("aiAssist.home.labels.embeddingTuningBody")}
                         </p>
                       </div>
                     </div>
                     <div className="project-model-card">
                       <div>
-                        <div className="project-model-name">Defaults</div>
+                        <div className="project-model-name">{t("aiAssist.home.labels.defaults")}</div>
                         <p className="project-model-description">
-                          Chunk size: {appSettings.llm.chunkSize}
+                          {t("aiAssist.home.labels.chunkSize")}: {appSettings.llm.chunkSize}
                         </p>
                         <p className="project-model-description">
-                          Overlap: {appSettings.llm.overlapSize}
+                          {t("aiAssist.home.labels.overlap")}: {appSettings.llm.overlapSize}
                         </p>
                         <p className="project-model-description">
-                          Batch size: {appSettings.llm.batchSize}
+                          {t("aiAssist.home.labels.batchSize")}: {appSettings.llm.batchSize}
                         </p>
                       </div>
                     </div>
@@ -1196,7 +1212,7 @@ export function AIAssistView() {
                         disabled={!embeddingTuningAvailable}
                         title={embeddingTuningAvailable ? undefined : embeddingTuningBlockedMessage}
                       >
-                        Tuning
+                        {t("aiAssist.home.actions.tuning")}
                       </button>
                     </div>
                   </section>
@@ -1204,12 +1220,16 @@ export function AIAssistView() {
                   <section className="home-project-card ai-assist-home-card ai-assist-home-card--balanced">
                     <div className="home-project-card-header">
                       <div>
-                        <h2>LLM Connection</h2>
+                        <h2>{t("aiAssist.home.labels.llmConnection")}</h2>
                         <p className="ai-assist-card-subcopy">
-                          Choose whether Kanqual should use no LLM, a local endpoint, or a future cloud provider.
+                          {t("aiAssist.home.messages.llmConnectionBody")}
                         </p>
                         <div className="settings-toggle-row settings-toggle-row--stacked settings-toggle-row--compact">
-                          <div className="segmented-control ai-assist-connection-mode-toggle" role="tablist" aria-label="LLM connection mode">
+                          <div
+                            className="segmented-control ai-assist-connection-mode-toggle"
+                            role="tablist"
+                            aria-label={t("aiAssist.home.labels.connectionMode")}
+                          >
                             <button
                               type="button"
                               role="tab"
@@ -1222,7 +1242,7 @@ export function AIAssistView() {
                               disabled={!canManageLlmSettings}
                               onClick={() => handleLlmConnectionModeChange("none")}
                             >
-                              None
+                              {t("aiAssist.home.statuses.none")}
                             </button>
                             <button
                               type="button"
@@ -1236,7 +1256,7 @@ export function AIAssistView() {
                               disabled={!canManageLlmSettings}
                               onClick={() => handleLlmConnectionModeChange("local")}
                             >
-                              Local
+                              {t("aiAssist.home.statuses.local")}
                             </button>
                             <button
                               type="button"
@@ -1250,7 +1270,7 @@ export function AIAssistView() {
                               disabled={!canManageLlmSettings}
                               onClick={() => handleLlmConnectionModeChange("cloud")}
                             >
-                              Cloud
+                              {t("aiAssist.home.statuses.cloud")}
                             </button>
                           </div>
                         </div>
@@ -1259,9 +1279,9 @@ export function AIAssistView() {
                     {llmConnectionMode === "none" ? (
                       <div className="project-model-card">
                         <div>
-                          <div className="project-model-name">LLM connections disabled</div>
+                          <div className="project-model-name">{t("aiAssist.home.messages.llmConnectionsDisabled")}</div>
                           <p className="project-model-description">
-                            Kanqual will not use any LLM provider until you switch this card to Local or Cloud.
+                            {t("aiAssist.home.messages.noLlmProviderUntilEnabled")}
                           </p>
                         </div>
                       </div>
@@ -1270,22 +1290,24 @@ export function AIAssistView() {
                       <>
                         {ollamaError && <div className="form-error project-settings-error">{ollamaError}</div>}
                         <p className="ai-assist-inline-help">
-                          Any local provider that exposes an OpenAI-compatible API can work here.
+                          {t("aiAssist.home.messages.localProviderBody")}
                         </p>
                         <div className={llmServerCardClassName}>
                           <div>
-                            <div className="project-model-name">LLM server</div>
+                            <div className="project-model-name">{t("aiAssist.home.labels.localLlmServer")}</div>
                             <p className="project-model-description">
-                              Endpoint: <code>{appSettings.llm.ollamaProtocol}://{appSettings.llm.ollamaHost}:{appSettings.llm.ollamaPort}</code>
+                              {t("aiAssist.home.labels.endpoint")} <code>{appSettings.llm.ollamaProtocol}://{appSettings.llm.ollamaHost}:{appSettings.llm.ollamaPort}</code>
                             </p>
                             <p className="project-model-description">
-                              Status: {ollamaDiscovery?.ok ? "Connected" : "Not tested yet"}
+                              {t("aiAssist.home.labels.status")} {ollamaDiscovery?.ok ? t("aiAssist.home.statuses.connected") : t("aiAssist.home.statuses.notTestedYet")}
                             </p>
                             <p className="project-model-description">
-                              Version: {ollamaDiscovery?.version || "Not available"}
+                              {t("aiAssist.home.labels.version")} {ollamaDiscovery?.version || t("aiAssist.home.statuses.notAvailable")}
                             </p>
                             <p className="project-model-description">
-                              Models: {ollamaDiscovery?.ok ? `${ollamaDiscovery.modelCount} found` : "Not loaded"}
+                              {t("aiAssist.home.labels.models")} {ollamaDiscovery?.ok
+                                ? t("aiAssist.home.messages.modelsFound", { count: ollamaDiscovery.modelCount })
+                                : t("aiAssist.home.messages.notLoaded")}
                             </p>
                           </div>
                         </div>
@@ -1300,7 +1322,7 @@ export function AIAssistView() {
                             disabled={ollamaBusy || !canManageLlmSettings}
                             style={{ marginLeft: "auto" }}
                           >
-                            {ollamaBusy ? "Testing..." : "Test"}
+                            {ollamaBusy ? t("aiAssist.home.statuses.testing") : t("aiAssist.home.actions.test")}
                           </button>
                         </div>
                       </>
@@ -1311,8 +1333,8 @@ export function AIAssistView() {
                         {cloudNotice && <div className="settings-success project-settings-success">{cloudNotice}</div>}
                         <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                           <label className="form-label">
-                            API provider
-                            <span className="settings-field-hint">Choose the cloud service Kanqual should target.</span>
+                            {t("aiAssist.home.labels.apiProvider")}
+                            <span className="settings-field-hint">{t("aiAssist.home.messages.chooseCloudService")}</span>
                             <select
                               className="form-input"
                               value={appSettings.llm.cloudProvider}
@@ -1334,17 +1356,21 @@ export function AIAssistView() {
                                 void openUrl(selectedCloudProvider.keyUrl);
                               }}
                             >
-                              Open key setup
+                              {t("aiAssist.home.actions.openKeySetup")}
                             </a>
                           </p>
                           <div className={cloudProviderCardClassName}>
                             <div>
-                              <div className="project-model-name">{selectedCloudProvider.label} endpoint</div>
+                              <div className="project-model-name">{selectedCloudProvider.label} {t("aiAssist.home.labels.endpointNoun")}</div>
                               <p className="project-model-description">
-                                Status: {cloudDiscovery?.ok ? "Connected" : cloudBusy ? "Testing..." : "Not tested yet"}
+                                {t("aiAssist.home.labels.status")} {cloudDiscovery?.ok
+                                  ? t("aiAssist.home.statuses.connected")
+                                  : cloudBusy
+                                    ? t("aiAssist.home.statuses.testing")
+                                    : t("aiAssist.home.statuses.notTestedYet")}
                               </p>
                               <p className="project-model-description">
-                                Endpoint: <code>{cloudDiscovery?.baseUrl || (
+                                {t("aiAssist.home.labels.endpoint")} <code>{cloudDiscovery?.baseUrl || (
                                   selectedCloudProvider.value === "openai"
                                     ? "https://api.openai.com/v1"
                                     : selectedCloudProvider.value === "anthropic"
@@ -1357,20 +1383,24 @@ export function AIAssistView() {
                                 )}</code>
                               </p>
                               <p className="project-model-description">
-                                Models: {cloudDiscovery?.ok ? `${cloudDiscovery.modelCount} available` : "Load after a successful test"}
+                                {t("aiAssist.home.labels.models")} {cloudDiscovery?.ok
+                                  ? t("aiAssist.home.messages.modelsAvailable", { count: cloudDiscovery.modelCount })
+                                  : t("aiAssist.home.messages.loadAfterSuccessfulTest")}
                               </p>
                             </div>
                           </div>
                           <label className="form-label">
                             API secret
-                            <span className="settings-field-hint">Paste the secret key for the selected provider.</span>
+                            <span className="settings-field-hint">{t("aiAssist.home.messages.pasteProviderKey")}</span>
                             <input
                               className="form-input"
                               type="password"
                               autoComplete="off"
                               value={appSettings.llm.cloudApiSecret}
                               onChange={(e) => handleCloudSecretChange(e.target.value)}
-                              placeholder={`Enter your ${selectedCloudProvider.label} API secret`}
+                              placeholder={t("aiAssist.home.labels.cloudSecretPlaceholder", {
+                                provider: selectedCloudProvider.label,
+                              })}
                             />
                           </label>
                         </fieldset>
@@ -1382,7 +1412,7 @@ export function AIAssistView() {
                             disabled={!canManageLlmSettings || cloudBusy}
                             style={{ marginLeft: "auto" }}
                           >
-                            {cloudBusy ? "Testing..." : "Test"}
+                            {cloudBusy ? t("aiAssist.home.statuses.testing") : t("aiAssist.home.actions.test")}
                           </button>
                         </div>
                       </>
@@ -1392,19 +1422,21 @@ export function AIAssistView() {
                   <section className={`home-project-card ai-assist-home-card${generationDefaultsAvailable ? "" : " ai-assist-home-card--disabled"}`}>
                     <div className="home-project-card-header">
                       <div>
-                        <h2>Generation Defaults</h2>
+                        <h2>{t("aiAssist.home.labels.generationDefaults")}</h2>
                         <p className="ai-assist-card-subcopy">
-                          Choose the model Kanqual should use, then expand the advanced defaults only when you want to tune generation behavior.
+                          {t("aiAssist.home.messages.generationDefaultsBody")}
                         </p>
                       </div>
                     </div>
                     <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!canManageLlmSettings || !generationDefaultsAvailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                       <label className="form-label">
-                        {llmConnectionMode === "cloud" ? "Available cloud model" : "Available local model"}
+                        {llmConnectionMode === "cloud"
+                          ? t("aiAssist.home.labels.availableCloudModel")
+                          : t("aiAssist.home.labels.availableLocalModel")}
                         <span className="settings-field-hint">
                           {llmConnectionMode === "cloud"
-                            ? "Test the cloud connection first to load the models available for the selected provider."
-                            : "Test the connection first to load installed models from this server."}
+                            ? t("aiAssist.home.messages.testCloudConnectionFirst")
+                            : t("aiAssist.home.messages.testLocalConnectionFirst")}
                         </span>
                         <select
                           className="form-input"
@@ -1422,8 +1454,12 @@ export function AIAssistView() {
                         >
                           <option value="">
                             {llmConnectionMode === "cloud"
-                              ? (generationModelOptions.length === 0 ? "No cloud models loaded yet" : "Select a model")
-                              : (generationModelOptions.length === 0 ? "No models loaded yet" : "Select a model")}
+                              ? (generationModelOptions.length === 0
+                                ? t("aiAssist.home.messages.noCloudModelsLoadedYet")
+                                : t("aiAssist.home.labels.selectModel"))
+                              : (generationModelOptions.length === 0
+                                ? t("aiAssist.home.messages.noModelsLoadedYet")
+                                : t("aiAssist.home.labels.selectModel"))}
                           </option>
                           {generationModelOptions.map((model) => (
                             <option key={model.id} value={model.id}>
@@ -1446,7 +1482,7 @@ export function AIAssistView() {
                         disabled={!generationDefaultsAvailable}
                         title={generationDefaultsAvailable ? undefined : generationDefaultsBlockedMessage}
                       >
-                        Defaults
+                        {t("aiAssist.home.labels.defaults")}
                       </button>
                     </div>
                   </section>
@@ -1460,9 +1496,9 @@ export function AIAssistView() {
                 <section className="home-project-card ai-assist-home-card">
                   <div className="home-project-card-header">
                     <div>
-                      <h2>Project AI Assist</h2>
+                      <h2>{t("aiAssist.home.projectAiAssistTitle")}</h2>
                       <p className="ai-assist-card-subcopy">
-                        Turn AI assistance on or off for this project. Device setup alone does not enable AI features inside the project.
+                        {t("aiAssist.home.messages.projectAiAssistBody")}
                       </p>
                     </div>
                   </div>
@@ -1472,7 +1508,7 @@ export function AIAssistView() {
                   {projectNotice && <div className="settings-success project-settings-success">{projectNotice}</div>}
                   <label className="settings-toggle-row">
                     <span>
-                      <strong>Enable</strong>
+                      <strong>{t("aiAssist.home.actions.enable")}</strong>
                     </span>
                     <input
                       type="checkbox"
@@ -1486,9 +1522,9 @@ export function AIAssistView() {
                 <section className="home-project-card ai-assist-home-card">
                   <div className="home-project-card-header">
                     <div>
-                      <h2>Embedding Management</h2>
+                      <h2>{t("aiAssist.home.embeddingManagementTitle")}</h2>
                       <p className="ai-assist-card-subcopy">
-                        Review the current index for this project and rebuild or delete embeddings when the project changes.
+                        {t("aiAssist.home.messages.embeddingManagementBody")}
                       </p>
                     </div>
                   </div>
@@ -1498,13 +1534,13 @@ export function AIAssistView() {
                       className="btn"
                       onClick={() => setBuildModalOpen(true)}
                       disabled={projectBuildBusy || !canBuildProjectEmbeddings}
-                      title={canBuildProjectEmbeddings ? undefined : "You do not have permission to build project embeddings."}
+                      title={canBuildProjectEmbeddings ? undefined : t("aiAssist.home.messages.noPermissionToBuildProjectEmbeddings")}
                     >
                       {projectBuildPhase === "running"
-                        ? "Building..."
+                        ? t("aiAssist.home.statuses.building")
                         : indexStatus?.exists
-                          ? "Rebuild"
-                          : "Run"}
+                          ? t("aiAssist.home.actions.rebuild")
+                          : t("aiAssist.home.actions.run")}
                     </button>
                     <button
                       type="button"
@@ -1514,18 +1550,18 @@ export function AIAssistView() {
                       style={{ marginLeft: "auto" }}
                       title={
                         !canDeleteProjectEmbeddings
-                          ? "You do not have permission to delete project embeddings."
+                          ? t("aiAssist.home.messages.noPermissionToDeleteProjectEmbeddings")
                           : !indexStatus?.exists
-                            ? "No project embeddings are available to delete."
+                            ? t("aiAssist.home.messages.noProjectEmbeddingsToDelete")
                             : undefined
                       }
                     >
-                      {aiAssistDeletingIndex ? "Deleting..." : "Delete"}
+                      {aiAssistDeletingIndex ? t("aiAssist.home.statuses.deleting") : t("aiAssist.home.actions.delete")}
                     </button>
                   </div>
                   {!canBuildProjectEmbeddings && !canDeleteProjectEmbeddings && (
                     <div className="users-permission-note">
-                      You can view project embedding status, but you do not have permission to rebuild or delete embeddings.
+                      {t("aiAssist.home.messages.viewOnlyProjectEmbeddingStatus")}
                     </div>
                   )}
                 </section>
@@ -1538,19 +1574,19 @@ export function AIAssistView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>AI Assist Help</h2>
+            <h2>{t("aiAssist.home.help.title")}</h2>
             <p className="users-guide-copy">
-              Use AI Assist Home as the main control center for both runtime setup and project AI readiness.
+              {t("aiAssist.home.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Device-Level Setup manages the embedding model and LLM connection on this machine. Project-Level Setup manages whether this project can use AI Assist and whether its embeddings are ready.
+              {t("aiAssist.home.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Remote workspaces may rely on a host-managed runtime, so some device controls may appear as status-only instead of editable settings.
+              {t("aiAssist.home.help.line3")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1559,44 +1595,44 @@ export function AIAssistView() {
 
       <DeviceDetailsModal
         open={activeDeviceModal === "download-details"}
-        title="Embedding Download Details"
+        title={t("aiAssist.home.modals.embeddingDownloadDetails")}
         onClose={() => setActiveDeviceModal(null)}
       >
         <ul className="ai-assist-settings-summary-list">
           <li>
-            <strong>Repository:</strong> <code>{embeddingModelStatus?.repoId ?? "intfloat/multilingual-e5-large"}</code>
+            <strong>{t("aiAssist.home.labels.repository")}</strong> <code>{embeddingModelStatus?.repoId ?? "intfloat/multilingual-e5-large"}</code>
           </li>
           <li>
-            <strong>Total download:</strong> {formatBytes(embeddingModelPreflight?.totalBytes ?? 0)}
+            <strong>{t("aiAssist.home.labels.totalDownload")}</strong> {formatBytes(embeddingModelPreflight?.totalBytes ?? 0)}
           </li>
           <li>
-            <strong>Already on device:</strong> {formatBytes(embeddingModelPreflight?.existingBytes ?? embeddingModelStatus?.bytes ?? 0)}
+            <strong>{t("aiAssist.home.labels.alreadyOnDevice")}</strong> {formatBytes(embeddingModelPreflight?.existingBytes ?? embeddingModelStatus?.bytes ?? 0)}
             {embeddingModelPreflight?.manifestAvailable ? ` | ${embeddingModelPreflight?.existingFiles ?? 0} files` : ""}
           </li>
           <li>
-            <strong>Remaining:</strong> {formatBytes(embeddingModelPreflight?.remainingBytes ?? 0)}
+            <strong>{t("aiAssist.home.labels.remaining")}</strong> {formatBytes(embeddingModelPreflight?.remainingBytes ?? 0)}
             {embeddingModelPreflight?.manifestAvailable && embeddingModelPreflight?.remainingFiles != null
-              ? ` across ${embeddingModelPreflight.remainingFiles} files`
+              ? ` ${t("aiAssist.home.messages.remainingFilesAcross", { count: embeddingModelPreflight.remainingFiles })}`
               : ""}
           </li>
           <li>
-            <strong>Downloaded:</strong> {formatDownloadDate(embeddingModelStatus?.downloadedAtMs)}
+            <strong>{t("aiAssist.home.labels.downloadedAt")}</strong> {formatDownloadDate(embeddingModelStatus?.downloadedAtMs, t("aiAssist.home.labels.notDownloadedYet"))}
           </li>
           <li>
-            <strong>Location:</strong> <code>{embeddingModelStatus?.modelDir ?? "Detecting local model directory..."}</code>
+            <strong>{t("aiAssist.home.labels.location")}</strong> <code>{embeddingModelStatus?.modelDir ?? t("aiAssist.home.messages.detectingLocalModelDirectory")}</code>
           </li>
         </ul>
       </DeviceDetailsModal>
 
       <DeviceDetailsModal
         open={activeDeviceModal === "embedding-tuning"}
-        title="Embedding Tuning"
+        title={t("aiAssist.home.modals.embeddingTuning")}
         onClose={() => setActiveDeviceModal(null)}
       >
         <div className="llm-settings-grid">
           <label className="form-label">
-            Chunk size
-            <span className="settings-field-hint">Text size for each embedding chunk.</span>
+            {t("aiAssist.home.labels.chunkSize")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.chunkSizeHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1618,8 +1654,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Overlap size
-            <span className="settings-field-hint">Shared text between neighboring chunks.</span>
+            {t("aiAssist.home.labels.overlapSize")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.overlapSizeHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1636,8 +1672,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Batch size
-            <span className="settings-field-hint">Chunks processed together during indexing.</span>
+            {t("aiAssist.home.labels.batchSize")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.batchSizeHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1658,13 +1694,13 @@ export function AIAssistView() {
 
       <DeviceDetailsModal
         open={activeDeviceModal === "connection-settings"}
-        title="Connection Settings"
+        title={t("aiAssist.home.modals.connectionSettings")}
         onClose={() => setActiveDeviceModal(null)}
       >
         <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <label className="form-label">
-            Protocol
-            <span className="settings-field-hint">Most local setups use plain HTTP.</span>
+            {t("aiAssist.home.labels.protocol")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.protocolHint")}</span>
             <select
               className="form-input"
               value={appSettings.llm.ollamaProtocol}
@@ -1681,8 +1717,8 @@ export function AIAssistView() {
             </select>
           </label>
           <label className="form-label">
-            Host / URL
-            <span className="settings-field-hint">Usually <code>127.0.0.1</code> or <code>localhost</code>.</span>
+            {t("aiAssist.home.labels.hostUrl")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.hostUrlHint")}</span>
             <input
               className="form-input"
               type="text"
@@ -1694,8 +1730,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Port
-            <span className="settings-field-hint">Default for many local servers: <code>11434</code>.</span>
+            {t("aiAssist.home.labels.port")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.portHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1712,8 +1748,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Request timeout
-            <span className="settings-field-hint">Seconds to wait when testing or listing models.</span>
+            {t("aiAssist.home.labels.requestTimeout")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.requestTimeoutHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1734,13 +1770,13 @@ export function AIAssistView() {
 
       <DeviceDetailsModal
         open={activeDeviceModal === "generation-defaults"}
-        title="Advanced Generation Defaults"
+        title={t("aiAssist.home.modals.generationDefaults")}
         onClose={() => setActiveDeviceModal(null)}
       >
         <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <label className="form-label">
-            Temperature
-            <span className="settings-field-hint">Lower values are more deterministic.</span>
+            {t("aiAssist.home.labels.temperature")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.temperatureHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1758,8 +1794,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Context window
-            <span className="settings-field-hint">Default <code>num_ctx</code> target for future requests.</span>
+            {t("aiAssist.home.labels.contextWindow")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.contextWindowHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1776,8 +1812,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Keep alive (minutes)
-            <span className="settings-field-hint">Keeps models warm between requests.</span>
+            {t("aiAssist.home.labels.keepAliveMinutes")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.keepAliveHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1794,8 +1830,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Relevant-segment shortlist
-            <span className="settings-field-hint">Top matches sent to the model before it narrows them down.</span>
+            {t("aiAssist.home.labels.relevantSegmentShortlist")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.relevantSegmentShortlistHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1819,8 +1855,8 @@ export function AIAssistView() {
             />
           </label>
           <label className="form-label">
-            Relevant segments returned
-            <span className="settings-field-hint">Maximum number of segments returned to AI Assisted Coding.</span>
+            {t("aiAssist.home.labels.relevantSegmentsReturned")}
+            <span className="settings-field-hint">{t("aiAssist.home.messages.relevantSegmentsReturnedHint")}</span>
             <input
               className="form-input"
               type="number"
@@ -1850,7 +1886,7 @@ export function AIAssistView() {
         onRun={() => {
           void handleRunEmbedding().then((started) => {
             if (started) {
-              setProjectNotice("Project embeddings are preparing in the background.");
+              setProjectNotice(t("aiAssist.home.messages.projectEmbeddingsPreparing"));
               setBuildModalOpen(false);
             }
           });

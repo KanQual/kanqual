@@ -5,6 +5,8 @@ import { readAppSettings } from "../lib/appSettings";
 import { assertActiveLlmRuntime } from "../lib/llmRuntime";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 import {
   AttributeValuesModal,
   type SharedAttributeDraft as AttributeDraft,
@@ -89,14 +91,6 @@ type AttributeSuggestionRunState = {
   totalItems: number;
 };
 
-const ATTRIBUTE_SUGGESTION_COLS: Array<{ key: "name" | "attributeName" | "createdByName" | "createdAt" | "actions"; label: string; width: string }> = [
-  { key: "name", label: "Name", width: "30%" },
-  { key: "attributeName", label: "Attribute", width: "24%" },
-  { key: "createdByName", label: "Created By", width: "18%" },
-  { key: "createdAt", label: "Created", width: "18%" },
-  { key: "actions", label: "", width: "10%" },
-];
-
 const EMPTY_ATTRIBUTE_VALUES_BY_OWNER: Record<string, string> = {};
 
 function renderMissingAttributeValue() {
@@ -106,7 +100,7 @@ function renderMissingAttributeValue() {
 function fmtSavedRunDate(iso: string): string {
   if (!iso) return "";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -138,7 +132,7 @@ function toAttributeDefinition(record: {
   }
   return {
     id: record.id,
-    name: record.name?.trim() || "Untitled attribute",
+    name: record.name?.trim() || "",
     dataType: record.data_type || "text",
     description: record.description?.trim() || "",
     options,
@@ -146,7 +140,26 @@ function toAttributeDefinition(record: {
   };
 }
 
+function formatAttributeTypeLabel(
+  dataType: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  switch (dataType) {
+    case "text":
+      return t("aiAssist.attributes.attributeTypes.text");
+    case "number":
+      return t("aiAssist.attributes.attributeTypes.number");
+    case "datetime":
+      return t("aiAssist.attributes.attributeTypes.datetime");
+    case "categorical":
+      return t("aiAssist.attributes.attributeTypes.categorical");
+    default:
+      return dataType;
+  }
+}
+
 function useAttributeDefinitions(kind: "case" | "document") {
+  const { t } = useI18n();
   const { pb, activeProject } = useStore();
   const [definitions, setDefinitions] = useState<AttributeDefinition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -172,7 +185,13 @@ function useAttributeDefinitions(kind: "case" | "document") {
           fields: "id,name,data_type,description,options_json,sort_order",
         });
         if (cancelled) return;
-        setDefinitions(records.map((record) => toAttributeDefinition(record)).sort((left, right) => {
+        setDefinitions(records.map((record) => {
+          const definition = toAttributeDefinition(record);
+          return {
+            ...definition,
+            name: definition.name || t("aiAssist.attributes.labels.untitledAttribute"),
+          };
+        }).sort((left, right) => {
           if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
           return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
         }));
@@ -181,7 +200,7 @@ function useAttributeDefinitions(kind: "case" | "document") {
         console.error(`Failed to load ${kind} attribute definitions:`, nextError);
         if (!cancelled) {
           setDefinitions([]);
-          setError(`Could not load ${kind} attribute definitions.`);
+          setError(t("aiAssist.attributes.errors.failedToLoadAttributeDefinitions", { kind }));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -198,6 +217,7 @@ function useAttributeDefinitions(kind: "case" | "document") {
 }
 
 function useAttributeCoverageSummary(kind: "case" | "document") {
+  const { t } = useI18n();
   const { pb, activeProject } = useStore();
   const { definitions, loading: definitionsLoading, error: definitionsError } = useAttributeDefinitions(kind);
   const [coverageByAttributeId, setCoverageByAttributeId] = useState<Record<string, AttributeCoverageSummary>>({});
@@ -279,7 +299,7 @@ function useAttributeCoverageSummary(kind: "case" | "document") {
         console.error(`Failed to load ${kind} attribute coverage:`, nextError);
         if (!cancelled) {
           setCoverageByAttributeId({});
-          setError(`Could not load ${kind} attribute coverage.`);
+          setError(t("aiAssist.attributes.errors.failedToLoadAttributeCoverage", { kind }));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -302,6 +322,7 @@ function useAttributeCoverageSummary(kind: "case" | "document") {
 }
 
 function useAttributeValueRows(kind: "case" | "document", selectedAttributeId: string | null) {
+  const { t } = useI18n();
   const { pb, activeProject } = useStore();
   const [rows, setRows] = useState<AttributeValueRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -345,7 +366,7 @@ function useAttributeValueRows(kind: "case" | "document", selectedAttributeId: s
           setRows(caseRecords.map((record) => ({
             recordId: valuesByOwner.get(record.id)?.recordId,
             ownerId: record.id,
-            ownerName: String(record.name ?? "Untitled case"),
+            ownerName: String(record.name ?? t("aiAssist.attributes.labels.untitledCase")),
             value: valuesByOwner.get(record.id)?.value ?? "",
           })));
         } else {
@@ -371,7 +392,7 @@ function useAttributeValueRows(kind: "case" | "document", selectedAttributeId: s
           setRows(documentRecords.map((record) => ({
             recordId: valuesByOwner.get(record.id)?.recordId,
             ownerId: record.id,
-            ownerName: String(record.name ?? "Untitled document"),
+            ownerName: String(record.name ?? t("aiAssist.attributes.labels.untitledDocument")),
             value: valuesByOwner.get(record.id)?.value ?? "",
           })));
         }
@@ -380,7 +401,7 @@ function useAttributeValueRows(kind: "case" | "document", selectedAttributeId: s
         console.error(`Failed to load ${kind} attribute values:`, nextError);
         if (!cancelled) {
           setRows([]);
-          setError(`Could not load ${kind} attribute values.`);
+          setError(t("aiAssist.attributes.errors.failedToLoadAttributeValues", { kind }));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -397,6 +418,7 @@ function useAttributeValueRows(kind: "case" | "document", selectedAttributeId: s
 }
 
 function useAttributeOwnerRows(kind: "case" | "document") {
+  const { t } = useI18n();
   const { pb, activeProject } = useStore();
   const [rows, setRows] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(false);
@@ -425,14 +447,14 @@ function useAttributeOwnerRows(kind: "case" | "document") {
         if (cancelled) return;
         setRows(records.map((record) => ({
           id: record.id,
-          name: String(record.name ?? `Untitled ${kind}`),
+          name: String(record.name ?? t("aiAssist.attributes.labels.untitledKind", { kind })),
         })));
         setError("");
       } catch (nextError) {
         console.error(`Failed to load ${kind} owner rows:`, nextError);
         if (!cancelled) {
           setRows([]);
-          setError(`Could not load ${kind} rows.`);
+          setError(t("aiAssist.attributes.errors.failedToLoadRows", { kind }));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -463,6 +485,7 @@ function AttributeSuggestionEvidenceModal({
   onOpenEvidence: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
@@ -474,14 +497,14 @@ function AttributeSuggestionEvidenceModal({
       >
         <div className="settings-section-header">
           <div>
-            <h2 id="ai-attribute-evidence-title" className="settings-section-title">Suggestion Evidence</h2>
+            <h2 id="ai-attribute-evidence-title" className="settings-section-title">{t("aiAssist.attributes.modals.evidence.title")}</h2>
             <p className="settings-section-desc">{ownerName}</p>
           </div>
-          <button className="btn" type="button" onClick={onClose}>Close</button>
+          <button className="btn" type="button" onClick={onClose}>{t("common.close")}</button>
         </div>
         <div className="app-settings-modal-body">
           <div className="app-settings-stat-card">
-            <strong>Suggested Value</strong>
+            <strong>{t("aiAssist.attributes.labels.suggestedValue")}</strong>
             <span>{value || "-"}</span>
           </div>
           {evidenceText ? (
@@ -494,16 +517,16 @@ function AttributeSuggestionEvidenceModal({
                 title={evidenceText}
               >
                 <span className="ai-chat-citation-number">[1]</span>
-                <span className="ai-chat-citation-kind">Text</span>
+                <span className="ai-chat-citation-kind">{t("aiAssist.attributes.labels.text")}</span>
                 <span className="ai-chat-citation-line">
-                  <strong>Supporting Text Segment</strong>
+                  <strong>{t("aiAssist.attributes.modals.evidence.supportingTextSegment")}</strong>
                   <small>{evidenceText}</small>
                 </span>
               </button>
             </div>
           ) : (
             <div className="project-model-modal-copy">
-              <p>No supporting excerpt was returned for this suggestion.</p>
+              <p>{t("aiAssist.attributes.modals.evidence.noSupportingExcerpt")}</p>
             </div>
           )}
         </div>
@@ -602,6 +625,7 @@ function SaveAttributeSuggestionsModal({
   onClose: () => void;
   onSave: (name: string) => void;
 }) {
+  const { t } = useI18n();
   const [name, setName] = useState(initialName);
 
   useEffect(() => {
@@ -611,31 +635,31 @@ function SaveAttributeSuggestionsModal({
   return (
     <div className="modal-overlay" onClick={() => !loading && onClose()}>
       <div className="modal" onClick={(event) => event.stopPropagation()}>
-        <h2>Save Suggestions</h2>
+        <h2>{t("aiAssist.attributes.modals.saveSuggestions.title")}</h2>
         <p style={{ marginBottom: 16, lineHeight: 1.5 }}>
-          Save this suggestion set so it can be reopened from the saved suggestions list.
+          {t("aiAssist.attributes.modals.saveSuggestions.body")}
         </p>
         <label className="form-label">
-          Suggestion set name
+          {t("aiAssist.attributes.modals.saveSuggestions.nameLabel")}
           <input
             className="form-input"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Suggestion set name..."
+            placeholder={t("aiAssist.attributes.modals.saveSuggestions.namePlaceholder")}
             autoFocus
             disabled={loading}
           />
         </label>
         {error && <div className="form-error" style={{ marginTop: 12 }}>{error}</div>}
         <div className="form-actions" style={{ marginTop: 24 }}>
-          <button type="button" className="btn" onClick={onClose} disabled={loading}>Cancel</button>
+          <button type="button" className="btn" onClick={onClose} disabled={loading}>{t("common.cancel")}</button>
           <button
             type="button"
             className="btn btn--primary"
             onClick={() => onSave(name)}
             disabled={loading || !name.trim()}
           >
-            {loading ? "Saving..." : "Save Suggestions"}
+            {loading ? t("aiAssist.attributes.statuses.saving") : t("aiAssist.attributes.actions.saveSuggestions")}
           </button>
         </div>
       </div>
@@ -656,6 +680,7 @@ function AIAssistAttributeWorkspace({
   initialAttributeId?: string | null;
   onSaved?: (row: SavedAttributeSuggestionRow) => void;
 }) {
+  const { t } = useI18n();
   const {
     pb,
     activeProject,
@@ -673,6 +698,8 @@ function AIAssistAttributeWorkspace({
     cancelAttributeSuggestionRun,
   } = useStore();
   const canUseAiAttributeTools = canCurrentUser("useAiAttributeTools");
+  const pageTitle = t("aiAssist.attributes.workspace.pageTitle");
+  const isCaseMode = kind === "case";
   const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
   const { definitions, loading, error } = useAttributeDefinitions(kind);
   const [selectedAttributeId, setSelectedAttributeId] = useState<string | null>(null);
@@ -692,6 +719,12 @@ function AIAssistAttributeWorkspace({
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveError, setSaveError] = useState("");
   const suggestionRunRef = useRef<AttributeSuggestionRunState | null>(null);
+  const columnLabels = {
+    owner: isCaseMode ? t("aiAssist.attributes.labels.case") : t("aiAssist.attributes.labels.document"),
+    currentValue: t("aiAssist.attributes.labels.currentValue"),
+    suggestedValue: t("aiAssist.attributes.labels.suggestedValue"),
+    accept: t("aiAssist.attributes.labels.accept"),
+  };
 
   useEffect(() => {
     setSelectedAttributeId((current) => {
@@ -844,11 +877,11 @@ function AIAssistAttributeWorkspace({
     try {
       const target = await resolveEvidenceTarget(row);
       if (!target) {
-        throw new Error("Could not locate that evidence excerpt in the current project documents.");
+        throw new Error(t("aiAssist.attributes.errors.failedToLocateEvidence"));
       }
       const document = documentsById.get(target.documentId);
       if (!document) {
-        throw new Error("Could not open the source document for that evidence excerpt.");
+        throw new Error(t("aiAssist.attributes.errors.failedToOpenEvidenceDocument"));
       }
       setActiveDocument(document);
       setPendingTextCitation({
@@ -861,7 +894,7 @@ function AIAssistAttributeWorkspace({
       setView("code-text");
     } catch (error) {
       console.error("Failed to open attribute suggestion evidence:", error);
-      setSuggestionError(error instanceof Error ? error.message : "Could not open the supporting text segment.");
+      setSuggestionError(error instanceof Error ? error.message : t("aiAssist.attributes.errors.failedToOpenSupportingText"));
     } finally {
       setOpeningEvidenceOwnerId(null);
     }
@@ -935,7 +968,7 @@ function AIAssistAttributeWorkspace({
       });
       return documents.map((document) => ({
         id: document.id,
-        name: String(document.name ?? "Untitled document"),
+        name: String(document.name ?? t("aiAssist.attributes.labels.untitledDocument")),
         content: String(document.content ?? ""),
       }));
     }
@@ -958,7 +991,7 @@ function AIAssistAttributeWorkspace({
     const documentsById = new Map(documents.map((document) => ([
       document.id,
       {
-        name: String(document.name ?? "Untitled document"),
+        name: String(document.name ?? t("aiAssist.attributes.labels.untitledDocument")),
         content: String(document.content ?? ""),
       },
     ])));
@@ -983,7 +1016,7 @@ function AIAssistAttributeWorkspace({
         .join("\n\n");
       return {
         id: caseRecord.id,
-        name: String(caseRecord.name ?? "Untitled case"),
+        name: String(caseRecord.name ?? t("aiAssist.attributes.labels.untitledCase")),
         content,
       };
     });
@@ -1054,7 +1087,7 @@ function AIAssistAttributeWorkspace({
       setSuggestionJobId(null);
     } catch (nextError) {
       console.error("Failed to generate attribute suggestions:", nextError);
-      setSuggestionError(nextError instanceof Error ? nextError.message : "Could not generate AI suggestions.");
+      setSuggestionError(nextError instanceof Error ? nextError.message : t("aiAssist.attributes.errors.failedToGenerateSuggestions"));
       setSuggestionRunState((current) => current?.runId === runId ? null : current);
       setSuggestionStopBusy(false);
       setSuggestionJobId(null);
@@ -1072,7 +1105,7 @@ function AIAssistAttributeWorkspace({
       await cancelAttributeSuggestionRun(activeRun.runId, suggestionJobId);
     } catch (nextError) {
       console.error("Failed to stop attribute suggestion generation:", nextError);
-      setSuggestionError(nextError instanceof Error ? nextError.message : "Could not stop AI suggestions.");
+      setSuggestionError(nextError instanceof Error ? nextError.message : t("aiAssist.attributes.errors.failedToStopSuggestions"));
       setSuggestionStopBusy(false);
     }
   }
@@ -1106,7 +1139,7 @@ function AIAssistAttributeWorkspace({
           });
           recordId = created.id;
         }
-        await logAction(activeProject.id, "case_attribute.update", `Accepted AI suggestion for case attribute "${selectedAttribute.name}"`, recordId ?? selectedAttribute.id, {
+        await logAction(activeProject.id, "case_attribute.update", t("projectLog.labels.caseAttributeSuggestionAccepted", { name: selectedAttribute.name }), recordId ?? selectedAttribute.id, {
           entityType: "case_attribute_value",
           attributeId: selectedAttribute.id,
           attributeName: selectedAttribute.name,
@@ -1132,7 +1165,7 @@ function AIAssistAttributeWorkspace({
           });
           recordId = created.id;
         }
-        await logAction(activeProject.id, "document_attribute.update", `Accepted AI suggestion for document attribute "${selectedAttribute.name}"`, recordId ?? selectedAttribute.id, {
+        await logAction(activeProject.id, "document_attribute.update", t("projectLog.labels.documentAttributeSuggestionAccepted", { name: selectedAttribute.name }), recordId ?? selectedAttribute.id, {
           entityType: "document_attribute_value",
           attributeId: selectedAttribute.id,
           attributeName: selectedAttribute.name,
@@ -1146,7 +1179,7 @@ function AIAssistAttributeWorkspace({
       reloadValueRows();
     } catch (nextError) {
       console.error("Failed to accept AI attribute suggestion:", nextError);
-      setSuggestionError(nextError instanceof Error ? nextError.message : "Could not accept the suggested value.");
+      setSuggestionError(nextError instanceof Error ? nextError.message : t("aiAssist.attributes.errors.failedToAcceptSuggestion"));
     } finally {
       setAcceptingOwnerId(null);
     }
@@ -1185,7 +1218,7 @@ function AIAssistAttributeWorkspace({
           snapshot: snapshotJson,
         });
         if (!record) {
-          throw new Error("Could not save AI suggestions because no active project is open.");
+          throw new Error(t("aiAssist.attributes.errors.failedToSaveSuggestionsNoProject"));
         }
         const nextRow = parseSavedAttributeSuggestionRow(record);
         if (!nextRow) {
@@ -1197,7 +1230,7 @@ function AIAssistAttributeWorkspace({
       setShowSaveModal(false);
     } catch (nextError) {
       console.error("Failed to save attribute suggestions:", nextError);
-      setSaveError(nextError instanceof Error ? nextError.message : "Could not save AI suggestions.");
+      setSaveError(nextError instanceof Error ? nextError.message : t("aiAssist.attributes.errors.failedToSaveSuggestions"));
     } finally {
       setSaveBusy(false);
     }
@@ -1207,10 +1240,10 @@ function AIAssistAttributeWorkspace({
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Generate Suggestions</h1>
+          <h1>{pageTitle}</h1>
         </header>
         <div className="empty-state">
-          <p>Open a project first.</p>
+          <p>{t("aiAssist.attributes.workspace.empty.openProjectFirst")}</p>
         </div>
       </div>
     );
@@ -1220,10 +1253,10 @@ function AIAssistAttributeWorkspace({
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Generate Suggestions</h1>
+          <h1>{pageTitle}</h1>
         </header>
         <div className="empty-state">
-          <p>You do not have permission to use AI Assist attribute tools for this project.</p>
+          <p>{t("aiAssist.attributes.workspace.empty.noPermission")}</p>
         </div>
       </div>
     );
@@ -1233,24 +1266,20 @@ function AIAssistAttributeWorkspace({
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Generate Suggestions</h1>
+          <h1>{pageTitle}</h1>
         </header>
         <div className="empty-state">
-          <p>Enable AI Assist in Project Settings before using AI attribute tools.</p>
+          <p>{t("aiAssist.attributes.workspace.empty.enableInProjectSettings")}</p>
         </div>
       </div>
     );
   }
-
-  const pageTitle = "Generate Suggestions";
-  const isCaseMode = kind === "case";
-
   return (
     <div className="view ai-attribute-view">
       {onBack && (
         <div className="workspace-back-row">
           <button type="button" className="btn" onClick={onBack}>
-            Back to Attributes
+            {t("aiAssist.attributes.actions.backToAttributes")}
           </button>
         </div>
       )}
@@ -1261,8 +1290,8 @@ function AIAssistAttributeWorkspace({
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("aiAssist.attributes.openHelp")}
+            aria-label={t("aiAssist.attributes.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -1273,9 +1302,9 @@ function AIAssistAttributeWorkspace({
             className="btn btn--primary"
             onClick={() => setShowSaveModal(true)}
             disabled={!hasGeneratedSuggestions || saveBusy}
-            title={!hasGeneratedSuggestions ? "Generate suggestions before saving this page" : undefined}
+            title={!hasGeneratedSuggestions ? t("aiAssist.attributes.workspace.saveDisabled") : undefined}
           >
-            {saveBusy ? "Saving..." : savedRow ? "Save Changes" : "Save Suggestions"}
+            {saveBusy ? t("aiAssist.attributes.statuses.saving") : savedRow ? t("aiAssist.attributes.actions.saveChanges") : t("aiAssist.attributes.actions.saveSuggestions")}
           </button>
         </div>
       </header>
@@ -1283,19 +1312,19 @@ function AIAssistAttributeWorkspace({
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Identify Attributes Help</h2>
+            <h2>{t("aiAssist.attributes.workspace.help.title")}</h2>
             <p className="users-guide-copy">
-              Switch between case and document attributes, choose an attribute, review AI suggestions, accept or edit suggested values, and inspect current stored values.
+              {t("aiAssist.attributes.workspace.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use this page when AI Assist is helping you populate structured attributes. Pick an attribute and review suggestions item by item before saving accepted values.
+              {t("aiAssist.attributes.workspace.help.line2")}
             </p>
             <p className="users-guide-copy">
-              This workflow operates on shared project attributes. Your role may allow viewing but not editing, and suggestions should be reviewed before acceptance.
+              {t("aiAssist.attributes.workspace.help.line3")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1316,7 +1345,7 @@ function AIAssistAttributeWorkspace({
               onClick={() => void handleStopSuggestionGeneration()}
               disabled={!suggestionBusy || suggestionStopBusy}
             >
-              {suggestionStopBusy ? "Stopping..." : "Stop"}
+              {suggestionStopBusy ? t("aiAssist.attributes.statuses.stopping") : t("aiAssist.attributes.actions.stop")}
             </button>
             <button
               type="button"
@@ -1324,7 +1353,7 @@ function AIAssistAttributeWorkspace({
               onClick={() => void handleStartSuggestionGeneration()}
               disabled={!selectedAttribute || suggestionBusy}
             >
-              {suggestionBusy ? "Generating..." : "Generate Suggestions"}
+              {suggestionBusy ? t("aiAssist.attributes.statuses.generating") : t("aiAssist.attributes.actions.generateSuggestions")}
             </button>
           </div>
         </div>
@@ -1333,8 +1362,8 @@ function AIAssistAttributeWorkspace({
           <div className="ai-attribute-selected-summary">
             <div className="ai-attribute-selected-summary-main">
               <div className="ai-attribute-selected-summary-badges">
-                <span className="ai-attribute-selected-summary-kind">{isCaseMode ? "Case attribute" : "Document attribute"}</span>
-                <span className="ai-attribute-selected-summary-type">{selectedAttribute.dataType}</span>
+                <span className="ai-attribute-selected-summary-kind">{isCaseMode ? t("aiAssist.attributes.labels.caseAttribute") : t("aiAssist.attributes.labels.documentAttribute")}</span>
+                <span className="ai-attribute-selected-summary-type">{formatAttributeTypeLabel(selectedAttribute.dataType, t)}</span>
               </div>
               <strong>{selectedAttribute.name}</strong>
             </div>
@@ -1349,41 +1378,39 @@ function AIAssistAttributeWorkspace({
               <span className="ai-segments-progress-bar" />
             </div>
             <div className="ai-segments-search-copy">
-              AI Assist is generating suggested values for {selectedAttribute.name}
+              {t("aiAssist.attributes.workspace.generatingFor", { name: selectedAttribute.name })}
               {visibleSuggestionProgress ? ` (${visibleSuggestionProgress.completedItems}/${visibleSuggestionProgress.totalItems})` : ""}.
             </div>
           </div>
         )}
         {!selectedAttribute ? (
           <div className="ai-attribute-placeholder">
-            <p>Open this view from a specific attribute to generate suggestions.</p>
+            <p>{t("aiAssist.attributes.workspace.empty.openFromSpecificAttribute")}</p>
           </div>
         ) : valuesLoading || loading ? (
           <div className="ai-attribute-placeholder">
-            <p>Loading current values...</p>
+            <p>{t("aiAssist.attributes.workspace.empty.loadingCurrentValues")}</p>
           </div>
         ) : (
           <div className="ai-attribute-table-wrap">
             {valuesError && <div className="form-error project-settings-error">{valuesError}</div>}
             {suggestionModel && (
-              <p className="backup-field-hint ai-attribute-suggestion-meta">Generated with {suggestionModel}</p>
+              <p className="backup-field-hint ai-attribute-suggestion-meta">{t("aiAssist.attributes.workspace.generatedWith", { model: suggestionModel })}</p>
             )}
             <table className="users-table ai-attribute-table">
               <thead>
                 <tr>
-                  <th className="users-th ai-attribute-table-owner-col">
-                    {isCaseMode ? "Case" : "Document"}
-                  </th>
-                  <th className="users-th ai-attribute-table-value-col">Current Value</th>
-                  <th className="users-th ai-attribute-table-value-col">Suggested Value</th>
-                  <th className="users-th ai-attribute-table-action-col">Accept</th>
+                  <th className="users-th ai-attribute-table-owner-col">{columnLabels.owner}</th>
+                  <th className="users-th ai-attribute-table-value-col">{columnLabels.currentValue}</th>
+                  <th className="users-th ai-attribute-table-value-col">{columnLabels.suggestedValue}</th>
+                  <th className="users-th ai-attribute-table-action-col">{columnLabels.accept}</th>
                 </tr>
               </thead>
               <tbody>
                 {valueRows.length === 0 ? (
                   <tr>
                     <td className="users-td-msg" colSpan={4}>
-                      No {isCaseMode ? "cases" : "documents"} yet.
+                      {isCaseMode ? t("aiAssist.attributes.workspace.empty.noCasesYet") : t("aiAssist.attributes.workspace.empty.noDocumentsYet")}
                     </td>
                   </tr>
                 ) : (
@@ -1418,7 +1445,7 @@ function AIAssistAttributeWorkspace({
                               onClick={() => void handleAcceptSuggestion(suggestionRow)}
                               disabled={acceptingOwnerId === suggestionRow.ownerId || isAccepted}
                             >
-                              {acceptingOwnerId === suggestionRow.ownerId ? "Saving..." : isAccepted ? "Accepted" : "Accept"}
+                              {acceptingOwnerId === suggestionRow.ownerId ? t("aiAssist.attributes.statuses.saving") : isAccepted ? t("aiAssist.attributes.statuses.accepted") : t("aiAssist.attributes.actions.accept")}
                             </button>
                           ) : (
                             renderMissingAttributeValue()
@@ -1432,7 +1459,7 @@ function AIAssistAttributeWorkspace({
             </table>
             {suggestionRows.length === 0 && (
               <div className="ai-attribute-placeholder" style={{ marginTop: 16 }}>
-                <p>Generate suggestions to fill the suggested value column for {selectedAttribute.name}.</p>
+                <p>{t("aiAssist.attributes.workspace.generateToFill", { name: selectedAttribute.name })}</p>
               </div>
             )}
           </div>
@@ -1467,6 +1494,7 @@ function AIAssistAttributeWorkspace({
 }
 
 function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
+  const { t } = useI18n();
   const {
     activeProject,
     pb,
@@ -1498,7 +1526,14 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
   const canDeleteSavedSuggestions = canCurrentUser("deleteReports");
-  const title = "Identify Attributes";
+  const title = t("aiAssist.attributes.landing.pageTitle");
+  const suggestionColumns: Array<{ key: "name" | "attributeName" | "createdByName" | "createdAt" | "actions"; label: string; width: string }> = [
+    { key: "name", label: t("aiAssist.attributes.landing.table.name"), width: "30%" },
+    { key: "attributeName", label: t("aiAssist.attributes.landing.table.attribute"), width: "24%" },
+    { key: "createdByName", label: t("aiAssist.attributes.landing.table.createdBy"), width: "18%" },
+    { key: "createdAt", label: t("aiAssist.attributes.landing.table.created"), width: "18%" },
+    { key: "actions", label: "", width: "10%" },
+  ];
   const {
     definitions: caseDefinitions,
     coverageByAttributeId: caseCoverageByAttributeId,
@@ -1555,11 +1590,11 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
         .filter(Boolean) as SavedAttributeSuggestionRow[];
       setRows(mappedRows);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load saved suggestion runs.");
+      setError(loadError instanceof Error ? loadError.message : t("aiAssist.attributes.landing.failedToLoadSavedSuggestionRuns"));
     } finally {
       setLoading(false);
     }
-  }, [activeProject, kind, pb]);
+  }, [activeProject, kind, pb, t]);
 
   useEffect(() => {
     void loadSuggestionRuns();
@@ -1590,7 +1625,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete saved suggestions.");
+      setError(deleteError instanceof Error ? deleteError.message : t("aiAssist.attributes.landing.failedToDeleteSavedSuggestions"));
       setConfirmDelete(null);
     } finally {
       setDeleteBusy(false);
@@ -1621,7 +1656,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
   async function handleCreateAttribute(draft: AttributeDraft, valuesByOwner: Record<string, string>) {
     if (!activeProject) return;
     if (!canCreateCurrentAttributes) {
-      setNewAttributeError(`You do not have permission to create ${currentTargetKind} attributes.`);
+      setNewAttributeError(t("aiAssist.attributes.landing.noPermissionToCreate", { kind: currentTargetKind }));
       return;
     }
 
@@ -1660,7 +1695,9 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
       await logAction(
         activeProject.id,
         currentTargetKind === "case" ? "case_attribute.create" : "document_attribute.create",
-        `Added ${currentTargetKind} attribute "${draft.name.trim()}"`,
+        t(currentTargetKind === "case" ? "projectLog.labels.caseAttributeAdded" : "projectLog.labels.documentAttributeAdded", {
+          name: draft.name.trim(),
+        }),
         created.id,
         {
           entityType: currentTargetKind === "case" ? "case_attribute" : "document_attribute",
@@ -1686,7 +1723,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
         options: [],
       });
     } catch (createError) {
-      setNewAttributeError(createError instanceof Error ? createError.message : "Failed to create attribute.");
+      setNewAttributeError(createError instanceof Error ? createError.message : t("aiAssist.attributes.landing.failedToCreateAttribute"));
     } finally {
       setNewAttributeBusy(false);
     }
@@ -1700,8 +1737,8 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show attribute suggestions help"
-            title="Show Help"
+            aria-label={t("aiAssist.attributes.landing.openHelp")}
+            title={t("aiAssist.attributes.openHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -1717,9 +1754,9 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
             <div className="surface-card" style={{ minHeight: 420 }}>
               <div className="surface-card-header">
                 <div>
-                  <div className="surface-card-title">Current Attributes</div>
+                  <div className="surface-card-title">{t("aiAssist.attributes.landing.currentAttributesTitle")}</div>
                   <p className="surface-card-description">
-                    Review existing case and document attributes and start a new suggestion run from a specific attribute.
+                    {t("aiAssist.attributes.landing.currentAttributesBody")}
                   </p>
                 </div>
                 <button
@@ -1736,14 +1773,14 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
                     setNewAttributeModalOpen(true);
                   }}
                   disabled={!canCreateCurrentAttributes}
-                  title={!canCreateCurrentAttributes ? `You do not have permission to create ${currentTargetKind} attributes` : undefined}
+                  title={!canCreateCurrentAttributes ? t("aiAssist.attributes.landing.noPermissionToCreateTitle", { kind: currentTargetKind }) : undefined}
                 >
-                  + New Attribute
+                  {t("aiAssist.attributes.actions.newAttribute")}
                 </button>
               </div>
 
               <div className="ai-attribute-mode-toggle">
-                <div className="segmented-control" role="tablist" aria-label="Attribute target">
+                <div className="segmented-control" role="tablist" aria-label={t("aiAssist.attributes.landing.attributeTarget")}>
                   {(["case", "document"] as const).map((targetKind) => (
                     <button
                       key={targetKind}
@@ -1757,7 +1794,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
                       }
                       onClick={() => setView(targetKind === "case" ? "ai-assist-case-attributes" : "ai-assist-document-attributes")}
                     >
-                      {targetKind === "case" ? "Cases" : "Documents"}
+                      {targetKind === "case" ? t("aiAssist.attributes.labels.cases") : t("aiAssist.attributes.labels.documents")}
                     </button>
                   ))}
                 </div>
@@ -1770,9 +1807,9 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
 
               <div className="ai-attribute-list" style={{ marginTop: 16 }}>
                 {currentCoverageLoading ? (
-                  <div className="empty-state ai-attribute-empty-state"><p>Loading attributes...</p></div>
+                  <div className="empty-state ai-attribute-empty-state"><p>{t("aiAssist.attributes.landing.loadingAttributes")}</p></div>
                 ) : currentAttributeDefinitions.length === 0 ? (
-                  <div className="empty-state ai-attribute-empty-state"><p>No {currentTargetKind} attributes yet.</p></div>
+                  <div className="empty-state ai-attribute-empty-state"><p>{t("aiAssist.attributes.landing.noAttributesYet", { kind: currentTargetKind })}</p></div>
                 ) : (
                   currentAttributeDefinitions.map((definition) => {
                     const coverage = currentCoverageByAttributeId[definition.id];
@@ -1796,11 +1833,11 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
                       >
                         <div className="ai-attribute-list-item-main" style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                           <strong>{definition.name}</strong>
-                          <span>{definition.dataType === "datetime" ? "Date/time" : definition.dataType}</span>
+                          <span>{formatAttributeTypeLabel(definition.dataType, t)}</span>
                         </div>
                         <div className="ai-attribute-list-item-meta">
-                          {missingCount} missing {currentOwnerLabel}
-                          {totalOwners > 0 ? ` of ${totalOwners}` : ""}
+                          {t("aiAssist.attributes.landing.missingOwners", { count: missingCount, owners: currentOwnerLabel })}
+                          {totalOwners > 0 ? ` ${t("aiAssist.attributes.landing.ofOwners", { count: totalOwners })}` : ""}
                         </div>
                       </button>
                     );
@@ -1814,32 +1851,32 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
             <div className="surface-card" style={{ minHeight: 420 }}>
               <div className="surface-card-header">
                 <div>
-                  <div className="surface-card-title">Saved Suggestion Runs</div>
+                  <div className="surface-card-title">{t("aiAssist.attributes.landing.savedSuggestionRunsTitle")}</div>
                   <p className="surface-card-description">
-                    Reopen, review, or delete saved attribute suggestion runs for {kind === "case" ? "cases" : "documents"}.
+                    {t("aiAssist.attributes.landing.savedSuggestionRunsBody", { kind: kind === "case" ? t("aiAssist.attributes.labels.cases") : t("aiAssist.attributes.labels.documents") })}
                   </p>
                 </div>
               </div>
               <div className="users-table-wrap" style={{ maxHeight: 34 + (Math.max(loading || rows.length === 0 ? 1 : rows.length, 1) + 2) * 36 }}>
                 <table className="users-table">
                   <thead>
-                    <tr>
-                      {ATTRIBUTE_SUGGESTION_COLS.map((col) => (
-                        <th key={col.key} style={{ width: col.width }} className="users-th">
-                          {col.label}
-                        </th>
-                      ))}
-                    </tr>
+                      <tr>
+                        {suggestionColumns.map((col) => (
+                          <th key={col.key} style={{ width: col.width }} className="users-th">
+                            {col.label}
+                          </th>
+                        ))}
+                      </tr>
                   </thead>
                   <tbody>
                     {loading && (
                       <tr>
-                        <td colSpan={ATTRIBUTE_SUGGESTION_COLS.length} className="users-td-msg">Loading...</td>
+                        <td colSpan={suggestionColumns.length} className="users-td-msg">{t("aiAssist.attributes.statuses.loading")}</td>
                       </tr>
                     )}
                     {!loading && rows.length === 0 && (
                       <tr>
-                        <td colSpan={ATTRIBUTE_SUGGESTION_COLS.length} className="users-td-msg">No saved suggestion runs yet.</td>
+                        <td colSpan={suggestionColumns.length} className="users-td-msg">{t("aiAssist.attributes.landing.noSavedSuggestionRuns")}</td>
                       </tr>
                     )}
                     {!loading && rows.map((row) => (
@@ -1853,10 +1890,10 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
                         }}
                       >
                         <td className="users-td users-td--name">{row.name}</td>
-                        <td className="users-td users-td--muted">{row.attributeName || "No attribute selected"}</td>
+                        <td className="users-td users-td--muted">{row.attributeName || t("aiAssist.attributes.landing.noAttributeSelected")}</td>
                         <td className="users-td users-td--muted">{row.createdByName}</td>
                         <td className="users-td users-td--muted">{fmtSavedRunDate(row.createdAt)}</td>
-                        <td className="users-td users-td--muted">Right-click</td>
+                        <td className="users-td users-td--muted">{t("aiAssist.attributes.landing.rightClick")}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1870,19 +1907,19 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
-            <h2>Identify Attributes Help</h2>
+            <h2>{t("aiAssist.attributes.landing.help.title")}</h2>
             <p className="users-guide-copy">
-              Start a new attribute suggestion run from here or reopen a saved run from the table.
+              {t("aiAssist.attributes.landing.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Saved runs keep the selected attribute and the generated AI suggestions so you can review or resume them later.
+              {t("aiAssist.attributes.landing.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Access depends on your role and whether AI Assist is enabled for the active project.
+              {t("aiAssist.attributes.landing.help.line3")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1902,7 +1939,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
             setNewAttributeError("");
           }}
           onSave={(draft, valuesByOwner) => void handleCreateAttribute(draft, valuesByOwner)}
-          emptyStateLabel={currentTargetKind === "case" ? "No cases yet." : "No documents yet."}
+          emptyStateLabel={currentTargetKind === "case" ? t("aiAssist.attributes.workspace.empty.noCasesYet") : t("aiAssist.attributes.workspace.empty.noDocumentsYet")}
         />
       )}
 
@@ -1915,7 +1952,7 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
               setContextMenu(null);
             }}
           >
-            Open Suggestions
+            {t("aiAssist.attributes.actions.openSuggestions")}
           </button>
           {canDeleteSavedSuggestions ? (
             <button
@@ -1925,11 +1962,11 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
                 setContextMenu(null);
               }}
             >
-              Delete Suggestions
+              {t("aiAssist.attributes.actions.deleteSuggestions")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="Only editors and owners can delete saved suggestion runs">
-              Delete Suggestions
+            <div className="context-menu-item context-menu-item--disabled" title={t("aiAssist.attributes.landing.onlyEditorsOwnersDelete")}>
+              {t("aiAssist.attributes.actions.deleteSuggestions")}
             </div>
           )}
         </div>
@@ -1938,16 +1975,16 @@ function AIAssistAttributeLandingView({ kind }: { kind: "case" | "document" }) {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => !deleteBusy && setConfirmDelete(null)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete Saved Suggestions</h2>
+            <h2>{t("aiAssist.attributes.modals.deleteSuggestions.title")}</h2>
             <p className="users-guide-copy">
-              Delete <strong>{confirmDelete.name}</strong>? This saved suggestion run will be removed from the project log and table.
+              {t("aiAssist.attributes.modals.deleteSuggestions.bodyPrefix")} <strong>{confirmDelete.name}</strong>? {t("aiAssist.attributes.modals.deleteSuggestions.bodySuffix")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteBusy}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button type="button" className="btn btn--danger" onClick={() => void handleDelete()} disabled={deleteBusy}>
-                {deleteBusy ? "Deleting..." : "Delete"}
+                {deleteBusy ? t("aiAssist.attributes.statuses.deleting") : t("aiAssist.attributes.actions.delete")}
               </button>
             </div>
           </div>

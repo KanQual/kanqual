@@ -1,4 +1,5 @@
 import type { RecordModel } from "pocketbase";
+import { formatCurrentDateTime } from "../i18n/formatters";
 
 export const PROCESSED_DOCUMENT_REVIEW_COLLECTION = "processed_document_reviews";
 
@@ -126,7 +127,7 @@ function normalizeReviewLenses(value: unknown): Record<ProcessedDocumentReviewLe
 export function formatProcessedReviewDate(iso: string): string {
   if (!iso) return "-";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric",
       month: "short",
       day: "numeric",

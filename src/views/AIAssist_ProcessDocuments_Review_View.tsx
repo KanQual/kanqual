@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
+import { useI18n } from "../i18n/provider";
 import {
   collectSpeakerSummaries,
   formatProcessedReviewDate,
@@ -34,6 +35,10 @@ function ReviewResultsPanel({
   onChangeReviewTab: (tab: ReviewLensId) => void;
   editable: boolean;
 }) {
+  const { t } = useI18n();
+  function getLensLabel(lensId: ReviewLensId) {
+    return t(`aiAssist.processDocuments.review.lenses.${lensId}.label`);
+  }
   const visibleReviewTabs = useMemo(
     () => REVIEW_LENSES.filter((lens) => enabledReviewLenses[lens.id]),
     [enabledReviewLenses],
@@ -58,7 +63,11 @@ function ReviewResultsPanel({
 
   return (
     <div className="ai-process-doc-column-body ai-process-doc-column-body--review">
-      <div className="segmented-control ai-process-doc-tablist" role="tablist" aria-label="Processing review sections">
+      <div
+        className="segmented-control ai-process-doc-tablist"
+        role="tablist"
+        aria-label={t("aiAssist.processDocuments.review.tabsAriaLabel")}
+      >
         {visibleReviewTabs.map((lens) => (
           <button
             key={lens.id}
@@ -72,7 +81,7 @@ function ReviewResultsPanel({
             }
             onClick={() => onChangeReviewTab(lens.id)}
           >
-            {lens.label}
+            {getLensLabel(lens.id)}
           </button>
         ))}
       </div>
@@ -81,15 +90,15 @@ function ReviewResultsPanel({
         <div className="ai-process-doc-review-section">
           <div className="ai-process-doc-review-summary">
             <strong>{speakerSummaries.length}</strong>
-            <span>speakers or speaker labels identified</span>
+            <span>{t("aiAssist.processDocuments.review.speakerSummary", { count: speakerSummaries.length })}</span>
           </div>
           <div className="ai-process-doc-review-grid">
             <div className="surface-card ai-process-doc-segment-review-card">
-              <div className="surface-card-title">Segment Review</div>
+              <div className="surface-card-title">{t("aiAssist.processDocuments.review.segmentReview")}</div>
               <div className="ai-process-doc-segment-list">
                 {reviewSegments.length === 0 ? (
                   <div className="empty-state ai-process-doc-empty">
-                    <p>No elements remain in this review.</p>
+                    <p>{t("aiAssist.processDocuments.review.noElementsRemain")}</p>
                   </div>
                 ) : (
                   reviewSegments.map((segment, index) => (
@@ -104,9 +113,12 @@ function ReviewResultsPanel({
                                 : "coder"
                           }`}
                         >
-                          {segment.segmentType}
+                          {t(`aiAssist.processDocuments.review.segmentTypes.${segment.segmentType}`)}
                         </span>
-                        <label className="ai-process-doc-segment-tag-select" aria-label="Element tag">
+                        <label
+                          className="ai-process-doc-segment-tag-select"
+                          aria-label={t("aiAssist.processDocuments.review.elementTag")}
+                        >
                           <select
                             className="form-select"
                             value={segment.segmentType}
@@ -115,13 +127,13 @@ function ReviewResultsPanel({
                               updateReviewSegment(index, { segmentType: e.target.value as SegmentType })
                             }
                           >
-                            <option value="metadata">metadata</option>
-                            <option value="question">question</option>
-                            <option value="answer">answer</option>
+                            <option value="metadata">{t("aiAssist.processDocuments.review.segmentTypes.metadata")}</option>
+                            <option value="question">{t("aiAssist.processDocuments.review.segmentTypes.question")}</option>
+                            <option value="answer">{t("aiAssist.processDocuments.review.segmentTypes.answer")}</option>
                           </select>
                         </label>
                         {segment.segmentType !== "metadata" && segmentContainsTimestamp(segment) && (
-                          <span className="role-badge role-badge--viewer">Metadata</span>
+                          <span className="role-badge role-badge--viewer">{t("aiAssist.processDocuments.review.metadataBadge")}</span>
                         )}
                         <button
                           type="button"
@@ -129,18 +141,18 @@ function ReviewResultsPanel({
                           disabled={!editable}
                           onClick={() => removeReviewSegment(index)}
                         >
-                          Delete
+                          {t("aiAssist.processDocuments.review.delete")}
                         </button>
                       </div>
                       <div className="ai-process-doc-segment-editor">
                         <label className="form-label">
-                          Speaker
+                          {t("aiAssist.processDocuments.review.speaker")}
                           <input
                             className="form-input"
                             value={segment.speakerId}
                             disabled={!editable}
                             onChange={(e) => updateReviewSegment(index, { speakerId: e.target.value })}
-                            placeholder="Unlabeled speaker"
+                            placeholder={t("aiAssist.processDocuments.review.unlabeledSpeaker")}
                           />
                         </label>
                         {segment.timestampText.trim() && (
@@ -150,7 +162,7 @@ function ReviewResultsPanel({
                         )}
                       </div>
                       <label className="form-label ai-process-doc-segment-text-field">
-                        Element text
+                        {t("aiAssist.processDocuments.review.elementText")}
                         <textarea
                           className="form-input ai-process-doc-segment-textarea"
                           value={segment.text}
@@ -160,7 +172,7 @@ function ReviewResultsPanel({
                         />
                       </label>
                       <div className="ai-process-doc-segment-footnote">
-                        {segment.speakerId.trim() || "Unlabeled speaker"}
+                        {segment.speakerId.trim() || t("aiAssist.processDocuments.review.unlabeledSpeaker")}
                       </div>
                     </article>
                   ))
@@ -175,20 +187,24 @@ function ReviewResultsPanel({
         <div className="ai-process-doc-review-section">
           <div className="ai-process-doc-review-summary">
             <strong>{properNameCandidates.length}</strong>
-            <span>likely speaker-name candidates surfaced for review</span>
+            <span>{t("aiAssist.processDocuments.review.nameCandidateSummary", { count: properNameCandidates.length })}</span>
           </div>
           <div className="surface-card">
-            <div className="surface-card-title">Name Candidates</div>
+            <div className="surface-card-title">{t("aiAssist.processDocuments.review.nameCandidates")}</div>
             {properNameCandidates.length === 0 ? (
               <p className="surface-card-description">
-                No likely real speaker names were detected in transcript labels.
+                {t("aiAssist.processDocuments.review.noSpeakerNamesDetected")}
               </p>
             ) : (
               <div className="ai-process-doc-chip-list">
                 {properNameCandidates.map((candidate, index) => (
                   <div key={`${candidate.text}-${index}`} className="ai-process-doc-chip-card">
                     <strong>{candidate.text}</strong>
-                    <span>{candidate.sourceType === "speaker" ? "Speaker label" : "Transcript text"}</span>
+                    <span>
+                      {candidate.sourceType === "speaker"
+                        ? t("aiAssist.processDocuments.review.speakerLabel")
+                        : t("aiAssist.processDocuments.review.transcriptText")}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -201,6 +217,7 @@ function ReviewResultsPanel({
 }
 
 export function AIAssistProcessDocumentsReviewView() {
+  const { t } = useI18n();
   const {
     activeProject,
     addDocument,
@@ -258,7 +275,7 @@ export function AIAssistProcessDocumentsReviewView() {
 
   function openExportModal() {
     if (!selectedReviewRecord || !canExportAiOutputsToProject) return;
-    setExportName(selectedReviewRecord.documentName || "Processed transcript");
+    setExportName(selectedReviewRecord.documentName || t("aiAssist.processDocuments.review.export.defaultName"));
     setExportDescription("");
     setDeleteOriginalOnExport(false);
     setExportError("");
@@ -287,7 +304,7 @@ export function AIAssistProcessDocumentsReviewView() {
       }
     } catch (nextError) {
       console.error("Failed to load processed document reviews:", nextError);
-      setReviewError("Could not load processed documents for review.");
+      setReviewError(t("aiAssist.processDocuments.errors.failedToLoadReviews"));
     } finally {
       setLoadingReviews(false);
     }
@@ -318,7 +335,7 @@ export function AIAssistProcessDocumentsReviewView() {
       );
     } catch (nextError) {
       console.error("Failed to save processed document review:", nextError);
-      setSaveReviewError("Could not save review changes.");
+      setSaveReviewError(t("aiAssist.processDocuments.errors.failedToSaveReview"));
     } finally {
       setSaveReviewBusy(false);
     }
@@ -328,7 +345,7 @@ export function AIAssistProcessDocumentsReviewView() {
     if (!activeProject || !selectedReviewRecord || !canExportAiOutputsToProject) return;
     const nextName = exportName.trim();
     if (!nextName) {
-      setExportError("Enter a name for the processed document.");
+      setExportError(t("aiAssist.processDocuments.errors.enterName"));
       return;
     }
 
@@ -348,7 +365,7 @@ export function AIAssistProcessDocumentsReviewView() {
         },
       );
       if (!created?.id) {
-        throw new Error("Processed document could not be exported because the document was not created.");
+        throw new Error(t("aiAssist.processDocuments.errors.documentNotCreated"));
       }
 
       await pb.collection(PROCESSED_DOCUMENT_REVIEW_COLLECTION).update(selectedReviewRecord.id, {
@@ -362,7 +379,7 @@ export function AIAssistProcessDocumentsReviewView() {
       await logAction(
         activeProject.id,
         "project.ai_processed_document.export",
-        `Exported processed document "${nextName}"`,
+        t("projectLog.labels.projectAiProcessedDocumentExport", { name: nextName }),
         created.id,
         {
           entityType: "document",
@@ -386,7 +403,9 @@ export function AIAssistProcessDocumentsReviewView() {
       setExportModalOpen(false);
     } catch (nextError) {
       console.error("Failed to export processed document:", nextError);
-      setExportError(nextError instanceof Error ? nextError.message : "Could not export processed document.");
+      setExportError(
+        nextError instanceof Error ? nextError.message : t("aiAssist.processDocuments.errors.failedToExport"),
+      );
     } finally {
       setExportBusy(false);
     }
@@ -405,7 +424,9 @@ export function AIAssistProcessDocumentsReviewView() {
       });
     } catch (nextError) {
       console.error("Failed to restart processed document run:", nextError);
-      setRerunError(nextError instanceof Error ? nextError.message : "Could not start document processing.");
+      setRerunError(
+        nextError instanceof Error ? nextError.message : t("aiAssist.processDocuments.errors.failedToStart"),
+      );
     } finally {
       setRerunBusy(false);
     }
@@ -415,10 +436,10 @@ export function AIAssistProcessDocumentsReviewView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Process Documents Review</h1>
+          <h1>{t("aiAssist.processDocuments.review.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>Open a project first.</p>
+          <p>{t("aiAssist.processDocuments.empty.openProjectFirst")}</p>
         </div>
       </div>
     );
@@ -428,10 +449,10 @@ export function AIAssistProcessDocumentsReviewView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Review Processed Documents</h1>
+          <h1>{t("aiAssist.processDocuments.review.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>You do not have permission to review processed AI outputs for this project.</p>
+          <p>{t("aiAssist.processDocuments.empty.noPermission")}</p>
         </div>
       </div>
     );
@@ -441,10 +462,10 @@ export function AIAssistProcessDocumentsReviewView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Review Processed Documents</h1>
+          <h1>{t("aiAssist.processDocuments.review.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>Enable AI Assist in Project Settings before reviewing processed AI outputs.</p>
+          <p>{t("aiAssist.processDocuments.empty.enableInProjectSettings")}</p>
         </div>
       </div>
     );
@@ -454,18 +475,18 @@ export function AIAssistProcessDocumentsReviewView() {
     <div className="view ai-process-doc-view ai-process-doc-view--reviewing">
       <div className="workspace-back-row">
         <button type="button" className="btn" onClick={() => setView("ai-assist-process-documents")}>
-          Back to Processed Documents
+          {t("aiAssist.processDocuments.review.backToProcessedDocuments")}
         </button>
       </div>
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Review Processed Documents</h1>
+          <h1>{t("aiAssist.processDocuments.review.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("aiAssist.processDocuments.openHelp")}
+            aria-label={t("aiAssist.processDocuments.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -478,9 +499,9 @@ export function AIAssistProcessDocumentsReviewView() {
             <div className="surface-card ai-process-doc-review-list-card">
               <div className="surface-card-header">
                 <div>
-                  <div className="surface-card-title">Processed Documents</div>
+                  <div className="surface-card-title">{t("aiAssist.processDocuments.review.savedDocumentsTitle")}</div>
                   <p className="surface-card-description">
-                    Review saved processing outputs and continue where you left off.
+                    {t("aiAssist.processDocuments.review.savedDocumentsBody")}
                   </p>
                 </div>
               </div>
@@ -489,20 +510,20 @@ export function AIAssistProcessDocumentsReviewView() {
                 <table className="users-table">
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Status</th>
-                      <th>Processed</th>
-                      <th>In Project</th>
+                      <th>{t("aiAssist.processDocuments.review.table.name")}</th>
+                      <th>{t("aiAssist.processDocuments.review.table.status")}</th>
+                      <th>{t("aiAssist.processDocuments.review.table.processed")}</th>
+                      <th>{t("aiAssist.processDocuments.review.table.inProject")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loadingReviews ? (
                       <tr>
-                        <td colSpan={4} className="users-td-msg">Loading...</td>
+                        <td colSpan={4} className="users-td-msg">{t("common.loading")}</td>
                       </tr>
                     ) : reviewRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="users-td-msg">No processed documents yet.</td>
+                        <td colSpan={4} className="users-td-msg">{t("aiAssist.processDocuments.review.noProcessedDocuments")}</td>
                       </tr>
                     ) : (
                       reviewRecords.map((record) => (
@@ -513,20 +534,30 @@ export function AIAssistProcessDocumentsReviewView() {
                           }`}
                           onClick={() => openReviewRecord(record)}
                         >
-                          <td className="users-td users-td--name">{record.documentName || "Untitled document"}</td>
+                          <td className="users-td users-td--name">{record.documentName || t("aiAssist.processDocuments.labels.untitledDocument")}</td>
                           <td className="users-td users-td--muted">
                             {record.status === "reviewed"
-                              ? "Reviewed"
+                              ? t("aiAssist.processDocuments.statuses.reviewed")
                               : record.processingStatus === "partial"
-                                ? `Partial (${record.processedChunkCount}/${record.chunkCount})`
+                                ? t("aiAssist.processDocuments.review.partialWithCount", {
+                                    completed: record.processedChunkCount,
+                                    total: record.chunkCount,
+                                  })
                                 : record.processingStatus === "error"
-                                  ? "Failed"
+                                  ? t("aiAssist.processDocuments.statuses.failed")
                                   : record.processingStatus === "running"
-                                    ? `Running (${record.processedChunkCount}/${record.chunkCount})`
-                                    : "Pending"}
+                                    ? t("aiAssist.processDocuments.review.runningWithCount", {
+                                        completed: record.processedChunkCount,
+                                        total: record.chunkCount,
+                                      })
+                                    : t("aiAssist.processDocuments.statuses.pending")}
                           </td>
                           <td className="users-td users-td--muted">{formatProcessedReviewDate(record.updatedAt)}</td>
-                          <td className="users-td users-td--muted">{record.exportedToProject ? "Yes" : "No"}</td>
+                          <td className="users-td users-td--muted">
+                            {record.exportedToProject
+                              ? t("aiAssist.processDocuments.review.yes")
+                              : t("aiAssist.processDocuments.review.no")}
+                          </td>
                         </tr>
                       ))
                     )}
@@ -540,25 +571,34 @@ export function AIAssistProcessDocumentsReviewView() {
             <div className="surface-card ai-process-doc-review-detail-card">
               {!selectedReviewRecord ? (
                 <div className="empty-state ai-process-doc-review-empty">
-                  <p>Select a processed document to review its segments and named entities.</p>
+                  <p>{t("aiAssist.processDocuments.review.selectDocumentPrompt")}</p>
                 </div>
               ) : (
                 <>
                   <div className="ai-process-doc-review-modal-header ai-process-doc-review-modal-header--with-summary">
                     <div>
-                      <h2>{selectedReviewRecord.documentName || "Untitled document"}</h2>
+                      <h2>{selectedReviewRecord.documentName || t("aiAssist.processDocuments.labels.untitledDocument")}</h2>
                       <p className="surface-card-description">
-                        {selectedReviewRecord.model || "Unknown model"} | {selectedReviewRecord.chunkCount} chunk
-                        {selectedReviewRecord.chunkCount === 1 ? "" : "s"} | {selectedReviewRecord.processedChunkCount} processed | Processed {formatProcessedReviewDate(selectedReviewRecord.updatedAt)}
+                        {t("aiAssist.processDocuments.review.recordSummary", {
+                          model: selectedReviewRecord.model || t("aiAssist.processDocuments.review.unknownModel"),
+                          chunkCount: selectedReviewRecord.chunkCount,
+                          processedChunkCount: selectedReviewRecord.processedChunkCount,
+                          processedAt: formatProcessedReviewDate(selectedReviewRecord.updatedAt),
+                        })}
                       </p>
                     </div>
                     {selectedReviewSpeakerSummaries.length > 0 && (
-                      <div className="ai-process-doc-summary-strip" aria-label="Segment summary">
+                      <div className="ai-process-doc-summary-strip" aria-label={t("aiAssist.processDocuments.review.segmentSummary")}>
                         {selectedReviewSpeakerSummaries.map((speaker) => (
                           <div key={speaker.id} className="ai-process-doc-summary-chip">
                             <strong>{speaker.id}</strong>
-                            <span>{speaker.turnCount} turns</span>
-                            <small>{speaker.questionCount} q | {speaker.answerCount} a</small>
+                            <span>{t("aiAssist.processDocuments.review.turnCount", { count: speaker.turnCount })}</span>
+                            <small>
+                              {t("aiAssist.processDocuments.review.questionAnswerCount", {
+                                questions: speaker.questionCount,
+                                answers: speaker.answerCount,
+                              })}
+                            </small>
                           </div>
                         ))}
                       </div>
@@ -569,8 +609,15 @@ export function AIAssistProcessDocumentsReviewView() {
                   {rerunError && <div className="form-error project-settings-error">{rerunError}</div>}
                   {selectedReviewRecord.processingStatus === "partial" && (
                     <div className="users-permission-note" style={{ marginBottom: 12 }}>
-                      This run is partial. {selectedReviewRecord.processedChunkCount} of {selectedReviewRecord.chunkCount} chunks completed.
-                      {selectedReviewRecord.processingError ? ` Last error: ${selectedReviewRecord.processingError}` : ""}
+                      {t("aiAssist.processDocuments.review.partialRun", {
+                        completed: selectedReviewRecord.processedChunkCount,
+                        total: selectedReviewRecord.chunkCount,
+                      })}
+                      {selectedReviewRecord.processingError
+                        ? ` ${t("aiAssist.processDocuments.review.lastError", {
+                            message: selectedReviewRecord.processingError,
+                          })}`
+                        : ""}
                     </div>
                   )}
                   {selectedReviewRecord.processingStatus === "error" && selectedReviewRecord.processingError && (
@@ -594,9 +641,9 @@ export function AIAssistProcessDocumentsReviewView() {
                         className="btn"
                         disabled={processBusy || rerunBusy || !canUseAiProcessDocuments}
                         onClick={() => void handleReprocessSelectedRecord()}
-                        title={!canUseAiProcessDocuments ? "You do not have permission to process documents" : undefined}
+                        title={!canUseAiProcessDocuments ? t("aiAssist.processDocuments.empty.noPermissionToProcess") : undefined}
                       >
-                        {rerunBusy ? "Starting" : "Resume Processing"}
+                        {rerunBusy ? t("aiAssist.processDocuments.review.starting") : t("aiAssist.processDocuments.review.resumeProcessing")}
                       </button>
                     )}
                     <button
@@ -604,9 +651,9 @@ export function AIAssistProcessDocumentsReviewView() {
                       className="btn"
                       disabled={processBusy || rerunBusy || !canUseAiProcessDocuments}
                       onClick={() => void handleReprocessSelectedRecord({ restart: true })}
-                      title={!canUseAiProcessDocuments ? "You do not have permission to process documents" : undefined}
+                      title={!canUseAiProcessDocuments ? t("aiAssist.processDocuments.empty.noPermissionToProcess") : undefined}
                     >
-                      {rerunBusy ? "Starting" : "Restart Processing"}
+                      {rerunBusy ? t("aiAssist.processDocuments.review.starting") : t("aiAssist.processDocuments.actions.restartSelected")}
                     </button>
                     <button
                       type="button"
@@ -619,22 +666,24 @@ export function AIAssistProcessDocumentsReviewView() {
                       onClick={openExportModal}
                       title={
                         !canExportAiOutputsToProject
-                          ? "You do not have permission to export AI outputs to the project"
+                          ? t("aiAssist.processDocuments.review.noPermissionToExport")
                           : selectedReviewRecord.processingStatus !== "completed"
-                            ? "Only completed processed documents can be exported to the project"
+                            ? t("aiAssist.processDocuments.review.onlyCompletedCanExport")
                             : undefined
                       }
                     >
-                      {selectedReviewRecord.exportedToProject ? "Exported to Project" : "Export to Project"}
+                      {selectedReviewRecord.exportedToProject
+                        ? t("aiAssist.processDocuments.review.exportedToProject")
+                        : t("aiAssist.processDocuments.review.exportToProject")}
                     </button>
                     <button
                       type="button"
                       className="btn btn--primary"
                       disabled={saveReviewBusy || !canSaveAiOutputs}
                       onClick={() => void handleSaveReview()}
-                      title={!canSaveAiOutputs ? "You do not have permission to save AI output reviews" : undefined}
+                      title={!canSaveAiOutputs ? t("aiAssist.processDocuments.review.noPermissionToSave") : undefined}
                     >
-                      {saveReviewBusy ? "Saving" : "Save Review"}
+                      {saveReviewBusy ? t("aiAssist.processDocuments.review.saving") : t("aiAssist.processDocuments.review.saveReview")}
                     </button>
                   </div>
                 </>
@@ -647,19 +696,19 @@ export function AIAssistProcessDocumentsReviewView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help modal--wide" onClick={(e) => e.stopPropagation()}>
-            <h2>Processed Document Review Help</h2>
+            <h2>{t("aiAssist.processDocuments.review.help.title")}</h2>
             <p className="users-guide-copy">
-              Choose a processed document, inspect extracted entities and segments, edit tags, speakers, and text, save the reviewed output, and export reviewed results back into the project.
+              {t("aiAssist.processDocuments.review.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use this page after processing completes. Pick a saved review record from the list, correct anything that needs cleanup, then save or export the reviewed version.
+              {t("aiAssist.processDocuments.review.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Processed results are saved in a project review queue so they can be revisited later. Exporting reviewed output changes shared project content.
+              {t("aiAssist.processDocuments.review.help.line3")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -669,10 +718,10 @@ export function AIAssistProcessDocumentsReviewView() {
       {exportModalOpen && selectedReviewRecord && (
         <div className="modal-overlay" onClick={() => !exportBusy && setExportModalOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Export to Project</h2>
+            <h2>{t("aiAssist.processDocuments.review.export.title")}</h2>
             <div className="form">
               <label className="form-label">
-                Name
+                {t("aiAssist.processDocuments.review.export.name")}
                 <input
                   className="form-input"
                   value={exportName}
@@ -681,7 +730,7 @@ export function AIAssistProcessDocumentsReviewView() {
                 />
               </label>
               <label className="form-label">
-                Description
+                {t("aiAssist.processDocuments.review.export.description")}
                 <textarea
                   className="form-input"
                   rows={5}
@@ -697,11 +746,11 @@ export function AIAssistProcessDocumentsReviewView() {
                   disabled={exportBusy || !canDeleteOriginalDocument}
                 />
                 <span>
-                  <strong>Delete original document</strong>
+                  <strong>{t("aiAssist.processDocuments.review.export.deleteOriginalDocument")}</strong>
                   <small>
                     {canDeleteOriginalDocument
-                      ? "Remove the source document after exporting this processed version."
-                      : "You do not have permission to delete the source document."}
+                      ? t("aiAssist.processDocuments.review.export.deleteOriginalAllowed")
+                      : t("aiAssist.processDocuments.review.export.deleteOriginalDenied")}
                   </small>
                 </span>
               </label>
@@ -713,7 +762,7 @@ export function AIAssistProcessDocumentsReviewView() {
                   onClick={() => setExportModalOpen(false)}
                   disabled={exportBusy}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -721,7 +770,7 @@ export function AIAssistProcessDocumentsReviewView() {
                   onClick={() => void handleExportToProject()}
                   disabled={exportBusy || !exportName.trim() || !canExportAiOutputsToProject}
                 >
-                  {exportBusy ? "Exporting" : "Export"}
+                  {exportBusy ? t("aiAssist.processDocuments.review.export.exporting") : t("aiAssist.processDocuments.review.export.action")}
                 </button>
               </div>
             </div>

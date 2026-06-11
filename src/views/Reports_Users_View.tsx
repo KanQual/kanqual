@@ -4,6 +4,8 @@ import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 type CoderReportKind = "activity" | "comparison" | "agreement";
 type CoderReportSortCol = "name" | "kind" | "createdByName" | "createdAt";
@@ -110,89 +112,104 @@ interface CoderReportRow {
   snapshot: CoderReportSnapshot;
 }
 
-const REPORT_LABELS: Record<CoderReportKind, string> = {
-  activity: "User Activity",
-  comparison: "User Comparison",
-  agreement: "Interuser Agreement",
-};
+function reportLabel(t: ReturnType<typeof useI18n>["t"], kind: CoderReportKind): string {
+  switch (kind) {
+    case "activity":
+      return t("reportsUsers.reportKinds.activity");
+    case "comparison":
+      return t("reportsUsers.reportKinds.comparison");
+    case "agreement":
+      return t("reportsUsers.reportKinds.agreement");
+  }
+}
 
-const REPORT_COLS: { key: CoderReportSortCol; label: string; width: string }[] = [
-  { key: "name", label: "Name", width: "34%" },
-  { key: "kind", label: "Type", width: "22%" },
-  { key: "createdByName", label: "Created By", width: "22%" },
-  { key: "createdAt", label: "Created", width: "22%" },
-];
+function getReportColumns(t: ReturnType<typeof useI18n>["t"]): { key: CoderReportSortCol; label: string; width: string }[] {
+  return [
+    { key: "name", label: t("reportsUsers.tableColumns.name"), width: "34%" },
+    { key: "kind", label: t("reportsUsers.tableColumns.type"), width: "22%" },
+    { key: "createdByName", label: t("reportsUsers.tableColumns.createdBy"), width: "22%" },
+    { key: "createdAt", label: t("reportsUsers.tableColumns.created"), width: "22%" },
+  ];
+}
 
-const ACTION_LABELS: Record<string, string> = {
-  "project.create": "Project created",
-  "project.open": "Project opened",
-  "project.close": "Project left",
-  "project.update": "Project updated",
-  "project.export": "Project exported",
-  "project.encrypted_backup.export": "Encrypted project backup exported",
-  "project.log.export": "Project log exported",
-  "project.import": "Project imported",
-  "project.encrypted_backup.import": "Encrypted project backup imported",
-  "project.restore_backup": "Project restored from backup",
-  "project.backup.create": "Project backup created",
-  "project.backup.settings": "Project backup settings updated",
-  "project.backup.delete": "Project backup deleted",
-  "project.network_mode.update": "Network mode updated",
-  "project.ai_assist.update": "Project AI Assist updated",
-  "project.ai_chat.message": "AI chat message sent",
-  "project.ai_chat.response": "AI chat response received",
-  "project.ai_assist.embeddings.delete": "Project AI Assist embeddings deleted",
-  "codebook.export": "Codebook exported",
-  "codebook.import": "Codebook imported",
-  "ai_assist.index": "AI Assist embeddings built",
-  "ai_assist.reindex": "AI Assist embeddings rebuilt",
-  "document.create": "Document added",
-  "document.update": "Document updated",
-  "document.delete": "Document deleted",
-  "document.restore": "Document restored",
-  "document.associations": "Document associations updated",
-  "code.create": "Code added",
-  "code.update": "Code updated",
-  "code.delete": "Code deleted",
-  "code.restore": "Code restored",
-  "annotation.create": "Annotation added",
-  "annotation.update": "Annotation updated",
-  "annotation.delete": "Annotation deleted",
-  "annotation.restore": "Annotation restored",
-  "case.create": "Case created",
-  "case.update": "Case updated",
-  "case.delete": "Case deleted",
-  "case.restore": "Case restored",
-  "case.associations": "Case associations updated",
-  "case_attribute.create": "Case attribute added",
-  "case_attribute.update": "Case attribute updated",
-  "case_attribute.delete": "Case attribute deleted",
-  "document_attribute.create": "Document attribute added",
-  "document_attribute.update": "Document attribute updated",
-  "document_attribute.delete": "Document attribute deleted",
-  "memo.create": "Memo created",
-  "memo.update": "Memo updated",
-  "memo.delete": "Memo deleted",
-  "memo.restore": "Memo restored",
-  "code_report.create": "Code report created",
-  "code_report.update": "Code report updated",
-  "code_report.delete": "Code report deleted",
-  "code_report.restore": "Code report restored",
-  "coder_report.create": "Coder report created",
-  "coder_report.update": "Coder report updated",
-  "coder_report.delete": "Coder report deleted",
-  "coder_report.restore": "Coder report restored",
-  "member.add": "Member added",
-  "member.update": "Member updated",
-  "member.remove": "Member removed",
-  "member.reassociate": "Imported member reassociated",
-  "member.remove_unresolved": "Imported member removed",
-};
+const ACTION_LABEL_KEYS = {
+  "project.create": "projectCreate",
+  "project.open": "projectOpen",
+  "project.close": "projectClose",
+  "project.update": "projectUpdate",
+  "project.export": "projectExport",
+  "project.encrypted_backup.export": "projectEncryptedBackupExport",
+  "project.log.export": "projectLogExport",
+  "project.import": "projectImport",
+  "project.encrypted_backup.import": "projectEncryptedBackupImport",
+  "project.restore_backup": "projectRestoreBackup",
+  "project.backup.create": "projectBackupCreate",
+  "project.backup.settings": "projectBackupSettings",
+  "project.backup.delete": "projectBackupDelete",
+  "project.network_mode.update": "projectNetworkModeUpdate",
+  "project.ai_assist.update": "projectAiAssistUpdate",
+  "project.ai_chat.message": "projectAiChatMessage",
+  "project.ai_chat.response": "projectAiChatResponse",
+  "project.ai_assist.embeddings.delete": "projectAiAssistEmbeddingsDelete",
+  "codebook.export": "codebookExport",
+  "codebook.import": "codebookImport",
+  "ai_assist.index": "aiAssistIndex",
+  "ai_assist.reindex": "aiAssistReindex",
+  "document.create": "documentCreate",
+  "document.update": "documentUpdate",
+  "document.delete": "documentDelete",
+  "document.restore": "documentRestore",
+  "document.associations": "documentAssociations",
+  "code.create": "codeCreate",
+  "code.update": "codeUpdate",
+  "code.delete": "codeDelete",
+  "code.restore": "codeRestore",
+  "annotation.create": "annotationCreate",
+  "annotation.update": "annotationUpdate",
+  "annotation.delete": "annotationDelete",
+  "annotation.restore": "annotationRestore",
+  "case.create": "caseCreate",
+  "case.update": "caseUpdate",
+  "case.delete": "caseDelete",
+  "case.restore": "caseRestore",
+  "case.associations": "caseAssociations",
+  "case_attribute.create": "caseAttributeCreate",
+  "case_attribute.update": "caseAttributeUpdate",
+  "case_attribute.delete": "caseAttributeDelete",
+  "document_attribute.create": "documentAttributeCreate",
+  "document_attribute.update": "documentAttributeUpdate",
+  "document_attribute.delete": "documentAttributeDelete",
+  "memo.create": "memoCreate",
+  "memo.update": "memoUpdate",
+  "memo.delete": "memoDelete",
+  "memo.restore": "memoRestore",
+  "code_report.create": "codeReportCreate",
+  "code_report.update": "codeReportUpdate",
+  "code_report.delete": "codeReportDelete",
+  "code_report.restore": "codeReportRestore",
+  "coder_report.create": "coderReportCreate",
+  "coder_report.update": "coderReportUpdate",
+  "coder_report.delete": "coderReportDelete",
+  "coder_report.restore": "coderReportRestore",
+  "member.add": "memberAdd",
+  "member.update": "memberUpdate",
+  "member.remove": "memberRemove",
+  "member.reassociate": "memberReassociate",
+  "member.remove_unresolved": "memberRemoveUnresolved",
+} as const satisfies Record<string, string>;
+
+function projectLogActionLabel(
+  t: ReturnType<typeof useI18n>["t"],
+  action: string,
+): string {
+  const key = ACTION_LABEL_KEYS[action as keyof typeof ACTION_LABEL_KEYS];
+  return key ? t(`projectLog.actions.${key}` as Parameters<typeof t>[0]) : action;
+}
 
 function fmtDate(iso?: string): string {
   if (!iso) return "-";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -266,6 +283,24 @@ function getPocketBaseErrorMessage(error: unknown): string {
   return details || maybe.response?.message || maybe.message || "Failed to save report.";
 }
 
+function formatAttributeTypeLabel(
+  dataType: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  switch (dataType) {
+    case "text":
+      return t("reportsUsers.attributeTypes.text");
+    case "number":
+      return t("reportsUsers.attributeTypes.number");
+    case "datetime":
+      return t("reportsUsers.attributeTypes.datetime");
+    case "categorical":
+      return t("reportsUsers.attributeTypes.categorical");
+    default:
+      return dataType;
+  }
+}
+
 function toggleSet(
   set: Set<string>,
   setter: React.Dispatch<React.SetStateAction<Set<string>>>,
@@ -296,14 +331,15 @@ function NewCoderReportModal({
   onClose: () => void;
   onSelect: (kind: CoderReportKind) => void;
 }) {
+  const { t } = useI18n();
   const options: Array<{ kind: CoderReportKind; text: string }> = [
-    { kind: "activity", text: "Activity, coverage, and coding volume by user." },
+    { kind: "activity", text: t("reportsUsers.newModal.activity") },
   ];
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>New User Report</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsUsers.newModal.title")}</h2>
         <div
           style={{
             display: "grid",
@@ -332,17 +368,17 @@ function NewCoderReportModal({
               }}
             >
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{REPORT_LABELS[option.kind]}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{reportLabel(t, option.kind)}</div>
                 <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--color-text-muted)" }}>{option.text}</div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {REPORT_LABELS[option.kind]}
+                {reportLabel(t, option.kind)}
               </div>
             </button>
           ))}
         </div>
         <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn" onClick={onClose}>{t("reportsUsers.cancel")}</button>
         </div>
       </div>
     </div>
@@ -368,6 +404,7 @@ function SelectionPanel({
   disabled?: boolean;
   headerExtra?: React.ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <div className="annotate-card" style={{ flexShrink: 0 }}>
       <button
@@ -385,8 +422,8 @@ function SelectionPanel({
       </button>
       {!collapsed && selectAll && !disabled && !selectAll.disabled && (
         <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (!selectAll.checked) selectAll.onToggle(); }}>All</button>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (selectAll.checked) selectAll.onToggle(); }}>Clear</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (!selectAll.checked) selectAll.onToggle(); }}>{t("reportsUsers.actions.all")}</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (selectAll.checked) selectAll.onToggle(); }}>{t("reportsUsers.actions.clear")}</button>
         </div>
       )}
       {!collapsed && children}
@@ -405,20 +442,21 @@ function CoderSelectionPanel({
   onChange: (ids: Set<string>) => void;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div className="annotate-card annotate-card--featured" style={{ flexShrink: 0 }}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Users{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
+        <span className="annotate-card-title">{t("reportsUsers.panels.users")}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
       </div>
       {!disabled && coders.length > 0 && (
         <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set(coders.map((item) => item.id)))}>All</button>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set())}>Clear</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set(coders.map((item) => item.id)))}>{t("reportsUsers.actions.all")}</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set())}>{t("reportsUsers.actions.clear")}</button>
         </div>
       )}
       <ul className="code-list">
         {coders.length === 0 ? (
-          <li className="code-list-empty">No coders.</li>
+          <li className="code-list-empty">{t("reportsUsers.empty.noCoders")}</li>
         ) : coders.map((item) => (
           <li
             key={item.id}
@@ -457,17 +495,12 @@ function CoderSelectionPanel({
 
 const LOG_CATEGORY_ORDER = ["all", "project", "case", "document", "code", "annotation", "memo", "report", "other"] as const;
 type LogCategory = typeof LOG_CATEGORY_ORDER[number];
-const LOG_CATEGORY_LABELS: Record<LogCategory, string> = {
-  all: "All",
-  project: "Project",
-  case: "Case",
-  document: "Document",
-  code: "Code",
-  annotation: "Annotation",
-  memo: "Memo",
-  report: "Report",
-  other: "Other",
-};
+function logCategoryLabel(
+  t: ReturnType<typeof useI18n>["t"],
+  category: LogCategory,
+): string {
+  return t(`reportsUsers.activity.categories.${category}` as const);
+}
 
 function getLogCategory(action: string): LogCategory {
   if (action.startsWith("project.") || action.startsWith("member.") || action.startsWith("ai_assist.")) return "project";
@@ -503,7 +536,7 @@ function formatPeriodKey(date: Date, granularity: "day" | "week" | "month"): str
 
 function formatPeriodLabel(periodKey: string, granularity: "day" | "week" | "month"): string {
   if (granularity === "day") {
-    return new Date(`${periodKey}T00:00:00`).toLocaleDateString(undefined, {
+    return formatCurrentDate(`${periodKey}T00:00:00`, {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -511,7 +544,7 @@ function formatPeriodLabel(periodKey: string, granularity: "day" | "week" | "mon
   }
   if (granularity === "month") {
     const [year, month] = periodKey.split("-");
-    return new Date(`${year}-${month}-01T00:00:00`).toLocaleDateString(undefined, {
+    return formatCurrentDate(`${year}-${month}-01T00:00:00`, {
       year: "numeric",
       month: "long",
     });
@@ -519,10 +552,11 @@ function formatPeriodLabel(periodKey: string, granularity: "day" | "week" | "mon
   const start = new Date(`${periodKey}T00:00:00`);
   const end = new Date(start);
   end.setDate(end.getDate() + 6);
-  return `${start.toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${end.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  return `${formatCurrentDate(start, { month: "short", day: "numeric" })} - ${formatCurrentDate(end, { month: "short", day: "numeric", year: "numeric" })}`;
 }
 
 function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
+  const { t } = useI18n();
   const plotHeight = 180;
   const sorted = useMemo(
     () => [...rows].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()),
@@ -592,7 +626,7 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
   return (
     <div className="annotate-card" style={{ flexShrink: 0 }}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Activity Over Time</span>
+        <span className="annotate-card-title">{t("reportsUsers.activity.overTime")}</span>
         <span className="users-filter-count">{visibleRows.length}</span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 14px 10px", justifyContent: "space-between" }}>
@@ -608,7 +642,7 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
                 style={{ fontSize: 11, padding: "2px 10px" }}
                 onClick={() => setActiveTab(tab)}
               >
-                {LOG_CATEGORY_LABELS[tab]} ({count})
+                {logCategoryLabel(t, tab)} ({count})
               </button>
             );
           })}
@@ -622,14 +656,14 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
               style={{ fontSize: 11, padding: "2px 10px", textTransform: "capitalize" }}
               onClick={() => setGranularity(option)}
             >
-              {option}
+              {t(`reportsUsers.activity.granularity.${option}` as const)}
             </button>
           ))}
         </div>
       </div>
       <div style={{ padding: "0 14px 14px" }}>
         {periodRows.length === 0 || coderColumns.length === 0 ? (
-          <div className="users-td-msg" style={{ padding: "24px 12px" }}>No log activity is available for this view.</div>
+          <div className="users-td-msg" style={{ padding: "24px 12px" }}>{t("reportsUsers.empty.noLogActivity")}</div>
         ) : (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 18, alignItems: "center" }}>
@@ -706,6 +740,7 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
 }
 
 function CoderProjectLogCard({ rows }: { rows: ProjectLogEntry[] }) {
+  const { t } = useI18n();
   const sorted = [...rows].sort(
     (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
   );
@@ -735,15 +770,15 @@ function CoderProjectLogCard({ rows }: { rows: ProjectLogEntry[] }) {
   );
 
   function accessModeLabel(mode?: "local" | "remote"): string {
-    if (mode === "local") return "Local";
-    if (mode === "remote") return "Remote";
+    if (mode === "local") return t("projectLog.access.local");
+    if (mode === "remote") return t("projectLog.access.remote");
     return "-";
   }
 
   return (
     <div className="annotate-card" style={{ flexShrink: 0 }}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Project Log</span>
+        <span className="annotate-card-title">{t("projectLog.title")}</span>
         <span className="users-filter-count">{sorted.length}</span>
       </div>
       {availableTabs.length > 1 && (
@@ -759,7 +794,7 @@ function CoderProjectLogCard({ rows }: { rows: ProjectLogEntry[] }) {
                 style={{ fontSize: 11, padding: "2px 10px" }}
                 onClick={() => setActiveTab(tab)}
               >
-                {LOG_CATEGORY_LABELS[tab]} ({count})
+                {logCategoryLabel(t, tab)} ({count})
               </button>
             );
           })}
@@ -769,22 +804,22 @@ function CoderProjectLogCard({ rows }: { rows: ProjectLogEntry[] }) {
         <table className="users-table">
           <thead>
             <tr>
-              <th className="users-th" style={{ minWidth: 140 }}>Time</th>
-              <th className="users-th" style={{ minWidth: 130 }}>Coder</th>
-              <th className="users-th" style={{ minWidth: 90 }}>Access</th>
-              <th className="users-th" style={{ minWidth: 140 }}>Action</th>
-              <th className="users-th" style={{ minWidth: 220 }}>Description</th>
+              <th className="users-th" style={{ minWidth: 140 }}>{t("projectLog.columns.time")}</th>
+              <th className="users-th" style={{ minWidth: 130 }}>{t("reportsUsers.activity.coder")}</th>
+              <th className="users-th" style={{ minWidth: 90 }}>{t("projectLog.columns.access")}</th>
+              <th className="users-th" style={{ minWidth: 140 }}>{t("reportsUsers.activity.action")}</th>
+              <th className="users-th" style={{ minWidth: 220 }}>{t("reportsUsers.activity.description")}</th>
             </tr>
           </thead>
           <tbody>
             {visibleRows.length === 0 ? (
-              <tr><td colSpan={5} className="users-td-msg">No project log entries for the selected coder.</td></tr>
+              <tr><td colSpan={5} className="users-td-msg">{t("reportsUsers.empty.noProjectLogEntries")}</td></tr>
             ) : visibleRows.map((entry) => (
               <tr key={entry.id} className="users-row">
                 <td className="users-td users-td--muted">{fmtDate(entry.occurredAt)}</td>
                 <td className="users-td users-td--name">{entry.userName || "-"}</td>
                 <td className="users-td users-td--muted">{accessModeLabel(entry.accessMode)}</td>
-                <td className="users-td users-td--muted">{ACTION_LABELS[entry.action] ?? entry.action}</td>
+                <td className="users-td users-td--muted">{projectLogActionLabel(t, entry.action)}</td>
                 <td className="users-td">{entry.label}</td>
               </tr>
             ))}
@@ -802,19 +837,20 @@ function heatmapColor(value: number, max: number): string {
 }
 
 function ComparisonSummaryCard({ stats }: { stats: ComparisonSummaryStats }) {
+  const { t } = useI18n();
   const items = [
-    { label: "Selected Coders", value: stats.selectedCoders },
-    { label: "Shared Documents", value: stats.sharedDocuments },
-    { label: "Total Annotations", value: stats.totalAnnotations },
-    { label: "Unique Codes", value: stats.uniqueCodes },
-    { label: "Codes Used By All", value: stats.codesUsedByAll },
-    { label: "Codes Used By One", value: stats.codesUsedByOne },
+    { label: t("reportsUsers.selectedCoders"), value: stats.selectedCoders },
+    { label: t("reportsUsers.sharedDocuments"), value: stats.sharedDocuments },
+    { label: t("reportsUsers.summary.totalAnnotations"), value: stats.totalAnnotations },
+    { label: t("reportsUsers.summary.uniqueCodes"), value: stats.uniqueCodes },
+    { label: t("reportsUsers.summary.codesUsedByAll"), value: stats.codesUsedByAll },
+    { label: t("reportsUsers.summary.codesUsedByOne"), value: stats.codesUsedByOne },
   ];
 
   return (
     <div className="annotate-card" style={{ flexShrink: 0 }}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Comparison Summary</span>
+        <span className="annotate-card-title">{t("reportsUsers.summary.comparisonSummary")}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, padding: 14 }}>
         {items.map((item) => (
@@ -837,6 +873,7 @@ function ComparisonMatrixCard({
   rows: ComparisonMatrixRow[];
   columns: ComparisonMatrixColumn[];
 }) {
+  const { t } = useI18n();
   const maxValue = Math.max(0, ...rows.flatMap((row) => row.values));
 
   return (
@@ -856,7 +893,7 @@ function ComparisonMatrixCard({
           </thead>
           <tbody>
             {rows.length === 0 || columns.length === 0 ? (
-              <tr><td colSpan={columns.length + 1} className="users-td-msg">Select coders to build the comparison.</td></tr>
+              <tr><td colSpan={columns.length + 1} className="users-td-msg">{t("reportsUsers.empty.selectCodersForComparison")}</td></tr>
             ) : rows.map((row) => (
               <tr key={row.id} className="users-row">
                 <td className="users-td users-td--name">{row.label}</td>
@@ -897,6 +934,7 @@ function CoderReportCreationPage({
   onSaved?: (row: CoderReportRow) => void;
   onUseSettings?: (settings: CoderReportSettings) => void;
 }) {
+  const { t } = useI18n();
   const { user: currentUser } = useAuth();
   const { pb, activeProject, documents: storeDocuments, codes: storeCodes, logEntries, createCoderReport, canCurrentUser } = useStore();
   const frozenSnapshot = row?.snapshot;
@@ -913,7 +951,7 @@ function CoderReportCreationPage({
   const caseAttributeValuesFromSnapshot = frozenSnapshot?.caseAttributeValues ?? [];
   const codes = frozenSnapshot?.codes ?? storeCodes;
 
-  const [name, setName] = useState(row?.name ?? `${REPORT_LABELS[reportKind]} Report`);
+  const [name, setName] = useState(row?.name ?? `${reportLabel(t, reportKind)} Report`);
   const [allCaseItems, setAllCaseItems] = useState<CaseItem[]>(caseItems);
   const [coderItems, setCoderItems] = useState<CoderItem[]>(frozenSnapshot?.coderItems ?? []);
   const [caseAttributeItems, setCaseAttributeItems] = useState<AttributeItem[]>(caseAttributeItemsFromSnapshot);
@@ -978,13 +1016,13 @@ function CoderReportCreationPage({
           memberRecs
             .map((record) => {
               const user = record.expand?.user;
-              return user ? { id: user.id, name: user.name || user.email || "Unknown" } : null;
+              return user ? { id: user.id, name: user.name || user.email || t("reportsCodes.exportSections.unknown") } : null;
             })
             .filter(Boolean) as CoderItem[],
         );
         setCaseAttributeItems(caseAttrRecs.map((record) => ({
           id: record.id,
-          name: record.name ?? "Untitled attribute",
+          name: record.name ?? t("reportsUsers.untitledAttribute"),
           dataType: record.data_type ?? "text",
         })));
         setCaseDocumentLinks(caseDocRecs.map((record) => ({
@@ -1322,7 +1360,7 @@ function CoderReportCreationPage({
             <div key={item.id} style={{ border: "1px solid var(--color-border)", borderRadius: 10, padding: 12, background: "var(--color-surface-alt)" }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{item.name}</div>
               {!stat || stat.textValues.length === 0 ? (
-                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No values are available for this attribute yet.</div>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsUsers.filterEditors.noValues")}</div>
               ) : (
                 <div style={{ display: "grid", gap: 6 }}>
                   {stat.textValues.map((value) => (
@@ -1350,11 +1388,11 @@ function CoderReportCreationPage({
     );
   }
 
-  const selectedCoderLabels = coderItems.filter((item) => selCoderIds.has(item.id)).map((item) => item.name).join(", ") || "No coders selected";
+  const selectedCoderLabels = coderItems.filter((item) => selCoderIds.has(item.id)).map((item) => item.name).join(", ") || t("reportsUsers.empty.noCodersSelected");
   const caseFilterDetails = allCaseItems
     .filter((item) => (effectiveCaseIds ?? new Set<string>()).has(item.id))
     .map((item) => item.name);
-  const reportLabel = REPORT_LABELS[reportKind];
+  const reportLabelText = reportLabel(t, reportKind);
   const createdBy = row?.createdByName || currentUser?.name || currentUser?.email || "-";
 
   function currentSettings(): CoderReportSettings {
@@ -1399,7 +1437,7 @@ function CoderReportCreationPage({
     setSaving(true);
     setError(null);
     try {
-      const reportName = name.trim() || `${reportLabel} Report`;
+      const reportName = name.trim() || t("reportsUsers.defaultReportName", { kind: reportLabelText });
       const snapshot = buildSnapshot();
       const record = await createCoderReport({
         name: reportName,
@@ -1427,21 +1465,19 @@ function CoderReportCreationPage({
 
   return (
     <div className="annotate-view">
-      <div className="workspace-back-row workspace-back-row--annotate">
-        <button className="btn" onClick={onBack}>Back to Reports</button>
-      </div>
-      <div className="annotate-back-bar" style={{ alignItems: "center", paddingBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
+        <button className="btn" onClick={onBack}>{t("reportsUsers.backToReports")}</button>
+        <div className="report-action-group" style={{ gap: 10 }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           {isFrozen ? (
             canStartReports ? (
             <button className="btn btn--primary" onClick={() => onUseSettings?.(frozenSnapshot!.settings)}>
-              New Report From Settings
+              {t("reportsUsers.newFromSettings")}
             </button>
             ) : null
           ) : (
             <button className="btn btn--primary" onClick={handleSave} disabled={saving || !canStartReports}>
-              {saving ? "Saving..." : "Save"}
+              {saving ? t("reportsUsers.actions.saving") : t("reportsUsers.actions.save")}
             </button>
           )}
         </div>
@@ -1460,7 +1496,7 @@ function CoderReportCreationPage({
           />
           {loadingFilters && (
             <div className="annotate-card" style={{ flexShrink: 0 }}>
-              <div style={{ padding: 14, fontSize: 13, color: "var(--color-text-muted)" }}>Loading...</div>
+              <div style={{ padding: 14, fontSize: 13, color: "var(--color-text-muted)" }}>{t("reportsUsers.empty.loading")}</div>
             </div>
           )}
         </div>
@@ -1471,7 +1507,7 @@ function CoderReportCreationPage({
         >
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Report Title</span>
+              <span className="annotate-card-title">{t("reportsUsers.reportTitle")}</span>
             </div>
             <div style={{ padding: 14 }}>
               <input
@@ -1486,21 +1522,21 @@ function CoderReportCreationPage({
 
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Details</span>
+              <span className="annotate-card-title">{t("reportsUsers.reportDetails")}</span>
             </div>
             <div style={{ padding: 14, display: "grid", gap: 8, fontSize: 13 }}>
-              <div><strong>Type:</strong> {reportLabel}</div>
-              <div><strong>Created by:</strong> {createdBy}</div>
-              <div><strong>Created:</strong> {row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}</div>
-              <div><strong>Cases:</strong> {caseFilterDetails.length > 0 ? caseFilterDetails.join(", ") : "All cases"}</div>
-              <div><strong>Coders:</strong> {selectedCoderLabels}</div>
+              <div><strong>{t("reportsUsers.typeLabel")}:</strong> {reportLabelText}</div>
+              <div><strong>{t("reportsUsers.summary.createdBy")}:</strong> {createdBy}</div>
+              <div><strong>{t("reportsUsers.summary.created")}:</strong> {row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}</div>
+              <div><strong>{t("reportsUsers.casesLabel")}:</strong> {caseFilterDetails.length > 0 ? caseFilterDetails.join(", ") : t("reportsUsers.allCases")}</div>
+              <div><strong>{t("reportsUsers.summary.coders")}:</strong> {selectedCoderLabels}</div>
             </div>
           </div>
 
           {(reportKind === "activity" || reportKind === "comparison") && (
             <div className="annotate-card" style={{ flexShrink: 0 }}>
               <div className="annotate-card-header">
-                <span className="annotate-card-title">{reportKind === "comparison" ? "Coder Metrics" : reportLabel}</span>
+                <span className="annotate-card-title">{reportKind === "comparison" ? t("reportsUsers.coderMetrics") : reportLabelText}</span>
               </div>
               <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 320 }}>
                 <table className="users-table">
@@ -1508,7 +1544,7 @@ function CoderReportCreationPage({
                     <>
                       <thead>
                         <tr>
-                          <th className="users-th">Metric</th>
+                          <th className="users-th">{t("reportsUsers.metrics.metric")}</th>
                           {summaryRows.map((summary) => (
                             <th key={summary.coderId} className="users-th">{summary.coderName}</th>
                           ))}
@@ -1516,29 +1552,29 @@ function CoderReportCreationPage({
                       </thead>
                       <tbody>
                         {summaryRows.length === 0 ? (
-                          <tr><td colSpan={2} className="users-td-msg">Select coders to build the report.</td></tr>
+                          <tr><td colSpan={2} className="users-td-msg">{t("reportsUsers.empty.selectCodersForReport")}</td></tr>
                         ) : (
                           <>
                             <tr className="users-row">
-                              <td className="users-td users-td--name">Annotations</td>
+                              <td className="users-td users-td--name">{t("reportsUsers.metrics.annotations")}</td>
                               {summaryRows.map((summary) => (
                                 <td key={`${summary.coderId}-annotations`} className="users-td">{summary.annotations}</td>
                               ))}
                             </tr>
                             <tr className="users-row">
-                              <td className="users-td users-td--name">Documents</td>
+                              <td className="users-td users-td--name">{t("reportsUsers.metrics.documents")}</td>
                               {summaryRows.map((summary) => (
                                 <td key={`${summary.coderId}-documents`} className="users-td">{summary.documents}</td>
                               ))}
                             </tr>
                             <tr className="users-row">
-                              <td className="users-td users-td--name">Codes</td>
+                              <td className="users-td users-td--name">{t("reportsUsers.metrics.codes")}</td>
                               {summaryRows.map((summary) => (
                                 <td key={`${summary.coderId}-codes`} className="users-td">{summary.codes}</td>
                               ))}
                             </tr>
                             <tr className="users-row">
-                              <td className="users-td users-td--name">Last Coded</td>
+                              <td className="users-td users-td--name">{t("reportsUsers.metrics.lastCoded")}</td>
                               {summaryRows.map((summary) => (
                                 <td key={`${summary.coderId}-last-coded`} className="users-td users-td--muted">{fmtDate(summary.lastCodedAt)}</td>
                               ))}
@@ -1551,16 +1587,16 @@ function CoderReportCreationPage({
                     <>
                       <thead>
                         <tr>
-                          <th className="users-th">Coder</th>
-                          <th className="users-th">Annotations</th>
-                          <th className="users-th">Documents</th>
-                          <th className="users-th">Codes</th>
-                          <th className="users-th">Last Coded</th>
+                          <th className="users-th">{t("reportsUsers.activity.coder")}</th>
+                          <th className="users-th">{t("reportsUsers.metrics.annotations")}</th>
+                          <th className="users-th">{t("reportsUsers.metrics.documents")}</th>
+                          <th className="users-th">{t("reportsUsers.metrics.codes")}</th>
+                          <th className="users-th">{t("reportsUsers.metrics.lastCoded")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {summaryRows.length === 0 ? (
-                          <tr><td colSpan={5} className="users-td-msg">Select coders to build the report.</td></tr>
+                          <tr><td colSpan={5} className="users-td-msg">{t("reportsUsers.empty.selectCodersForReport")}</td></tr>
                         ) : summaryRows.map((summary) => (
                           <tr key={summary.coderId} className="users-row">
                             <td className="users-td users-td--name">{summary.coderName}</td>
@@ -1589,12 +1625,12 @@ function CoderReportCreationPage({
             <>
               <ComparisonSummaryCard stats={comparisonSummary} />
               <ComparisonMatrixCard
-                title="Code Usage Matrix"
+                title={t("reportsUsers.metrics.codeUsageMatrix")}
                 rows={codeUsageRows}
                 columns={comparisonColumns}
               />
               <ComparisonMatrixCard
-                title="Document Comparison Matrix"
+                title={t("reportsUsers.metrics.documentComparisonMatrix")}
                 rows={documentComparisonRows}
                 columns={documentComparisonColumns}
               />
@@ -1605,7 +1641,7 @@ function CoderReportCreationPage({
         {reportKind !== "activity" && (
         <div className="annotate-right">
           <SelectionPanel
-            title="Documents"
+            title={t("reportsUsers.panels.documents")}
             count={selDocIds.size}
             collapsed={false}
             onToggleCollapsed={() => {}}
@@ -1618,7 +1654,7 @@ function CoderReportCreationPage({
           >
             <ul className="code-list">
               {documents.length === 0 ? (
-                <li className="code-list-empty">No documents.</li>
+                <li className="code-list-empty">{t("reportsUsers.empty.noDocuments")}</li>
               ) : documents.map((doc) => (
                 <li key={doc.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && toggleSet(selDocIds, setSelDocIds, doc.id)}>
                   <input
@@ -1636,7 +1672,7 @@ function CoderReportCreationPage({
           </SelectionPanel>
 
           <SelectionPanel
-            title="Codes"
+            title={t("reportsUsers.panels.codes")}
             count={selCodeIds.size}
             collapsed={false}
             onToggleCollapsed={() => {}}
@@ -1649,7 +1685,7 @@ function CoderReportCreationPage({
           >
             <ul className="code-list">
               {codes.length === 0 ? (
-                <li className="code-list-empty">No codes.</li>
+                <li className="code-list-empty">{t("reportsUsers.empty.noCodes")}</li>
               ) : codes.map((code) => (
                 <li key={code.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && toggleSet(selCodeIds, setSelCodeIds, code.id)}>
                   <input
@@ -1674,20 +1710,20 @@ function CoderReportCreationPage({
         <div className="modal-overlay" onClick={() => setShowCaseAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>Filter Cases by Attributes</h2>
-              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>Close</button>
+              <h2 style={{ margin: 0 }}>{t("reportsUsers.filters.title")}</h2>
+              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsUsers.close")}</button>
             </div>
             {!isFrozen && !loadingFilters && caseAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllCaseAttributes}>All</button>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={clearCaseAttributeSelections}>Clear</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllCaseAttributes}>{t("reportsUsers.actions.all")}</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={clearCaseAttributeSelections}>{t("reportsUsers.actions.clear")}</button>
               </div>
             )}
             <ul className="code-list">
               {loadingFilters ? (
-                <li className="code-list-empty">Loading...</li>
+                <li className="code-list-empty">{t("reportsUsers.empty.loading")}</li>
               ) : caseAttributeItems.length === 0 ? (
-                <li className="code-list-empty">No case attributes.</li>
+                <li className="code-list-empty">{t("reportsUsers.empty.noCaseAttributes")}</li>
               ) : caseAttributeItems.map((item) => (
                 <li
                   key={item.id}
@@ -1707,7 +1743,7 @@ function CoderReportCreationPage({
                     onClick={(e) => e.stopPropagation()}
                   />
                   <span className="code-label">{item.name}</span>
-                  <span className="users-filter-count">{item.dataType === "datetime" ? "Date/time" : item.dataType}</span>
+                  <span className="users-filter-count">{formatAttributeTypeLabel(item.dataType, t)}</span>
                 </li>
               ))}
             </ul>
@@ -1726,6 +1762,8 @@ function CoderReportCreationPage({
 }
 
 export function ReportsUsersView() {
+  const { t } = useI18n();
+  const reportColumns = getReportColumns(t);
   const { activeProject, pb, canCurrentUser, deleteCoderReport } = useStore();
   const canCreateReports = canCurrentUser("createReports") && canCurrentUser("editReportConfiguration");
   const canDeleteReports = canCurrentUser("deleteReports");
@@ -1781,7 +1819,7 @@ export function ReportsUsersView() {
       setRows(mappedRows);
       return mappedRows;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load coder reports.");
+      setError(e instanceof Error ? e.message : t("reportsUsers.errors.loadReports"));
       return [];
     } finally {
       setLoading(false);
@@ -1803,8 +1841,8 @@ export function ReportsUsersView() {
   }, []);
 
   const sorted = [...rows].sort((a, b) => {
-    const aValue = sortCol === "kind" ? REPORT_LABELS[a.snapshot.kind] : String(a[sortCol]);
-    const bValue = sortCol === "kind" ? REPORT_LABELS[b.snapshot.kind] : String(b[sortCol]);
+    const aValue = sortCol === "kind" ? reportLabel(t, a.snapshot.kind) : String(a[sortCol]);
+    const bValue = sortCol === "kind" ? reportLabel(t, b.snapshot.kind) : String(b[sortCol]);
     const cmp = aValue.localeCompare(bValue, undefined, { sensitivity: "base" });
     return sortDir === "asc" ? cmp : -cmp;
   });
@@ -1825,7 +1863,7 @@ export function ReportsUsersView() {
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete report.");
+      setError(e instanceof Error ? e.message : t("reportsCodes.errors.deleteReport"));
     } finally {
       setDeleteLoading(false);
     }
@@ -1865,12 +1903,12 @@ export function ReportsUsersView() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>User Reports</h1>
+          <h1>{t("reportsUsers.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show user reports help"
-            title="Show Help"
+            aria-label={t("reportsUsers.openHelp")}
+            title={t("reportsUsers.openHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -1880,9 +1918,9 @@ export function ReportsUsersView() {
           className="btn btn--primary"
           onClick={() => setShowNewModal(true)}
           disabled={!canCreateReports}
-          title={!canCreateReports ? "You do not have permission to create user reports" : undefined}
+          title={!canCreateReports ? t("reportsUsers.newReportDenied") : undefined}
         >
-          + New Report
+          {t("reportsUsers.newReport")}
         </button>
       </header>
 
@@ -1894,7 +1932,7 @@ export function ReportsUsersView() {
             <table className="users-table">
               <thead>
                 <tr>
-                  {REPORT_COLS.map((col) => (
+                  {reportColumns.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
@@ -1908,8 +1946,8 @@ export function ReportsUsersView() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={4} className="users-td-msg">Loading...</td></tr>}
-                {!loading && sorted.length === 0 && <tr><td colSpan={4} className="users-td-msg">No reports yet.</td></tr>}
+                {loading && <tr><td colSpan={4} className="users-td-msg">{t("reportsUsers.loading")}</td></tr>}
+                {!loading && sorted.length === 0 && <tr><td colSpan={4} className="users-td-msg">{t("reportsUsers.noReports")}</td></tr>}
                 {!loading && sorted.map((row) => (
                   <tr
                     key={row.id}
@@ -1921,7 +1959,7 @@ export function ReportsUsersView() {
                     }}
                   >
                     <td className="users-td users-td--name">{row.name}</td>
-                    <td className="users-td users-td--muted">{REPORT_LABELS[row.snapshot.kind]}</td>
+                    <td className="users-td users-td--muted">{reportLabel(t, row.snapshot.kind)}</td>
                     <td className="users-td users-td--muted">{row.createdByName}</td>
                     <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
                   </tr>
@@ -1935,19 +1973,19 @@ export function ReportsUsersView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>User Reports Help</h2>
+            <h2>{t("reportsUsers.help.title")}</h2>
             <p className="users-guide-copy">
-              Create or open a user report, compare coding by user, review report sections, and delete a report when permitted.
+              {t("reportsUsers.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use user reports to compare how different collaborators are coding across the project. Open a report or create a new one, then inspect the comparative output.
+              {t("reportsUsers.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Report creation and deletion depend on your role. Reports summarize existing project activity rather than changing it.
+              {t("reportsUsers.help.line3")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("reportsUsers.close")}
               </button>
             </div>
           </div>
@@ -1956,11 +1994,11 @@ export function ReportsUsersView() {
 
       {contextMenu && (
         <div ref={contextMenuRef} className="context-menu" style={contextMenuStyle}>
-          <button className="context-menu-item" onClick={() => { setOpenSavedRow(contextMenu.row); setContextMenu(null); }}>Open Report</button>
+          <button className="context-menu-item" onClick={() => { setOpenSavedRow(contextMenu.row); setContextMenu(null); }}>{t("reportsUsers.openReport")}</button>
           {canDeleteReports ? (
-            <button className="context-menu-item context-menu-item--danger" onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}>Delete Report</button>
+            <button className="context-menu-item context-menu-item--danger" onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}>{t("reportsUsers.deleteReport")}</button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete reports">Delete Report</div>
+            <div className="context-menu-item context-menu-item--disabled" title={t("reportsUsers.deleteDenied")}>{t("reportsUsers.deleteReport")}</div>
           )}
         </div>
       )}
@@ -1968,12 +2006,12 @@ export function ReportsUsersView() {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Report</h2>
-            <p>Delete "{confirmDelete.name}"?</p>
+            <h2>{t("reportsUsers.deleteTitle")}</h2>
+            <p>{t("reportsUsers.deleteBody", { name: confirmDelete.name })}</p>
             <div className="modal-actions">
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsUsers.cancel")}</button>
               <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? "Deleting..." : "Delete Report"}
+                {deleteLoading ? t("reportsUsers.deleting") : t("reportsUsers.deleteReport")}
               </button>
             </div>
           </div>

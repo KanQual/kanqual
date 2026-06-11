@@ -3,6 +3,7 @@ import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { AIAssistedCodingAnnotateView } from "./AIAssist_Code_Annotate_View";
 import { HelpIcon } from "../components/AppIcons";
+import { useI18n } from "../i18n/provider";
 
 interface DocCodeRow {
   id: string;
@@ -62,14 +63,8 @@ function fmtCoverage(pct: number): string {
   return `${pct.toFixed(1)}%`;
 }
 
-const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "cases", label: "Cases", width: "17%" },
-  { key: "annotationsCount", label: "Annotations", width: "12%" },
-  { key: "codesCount", label: "Codes", width: "11%" },
-  { key: "coverage", label: "Code Coverage", width: "17%" },
-];
-
 function CodeDocumentsLanding() {
+  const { t } = useI18n();
   const { activeProject, pb, documents, setActiveDocument, canCurrentUser, kickDocumentLock } = useStore();
   const canKickDocumentLock = canCurrentUser("bypassReadOnlyProtections");
 
@@ -85,6 +80,12 @@ function CodeDocumentsLanding() {
   const [helpOpen, setHelpOpen] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
+  const cols: { key: SortCol; label: string; width: string }[] = [
+    { key: "cases", label: t("aiAssist.code.table.cases"), width: "17%" },
+    { key: "annotationsCount", label: t("aiAssist.code.table.annotations"), width: "12%" },
+    { key: "codesCount", label: t("aiAssist.code.table.codes"), width: "11%" },
+    { key: "coverage", label: t("aiAssist.code.table.codeCoverage"), width: "17%" },
+  ];
 
   const currentUserId = pb.authStore.record?.id ?? "";
 
@@ -141,11 +142,11 @@ function CodeDocumentsLanding() {
         }),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load.");
+      setError(e instanceof Error ? e.message : t("aiAssist.code.errors.failedToLoad"));
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb, documents]);
+  }, [activeProject, pb, documents, t]);
 
   const loadLocks = useCallback(async () => {
     if (!pb || documents.length === 0) {
@@ -178,9 +179,9 @@ function CodeDocumentsLanding() {
           next[record.document] = {
             id: record.id,
             documentId: record.document,
-            documentName: String(record.expand?.document?.name ?? "Document"),
+            documentName: String(record.expand?.document?.name ?? t("aiAssist.code.labels.document")),
             userId: String(record.user ?? ""),
-            userName: String(record.user_name ?? "Another user"),
+            userName: String(record.user_name ?? t("aiAssist.code.labels.anotherUser")),
             expiresAtMs,
           };
         }
@@ -188,9 +189,9 @@ function CodeDocumentsLanding() {
 
       setLockMap(next);
     } catch (e) {
-      setError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load document locks."));
+      setError((prev) => prev ?? (e instanceof Error ? e.message : t("aiAssist.code.errors.failedToLoadDocumentLocks")));
     }
-  }, [pb, documents]);
+  }, [pb, documents, t]);
 
   useEffect(() => {
     void load();
@@ -272,7 +273,7 @@ function CodeDocumentsLanding() {
       setKickTarget(null);
       await loadLocks();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove the user from Code Text.");
+      setError(e instanceof Error ? e.message : t("aiAssist.code.errors.failedToKickUser"));
       setKickTarget(null);
     } finally {
       setKickBusy(false);
@@ -283,13 +284,13 @@ function CodeDocumentsLanding() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>AI Assisted Coding</h1>
+          <h1>{t("aiAssist.code.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("aiAssist.code.openHelp")}
+            aria-label={t("aiAssist.code.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -314,9 +315,9 @@ function CodeDocumentsLanding() {
                     className={`users-th${sortCol === "name" ? " users-th--sorted" : ""}`}
                     onClick={() => handleSort("name")}
                   >
-                    Name<span className="users-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
+                    {t("aiAssist.code.table.name")}<span className="users-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
                   </th>
-                  {COLS.map((col) => (
+                  {cols.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
@@ -329,17 +330,17 @@ function CodeDocumentsLanding() {
                       </span>
                     </th>
                   ))}
-                  <th style={{ width: "14%" }} className="users-th">Lock</th>
+                  <th style={{ width: "14%" }} className="users-th">{t("aiAssist.code.table.lock")}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={6} className="users-td-msg">Loading...</td></tr>
+                  <tr><td colSpan={6} className="users-td-msg">{t("aiAssist.code.statuses.loading")}</td></tr>
                 )}
                 {!loading && sorted.length === 0 && (
                   <tr>
                     <td colSpan={6} className="users-td-msg">
-                      No documents yet. Add documents from the Documents page first.
+                      {t("aiAssist.code.empty.noDocumentsYet")}
                     </td>
                   </tr>
                 )}
@@ -347,15 +348,15 @@ function CodeDocumentsLanding() {
                   const lock = lockMap[row.id];
                   const isLockedByOther = !!lock && lock.userId !== currentUserId;
                   const lockLabel = !lock
-                    ? "Available"
+                    ? t("aiAssist.code.lock.available")
                     : isLockedByOther
-                      ? "Locked"
-                      : "Locked by you";
+                      ? t("aiAssist.code.lock.locked")
+                      : t("aiAssist.code.lock.lockedByYou");
                   const lockTitle = !lock
-                    ? "No one is currently annotating this document."
+                    ? t("aiAssist.code.lock.noOneAnnotating")
                     : isLockedByOther
-                      ? `${lock.userName} is currently annotating this document.`
-                      : "You are currently holding this document lock.";
+                      ? t("aiAssist.code.lock.userAnnotating", { user: lock.userName })
+                      : t("aiAssist.code.lock.youHolding");
 
                   return (
                     <tr
@@ -398,7 +399,7 @@ function CodeDocumentsLanding() {
                           </span>
                           {lock && (
                             <span className="code-doc-lock-owner">
-                              {isLockedByOther ? lock.userName : "You"}
+                              {isLockedByOther ? lock.userName : t("aiAssist.code.labels.you")}
                             </span>
                           )}
                         </span>
@@ -414,19 +415,19 @@ function CodeDocumentsLanding() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>AI Assisted Coding Help</h2>
+            <h2>{t("aiAssist.code.help.title")}</h2>
             <p className="users-guide-copy">
-              Review the document list, open a document in the AI-assisted coding workspace, inspect lock state, right-click a locked document, and kick a user from a lock if permitted.
+              {t("aiAssist.code.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Start here when you want AI-assisted coding rather than manual code-text coding. Choose a document and move into the dedicated AI Assist Coding View for that source.
+              {t("aiAssist.code.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Locked documents are being used in another coding workspace. Lock ownership and kick actions are permission-sensitive.
+              {t("aiAssist.code.help.line3")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -445,7 +446,7 @@ function CodeDocumentsLanding() {
             if (!canKick) {
               return (
                 <div className="context-menu-item context-menu-item--disabled">
-                  No actions available
+                  {t("aiAssist.code.context.noActionsAvailable")}
                 </div>
               );
             }
@@ -457,7 +458,7 @@ function CodeDocumentsLanding() {
                   setContextMenu(null);
                 }}
               >
-                Kick User From Code Text
+                {t("aiAssist.code.actions.kickUserFromCodeText")}
               </button>
             );
           })()}
@@ -467,20 +468,20 @@ function CodeDocumentsLanding() {
       {kickTarget && (
         <div className="modal-overlay" onClick={() => !kickBusy && setKickTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Kick User From Document</h2>
+            <h2>{t("aiAssist.code.modals.kickUser.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Remove <strong>{kickTarget.userName}</strong> from annotating{" "}
+              {t("aiAssist.code.modals.kickUser.bodyPrefix")} <strong>{kickTarget.userName}</strong> {t("aiAssist.code.modals.kickUser.bodyMiddle")}{" "}
               <strong>{kickTarget.documentName}</strong>?
             </p>
             <p className="modal-warning-text">
-              This will immediately close their Code Text session for this document. They can reopen it later if the lock is available again.
+              {t("aiAssist.code.modals.kickUser.warning")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button className="btn" onClick={() => setKickTarget(null)} disabled={kickBusy}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="btn btn--danger" onClick={handleKickLock} disabled={kickBusy}>
-                {kickBusy ? "Removing..." : "Kick User"}
+                {kickBusy ? t("aiAssist.code.statuses.removing") : t("aiAssist.code.actions.kickUser")}
               </button>
             </div>
           </div>
@@ -491,6 +492,7 @@ function CodeDocumentsLanding() {
 }
 
 export function AIAssistedCodingView() {
+  const { t } = useI18n();
   const { activeDocument, setActiveDocument, canCurrentUser, activeProject, projectAiAssistSettings } = useStore();
   const canUseAiCodingTools = canCurrentUser("useAiCodingTools");
   const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
@@ -499,10 +501,10 @@ export function AIAssistedCodingView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>AI Assisted Coding</h1>
+          <h1>{t("aiAssist.code.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>You do not have permission to use AI Assist coding tools for this project.</p>
+          <p>{t("aiAssist.code.empty.noPermission")}</p>
         </div>
       </div>
     );
@@ -512,10 +514,10 @@ export function AIAssistedCodingView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>AI Assisted Coding</h1>
+          <h1>{t("aiAssist.code.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>Enable AI Assist in Project Settings before using AI coding tools.</p>
+          <p>{t("aiAssist.code.empty.enableInProjectSettings")}</p>
         </div>
       </div>
     );

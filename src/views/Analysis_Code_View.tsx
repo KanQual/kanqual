@@ -3,6 +3,7 @@ import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { AnnotateView } from "./Analysis_Code_Annotate_View";
 import { HelpIcon } from "../components/AppIcons";
+import { useI18n } from "../i18n/provider";
 
 interface DocCodeRow {
   id: string;
@@ -62,6 +63,11 @@ function fmtCoverage(pct: number): string {
   return `${pct.toFixed(1)}%`;
 }
 
+function getSortIcon(active: boolean, dir: SortDir): string {
+  if (!active) return " \u2195";
+  return dir === "asc" ? " \u2191" : " \u2193";
+}
+
 const COLS: { key: SortCol; label: string; width: string }[] = [
   { key: "cases", label: "Cases", width: "17%" },
   { key: "annotationsCount", label: "Annotations", width: "12%" },
@@ -70,8 +76,15 @@ const COLS: { key: SortCol; label: string; width: string }[] = [
 ];
 
 function CodeDocumentsLanding() {
+  const { t } = useI18n();
   const { activeProject, pb, documents, setActiveDocument, canCurrentUser, kickDocumentLock } = useStore();
   const canKickDocumentLock = canCurrentUser("bypassReadOnlyProtections");
+  const localizedCols = [
+    { ...COLS[0], label: t("analysisCode.table.cases") },
+    { ...COLS[1], label: t("analysisCode.table.annotations") },
+    { ...COLS[2], label: t("analysisCode.table.codes") },
+    { ...COLS[3], label: t("analysisCode.table.codeCoverage") },
+  ];
 
   const [rows, setRows] = useState<DocCodeRow[]>([]);
   const [lockMap, setLockMap] = useState<Record<string, DocumentLockSummary>>({});
@@ -141,11 +154,11 @@ function CodeDocumentsLanding() {
         }),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load.");
+      setError(e instanceof Error ? e.message : t("analysisCode.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb, documents]);
+  }, [activeProject, documents, pb, t]);
 
   const loadLocks = useCallback(async () => {
     if (!pb || documents.length === 0) {
@@ -178,9 +191,9 @@ function CodeDocumentsLanding() {
           next[record.document] = {
             id: record.id,
             documentId: record.document,
-            documentName: String(record.expand?.document?.name ?? "Document"),
+            documentName: String(record.expand?.document?.name ?? t("analysisCode.fallbacks.document")),
             userId: String(record.user ?? ""),
-            userName: String(record.user_name ?? "Another user"),
+            userName: String(record.user_name ?? t("analysisCode.fallbacks.anotherUser")),
             expiresAtMs,
           };
         }
@@ -188,9 +201,9 @@ function CodeDocumentsLanding() {
 
       setLockMap(next);
     } catch (e) {
-      setError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load document locks."));
+      setError((prev) => prev ?? (e instanceof Error ? e.message : t("analysisCode.errors.loadLocksFailed")));
     }
-  }, [pb, documents]);
+  }, [documents, pb, t]);
 
   useEffect(() => {
     void load();
@@ -216,7 +229,7 @@ function CodeDocumentsLanding() {
       clearInterval(intervalId);
       unsubLocks.then((fn) => fn()).catch(() => {});
     };
-  }, [pb, documents, loadLocks]);
+  }, [documents, loadLocks, pb]);
 
   useEffect(() => {
     function onPointerDown(e: MouseEvent) {
@@ -224,9 +237,11 @@ function CodeDocumentsLanding() {
         setContextMenu(null);
       }
     }
+
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") setContextMenu(null);
     }
+
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -250,29 +265,33 @@ function CodeDocumentsLanding() {
   }, [rows, sortCol, sortDir]);
 
   function handleSort(col: SortCol) {
-    if (col === sortCol) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortCol(col);
-      setSortDir("asc");
+    if (col === sortCol) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
     }
+
+    setSortCol(col);
+    setSortDir("asc");
   }
 
   function handleRowClick(row: DocCodeRow) {
     const lock = lockMap[row.id];
     if (lock && lock.userId !== currentUserId) return;
+
     const doc = documents.find((d) => d.id === row.id);
     if (doc) setActiveDocument(doc);
   }
 
   async function handleKickLock() {
     if (!kickTarget) return;
+
     setKickBusy(true);
     try {
       await kickDocumentLock(kickTarget);
       setKickTarget(null);
       await loadLocks();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove the user from Code Text.");
+      setError(e instanceof Error ? e.message : t("analysisCode.errors.removeUserFailed"));
       setKickTarget(null);
     } finally {
       setKickBusy(false);
@@ -283,13 +302,13 @@ function CodeDocumentsLanding() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Code</h1>
+          <h1>{t("analysisCode.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("analysisCode.showHelp")}
+            aria-label={t("analysisCode.showHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -299,138 +318,138 @@ function CodeDocumentsLanding() {
       {error && <p className="users-error">{error}</p>}
 
       <div className="users-content">
-      <div
-        className="users-table-wrap"
-        style={{
-          maxHeight:
-            34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
-        }}
-      >
-        <table className="users-table">
-          <thead>
-            <tr>
-              <th
-                style={{ width: "20%" }}
-                className={`users-th${sortCol === "name" ? " users-th--sorted" : ""}`}
-                onClick={() => handleSort("name")}
-              >
-                Name
-                <span className="users-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
-              </th>
-              {COLS.map((col) => (
-                <th
-                  key={col.key}
-                  style={{ width: col.width }}
-                  className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
-                  onClick={() => handleSort(col.key)}
-                >
-                  {col.label}
-                  <span className="users-sort-icon">
-                    {sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
-                  </span>
-                </th>
-              ))}
-              <th style={{ width: "14%" }} className="users-th">Lock</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={6} className="users-td-msg">Loading...</td></tr>
-            )}
-            {!loading && sorted.length === 0 && (
+        <div
+          className="users-table-wrap"
+          style={{
+            maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
+          }}
+        >
+          <table className="users-table">
+            <thead>
               <tr>
-                <td colSpan={6} className="users-td-msg">
-                  No documents yet. Add documents from the Documents page first.
-                </td>
-              </tr>
-            )}
-            {!loading && sorted.map((row) => {
-              const lock = lockMap[row.id];
-              const isLockedByOther = !!lock && lock.userId !== currentUserId;
-              const lockLabel = !lock
-                ? "Available"
-                : isLockedByOther
-                  ? "Locked"
-                  : "Locked by you";
-              const lockTitle = !lock
-                ? "No one is currently annotating this document."
-                : isLockedByOther
-                  ? `${lock.userName} is currently annotating this document.`
-                  : "You are currently holding this document lock.";
-
-              return (
-                <tr
-                  key={row.id}
-                  className={`users-row${isLockedByOther ? " users-row--disabled" : ""}`}
-                  onClick={() => handleRowClick(row)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setContextMenu({ x: e.clientX, y: e.clientY, row });
-                  }}
-                  title={lockTitle}
+                <th
+                  style={{ width: "20%" }}
+                  className={`users-th${sortCol === "name" ? " users-th--sorted" : ""}`}
+                  onClick={() => handleSort("name")}
                 >
-                  <td className="users-td users-td--name">{row.name}</td>
-                  <td className="users-td users-td--muted cases-td-docs">
-                    {row.cases.length > 0
-                      ? row.cases.map((c, i) => (
-                          <span key={i} className="cases-doc-name">{c}</span>
-                        ))
-                      : <span className="cases-no-docs">-</span>}
-                  </td>
-                  <td className="users-td users-td--muted">{row.annotationsCount}</td>
-                  <td className="users-td users-td--muted">{row.codesCount}</td>
-                  <td className="users-td users-td--muted">
-                    <span className="code-coverage-cell">
-                      <span className="code-coverage-label">{fmtCoverage(row.coverage)}</span>
-                      <span className="code-coverage-track">
-                        <span
-                          className="code-coverage-fill"
-                          style={{ width: `${Math.min(row.coverage, 100)}%` }}
-                        />
-                      </span>
-                    </span>
-                  </td>
-                  <td className="users-td users-td--muted">
-                    <span className="code-doc-lock-cell">
-                      <span
-                        className={`code-doc-lock-pill${lock ? " code-doc-lock-pill--locked" : " code-doc-lock-pill--available"}`}
-                      >
-                        {lockLabel}
-                      </span>
-                      {lock && (
-                        <span className="code-doc-lock-owner">
-                          {isLockedByOther ? lock.userName : "You"}
-                        </span>
-                      )}
-                    </span>
+                  {t("analysisCode.table.name")}
+                  <span className="users-sort-icon">{getSortIcon(sortCol === "name", sortDir)}</span>
+                </th>
+                {localizedCols.map((col) => (
+                  <th
+                    key={col.key}
+                    style={{ width: col.width }}
+                    className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
+                    onClick={() => handleSort(col.key)}
+                  >
+                    {col.label}
+                    <span className="users-sort-icon">{getSortIcon(sortCol === col.key, sortDir)}</span>
+                  </th>
+                ))}
+                <th style={{ width: "14%" }} className="users-th">
+                  {t("analysisCode.table.lock")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <td colSpan={6} className="users-td-msg">
+                    {t("analysisCode.statuses.loading")}
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              )}
+              {!loading && sorted.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="users-td-msg">
+                    {t("analysisCode.empty.noDocuments")}
+                  </td>
+                </tr>
+              )}
+              {!loading &&
+                sorted.map((row) => {
+                  const lock = lockMap[row.id];
+                  const isLockedByOther = !!lock && lock.userId !== currentUserId;
+                  const lockLabel = !lock
+                    ? t("analysisCode.locks.available")
+                    : isLockedByOther
+                      ? t("analysisCode.locks.locked")
+                      : t("analysisCode.locks.lockedByYou");
+                  const lockTitle = !lock
+                    ? t("analysisCode.locks.availableDetail")
+                    : isLockedByOther
+                      ? t("analysisCode.locks.lockedByOtherDetail", { userName: lock.userName })
+                      : t("analysisCode.locks.lockedByYouDetail");
+
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`users-row${isLockedByOther ? " users-row--disabled" : ""}`}
+                      onClick={() => handleRowClick(row)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu({ x: e.clientX, y: e.clientY, row });
+                      }}
+                      title={lockTitle}
+                    >
+                      <td className="users-td users-td--name">{row.name}</td>
+                      <td className="users-td users-td--muted cases-td-docs">
+                        {row.cases.length > 0 ? (
+                          row.cases.map((caseName, i) => (
+                            <span key={i} className="cases-doc-name">
+                              {caseName}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="cases-no-docs">-</span>
+                        )}
+                      </td>
+                      <td className="users-td users-td--muted">{row.annotationsCount}</td>
+                      <td className="users-td users-td--muted">{row.codesCount}</td>
+                      <td className="users-td users-td--muted">
+                        <span className="code-coverage-cell">
+                          <span className="code-coverage-label">{fmtCoverage(row.coverage)}</span>
+                          <span className="code-coverage-track">
+                            <span
+                              className="code-coverage-fill"
+                              style={{ width: `${Math.min(row.coverage, 100)}%` }}
+                            />
+                          </span>
+                        </span>
+                      </td>
+                      <td className="users-td users-td--muted">
+                        <span className="code-doc-lock-cell">
+                          <span
+                            className={`code-doc-lock-pill${lock ? " code-doc-lock-pill--locked" : " code-doc-lock-pill--available"}`}
+                          >
+                            {lockLabel}
+                          </span>
+                          {lock && (
+                            <span className="code-doc-lock-owner">
+                              {isLockedByOther ? lock.userName : t("analysisCode.locks.you")}
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Code Help</h2>
-            <p className="users-guide-copy">
-              Choose a document to code, inspect document-level coding statistics, open the annotation workspace, right-click a locked row, and kick a user from a locked document if permitted.
-            </p>
-            <p className="users-guide-copy">
-              Start here when you want to code documents manually. Select a document from the list to open the coding workspace for that document.
-            </p>
-            <p className="users-guide-copy">
-              Locked documents are being edited in another coding workspace. Lock resolution depends on permissions, and only one collaborator should edit the same document at a time.
-            </p>
-            <p className="users-guide-copy">
-              Project role permissions for coding and document-lock behavior affect what you can do on this page.
-            </p>
+            <h2>{t("analysisCode.help.title")}</h2>
+            <p className="users-guide-copy">{t("analysisCode.help.line1")}</p>
+            <p className="users-guide-copy">{t("analysisCode.help.line2")}</p>
+            <p className="users-guide-copy">{t("analysisCode.help.line3")}</p>
+            <p className="users-guide-copy">{t("analysisCode.help.line4")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -438,21 +457,18 @@ function CodeDocumentsLanding() {
       )}
 
       {contextMenu && (
-        <div
-          ref={contextMenuRef}
-          className="context-menu"
-          style={contextMenuStyle}
-        >
+        <div ref={contextMenuRef} className="context-menu" style={contextMenuStyle}>
           {(() => {
             const lock = lockMap[contextMenu.row.id];
             const canKick = !!lock && lock.userId !== currentUserId && canKickDocumentLock;
             if (!canKick) {
               return (
                 <div className="context-menu-item context-menu-item--disabled">
-                  No actions available
+                  {t("analysisCode.actions.noActionsAvailable")}
                 </div>
               );
             }
+
             return (
               <button
                 className="context-menu-item context-menu-item--danger"
@@ -461,7 +477,7 @@ function CodeDocumentsLanding() {
                   setContextMenu(null);
                 }}
               >
-                Kick User From Code Text
+                {t("analysisCode.actions.kickUserFromCodeText")}
               </button>
             );
           })()}
@@ -471,20 +487,18 @@ function CodeDocumentsLanding() {
       {kickTarget && (
         <div className="modal-overlay" onClick={() => !kickBusy && setKickTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Kick User From Document</h2>
+            <h2>{t("analysisCode.kickModal.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Remove <strong>{kickTarget.userName}</strong> from annotating{" "}
-              <strong>{kickTarget.documentName}</strong>?
+              {t("analysisCode.kickModal.bodyPrefix")} <strong>{kickTarget.userName}</strong>{" "}
+              {t("analysisCode.kickModal.bodyMiddle")} <strong>{kickTarget.documentName}</strong>?
             </p>
-            <p className="modal-warning-text">
-              This will immediately close their Code Text session for this document. They can reopen it later if the lock is available again.
-            </p>
+            <p className="modal-warning-text">{t("analysisCode.kickModal.warning")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button className="btn" onClick={() => setKickTarget(null)} disabled={kickBusy}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="btn btn--danger" onClick={handleKickLock} disabled={kickBusy}>
-                {kickBusy ? "Removing..." : "Kick User"}
+                {kickBusy ? t("analysisCode.statuses.removing") : t("analysisCode.actions.kickUser")}
               </button>
             </div>
           </div>

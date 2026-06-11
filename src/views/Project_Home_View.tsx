@@ -10,6 +10,8 @@ import { loadProjectBackupManifest } from "../lib/projectBackups";
 import type { Project, View } from "../types";
 import { hasHtmlText } from "../lib/htmlText";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 interface RemoteStats {
   memberCount: number;
@@ -77,7 +79,7 @@ function RichTextEditor({
 function fmtDate(iso: string): string {
   if (!iso) return "-";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -96,19 +98,38 @@ function StatCard({
   onClick,
 }: {
   title: string;
-  count: number | null;
+  count: string | number | null;
   stats: { label: string; value: string | number }[];
   onClick: () => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="home-stat-card" onClick={onClick}>
       <div className="home-stat-title">{title}</div>
       <div className="home-stat-count">{count ?? "—"}</div>
       <div className="home-stat-details">
         {stats.map((s) => (
-          <div key={s.label} className="home-stat-row">
-            <span className="home-stat-label">{s.label}</span>
-            <span className="home-stat-value">{s.value}</span>
+          <div
+            key={
+              s.label === "Avg per doc"
+                ? t("projectHome.stats.avgPerDoc")
+                : s.label === "Annotations"
+                  ? t("projectHome.stats.annotations")
+                  : s.label
+            }
+            className="home-stat-row"
+          >
+            <span className="home-stat-label">
+              {s.label === "Avg per doc"
+                ? t("projectHome.stats.avgPerDoc")
+                : s.label === "Annotations"
+                  ? t("projectHome.stats.annotations")
+                  : s.label}
+            </span>
+            <span className="home-stat-value">
+              {typeof s.value === "number" ? formatCurrentNumber(s.value) : s.value}
+            </span>
           </div>
         ))}
       </div>
@@ -117,6 +138,7 @@ function StatCard({
 }
 
 export function HomeView() {
+  const { t } = useI18n();
   const { pb, activeProject, documents, codes, memos, logEntries, setView, userRole, canCurrentUser, deleteProject, updateProject, closeProject } = useStore();
   const [remote, setRemote] = useState<RemoteStats | null>(null);
   const [backupCardIssue, setBackupCardIssue] = useState<ProjectBackupBannerIssue | null>(null);
@@ -273,7 +295,7 @@ export function HomeView() {
       setConfirmDelete(null);
       setMenuOpen(false);
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : "Failed to delete project.");
+      setDeleteError(e instanceof Error ? e.message : t("projectHome.deleteFailed"));
     } finally {
       setDeleteBusy(false);
     }
@@ -298,7 +320,7 @@ export function HomeView() {
       });
       setShowEditProject(false);
     } catch (e) {
-      setEditProjectError(e instanceof Error ? e.message : "Failed to update project.");
+      setEditProjectError(e instanceof Error ? e.message : t("projectHome.editModal.updateFailed"));
     } finally {
       setEditProjectSaving(false);
     }
@@ -314,13 +336,13 @@ export function HomeView() {
     <div className="view home-view">
       <header className="view-header">
         <div className="home-title-wrap">
-          <h1>Home</h1>
+          <h1>{t("projectHome.title")}</h1>
           <button
             type="button"
             className="home-help-icon-btn"
             onClick={() => setHelpOpen(true)}
             title="Show Help"
-            aria-label="Show Help"
+            aria-label={t("projectHome.openHelp")}
           >
             <HelpIcon className="home-help-icon" />
           </button>
@@ -332,10 +354,10 @@ export function HomeView() {
             type="button"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            aria-label="Project actions"
+            aria-label={t("projectHome.actionsLabel")}
             onClick={() => setMenuOpen((open) => !open)}
           >
-            Actions
+            {t("projectHome.actions")}
           </button>
         )}
       </header>
@@ -352,7 +374,7 @@ export function HomeView() {
             type="button"
             onClick={openEditProjectModal}
           >
-            Edit Project
+            {t("projectHome.editProject")}
           </button>
           <button
             className="context-menu-item"
@@ -363,7 +385,7 @@ export function HomeView() {
               setView("projects");
             }}
           >
-            Change Active Project
+            {t("projectHome.changeActiveProject")}
           </button>
           <button
             className="context-menu-item context-menu-item--danger"
@@ -374,23 +396,23 @@ export function HomeView() {
               setConfirmDelete(activeProject);
             }}
           >
-            Delete Project
+            {t("projectHome.deleteProject")}
           </button>
         </div>
       )}
 
       <div className="home-dashboard">
         <div className="home-primary-column">
-          <section className="home-project-card" aria-label="Project title">
+          <section className="home-project-card" aria-label={t("projectHome.projectTitle")}>
             <div className="home-project-card-header">
-              <h2>Project Title</h2>
+              <h2>{t("projectHome.projectTitle")}</h2>
             </div>
-            <p className="home-project-title-value">{activeProject?.name ?? "Untitled Project"}</p>
+            <p className="home-project-title-value">{activeProject?.name ?? t("projectHome.untitledProject")}</p>
           </section>
 
-          <section className="home-project-card" aria-label="Project description">
+          <section className="home-project-card" aria-label={t("projectHome.projectDescription")}>
             <div className="home-project-card-header">
-              <h2>Project Description</h2>
+              <h2>{t("projectHome.projectDescription")}</h2>
             </div>
             {activeProject?.description && hasHtmlText(activeProject.description) ? (
               <div
@@ -405,21 +427,21 @@ export function HomeView() {
           </section>
 
           {showRestrictedInfo && activeProject && (
-            <section className="home-project-card" aria-label="Project information">
+            <section className="home-project-card" aria-label={t("projectHome.projectInformation")}>
               <div className="home-project-card-header">
-                <h2>Project Information</h2>
+                <h2>{t("projectHome.projectInformation")}</h2>
               </div>
               <div className="home-restricted-list">
                 <div className="home-restricted-item">
-                  <span className="home-restricted-label">Your Access</span>
+                  <span className="home-restricted-label">{t("projectHome.yourAccess")}</span>
                   <span className="home-restricted-value">{userRole}</span>
                 </div>
                 <div className="home-restricted-item">
-                  <span className="home-restricted-label">Created</span>
+                  <span className="home-restricted-label">{t("projectHome.created")}</span>
                   <span className="home-restricted-value">{fmtDate(activeProject.createdAt)}</span>
                 </div>
                 <div className="home-restricted-item">
-                  <span className="home-restricted-label">Last Updated</span>
+                  <span className="home-restricted-label">{t("projectHome.lastUpdated")}</span>
                   <span className="home-restricted-value">{fmtDate(lastProjectUpdateAt)}</span>
                 </div>
               </div>
@@ -432,19 +454,19 @@ export function HomeView() {
               className={`home-project-card home-project-card--interactive home-project-card--backup${
                 backupCardIssue ? " home-project-card--backup-error" : ""
               }`}
-              aria-label="Open project backups"
+              aria-label={t("projectHome.openBackups")}
               onClick={openBackupSettings}
             >
               <div className="home-project-card-header">
-                <h2>Backups</h2>
+                <h2>{t("projectHome.backups")}</h2>
               </div>
               <div className="home-restricted-list">
                 <div className="home-restricted-item">
-                  <span className="home-restricted-label">Most Recent</span>
+                  <span className="home-restricted-label">{t("projectHome.mostRecent")}</span>
                   <span className="home-restricted-value">{fmtDate(latestBackupAt)}</span>
                 </div>
                 <div className="home-restricted-item">
-                  <span className="home-restricted-label">Total Backups</span>
+                  <span className="home-restricted-label">{t("projectHome.totalBackups")}</span>
                   <span className="home-restricted-value">{backupCount}</span>
                 </div>
               </div>
@@ -466,62 +488,62 @@ export function HomeView() {
 
         <div className="home-stats-grid">
         <StatCard
-          title="Users"
-          count={remote?.memberCount ?? null}
+          title={t("projectHome.stats.users")}
+          count={remote?.memberCount != null ? formatCurrentNumber(remote.memberCount) : null}
           stats={[
-            { label: "Owners",  value: remote?.membersByRole["owner"]  ?? 0 },
-            { label: "Editors", value: remote?.membersByRole["editor"] ?? 0 },
-            { label: "Coders",  value: remote?.membersByRole["coder"]  ?? 0 },
-            { label: "Viewers", value: remote?.membersByRole["viewer"] ?? 0 },
+            { label: t("projectHome.stats.owners"), value: remote?.membersByRole["owner"] ?? 0 },
+            { label: t("projectHome.stats.editors"), value: remote?.membersByRole["editor"] ?? 0 },
+            { label: t("projectHome.stats.coders"), value: remote?.membersByRole["coder"] ?? 0 },
+            { label: t("projectHome.stats.viewers"), value: remote?.membersByRole["viewer"] ?? 0 },
           ]}
           onClick={nav("users")}
         />
 
         <StatCard
-          title="Cases"
-          count={remote?.caseCount ?? null}
+          title={t("projectHome.stats.cases")}
+          count={remote?.caseCount != null ? formatCurrentNumber(remote.caseCount) : null}
           stats={[
-            { label: "Documents", value: docCount },
+            { label: t("projectHome.stats.documents"), value: docCount },
           ]}
           onClick={nav("cases")}
         />
 
         <StatCard
-          title="Documents"
-          count={docCount}
+          title={t("projectHome.stats.documents")}
+          count={formatCurrentNumber(docCount)}
           stats={[
-            { label: "Total words",   value: totalWords.toLocaleString() },
-            { label: "Avg per doc",   value: avgWords.toLocaleString() },
+            { label: t("projectHome.stats.totalWords"), value: formatCurrentNumber(totalWords) },
+            { label: t("projectHome.stats.avgPerDoc"), value: formatCurrentNumber(avgWords) },
             { label: "Annotations",   value: remote?.annotationCount ?? "—" },
           ]}
           onClick={nav("documents")}
         />
 
         <StatCard
-          title="Codebook"
-          count={codeCount}
+          title={t("projectHome.stats.codebook")}
+          count={formatCurrentNumber(codeCount)}
           stats={[
-            { label: "Top-level", value: topLevel },
-            { label: "Sub-codes", value: subCodes },
+            { label: t("projectHome.stats.topLevel"), value: topLevel },
+            { label: t("projectHome.stats.subcodes"), value: subCodes },
           ]}
           onClick={nav("codebook")}
         />
 
         <StatCard
-          title="Memos"
-          count={memoCount}
+          title={t("projectHome.stats.memos")}
+          count={formatCurrentNumber(memoCount)}
           stats={[
-            { label: "Linked",   value: linkedMemos },
-            { label: "Unlinked", value: memoCount - linkedMemos },
+            { label: t("projectHome.stats.linked"), value: linkedMemos },
+            { label: t("projectHome.stats.unlinked"), value: memoCount - linkedMemos },
           ]}
           onClick={nav("memos")}
         />
 
         <StatCard
-          title="Reports"
-          count={remote?.reportCount ?? null}
+          title={t("projectHome.stats.reports")}
+          count={remote?.reportCount != null ? formatCurrentNumber(remote.reportCount) : null}
           stats={[
-            { label: "Codes applied", value: remote?.annotationCount ?? "—" },
+            { label: t("projectHome.stats.codesApplied"), value: remote?.annotationCount ?? "—" },
           ]}
           onClick={nav("code-reports")}
         />
@@ -531,15 +553,15 @@ export function HomeView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Project Home Help</h2>
+            <h2>{t("projectHome.help.title")}</h2>
             <p className="users-guide-copy">
-              Review project summary cards, jump to Users, Cases, Documents, Codebook, Memos, and Reports, and open the project menu to edit details, switch projects, or delete the project if permitted.
+              {t("projectHome.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use the Home page as the overview and navigation hub for the active project. Read the project summary, then use the cards or menu to move into the relevant work area.
+              {t("projectHome.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Project-home actions depend on your role. Administrative and destructive options are limited by project permissions.
+              {t("projectHome.help.line3")}
             </p>
             <div className="form-actions">
               <button
@@ -547,7 +569,7 @@ export function HomeView() {
                 className="btn"
                 onClick={() => setHelpOpen(false)}
               >
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -557,9 +579,9 @@ export function HomeView() {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => !deleteBusy && setConfirmDelete(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Project</h2>
+            <h2>{t("projectHome.deleteModal.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete <strong>{confirmDelete.name}</strong>?
+              {t("projectHome.deleteModal.body", { projectName: confirmDelete.name })}
             </p>
             <p className="modal-warning-text">
               All documents, codes, annotations, memos, reports, and project settings will be permanently lost and cannot be recovered.
@@ -567,10 +589,10 @@ export function HomeView() {
             {deleteError && <p className="auth-error" style={{ marginTop: 14 }}>{deleteError}</p>}
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteBusy}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="btn btn--danger" onClick={() => void handleDeleteProject()} disabled={deleteBusy}>
-                {deleteBusy ? "Deleting..." : "Delete Project"}
+                {deleteBusy ? t("projectSettings.shell.deleting") : t("projectHome.deleteProject")}
               </button>
             </div>
           </div>
@@ -580,33 +602,33 @@ export function HomeView() {
       {showEditProject && activeProject && (
         <div className="modal-overlay" onClick={() => !editProjectSaving && setShowEditProject(false)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-            <h2>Edit Project</h2>
+            <h2>{t("projectHome.editModal.title")}</h2>
             <div className="form">
               <label className="form-label">
-                Project Title
+                {t("projectHome.editModal.projectTitle")}
                 <input
                   className="form-input"
                   value={editProjectName}
                   onChange={(e) => setEditProjectName(e.target.value)}
-                  placeholder="Project title"
+                  placeholder={t("projectHome.editModal.projectTitlePlaceholder")}
                   autoFocus
                 />
               </label>
               <div className="form-label">
-                Project Description
+                {t("projectHome.editModal.projectDescription")}
                 <RichTextEditor initialHtml={activeProject.description} editorRef={descriptionRef} />
               </div>
               {editProjectError && <p className="auth-error">{editProjectError}</p>}
               <div className="form-actions" style={{ marginTop: 20 }}>
                 <button className="btn" onClick={() => setShowEditProject(false)} disabled={editProjectSaving}>
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   className="btn btn--primary"
                   onClick={() => void handleSaveProjectDetails()}
                   disabled={editProjectSaving || !editProjectName.trim()}
                 >
-                  {editProjectSaving ? "Saving..." : "Save Changes"}
+                  {editProjectSaving ? t("projectSettings.shell.saving") : t("projectHome.editModal.saveChanges")}
                 </button>
               </div>
             </div>

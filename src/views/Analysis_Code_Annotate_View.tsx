@@ -11,13 +11,15 @@ import {
 } from "../components/ProcessedTranscriptView";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string): string {
   if (!iso) return "";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -160,6 +162,7 @@ function ColorSuggestions({
 // ─── NewCodeModal ─────────────────────────────────────────────────────────────
 
 function NewCodeModal({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const { activeProject, codes, addCode } = useStore();
   const [label,    setLabel]    = useState("");
   const [desc,     setDesc]     = useState("");
@@ -190,9 +193,13 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
     } catch (e) {
       const fieldErrors = (e as { data?: { data?: Record<string, { message?: string }> } }).data?.data;
       if (fieldErrors && Object.keys(fieldErrors).length > 0) {
-        setError(Object.entries(fieldErrors).map(([f, v]) => `${f}: ${v?.message ?? "invalid"}`).join(" · "));
+        setError(
+          Object.entries(fieldErrors)
+            .map(([f, v]) => `${f}: ${v?.message ?? t("analysisCodeAnnotate.codebook.errors.invalidField")}`)
+            .join(" · "),
+        );
       } else {
-        setError(e instanceof Error ? (e as Error).message : "Failed to create code.");
+        setError(e instanceof Error ? (e as Error).message : t("analysisCodeAnnotate.codebook.errors.failedToCreateCode"));
       }
     } finally {
       setLoading(false);
@@ -202,44 +209,44 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New Code</h2>
+        <h2>{t("analysisCodeAnnotate.codebook.newCode.title")}</h2>
         <form className="form" onSubmit={handleSubmit}>
           <label className="form-label">
-            Code Name
+            {t("analysisCodeAnnotate.codebook.newCode.codeName")}
             <input
               className="form-input"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Resilience"
+              placeholder={t("analysisCodeAnnotate.codebook.newCode.codeNamePlaceholder")}
               required
               autoFocus
             />
           </label>
           <label className="form-label">
-            Description
+            {t("analysisCodeAnnotate.codebook.newCode.description")}
             <textarea
               className="form-input code-desc-textarea"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              placeholder="Optional description…"
+              placeholder={t("analysisCodeAnnotate.codebook.newCode.descriptionPlaceholder")}
               rows={3}
             />
           </label>
           <label className="form-label">
-            Parent Code
+            {t("analysisCodeAnnotate.codebook.newCode.parentCode")}
             <select
               className="form-input"
               value={parentId}
               onChange={(e) => setParentId(e.target.value)}
             >
-              <option value="">— Top-level (no parent) —</option>
+              <option value="">{t("analysisCodeAnnotate.codebook.newCode.topLevelOption")}</option>
               {codes.map((c) => (
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
           </label>
           <label className="form-label">
-            Color
+            {t("analysisCodeAnnotate.codebook.newCode.color")}
             <div className="code-color-row" style={{ marginTop: 6 }}>
               <input
                 type="color"
@@ -251,14 +258,16 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
             </div>
             <ColorSuggestions suggestions={colorSuggestions} selected={color} onSelect={setColor} />
             <p className="code-color-hint">
-              {parentId ? "Suggested shades of the parent code's color" : "Suggested colors distinct from existing codes"}
+              {parentId
+                ? t("analysisCodeAnnotate.codebook.newCode.parentColorHint")
+                : t("analysisCodeAnnotate.codebook.newCode.distinctColorHint")}
             </p>
           </label>
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
             <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
-              {loading ? "Creating…" : "Create Code"}
+              {loading ? t("analysisCodeAnnotate.codebook.newCode.creating") : t("analysisCodeAnnotate.codebook.newCode.create")}
             </button>
           </div>
         </form>
@@ -270,6 +279,7 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
 // ─── EditCodeModal ────────────────────────────────────────────────────────────
 
 function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
+  const { t } = useI18n();
   const { codes, updateCode } = useStore();
   const [label,   setLabel]   = useState(code.label);
   const [color,   setColor]   = useState(code.color || "#6366f1");
@@ -291,7 +301,7 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
       await updateCode(code.id, { label: label.trim(), color, description: desc });
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? (e as Error).message : "Failed to save.");
+      setError(e instanceof Error ? (e as Error).message : t("analysisCodeAnnotate.codebook.errors.failedToSaveCode"));
     } finally {
       setLoading(false);
     }
@@ -300,10 +310,10 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Edit Code</h2>
+        <h2>{t("analysisCodeAnnotate.codebook.editCode.title")}</h2>
         <form className="form" onSubmit={handleSubmit}>
           <label className="form-label">
-            Code Name
+            {t("analysisCodeAnnotate.codebook.newCode.codeName")}
             <input
               className="form-input"
               value={label}
@@ -313,17 +323,17 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
             />
           </label>
           <label className="form-label">
-            Description
+            {t("analysisCodeAnnotate.codebook.newCode.description")}
             <textarea
               className="form-input code-desc-textarea"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              placeholder="Optional description…"
+              placeholder={t("analysisCodeAnnotate.codebook.newCode.descriptionPlaceholder")}
               rows={3}
             />
           </label>
           <label className="form-label">
-            Color
+            {t("analysisCodeAnnotate.codebook.newCode.color")}
             <div className="code-color-row" style={{ marginTop: 6 }}>
               <input
                 type="color"
@@ -337,9 +347,9 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
           </label>
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
             <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
-              {loading ? "Saving…" : "Save Changes"}
+              {loading ? t("analysisCodeAnnotate.codebook.editCode.saving") : t("analysisCodeAnnotate.codebook.editCode.saveChanges")}
             </button>
           </div>
         </form>
@@ -411,6 +421,7 @@ function CodebookPanel({ pendingSelection, pendingSelectionRef, onClearSelection
   hiddenCodeIds: Set<string>;
   maxHeight: number;
 }) {
+  const { t } = useI18n();
   const { codes, annotations, canCurrentUser, deleteCode, addAnnotation, activeDocument } = useStore();
   const canCreateCodes = canCurrentUser("createCode");
   const canEditCodes = canCurrentUser("editCode");
@@ -515,23 +526,23 @@ function CodebookPanel({ pendingSelection, pendingSelectionRef, onClearSelection
   return (
     <div className="annotate-card" style={{ height: cardH, flexShrink: 0 }}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Codebook</span>
+        <span className="annotate-card-title">{t("analysisCodeAnnotate.codebook.title")}</span>
         {canCreateCodes && (
           <button className="btn btn--small btn--primary" onClick={() => setShowNewCode(true)}>
-            + Code
+            {t("analysisCodeAnnotate.codebook.actions.addCode")}
           </button>
         )}
       </div>
 
       {pendingSelection && (
         <div className="codebook-selection-hint">
-          Click a code to annotate
+          {t("analysisCodeAnnotate.codebook.selectionHint")}
         </div>
       )}
 
       <ul ref={listRef} className="code-list">
         {codes.length === 0 && (
-          <li className="code-list-empty">No codes yet.</li>
+          <li className="code-list-empty">{t("analysisCodeAnnotate.codebook.empty.noCodesYet")}</li>
         )}
         {visible.map(({ code, depth, hasChildren }) => (
           <li
@@ -550,7 +561,7 @@ function CodebookPanel({ pendingSelection, pendingSelectionRef, onClearSelection
                 type="button"
                 className="code-collapse-btn"
                 onClick={(e) => { e.stopPropagation(); toggleCollapse(code.id); }}
-                title={collapsed.has(code.id) ? "Expand" : "Collapse"}
+                title={collapsed.has(code.id) ? t("analysisCodeAnnotate.codebook.actions.expand") : t("analysisCodeAnnotate.codebook.actions.collapse")}
               >
                 {collapsed.has(code.id) ? "▶" : "▼"}
               </button>
@@ -573,14 +584,14 @@ function CodebookPanel({ pendingSelection, pendingSelectionRef, onClearSelection
           style={contextMenuStyle}
         >
           <button className="context-menu-item" onClick={() => setContextMenu(null)}>
-            Memo About Code
+            {t("analysisCodeAnnotate.codebook.actions.memoAboutCode")}
           </button>
           {canEditCodes && (
             <button
               className="context-menu-item"
               onClick={() => { setEditCode(contextMenu.code); setContextMenu(null); }}
             >
-              Edit Code
+              {t("analysisCodeAnnotate.codebook.actions.editCode")}
             </button>
           )}
           {canDeleteCodes && (
@@ -588,7 +599,7 @@ function CodebookPanel({ pendingSelection, pendingSelectionRef, onClearSelection
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDeleteCode(contextMenu.code); setContextMenu(null); }}
             >
-              Delete Code
+              {t("analysisCodeAnnotate.codebook.actions.deleteCode")}
             </button>
           )}
         </div>
@@ -598,17 +609,17 @@ function CodebookPanel({ pendingSelection, pendingSelectionRef, onClearSelection
       {confirmDeleteCode && (
         <div className="modal-overlay" onClick={() => !deletingCode && setConfirmDeleteCode(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Code</h2>
+            <h2>{t("analysisCodeAnnotate.codebook.deleteCode.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to delete <strong>{confirmDeleteCode.label}</strong>?
+              {t("analysisCodeAnnotate.codebook.deleteCode.bodyPrefix")} <strong>{confirmDeleteCode.label}</strong>?
             </p>
             <p className="modal-warning-text">
-              All annotations made with this code will be permanently deleted. This cannot be undone.
+              {t("analysisCodeAnnotate.codebook.deleteCode.warning")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDeleteCode(null)} disabled={deletingCode}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDeleteCode(null)} disabled={deletingCode}>{t("common.cancel")}</button>
               <button className="btn btn--danger" onClick={handleDeleteCode} disabled={deletingCode}>
-                {deletingCode ? "Deleting…" : "Delete Code"}
+                {deletingCode ? t("analysisCodeAnnotate.codebook.deleteCode.deleting") : t("analysisCodeAnnotate.codebook.actions.deleteCode")}
               </button>
             </div>
           </div>
@@ -639,6 +650,7 @@ function AnnotationDetailsPanel({
   hiddenUserIds: Set<string>;
   hiddenCodeIds: Set<string>;
 }) {
+  const { t } = useI18n();
   const {
     annotations: allAnnotations,
     codes,
@@ -726,13 +738,13 @@ function AnnotationDetailsPanel({
   return (
     <div className="annotate-card annotate-card--grow">
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Annotations ({annotations.length})</span>
+        <span className="annotate-card-title">{t("analysisCodeAnnotate.annotation.title", { count: annotations.length })}</span>
       </div>
 
       <ul className="annotation-list">
         {annotations.length === 0 && (
           <li className="annotation-list-empty">
-            Select text in the document and choose a code.
+            {t("analysisCodeAnnotate.annotation.empty")}
           </li>
         )}
         {annotations.map((a: Annotation) => {
@@ -813,7 +825,7 @@ function AnnotationDetailsPanel({
                 setContextMenu(null);
               }}
             >
-              {contextMenu.ann.note ? "Edit Note" : "Add Note"}
+              {contextMenu.ann.note ? t("analysisCodeAnnotate.annotation.actions.editNote") : t("analysisCodeAnnotate.annotation.actions.addNote")}
             </button>
           )}
           {canEditAnnotationNotes && contextMenu.ann.note && (
@@ -821,7 +833,7 @@ function AnnotationDetailsPanel({
               className="context-menu-item context-menu-item--danger"
               onClick={() => { updateAnnotationNote(contextMenu.ann.id, ""); setContextMenu(null); }}
             >
-              Delete Note
+              {t("analysisCodeAnnotate.annotation.actions.deleteNote")}
             </button>
           )}
           <button
@@ -829,14 +841,14 @@ function AnnotationDetailsPanel({
             onClick={() => handleMemoAboutAnnotation(contextMenu.ann)}
             disabled={!canCreateMemos}
           >
-            Memo About Annotation
+            {t("analysisCodeAnnotate.annotation.actions.memoAboutAnnotation")}
           </button>
           {canDeleteAnnotations && (
             <button
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDeleteAnn(contextMenu.ann); setContextMenu(null); }}
             >
-              Delete Annotation
+              {t("analysisCodeAnnotate.annotation.actions.deleteAnnotation")}
             </button>
           )}
         </div>
@@ -846,18 +858,18 @@ function AnnotationDetailsPanel({
       {confirmDeleteAnn && (
         <div className="modal-overlay" onClick={() => !deletingAnn && setConfirmDeleteAnn(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Annotation</h2>
+            <h2>{t("analysisCodeAnnotate.annotation.delete.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to delete this annotation?
+              {t("analysisCodeAnnotate.annotation.delete.body")}
             </p>
             <blockquote className="annotation-quote" style={{ margin: "0 0 16px" }}>
               "{confirmDeleteAnn.quote}"
             </blockquote>
-            <p className="modal-warning-text">This cannot be undone.</p>
+            <p className="modal-warning-text">{t("analysisCodeAnnotate.annotation.delete.warning")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>{t("common.cancel")}</button>
               <button className="btn btn--danger" onClick={handleDeleteAnn} disabled={deletingAnn}>
-                {deletingAnn ? "Deleting…" : "Delete Annotation"}
+                {deletingAnn ? t("analysisCodeAnnotate.annotation.delete.deleting") : t("analysisCodeAnnotate.annotation.actions.deleteAnnotation")}
               </button>
             </div>
           </div>
@@ -1309,11 +1321,12 @@ function DocumentViewer({
       ? parseProcessedTranscriptSegments(activeDocument.structuredContentJson)
       : [];
   const questionOutline = getProcessedTranscriptQuestionOutline(processedTranscriptSegments);
+  const { t } = useI18n();
 
   if (!activeProject) {
     return (
       <div className="annotate-card annotate-card--grow doc-viewer--empty">
-        <p>Open a project first.</p>
+        <p>{t("analysisCodeAnnotate.document.openProjectFirst")}</p>
       </div>
     );
   }
@@ -1324,12 +1337,12 @@ function DocumentViewer({
         {canImportDocuments ? (
           <>
             <button className="btn btn--primary btn--large" onClick={handleImport}>
-              Import Document
+              {t("analysisCodeAnnotate.document.importDocument")}
             </button>
-            <p className="doc-import-hint">Supports .txt, .md, .csv</p>
+            <p className="doc-import-hint">{t("analysisCodeAnnotate.document.supportsHint")}</p>
           </>
         ) : (
-          <p className="doc-import-hint">No document imported yet.</p>
+          <p className="doc-import-hint">{t("analysisCodeAnnotate.document.noDocumentImportedYet")}</p>
         )}
       </div>
     );
@@ -1345,7 +1358,7 @@ function DocumentViewer({
               <button
                 type="button"
                 className="processed-transcript-outline-btn"
-                aria-label="Show transcript outline"
+                aria-label={t("analysisCodeAnnotate.document.showTranscriptOutline")}
                 aria-expanded={outlineOpen}
                 onClick={() => setOutlineOpen((open) => !open)}
               >
@@ -1377,8 +1390,8 @@ function DocumentViewer({
             type="button"
             className="doc-toolbar-filter-btn"
             onClick={onOpenFilters}
-            aria-label="Filter visible annotations"
-            title="Filter visible annotations"
+            aria-label={t("analysisCodeAnnotate.filters.title")}
+            title={t("analysisCodeAnnotate.filters.title")}
           >
             <FilterIcon className="filter-icon-svg" />
           </button>
@@ -1434,7 +1447,7 @@ function DocumentViewer({
                 setContextMenu(null);
               }}
             >
-              {contextMenu.ann.note ? "Edit Note" : "Add Note"}
+              {contextMenu.ann.note ? t("analysisCodeAnnotate.annotation.actions.editNote") : t("analysisCodeAnnotate.annotation.actions.addNote")}
             </button>
           )}
           {canEditAnnotationNotes && contextMenu.ann.note && (
@@ -1445,7 +1458,7 @@ function DocumentViewer({
                 setContextMenu(null);
               }}
             >
-              Delete Note
+              {t("analysisCodeAnnotate.annotation.actions.deleteNote")}
             </button>
           )}
           <button
@@ -1453,7 +1466,7 @@ function DocumentViewer({
             onClick={() => handleMemoAboutAnnotation(contextMenu.ann)}
             disabled={!canCreateMemos}
           >
-            Memo About Annotation
+            {t("analysisCodeAnnotate.annotation.actions.memoAboutAnnotation")}
           </button>
           {canDeleteAnnotations && (
             <button
@@ -1463,7 +1476,7 @@ function DocumentViewer({
                 setContextMenu(null);
               }}
             >
-              Delete Annotation
+              {t("analysisCodeAnnotate.annotation.actions.deleteAnnotation")}
             </button>
           )}
         </div>
@@ -1472,12 +1485,16 @@ function DocumentViewer({
       {editingNoteAnn && (
         <div className="modal-overlay" onClick={() => !savingNote && setEditingNoteAnn(null)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>{editingNoteAnn.note ? "Edit Annotation Note" : "Add Annotation Note"}</h2>
+            <h2>
+              {editingNoteAnn.note
+                ? t("analysisCodeAnnotate.annotation.note.editTitle")
+                : t("analysisCodeAnnotate.annotation.note.addTitle")}
+            </h2>
             <textarea
               className="form-input"
               value={noteDraft}
               onChange={(event) => setNoteDraft(event.target.value)}
-              placeholder="Add a note..."
+              placeholder={t("analysisCodeAnnotate.annotation.note.placeholder")}
               autoFocus
               rows={5}
               style={{ width: "100%", resize: "vertical" }}
@@ -1487,9 +1504,9 @@ function DocumentViewer({
               }}
             />
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setEditingNoteAnn(null)} disabled={savingNote}>Cancel</button>
+              <button className="btn" onClick={() => setEditingNoteAnn(null)} disabled={savingNote}>{t("common.cancel")}</button>
               <button className="btn btn--primary" onClick={() => void handleSaveNote()} disabled={savingNote}>
-                {savingNote ? "Saving..." : "Save"}
+                {savingNote ? t("analysisCodeAnnotate.annotation.note.saving") : t("common.save")}
               </button>
             </div>
           </div>
@@ -1499,18 +1516,18 @@ function DocumentViewer({
       {confirmDeleteAnn && (
         <div className="modal-overlay" onClick={() => !deletingAnn && setConfirmDeleteAnn(null)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete Annotation</h2>
+            <h2>{t("analysisCodeAnnotate.annotation.delete.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to delete this annotation?
+              {t("analysisCodeAnnotate.annotation.delete.body")}
             </p>
             <blockquote className="annotation-quote" style={{ margin: "0 0 16px" }}>
               "{confirmDeleteAnn.quote}"
             </blockquote>
-            <p className="modal-warning-text">This cannot be undone.</p>
+            <p className="modal-warning-text">{t("analysisCodeAnnotate.annotation.delete.warning")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>{t("common.cancel")}</button>
               <button className="btn btn--danger" onClick={() => void handleDeleteAnn()} disabled={deletingAnn}>
-                {deletingAnn ? "Deleting..." : "Delete Annotation"}
+                {deletingAnn ? t("analysisCodeAnnotate.annotation.delete.deleting") : t("analysisCodeAnnotate.annotation.actions.deleteAnnotation")}
               </button>
             </div>
           </div>
@@ -1582,6 +1599,7 @@ function AnnotationVisibilityModal({
   onClearCodes: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const { annotations, codes } = useStore();
 
   const users = useMemo(() => {
@@ -1620,22 +1638,22 @@ function AnnotationVisibilityModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal--wide annotation-filter-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Filter Visible Annotations</h2>
+        <h2>{t("analysisCodeAnnotate.filters.title")}</h2>
         <p style={{ marginBottom: 16, lineHeight: 1.5 }}>
-          Choose which annotations remain visible in the document viewer. By default, all annotations are shown.
+          {t("analysisCodeAnnotate.filters.body")}
         </p>
 
         <div className="annotation-filter-modal-grid">
           <div className="annotation-filter-group">
             <div className="annotation-filter-title-row">
-              <div className="annotation-filter-title">Codes</div>
+              <div className="annotation-filter-title">{t("analysisCodeAnnotate.filters.codes")}</div>
               <div className="annotation-filter-actions">
-                <button type="button" className="btn btn--small" onClick={onSelectAllCodes}>Select All</button>
-                <button type="button" className="btn btn--small" onClick={onClearCodes}>Clear</button>
+                <button type="button" className="btn btn--small" onClick={onSelectAllCodes}>{t("analysisCodeAnnotate.filters.selectAll")}</button>
+                <button type="button" className="btn btn--small" onClick={onClearCodes}>{t("analysisCodeAnnotate.filters.clear")}</button>
               </div>
             </div>
             {visibleCodes.length === 0 ? (
-              <p className="annotation-filter-empty">No coded annotations yet.</p>
+              <p className="annotation-filter-empty">{t("analysisCodeAnnotate.filters.noCodedAnnotationsYet")}</p>
             ) : (
               <ul className="annotation-filter-list">
                 {visibleCodes.map(({ code, depth }) => (
@@ -1664,14 +1682,14 @@ function AnnotationVisibilityModal({
 
           <div className="annotation-filter-group">
             <div className="annotation-filter-title-row">
-              <div className="annotation-filter-title">Users</div>
+              <div className="annotation-filter-title">{t("analysisCodeAnnotate.filters.users")}</div>
               <div className="annotation-filter-actions">
-                <button type="button" className="btn btn--small" onClick={onSelectAllUsers}>Select All</button>
-                <button type="button" className="btn btn--small" onClick={onClearUsers}>Clear</button>
+                <button type="button" className="btn btn--small" onClick={onSelectAllUsers}>{t("analysisCodeAnnotate.filters.selectAll")}</button>
+                <button type="button" className="btn btn--small" onClick={onClearUsers}>{t("analysisCodeAnnotate.filters.clear")}</button>
               </div>
             </div>
             {users.length === 0 ? (
-              <p className="annotation-filter-empty">No annotators yet.</p>
+              <p className="annotation-filter-empty">{t("analysisCodeAnnotate.filters.noAnnotatorsYet")}</p>
             ) : (
               <ul className="annotation-filter-list">
                 {users.map(({ id, name, count }) => (
@@ -1694,7 +1712,7 @@ function AnnotationVisibilityModal({
         </div>
 
         <div className="form-actions" style={{ marginTop: 20 }}>
-          <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
+          <button type="button" className="btn btn--primary" onClick={onClose}>{t("analysisCodeAnnotate.filters.done")}</button>
         </div>
       </div>
     </div>
@@ -1704,6 +1722,7 @@ function AnnotationVisibilityModal({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
+  const { t } = useI18n();
   const {
     pendingAnnId,
     setPendingAnnId,
@@ -1780,18 +1799,18 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
     <div className="view annotate-view">
       {onBack && (
         <div className="workspace-back-row workspace-back-row--annotate">
-          <button className="btn" onClick={() => { clearDocumentLockConflict(); onBack(); }}>Back to Documents</button>
+          <button className="btn" onClick={() => { clearDocumentLockConflict(); onBack(); }}>{t("analysisCodeAnnotate.actions.backToDocuments")}</button>
         </div>
       )}
       <div className="annotate-back-bar">
         <div className="users-title-wrap">
-          <h1 className="annotate-title">Code Text</h1>
+          <h1 className="annotate-title">{t("analysisCodeAnnotate.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("analysisCodeAnnotate.showHelp")}
+            aria-label={t("analysisCodeAnnotate.showHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -1860,22 +1879,22 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Coding View Help</h2>
+            <h2>{t("analysisCodeAnnotate.help.title")}</h2>
             <p className="users-guide-copy">
-              Select text, apply a code, create, edit, or delete codes, edit or delete annotations, filter visible annotations by code or user, review annotation details, and navigate within the document.
+              {t("analysisCodeAnnotate.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use this page to code text directly. Highlight a span in the document, choose a code from the codebook panel, and review the resulting annotation in the details area.
+              {t("analysisCodeAnnotate.help.line2")}
             </p>
             <p className="users-guide-copy">
-              This page uses document locking so collaborators do not code the same document simultaneously. Filters only affect visibility, not the underlying annotation data.
+              {t("analysisCodeAnnotate.help.line3")}
             </p>
             <p className="users-guide-copy">
-              Project permissions for coding and code management, document-lock behavior, and the current filter state affect how this page behaves.
+              {t("analysisCodeAnnotate.help.line4")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1885,23 +1904,23 @@ export function AnnotateView({ onBack }: { onBack?: () => void } = {}) {
       {documentLockConflict && (
         <div className="modal-overlay" onClick={() => {}}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{documentLockConflict.reason === "kicked" ? "Removed From Document" : "Document Locked"}</h2>
+            <h2>{documentLockConflict.reason === "kicked" ? t("analysisCodeAnnotate.lockConflict.removedTitle") : t("analysisCodeAnnotate.lockConflict.lockedTitle")}</h2>
             {documentLockConflict.reason === "kicked" ? (
               <>
                 <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  <strong>{documentLockConflict.userName || "A project owner"}</strong> removed you from this document.
+                  <strong>{documentLockConflict.userName || t("analysisCodeAnnotate.lockConflict.projectOwner")}</strong> {t("analysisCodeAnnotate.lockConflict.removedBody")}
                 </p>
                 <p className="modal-warning-text">
-                  Kanqual is using a strict document lock in Code Text, so you will need to return to the document list before you can annotate again.
+                  {t("analysisCodeAnnotate.lockConflict.removedWarning")}
                 </p>
               </>
             ) : (
               <>
                 <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  <strong>{documentLockConflict.userName || "Another user"}</strong> is currently annotating this document.
+                  <strong>{documentLockConflict.userName || t("analysisCodeAnnotate.lockConflict.anotherUser")}</strong> {t("analysisCodeAnnotate.lockConflict.lockedBody")}
                 </p>
                 <p className="modal-warning-text">
-                  Kanqual is using a strict document lock in Code Text, so only one user can annotate a document at a time.
+                  {t("analysisCodeAnnotate.lockConflict.lockedWarning")}
                 </p>
               </>
             )}

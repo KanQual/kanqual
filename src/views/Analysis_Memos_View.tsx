@@ -13,6 +13,8 @@ import {
 } from "docx";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
 
@@ -124,7 +126,7 @@ type SortDir = "asc" | "desc";
 function fmtDate(iso: string): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -206,6 +208,7 @@ export function MemoEditorView({
   onSaved: () => void;
   onBack: () => void;
 }) {
+  const { t } = useI18n();
   const {
     pb,
     activeProject,
@@ -375,7 +378,7 @@ export function MemoEditorView({
       }
       onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save memo.");
+      setError(e instanceof Error ? e.message : t("analysisMemos.errors.saveFailed"));
       setSaving(false);
     }
   }
@@ -387,7 +390,7 @@ export function MemoEditorView({
     <div className="view doc-detail-view">
       <div className="workspace-back-row">
         <button className="btn" onClick={onBack}>
-          {backLabel ?? "Back to Memos"}
+          {backLabel ?? t("analysisMemos.actions.backToMemos")}
         </button>
       </div>
       <div className="case-detail-topbar">
@@ -398,7 +401,7 @@ export function MemoEditorView({
             onClick={handleSave}
             disabled={saving || !title.trim()}
           >
-            {saving ? "Saving…" : isEdit ? "Save Changes" : "Save Memo"}
+            {saving ? t("analysisMemos.statuses.saving") : isEdit ? t("analysisMemos.actions.saveChanges") : t("analysisMemos.actions.saveMemo")}
           </button>
         </div>
       </div>
@@ -409,13 +412,13 @@ export function MemoEditorView({
         <div className="doc-detail-left">
           {canAssociateMemoObjects ? (
             <>
-          <p className="memo-assoc-label">Associate Memo with…</p>
+          <p className="memo-assoc-label">{t("analysisMemos.editor.associateWith")}</p>
 
           {/* Cases */}
           <div className="case-card">
             <div className="memo-card-header" onClick={() => toggleSection("cases")}>
               <h3 className="case-card-title" style={{ margin: 0 }}>
-                Cases{selCaseIds.size > 0 ? ` (${selCaseIds.size})` : ""}
+                {t("analysisMemos.table.cases")}{selCaseIds.size > 0 ? ` (${selCaseIds.size})` : ""}
               </h3>
               <span className="codebook-collapse-icon">{collapsed.has("cases") ? "▶" : "▼"}</span>
             </div>
@@ -423,15 +426,15 @@ export function MemoEditorView({
               <>
                 {!dataLoading && caseItems.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseIds(new Set(caseItems.map(c => c.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseIds(new Set())}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseIds(new Set(caseItems.map(c => c.id)))}>{t("analysisMemos.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseIds(new Set())}>{t("analysisMemos.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="memo-sel-list">
                 {dataLoading
-                  ? <li className="memo-sel-empty">Loading…</li>
+                  ? <li className="memo-sel-empty">{t("analysisMemos.statuses.loading")}</li>
                   : caseItems.length === 0
-                    ? <li className="memo-sel-empty">No cases.</li>
+                    ? <li className="memo-sel-empty">{t("analysisMemos.empty.noCases")}</li>
                     : caseItems.map((item) => (
                         <li
                           key={item.id}
@@ -458,7 +461,7 @@ export function MemoEditorView({
           <div className="case-card">
             <div className="memo-card-header" onClick={() => toggleSection("case_attr_defs")}>
               <h3 className="case-card-title" style={{ margin: 0 }}>
-                Case Attributes{selCaseAttrDefIds.size > 0 ? ` (${selCaseAttrDefIds.size})` : ""}
+                {t("analysisMemos.editor.caseAttributes")}{selCaseAttrDefIds.size > 0 ? ` (${selCaseAttrDefIds.size})` : ""}
               </h3>
               <span className="codebook-collapse-icon">{collapsed.has("case_attr_defs") ? "▶" : "▼"}</span>
             </div>
@@ -466,15 +469,15 @@ export function MemoEditorView({
               <>
                 {!dataLoading && caseAttrDefs.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseAttrDefIds(new Set(caseAttrDefs.map(d => d.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseAttrDefIds(new Set())}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseAttrDefIds(new Set(caseAttrDefs.map(d => d.id)))}>{t("analysisMemos.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseAttrDefIds(new Set())}>{t("analysisMemos.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="memo-sel-list">
                   {dataLoading
-                    ? <li className="memo-sel-empty">Loading…</li>
+                    ? <li className="memo-sel-empty">{t("analysisMemos.statuses.loading")}</li>
                     : caseAttrDefs.length === 0
-                      ? <li className="memo-sel-empty">No case attributes.</li>
+                      ? <li className="memo-sel-empty">{t("analysisMemos.empty.noCaseAttributes")}</li>
                       : caseAttrDefs.map((def) => (
                           <li
                             key={def.id}
@@ -501,7 +504,7 @@ export function MemoEditorView({
           <div className="case-card">
             <div className="memo-card-header" onClick={() => toggleSection("documents")}>
               <h3 className="case-card-title" style={{ margin: 0 }}>
-                Documents{selDocIds.size > 0 ? ` (${selDocIds.size})` : ""}
+                {t("analysisMemos.table.documents")}{selDocIds.size > 0 ? ` (${selDocIds.size})` : ""}
               </h3>
               <span className="codebook-collapse-icon">{collapsed.has("documents") ? "▶" : "▼"}</span>
             </div>
@@ -509,13 +512,13 @@ export function MemoEditorView({
               <>
                 {storeDocs.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocIds(new Set(storeDocs.map(d => d.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocIds(new Set())}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocIds(new Set(storeDocs.map(d => d.id)))}>{t("analysisMemos.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocIds(new Set())}>{t("analysisMemos.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="memo-sel-list">
                   {storeDocs.length === 0
-                    ? <li className="memo-sel-empty">No documents.</li>
+                    ? <li className="memo-sel-empty">{t("analysisMemos.empty.noDocuments")}</li>
                     : storeDocs.map((doc) => (
                         <li
                           key={doc.id}
@@ -542,7 +545,7 @@ export function MemoEditorView({
           <div className="case-card">
             <div className="memo-card-header" onClick={() => toggleSection("doc_attr_defs")}>
               <h3 className="case-card-title" style={{ margin: 0 }}>
-                Document Attributes{selDocAttrDefIds.size > 0 ? ` (${selDocAttrDefIds.size})` : ""}
+                {t("analysisMemos.editor.documentAttributes")}{selDocAttrDefIds.size > 0 ? ` (${selDocAttrDefIds.size})` : ""}
               </h3>
               <span className="codebook-collapse-icon">{collapsed.has("doc_attr_defs") ? "▶" : "▼"}</span>
             </div>
@@ -550,15 +553,15 @@ export function MemoEditorView({
               <>
                 {!dataLoading && docAttrDefs.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocAttrDefIds(new Set(docAttrDefs.map(d => d.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocAttrDefIds(new Set())}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocAttrDefIds(new Set(docAttrDefs.map(d => d.id)))}>{t("analysisMemos.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocAttrDefIds(new Set())}>{t("analysisMemos.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="memo-sel-list">
                   {dataLoading
-                    ? <li className="memo-sel-empty">Loading…</li>
+                    ? <li className="memo-sel-empty">{t("analysisMemos.statuses.loading")}</li>
                     : docAttrDefs.length === 0
-                      ? <li className="memo-sel-empty">No document attributes.</li>
+                      ? <li className="memo-sel-empty">{t("analysisMemos.empty.noDocumentAttributes")}</li>
                       : docAttrDefs.map((def) => (
                           <li
                             key={def.id}
@@ -585,7 +588,7 @@ export function MemoEditorView({
           <div className="case-card">
             <div className="memo-card-header" onClick={() => toggleSection("codes")}>
               <h3 className="case-card-title" style={{ margin: 0 }}>
-                Codes{selCodeIds.size > 0 ? ` (${selCodeIds.size})` : ""}
+                {t("analysisMemos.table.codes")}{selCodeIds.size > 0 ? ` (${selCodeIds.size})` : ""}
               </h3>
               <span className="codebook-collapse-icon">{collapsed.has("codes") ? "▶" : "▼"}</span>
             </div>
@@ -593,13 +596,13 @@ export function MemoEditorView({
               <>
                 {codeTree.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCodeIds(new Set(codeTree.map(({ code }) => code.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCodeIds(new Set())}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCodeIds(new Set(codeTree.map(({ code }) => code.id)))}>{t("analysisMemos.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCodeIds(new Set())}>{t("analysisMemos.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="memo-sel-list">
                   {codeTree.length === 0
-                    ? <li className="memo-sel-empty">No codes.</li>
+                    ? <li className="memo-sel-empty">{t("analysisMemos.empty.noCodes")}</li>
                     : codeTree.map(({ code, depth }) => (
                         <li
                           key={code.id}
@@ -631,7 +634,7 @@ export function MemoEditorView({
           <div className="case-card">
             <div className="memo-card-header" onClick={() => toggleSection("annotations")}>
               <h3 className="case-card-title" style={{ margin: 0 }}>
-                Annotations{selAnnIds.size > 0 ? ` (${selAnnIds.size})` : ""}
+                {t("analysisMemos.detail.annotations")}{selAnnIds.size > 0 ? ` (${selAnnIds.size})` : ""}
               </h3>
               <span className="codebook-collapse-icon">{collapsed.has("annotations") ? "▶" : "▼"}</span>
             </div>
@@ -639,13 +642,13 @@ export function MemoEditorView({
               <>
                 {annItems.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelAnnIds(new Set(annItems.map(a => a.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelAnnIds(new Set())}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelAnnIds(new Set(annItems.map(a => a.id)))}>{t("analysisMemos.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelAnnIds(new Set())}>{t("analysisMemos.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="memo-sel-list">
                   {annItems.length === 0
-                    ? <li className="memo-sel-empty">No annotations.</li>
+                    ? <li className="memo-sel-empty">{t("analysisMemos.empty.noAnnotations")}</li>
                     : annItems.map((ann) => (
                         <li
                           key={ann.id}
@@ -680,9 +683,9 @@ export function MemoEditorView({
             </>
           ) : (
             <div className="case-card">
-              <h3 className="case-card-title">Associations</h3>
+              <h3 className="case-card-title">{t("analysisMemos.editor.associations")}</h3>
               <p className="case-card-empty">
-                Your role can save memo contents, but only higher-access roles can change memo associations.
+                {t("analysisMemos.editor.associationsReadOnly")}
               </p>
             </div>
           )}
@@ -691,22 +694,22 @@ export function MemoEditorView({
         {/* ── Right: title + body editor ── */}
         <div className="doc-detail-right">
           <div className="case-card" style={{ maxWidth: "none" }}>
-            <h3 className="case-card-title">{isEdit ? "Edit Memo" : "New Memo"}</h3>
+            <h3 className="case-card-title">{isEdit ? t("analysisMemos.editor.editMemo") : t("analysisMemos.actions.newMemo")}</h3>
             <input
               className="form-input"
-              placeholder="Memo title…"
+              placeholder={t("analysisMemos.editor.memoTitlePlaceholder")}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
             />
           </div>
           <div className="case-card" style={{ maxWidth: "none" }}>
-            <h3 className="case-card-title">Memo Details</h3>
+            <h3 className="case-card-title">{t("analysisMemos.editor.memoDetails")}</h3>
             <dl className="user-detail-meta case-detail-meta">
-              <dt>Created By</dt>
+              <dt>{t("analysisMemos.table.createdBy")}</dt>
               <dd>{isEdit ? editRow?.createdByName : (currentUser?.name || currentUser?.email || "—")}</dd>
-              <dt>Created</dt>
-              <dd>{isEdit ? fmtDate(editRow?.createdAt ?? "") : "Not yet saved"}</dd>
+              <dt>{t("analysisMemos.table.created")}</dt>
+              <dd>{isEdit ? fmtDate(editRow?.createdAt ?? "") : t("analysisMemos.editor.notYetSaved")}</dd>
             </dl>
           </div>
           {(() => {
@@ -719,11 +722,11 @@ export function MemoEditorView({
               .map(({ code }) => ({ id: code.id, name: code.label, color: code.color }));
 
             const cards: { key: string; label: string; value: number; items: { id: string; name: string; color?: string }[]; expandable?: boolean }[] = [
-              { key: "cases",      label: "Cases",       value: includedCases.length,     items: includedCases },
-              { key: "case_attrs", label: "Case Attrs",  value: includedCaseAttrs.length,  items: includedCaseAttrs },
-              { key: "documents",  label: "Documents",   value: includedDocs.length,       items: includedDocs.map((d) => ({ id: d.id, name: d.name })) },
-              { key: "doc_attrs",  label: "Doc. Attrs",  value: includedDocAttrs.length,   items: includedDocAttrs },
-              { key: "codes",      label: "Codes",       value: includedCodes.length,      items: includedCodes },
+              { key: "cases",      label: t("analysisMemos.table.cases"),               value: includedCases.length,     items: includedCases },
+              { key: "case_attrs", label: t("analysisMemos.editor.caseAttributesShort"), value: includedCaseAttrs.length,  items: includedCaseAttrs },
+              { key: "documents",  label: t("analysisMemos.table.documents"),           value: includedDocs.length,       items: includedDocs.map((d) => ({ id: d.id, name: d.name })) },
+              { key: "doc_attrs",  label: t("analysisMemos.editor.documentAttributesShort"), value: includedDocAttrs.length,   items: includedDocAttrs },
+              { key: "codes",      label: t("analysisMemos.table.codes"),               value: includedCodes.length,      items: includedCodes },
             ];
 
             return (
@@ -783,13 +786,13 @@ export function MemoEditorView({
                   onClick={() => setAnnCardCollapsed((v) => !v)}
                 >
                   <h3 className="case-card-title" style={{ margin: 0 }}>
-                    Annotations{includedAnns.length > 0 ? ` (${includedAnns.length})` : ""}
+                    {t("analysisMemos.detail.annotations")}{includedAnns.length > 0 ? ` (${includedAnns.length})` : ""}
                   </h3>
                   <span className="codebook-collapse-icon">{annCardCollapsed ? "▶" : "▼"}</span>
                 </div>
                 {!annCardCollapsed && (
                   includedAnns.length === 0
-                    ? <p className="case-card-empty">No annotations associated.</p>
+                    ? <p className="case-card-empty">{t("analysisMemos.detail.noAnnotationsAssociated")}</p>
                     : <ul className="memo-sel-list" style={{ marginTop: 4 }}>
                         {includedAnns.map((ann) => (
                           <li key={ann.id} className="memo-sel-item" style={{ borderRight: `3px solid ${ann.codeColor}`, paddingRight: 11, cursor: "default" }}>
@@ -811,7 +814,7 @@ export function MemoEditorView({
             );
           })()}
           <div className="case-card doc-content-card">
-            <h3 className="case-card-title">Body</h3>
+            <h3 className="case-card-title">{t("analysisMemos.detail.body")}</h3>
             <RichTextEditor initialHtml={editRow?.body ?? ""} editorRef={editorRef} grow />
           </div>
         </div>
@@ -846,23 +849,24 @@ function ExportMemoModal({
   onExportDOCX: () => void;
   exportingFormat: string | null;
 }) {
+  const { t } = useI18n();
   const options = [
     {
       key: "html",
-      label: "HTML",
-      description: "Can be opened in a web browser and is closest to what you see in the app.",
+      label: t("analysisMemos.export.htmlLabel"),
+      description: t("analysisMemos.export.htmlDescription"),
       onClick: onExportHTML,
     },
     {
       key: "pdf",
-      label: "PDF",
-      description: "Uses a simpler layout and is the best for sharing.",
+      label: t("analysisMemos.export.pdfLabel"),
+      description: t("analysisMemos.export.pdfDescription"),
       onClick: onExportPDF,
     },
     {
       key: "docx",
-      label: "DOCX",
-      description: "Uses a simpler layout and is the best for further editing.",
+      label: t("analysisMemos.export.docxLabel"),
+      description: t("analysisMemos.export.docxDescription"),
       onClick: onExportDOCX,
     },
   ] as const;
@@ -878,7 +882,7 @@ function ExportMemoModal({
         onClick={(e) => e.stopPropagation()}
         style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}
       >
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>Export Memo</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("analysisMemos.export.title")}</h2>
         <div
           style={{
             display: "grid",
@@ -918,7 +922,7 @@ function ExportMemoModal({
           ))}
         </div>
         <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>Cancel</button>
+          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("common.cancel")}</button>
         </div>
       </div>
     </div>
@@ -936,6 +940,7 @@ function MemoDetail({
   onBack: () => void;
   onEdit: () => void;
 }) {
+  const { t } = useI18n();
   const { pb } = useStore();
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<string | null>(null);
@@ -951,17 +956,17 @@ function MemoDetail({
   }
 
   const summaryCards = [
-    { key: "cases",       label: "Cases",       count: row.caseIds.length,                 names: row.cases,                    expandable: true },
-    { key: "case_attrs",  label: "Case Attrs",   count: row.caseAttributeDefIds.length,     names: row.caseAttributeDefNames,    expandable: true },
-    { key: "documents",   label: "Documents",    count: row.documentIds.length,             names: row.documents,                expandable: true },
-    { key: "doc_attrs",   label: "Doc. Attrs",   count: row.documentAttributeDefIds.length, names: row.documentAttributeDefNames, expandable: true },
-    { key: "codes",       label: "Codes",        count: row.codeIds.length,                 names: row.codes,                    expandable: true },
+    { key: "cases",       label: t("analysisMemos.table.cases"), count: row.caseIds.length,                 names: row.cases,                    expandable: true },
+    { key: "case_attrs",  label: t("analysisMemos.editor.caseAttributesShort"), count: row.caseAttributeDefIds.length,     names: row.caseAttributeDefNames,    expandable: true },
+    { key: "documents",   label: t("analysisMemos.table.documents"), count: row.documentIds.length,             names: row.documents,                expandable: true },
+    { key: "doc_attrs",   label: t("analysisMemos.editor.documentAttributesShort"), count: row.documentAttributeDefIds.length, names: row.documentAttributeDefNames, expandable: true },
+    { key: "codes",       label: t("analysisMemos.table.codes"), count: row.codeIds.length,                 names: row.codes,                    expandable: true },
   ];
 
   async function handleExportHTML() {
     try {
       setExportingFormat("html");
-      const path = await save({ defaultPath: `${row.title || "Memo"}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
+      const path = await save({ defaultPath: `${row.title || t("analysisMemos.export.defaultFileStem")}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
       if (!path) return;
 
       // Fetch annotation details (quote, code name, document name)
@@ -1007,13 +1012,13 @@ function MemoDetail({
 </head>
 <body>
 <h1>${escHtml(row.title)}</h1>
-<p class="meta">Created by ${escHtml(row.createdByName)} &middot; ${escHtml(fmtDate(row.createdAt))}</p>
-${section("Cases", row.cases)}
-${section("Case Attributes", row.caseAttributeDefNames)}
-${section("Documents", row.documents)}
-${section("Document Attributes", row.documentAttributeDefNames)}
-${section("Codes", row.codes)}
-${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a) => `<li><span class="ann-quote">"${escHtml(a.quote)}"</span><br><span class="ann-meta">${escHtml(a.codeName)} &mdash; ${escHtml(a.docName)}</span></li>`).join("")}</ul></section>` : ""}
+<p class="meta">${escHtml(t("analysisMemos.export.createdBy", { name: row.createdByName }))} &middot; ${escHtml(t("analysisMemos.export.createdAt", { value: fmtDate(row.createdAt) }))}</p>
+${section(t("analysisMemos.table.cases"), row.cases)}
+${section(t("analysisMemos.export.caseAttributes"), row.caseAttributeDefNames)}
+${section(t("analysisMemos.table.documents"), row.documents)}
+${section(t("analysisMemos.export.documentAttributes"), row.documentAttributeDefNames)}
+${section(t("analysisMemos.table.codes"), row.codes)}
+${annDetails.length > 0 ? `<section><h2>${escHtml(t("analysisMemos.detail.annotations"))}</h2><ul>${annDetails.map((a) => `<li><span class="ann-quote">"${escHtml(a.quote)}"</span><br><span class="ann-meta">${escHtml(a.codeName)} &mdash; ${escHtml(a.docName)}</span></li>`).join("")}</ul></section>` : ""}
 <div class="body">${row.body || ""}</div>
 </body>
 </html>`;
@@ -1029,7 +1034,7 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
   async function handleExportPDF() {
     try {
       setExportingFormat("pdf");
-      const path = await save({ defaultPath: `${row.title || "Memo"}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+      const path = await save({ defaultPath: `${row.title || t("analysisMemos.export.defaultFileStem")}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
       if (!path) return;
 
       const annRecords = row.annotationIds.length > 0
@@ -1070,18 +1075,18 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
         y += 10;
       };
 
-      addText(row.title || "Untitled Memo", 20, "bold", 6);
-      addText(`Created by: ${row.createdByName}`, 10, "normal", 2);
-      addText(`Created: ${fmtDate(row.createdAt)}`, 10, "normal", 20);
+      addText(row.title || t("analysisMemos.export.untitledMemo"), 20, "bold", 6);
+      addText(t("analysisMemos.export.createdBy", { name: row.createdByName }), 10, "normal", 2);
+      addText(t("analysisMemos.export.createdAt", { value: fmtDate(row.createdAt) }), 10, "normal", 20);
 
-      addSection("Cases", row.cases);
-      addSection("Case Attributes", row.caseAttributeDefNames);
-      addSection("Documents", row.documents);
-      addSection("Document Attributes", row.documentAttributeDefNames);
-      addSection("Codes", row.codes);
+      addSection(t("analysisMemos.table.cases"), row.cases);
+      addSection(t("analysisMemos.export.caseAttributes"), row.caseAttributeDefNames);
+      addSection(t("analysisMemos.table.documents"), row.documents);
+      addSection(t("analysisMemos.export.documentAttributes"), row.documentAttributeDefNames);
+      addSection(t("analysisMemos.table.codes"), row.codes);
 
       if (annDetails.length > 0) {
-        addText("Annotations", 9, "bold", 4);
+        addText(t("analysisMemos.detail.annotations"), 9, "bold", 4);
         for (const ann of annDetails) {
           addText(`"${ann.quote}"`, 10, "italic", 2);
           addText(`${ann.codeName} — ${ann.docName}`, 9, "normal", 6);
@@ -1091,7 +1096,7 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
 
       const bodyText = htmlToText(row.body || "");
       if (bodyText.trim()) {
-        addText("Body", 9, "bold", 4);
+        addText(t("analysisMemos.detail.body"), 9, "bold", 4);
         addText(bodyText, 11, "normal", 8);
       }
 
@@ -1108,7 +1113,7 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
   async function handleExportDOCX() {
     try {
       setExportingFormat("docx");
-      const path = await save({ defaultPath: `${row.title || "Memo"}.docx`, filters: [{ name: "Word Document", extensions: ["docx"] }] });
+      const path = await save({ defaultPath: `${row.title || t("analysisMemos.export.defaultFileStem")}.docx`, filters: [{ name: t("analysisMemos.export.wordDocument"), extensions: ["docx"] }] });
       if (!path) return;
 
       const annRecords = row.annotationIds.length > 0
@@ -1141,17 +1146,17 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
       const doc = new DocxDocument({
         sections: [{
           children: [
-            new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: row.title || "Untitled Memo" })] }),
-            new Paragraph({ children: [new TextRun({ text: `Created by: ${row.createdByName}`, color: "666666" })] }),
-            new Paragraph({ children: [new TextRun({ text: `Created: ${fmtDate(row.createdAt)}`, color: "666666" })] }),
+            new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: row.title || t("analysisMemos.export.untitledMemo") })] }),
+            new Paragraph({ children: [new TextRun({ text: t("analysisMemos.export.createdBy", { name: row.createdByName }), color: "666666" })] }),
+            new Paragraph({ children: [new TextRun({ text: t("analysisMemos.export.createdAt", { value: fmtDate(row.createdAt) }), color: "666666" })] }),
             new Paragraph({ children: [] }),
-            ...sectionParagraphs("Cases", row.cases),
-            ...sectionParagraphs("Case Attributes", row.caseAttributeDefNames),
-            ...sectionParagraphs("Documents", row.documents),
-            ...sectionParagraphs("Document Attributes", row.documentAttributeDefNames),
-            ...sectionParagraphs("Codes", row.codes),
+            ...sectionParagraphs(t("analysisMemos.table.cases"), row.cases),
+            ...sectionParagraphs(t("analysisMemos.export.caseAttributes"), row.caseAttributeDefNames),
+            ...sectionParagraphs(t("analysisMemos.table.documents"), row.documents),
+            ...sectionParagraphs(t("analysisMemos.export.documentAttributes"), row.documentAttributeDefNames),
+            ...sectionParagraphs(t("analysisMemos.table.codes"), row.codes),
             ...(annDetails.length > 0 ? [
-              new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Annotations" })] }),
+              new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: t("analysisMemos.detail.annotations") })] }),
               ...annDetails.flatMap((ann) => [
                 new Paragraph({ children: [new TextRun({ text: `"${ann.quote}"`, italics: true })] }),
                 new Paragraph({ children: [new TextRun({ text: `${ann.codeName} — ${ann.docName}`, color: "666666" })] }),
@@ -1159,7 +1164,7 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
               ]),
             ] : []),
             ...(bodyText.trim() ? [
-              new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Body" })] }),
+              new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: t("analysisMemos.detail.body") })] }),
               ...bodyParagraphs.map((text) => new Paragraph({ children: [new TextRun({ text })] })),
             ] : []),
           ],
@@ -1178,7 +1183,7 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
   return (
     <div className="view doc-detail-view">
       <div className="workspace-back-row">
-        <button className="btn" onClick={onBack}>Back to Memos</button>
+        <button className="btn" onClick={onBack}>{t("analysisMemos.actions.backToMemos")}</button>
       </div>
       <div className="case-detail-topbar">
         <div style={{ display: "flex", gap: 8 }}>
@@ -1211,15 +1216,15 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
         <div className="doc-detail-right">
 
           <div className="case-card" style={{ maxWidth: "none" }}>
-            <h3 className="case-card-title">Memo</h3>
+            <h3 className="case-card-title">{t("analysisMemos.detail.memo")}</h3>
             <p className="case-card-value">{row.title}</p>
           </div>
 
           <div className="case-card" style={{ maxWidth: "none" }}>
-            <h3 className="case-card-title">Memo Details</h3>
+            <h3 className="case-card-title">{t("analysisMemos.editor.memoDetails")}</h3>
             <dl className="user-detail-meta case-detail-meta">
-              <dt>Created By</dt><dd>{row.createdByName}</dd>
-              <dt>Created</dt>  <dd>{fmtDate(row.createdAt)}</dd>
+              <dt>{t("analysisMemos.table.createdBy")}</dt><dd>{row.createdByName}</dd>
+              <dt>{t("analysisMemos.table.created")}</dt>  <dd>{fmtDate(row.createdAt)}</dd>
             </dl>
           </div>
 
@@ -1272,13 +1277,13 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
               onClick={() => setAnnCardCollapsed((v) => !v)}
             >
               <h3 className="case-card-title" style={{ margin: 0 }}>
-                Annotations{row.annotationDetails.length > 0 ? ` (${row.annotationDetails.length})` : ""}
+                {t("analysisMemos.detail.annotations")}{row.annotationDetails.length > 0 ? ` (${row.annotationDetails.length})` : ""}
               </h3>
               <span className="codebook-collapse-icon">{annCardCollapsed ? "▶" : "▼"}</span>
             </div>
             {!annCardCollapsed && (
               row.annotationDetails.length === 0
-                ? <p className="case-card-empty">No annotations associated.</p>
+                ? <p className="case-card-empty">{t("analysisMemos.detail.noAnnotationsAssociated")}</p>
                 : <ul className="memo-sel-list" style={{ marginTop: 4 }}>
                     {row.annotationDetails.map((ann) => (
                       <li key={ann.id} className="memo-sel-item" style={{ borderRight: `3px solid ${ann.codeColor}`, paddingRight: 11, cursor: "default" }}>
@@ -1299,10 +1304,10 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
           </div>
 
           <div className="case-card doc-content-card">
-            <h3 className="case-card-title">Body</h3>
+            <h3 className="case-card-title">{t("analysisMemos.detail.body")}</h3>
             {row.body
               ? <div className="case-notes-body" dangerouslySetInnerHTML={{ __html: row.body }} />
-              : <p className="case-card-empty">No body text.</p>}
+              : <p className="case-card-empty">{t("analysisMemos.detail.noBodyText")}</p>}
           </div>
 
         </div>
@@ -1315,6 +1320,7 @@ ${annDetails.length > 0 ? `<section><h2>Annotations</h2><ul>${annDetails.map((a)
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function MemosView() {
+  const { t } = useI18n();
   const {
     activeProject,
     pb,
@@ -1343,6 +1349,14 @@ export function MemosView() {
 
   const [confirmDelete, setConfirmDelete] = useState<MemoRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const localizedCols = [
+    { ...COLS[0], label: t("analysisMemos.table.name") },
+    { ...COLS[1], label: t("analysisMemos.table.createdBy") },
+    { ...COLS[2], label: t("analysisMemos.table.created") },
+    { ...COLS[3], label: t("analysisMemos.table.cases") },
+    { ...COLS[4], label: t("analysisMemos.table.documents") },
+    { ...COLS[5], label: t("analysisMemos.table.codes") },
+  ];
 
   // Navigation: store IDs so detail/editor auto-refresh when rows reload
   const [showNewEditor,  setShowNewEditor]  = useState(false);
@@ -1419,7 +1433,7 @@ export function MemosView() {
         }),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load memos.");
+      setError(e instanceof Error ? e.message : t("analysisMemos.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -1492,7 +1506,7 @@ export function MemosView() {
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete memo.");
+      setError(e instanceof Error ? e.message : t("analysisMemos.errors.deleteFailed"));
       setConfirmDelete(null);
     } finally {
       setDeleteLoading(false);
@@ -1545,12 +1559,12 @@ export function MemosView() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Memos</h1>
+          <h1>{t("analysisMemos.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show memos help"
-            title="Show Help"
+            aria-label={t("analysisMemos.showHelp")}
+            title={t("analysisMemos.showHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -1560,9 +1574,9 @@ export function MemosView() {
           className="btn btn--primary"
           onClick={() => setShowNewEditor(true)}
           disabled={!canCreateMemos}
-          title={!canCreateMemos ? "You do not have permission to create memos" : undefined}
+          title={!canCreateMemos ? t("analysisMemos.permissions.cannotCreateMemos") : undefined}
         >
-          + New Memo
+          {t("analysisMemos.actions.newMemo")}
         </button>
       </header>
 
@@ -1580,7 +1594,7 @@ export function MemosView() {
             <table className="users-table">
               <thead>
                 <tr>
-                  {COLS.map((col) => (
+                  {localizedCols.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
@@ -1597,10 +1611,10 @@ export function MemosView() {
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={6} className="users-td-msg">Loading…</td></tr>
+                  <tr><td colSpan={6} className="users-td-msg">{t("analysisMemos.statuses.loading")}</td></tr>
                 )}
                 {!loading && sorted.length === 0 && (
-                  <tr><td colSpan={6} className="users-td-msg">No memos yet.</td></tr>
+                  <tr><td colSpan={6} className="users-td-msg">{t("analysisMemos.empty.noMemos")}</td></tr>
                 )}
                 {!loading && sorted.map((row) => (
                   <tr
@@ -1635,19 +1649,19 @@ export function MemosView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Memos Help</h2>
+            <h2>{t("analysisMemos.help.title")}</h2>
             <p className="users-guide-copy">
-              Browse memos, open and edit a memo, create memos from supported contexts, delete memos, and inspect linked annotations or project objects.
+              {t("analysisMemos.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use Memos as the place to capture analytic notes tied to documents, annotations, codes, or cases. Select a memo to review or edit its content.
+              {t("analysisMemos.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Memo creation and editing depend on your project role. Some memos are contextual and make most sense when opened alongside their linked object.
+              {t("analysisMemos.help.line3")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1666,7 +1680,7 @@ export function MemosView() {
               className="context-menu-item"
               onClick={() => { setEditorRowId(contextMenu.row.id); setContextMenu(null); }}
             >
-              Edit Memo
+              {t("analysisMemos.actions.editMemo")}
             </button>
           )}
           {canDeleteMemos && (
@@ -1674,7 +1688,7 @@ export function MemosView() {
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}
             >
-              Delete Memo
+              {t("analysisMemos.actions.deleteMemo")}
             </button>
           )}
         </div>
@@ -1687,20 +1701,19 @@ export function MemosView() {
           onClick={() => !deleteLoading && setConfirmDelete(null)}
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Memo</h2>
+            <h2>{t("analysisMemos.deleteModal.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete{" "}
-              <strong>{confirmDelete.title}</strong>?
+              {t("analysisMemos.deleteModal.body", { title: confirmDelete.title })}
             </p>
             <p className="modal-warning-text">
-              This memo will be permanently deleted and cannot be recovered.
+              {t("analysisMemos.deleteModal.warning")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? "Deleting…" : "Delete Memo"}
+                {deleteLoading ? t("analysisMemos.statuses.deleting") : t("analysisMemos.actions.deleteMemo")}
               </button>
             </div>
           </div>

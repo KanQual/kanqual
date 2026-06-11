@@ -2581,7 +2581,10 @@ export function useAppStore(pb: PocketBase) {
         } catch {
           // Startup restore should be best-effort only.
         }
-        await logAction(project.id, "project.open", `Opened project "${project.name}"`);
+        await logAction(project.id, "project.open", `Opened project "${project.name}"`, undefined, {
+          entityType: "project",
+          name: project.name,
+        });
         rememberRecentProject(project);
         rememberLastProjectId(project.id);
         setActiveProject(project);
@@ -2709,6 +2712,10 @@ export function useAppStore(pb: PocketBase) {
           "presence.inactive",
           `Marked "${userLabel}" inactive after presence heartbeat timeout`,
           entry.id,
+          {
+            entityType: "presence",
+            userLabel,
+          },
         );
         projectPresenceInactiveLogRef.current[entry.id] = entry.lastSeen;
       }
@@ -3120,7 +3127,10 @@ export function useAppStore(pb: PocketBase) {
       });
       await saveProjectAiAssistSettings(pb, project.id, DEFAULT_PROJECT_AI_ASSIST_SETTINGS);
       await saveProjectDocumentImportSettings(pb, project.id, DEFAULT_PROJECT_DOCUMENT_IMPORT_SETTINGS);
-      await logAction(project.id, "project.create", `Created project "${name}"`);
+      await logAction(project.id, "project.create", `Created project "${name}"`, project.id, {
+        entityType: "project",
+        name,
+      });
       return project;
     },
     [pb, logAction]
@@ -3157,7 +3167,10 @@ export function useAppStore(pb: PocketBase) {
 
     // Log close of previous project (when switching)
     if (prevProject && prevProject.id !== project.id) {
-      await logAction(prevProject.id, "project.close", `Left project "${prevProject.name}"`);
+      await logAction(prevProject.id, "project.close", `Left project "${prevProject.name}"`, undefined, {
+        entityType: "project",
+        name: prevProject.name,
+      });
     }
 
     // Stamp last_active on the membership record
@@ -3167,7 +3180,10 @@ export function useAppStore(pb: PocketBase) {
       await pb.collection("project_members").update(membership.id, { last_active: now });
     } catch { /* membership may not exist yet */ }
 
-    await logAction(project.id, "project.open", `Opened project "${project.name}"`);
+    await logAction(project.id, "project.open", `Opened project "${project.name}"`, undefined, {
+      entityType: "project",
+      name: project.name,
+    });
 
     rememberRecentProject(project);
     rememberLastProjectId(project.id);
@@ -3185,7 +3201,10 @@ export function useAppStore(pb: PocketBase) {
 
   const closeProject = useCallback(async (project: Project) => {
     try {
-      await logAction(project.id, "project.close", `Left project "${project.name}"`);
+      await logAction(project.id, "project.close", `Left project "${project.name}"`, undefined, {
+        entityType: "project",
+        name: project.name,
+      });
     } catch (error) {
       console.error("Failed to log project close:", error);
     }
@@ -3423,6 +3442,7 @@ export function useAppStore(pb: PocketBase) {
         uploadedFileId,
         {
           entityType: "project_uploaded_file",
+          fileName: current.originalFileName || current.uploadedFile,
           fromStatus: current.status,
           toStatus: nextStatus,
           documentId: options?.documentId ?? current.documentId ?? "",
@@ -3544,11 +3564,13 @@ export function useAppStore(pb: PocketBase) {
       if (activeProject && data.name) {
         await logAction(activeProject.id, "document.update", `Renamed document to "${data.name}"`, id, {
           entityType: "document",
+          name: data.name,
           changedFields: Object.keys(data),
         });
       } else if (activeProject) {
         await logAction(activeProject.id, "document.update", "Updated document", id, {
           entityType: "document",
+          name: data.name,
           changedFields: Object.keys(data),
         });
       }
@@ -3577,7 +3599,10 @@ export function useAppStore(pb: PocketBase) {
           ),
         ),
       );
-      if (activeProject) await logAction(activeProject.id, "document.delete", `Deleted document${name ? ` "${name}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "document.delete", `Deleted document${name ? ` "${name}"` : ""}`, id, {
+        entityType: "document",
+        name,
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup, updateProjectUploadedFileStatus]
   );
@@ -3636,6 +3661,7 @@ export function useAppStore(pb: PocketBase) {
       if (activeProject) {
         await logAction(activeProject.id, "code.update", `Updated code "${data.label}"`, id, {
           entityType: "code",
+          label: data.label,
           changedFields: ["label", "color", "description", "parentId"],
         });
       }
@@ -3650,7 +3676,10 @@ export function useAppStore(pb: PocketBase) {
       const anns = await pb.collection("annotations").getFullList({ filter: `code="${id}"&&deleted_at=""`, fields: "id" });
       await Promise.all(anns.map((a) => pb.collection("annotations").update(a.id, { deleted_at: deletedAt })));
       await pb.collection("codes").update(id, { deleted_at: deletedAt });
-      if (activeProject) await logAction(activeProject.id, "code.delete", `Deleted code${label ? ` "${label}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "code.delete", `Deleted code${label ? ` "${label}"` : ""}`, id, {
+        entityType: "code",
+        label,
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
@@ -3730,6 +3759,7 @@ export function useAppStore(pb: PocketBase) {
       if (activeProject) {
         await logAction(activeProject.id, "annotation.create", `Annotated "${truncated}"`, record.id, {
           entityType: "annotation",
+          quote: truncated,
           documentId,
           codeId,
           startOffset: normalizedStart,
@@ -3758,7 +3788,9 @@ export function useAppStore(pb: PocketBase) {
     async (id: string) => {
       await ensureProjectSafetyBackup("annotation.delete", "Deleted annotation");
       await pb.collection("annotations").update(id, { deleted_at: new Date().toISOString() });
-      if (activeProject) await logAction(activeProject.id, "annotation.delete", "Deleted annotation", id);
+      if (activeProject) await logAction(activeProject.id, "annotation.delete", "Deleted annotation", id, {
+        entityType: "annotation",
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
@@ -3794,6 +3826,7 @@ export function useAppStore(pb: PocketBase) {
       if (activeProject) {
         await logAction(activeProject.id, "case.update", `Updated case "${data.name}"`, id, {
           entityType: "case",
+          name: data.name,
           changedFields: ["name", "notes"],
         });
       }
@@ -3805,7 +3838,10 @@ export function useAppStore(pb: PocketBase) {
     async (id: string, name?: string) => {
       await ensureProjectSafetyBackup("case.delete", `Deleted case${name ? ` "${name}"` : ""}`);
       await pb.collection("cases").update(id, { deleted_at: new Date().toISOString() });
-      if (activeProject) await logAction(activeProject.id, "case.delete", `Deleted case${name ? ` "${name}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "case.delete", `Deleted case${name ? ` "${name}"` : ""}`, id, {
+        entityType: "case",
+        name,
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
@@ -3875,6 +3911,7 @@ export function useAppStore(pb: PocketBase) {
       if (activeProject) {
         await logAction(activeProject.id, "memo.update", `Updated memo "${data.title}"`, id, {
           entityType: "memo",
+          title: data.title,
           changedFields: [
             "title",
             "body",
@@ -3895,7 +3932,10 @@ export function useAppStore(pb: PocketBase) {
     async (id: string, title?: string) => {
       await ensureProjectSafetyBackup("memo.delete", `Deleted memo${title ? ` "${title}"` : ""}`);
       await pb.collection("memos").update(id, { deleted_at: new Date().toISOString() });
-      if (activeProject) await logAction(activeProject.id, "memo.delete", `Deleted memo${title ? ` "${title}"` : ""}`, id);
+      if (activeProject) await logAction(activeProject.id, "memo.delete", `Deleted memo${title ? ` "${title}"` : ""}`, id, {
+        entityType: "memo",
+        title,
+      });
     },
     [pb, activeProject, logAction, ensureProjectSafetyBackup]
   );
@@ -4230,6 +4270,11 @@ export function useAppStore(pb: PocketBase) {
         mode === "lan"
           ? "Enabled LAN collaboration mode for this session"
           : "Returned app network mode to local-only for this session",
+        undefined,
+        {
+          entityType: "network_mode",
+          mode,
+        },
       );
     }
   }, [activeProject, logAction, networkMode, pb]);

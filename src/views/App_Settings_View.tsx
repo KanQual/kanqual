@@ -22,6 +22,9 @@ import { readDir, stat } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
+import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
+import { useI18n } from "../i18n/provider";
+import { formatCurrentNumber } from "../i18n/formatters";
 import {
   clearRecentProjects,
   formatBytes,
@@ -38,7 +41,7 @@ import {
   type RegisteredUserAccount,
 } from "../lib/pb";
 import { isLocalBackendUrl } from "../lib/aiJobs";
-import { permissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
+import { buildPermissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
 import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
 import { HelpIcon } from "../components/AppIcons";
 
@@ -176,6 +179,18 @@ function SettingsModalSection({
 function shouldShowAppAutoSaveNotice(sectionId: string) {
   return ["startup", "import", "privacy", "updates", "llm"].includes(sectionId);
 }
+
+function formatStorageFileSummary(
+  count: number,
+  directory: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  return t("appSettings.storage.filesInDirectory", {
+    count: formatCurrentNumber(count),
+    directory,
+  });
+}
+
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Color row ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
@@ -691,14 +706,15 @@ function CollaborationPingBadge({
   result: PingResult;
   scope: "local" | "internet";
 }) {
-  if (result.status === "idle") return <span className="ping-badge ping-badge--idle">Not tested</span>;
-  if (result.status === "loading") return <span className="ping-badge ping-badge--idle">Testing...</span>;
+  const { t } = useI18n();
+  if (result.status === "idle") return <span className="ping-badge ping-badge--idle">{t("appSettings.network.notTested")}</span>;
+  if (result.status === "loading") return <span className="ping-badge ping-badge--idle">{t("appSettings.network.testing")}</span>;
   if (result.status === "success") {
     return (
       <span className="ping-badge ping-badge--ok">
         {scope === "local"
-          ? "A user in the local network should be able to collaborate on your projects."
-          : "A user on the internet should be able to collaborate on your projects."}
+          ? t("appSettings.network.localReachable")
+          : t("appSettings.network.internetReachable")}
         {typeof result.ms === "number" && <> {result.ms} ms</>}
       </span>
     );
@@ -706,8 +722,8 @@ function CollaborationPingBadge({
   return (
     <span className="ping-badge ping-badge--error">
       {scope === "local"
-        ? "A user in the local network might not be able to collaborate on your projects."
-        : "A user on the internet might not be able to collaborate on your projects."}
+        ? t("appSettings.network.localUnreachable")
+        : t("appSettings.network.internetUnreachable")}
       {result.error && <> - {result.error}</>}
     </span>
   );
@@ -734,6 +750,7 @@ function CollaborationAddressCard({
   onTest: () => void;
   scope: "local" | "internet";
 }) {
+  const { t } = useI18n();
   const address = host ? `http://${host}:${port}` : null;
   return (
     <div className="settings-row settings-row--block">
@@ -746,13 +763,13 @@ function CollaborationAddressCard({
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
         <code className="settings-code-line" style={{ minWidth: 220 }}>
-          {loading ? "Detecting..." : (address ?? "Unavailable")}
+          {loading ? t("appSettings.network.detecting") : (address ?? t("appSettings.network.unavailable"))}
         </code>
         <button className="btn btn--sm" disabled={!address} onClick={() => address && navigator.clipboard.writeText(address).catch(() => {})}>
-          Copy
+          {t("appSettings.network.copy")}
         </button>
         <button className="btn btn--sm btn--primary" disabled={!address || disabled || ping.status === "loading"} onClick={onTest}>
-          {ping.status === "loading" ? "Testing..." : "Test"}
+          {ping.status === "loading" ? t("appSettings.network.testing") : t("appSettings.network.test")}
         </button>
       </div>
     </div>
@@ -855,11 +872,15 @@ function formatDownloadDate(value: number | null | undefined): string {
   });
 }
 
-function formatAdminDateTime(value: string | null | undefined): string {
-  if (!value) return "Never";
+function formatAdminDateTime(
+  value: string | null | undefined,
+  fallbackLabel: string,
+  formatDateTime: (value: Date | number | string, options?: Intl.DateTimeFormatOptions) => string,
+): string {
+  if (!value) return fallbackLabel;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Never";
-  return date.toLocaleString([], {
+  if (Number.isNaN(date.getTime())) return fallbackLabel;
+  return formatDateTime(date, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -903,6 +924,7 @@ async function loadRegisteredUserActivityData(pb: NonNullable<ReturnType<typeof 
 }
 
 export function AppSettingsView() {
+  const { locale, setLocale, t, formatDateTime } = useI18n();
   const { pb, user, logout } = useAuth();
   const {
     networkMode,
@@ -967,65 +989,72 @@ export function AppSettingsView() {
   const settingsOverviewCards = [
     {
       id: "startup",
-      title: "Startup & Session",
-      description: "Choose how Kanqual opens and resumes work.",
+      title: t("appSettings.sectionTitles.startup"),
+      description: t("appSettings.overview.startup"),
       visible: canChangeStartupSettings,
       tone: "default" as const,
     },
     {
+      id: "language",
+      title: t("appSettings.sectionTitles.language"),
+      description: t("appSettings.overview.language"),
+      visible: canOpenAppSettings,
+      tone: "default" as const,
+    },
+    {
       id: "import",
-      title: "Document Import",
-      description: "Set default behaviors for importing and creating documents.",
+      title: t("appSettings.sectionTitles.documentImport"),
+      description: t("appSettings.overview.documentImport"),
       visible: canOpenAppSettings,
       tone: "default" as const,
     },
     {
       id: "privacy",
-      title: "Privacy & Security",
-      description: "Manage local privacy options for shared or sensitive use.",
+      title: t("appSettings.sectionTitles.privacy"),
+      description: t("appSettings.overview.privacy"),
       visible: canOpenAppSettings,
       tone: "default" as const,
     },
     {
       id: "storage",
-      title: "Data Location & Storage",
-      description: "View where local data and backups are stored.",
+      title: t("appSettings.storage.localStorageTitle"),
+      description: t("appSettings.overview.storage"),
       visible: canOpenAppSettings,
       tone: "default" as const,
     },
     {
       id: "updates",
-      title: "Updates",
-      description: "Choose whether Kanqual checks for newer releases and where to review them.",
+      title: t("appSettings.updates.title"),
+      description: t("appSettings.overview.updates"),
       visible: canOpenAppSettings,
       tone: "default" as const,
     },
     {
       id: "diagnostics",
-      title: "Diagnostics",
-      description: "Check app health, storage, and environment details.",
+      title: t("appSettings.sectionTitles.diagnostics"),
+      description: t("appSettings.overview.diagnostics"),
       visible: canOpenAppSettings,
       tone: "default" as const,
     },
     {
       id: "permissions",
-      title: "User Permissions",
-      description: "Review the full role matrix for administrators, owners, editors, coders, and viewers.",
+      title: t("appSettings.permissions.title"),
+      description: t("appSettings.permissions.description"),
       visible: canOpenAppSettings,
       tone: "default" as const,
     },
     {
       id: "network",
-      title: "Network & Collaboration",
-      description: "Control whether this device is accessible to collaborators.",
+      title: t("appSettings.sectionTitles.network"),
+      description: t("appSettings.overview.network"),
       visible: canOpenAppSettings,
       tone: "network" as const,
     },
     ...(canAccessAdministration
       ? [{
           id: "administration",
-          title: "Administration",
-          description: "Manage registered users, clear local app data, and open administrator-only workspace tools.",
+          title: t("appSettings.admin.title"),
+          description: t("appSettings.admin.description"),
           visible: true,
           tone: "admin" as const,
         }]
@@ -1036,26 +1065,26 @@ export function AppSettingsView() {
   const appSettingsSections = [
     {
       id: "everyday",
-      eyebrow: "Everyday Use",
-      title: "Change the app behaviors people are most likely to notice in daily work.",
-      cardIds: ["startup", "import"],
+      eyebrow: t("appSettings.overviewSections.everyday.eyebrow"),
+      title: t("appSettings.overviewSections.everyday.description"),
+      cardIds: ["startup", "language", "import"],
     },
     {
       id: "privacy-data",
-      eyebrow: "Privacy & Data",
-      title: "Control what is stored locally and how the device handles sensitive research work.",
+      eyebrow: t("appSettings.overviewSections.privacy.eyebrow"),
+      title: t("appSettings.overviewSections.privacy.description"),
       cardIds: ["privacy", "storage"],
     },
     {
       id: "maintenance",
-      eyebrow: "Maintenance",
-      title: "Review health, diagnostics, and release behavior for this installation.",
+      eyebrow: t("appSettings.overviewSections.maintenance.eyebrow"),
+      title: t("appSettings.overviewSections.maintenance.description"),
       cardIds: ["updates", "diagnostics"],
     },
     {
       id: "advanced",
-      eyebrow: "Advanced",
-      title: "Use these tools for permissions, collaboration, and administrator-only device actions.",
+      eyebrow: t("appSettings.overviewSections.advanced.eyebrow"),
+      title: t("appSettings.overviewSections.advanced.description"),
       cardIds: ["permissions", "network", "administration"],
     },
   ]
@@ -1090,7 +1119,9 @@ export function AppSettingsView() {
     }
   }, [settingsOverviewCards]);
 
-  const permissionMatrixByCategory = permissionMatrixRows.reduce<Record<string, PermissionMatrixRow[]>>((acc, row) => {
+  const permissionMatrixRowsForLocale = buildPermissionMatrixRows(t);
+
+  const permissionMatrixByCategory = permissionMatrixRowsForLocale.reduce<Record<string, PermissionMatrixRow[]>>((acc, row) => {
     if (!acc[row.category]) acc[row.category] = [];
     acc[row.category].push(row);
     return acc;
@@ -1550,12 +1581,12 @@ export function AppSettingsView() {
       case "permissions":
         return (
           <SettingsModalSection
-            title="Role Matrix"
-            description="Review which actions each Kanqual role can perform in the current permission model."
+            title={t("appSettings.permissions.roleMatrixTitle")}
+            description={t("appSettings.permissions.roleMatrixDescription")}
           >
             <div className="permission-matrix">
               <p className="permission-matrix-intro">
-                This matrix shows which actions each role can perform in the current KanQual permission model.
+                {t("appSettings.permissions.roleMatrixIntro")}
               </p>
               {Object.entries(permissionMatrixByCategory).map(([category, rows]) => (
                 <section key={category} className="permission-matrix-section">
@@ -1564,13 +1595,13 @@ export function AppSettingsView() {
                     <table className="permission-matrix-table">
                       <thead>
                         <tr>
-                          <th>Permission</th>
-                          <th>Description</th>
-                          <th>Administrator</th>
-                          <th>Owner</th>
-                          <th>Editor</th>
-                          <th>Coder</th>
-                          <th>Viewer</th>
+                          <th>{t("appSettings.permissions.columnPermission")}</th>
+                          <th>{t("appSettings.permissions.columnDescription")}</th>
+                          <th>{t("appSettings.permissions.columnAdministrator")}</th>
+                          <th>{t("appSettings.permissions.columnOwner")}</th>
+                          <th>{t("appSettings.permissions.columnEditor")}</th>
+                          <th>{t("appSettings.permissions.columnCoder")}</th>
+                          <th>{t("appSettings.permissions.columnViewer")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1578,11 +1609,11 @@ export function AppSettingsView() {
                           <tr key={`${row.category}-${row.permission}`}>
                             <td>{row.permission}</td>
                             <td>{row.description}</td>
-                            <td className={row.administrator ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.administrator ? "Yes" : "No"}</td>
-                            <td className={row.owner ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.owner ? "Yes" : "No"}</td>
-                            <td className={row.editor ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.editor ? "Yes" : "No"}</td>
-                            <td className={row.coder ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.coder ? "Yes" : "No"}</td>
-                            <td className={row.viewer ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.viewer ? "Yes" : "No"}</td>
+                            <td className={row.administrator ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.administrator ? t("appSettings.permissions.yes") : t("appSettings.permissions.no")}</td>
+                            <td className={row.owner ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.owner ? t("appSettings.permissions.yes") : t("appSettings.permissions.no")}</td>
+                            <td className={row.editor ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.editor ? t("appSettings.permissions.yes") : t("appSettings.permissions.no")}</td>
+                            <td className={row.coder ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.coder ? t("appSettings.permissions.yes") : t("appSettings.permissions.no")}</td>
+                            <td className={row.viewer ? "permission-matrix-cell permission-matrix-cell--yes" : "permission-matrix-cell permission-matrix-cell--no"}>{row.viewer ? t("appSettings.permissions.yes") : t("appSettings.permissions.no")}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1597,18 +1628,20 @@ export function AppSettingsView() {
         return (
           <>
             <SettingsModalSection
-              title="Access Mode"
+              title={t("appSettings.network.accessModeTitle")}
               description="Choose whether this Kanqual database stays available only on this device or can be reached from other trusted devices on the network."
             >
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <div className="settings-row-label">Network mode</div>
+                  <div className="settings-row-label">{t("appSettings.network.networkMode")}</div>
                   <div className="settings-row-desc">
                     {networkMode === "local"
-                      ? "Local only - data is not accessible from other devices."
+                      ? t("appSettings.network.localOnlyDescription")
                       : localIp
-                        ? `Network mode active - other devices can connect at http://${localIp}:8090`
-                        : "Network mode active - other devices on your local network can connect."}
+                        ? t("appSettings.network.activeWithAddress", {
+                            address: `http://${localIp}:8090`,
+                          })
+                        : t("appSettings.network.activeWithoutAddress")}
                   </div>
                 </div>
                 <div className="segmented-control">
@@ -1621,8 +1654,10 @@ export function AppSettingsView() {
                       disabled={networkSwitching}
                     >
                       {networkSwitching && option !== networkMode
-                        ? "Restarting..."
-                        : option === "local" ? "Local only" : "Allow network"}
+                        ? t("appSettings.network.restarting")
+                        : option === "local"
+                          ? t("appSettings.network.localOnlyOption")
+                          : t("appSettings.network.allowNetworkOption")}
                     </button>
                   ))}
                 </div>
@@ -1630,12 +1665,12 @@ export function AppSettingsView() {
             </SettingsModalSection>
             {networkMode === "lan" && (
               <SettingsModalSection
-                title="Connection Addresses"
-                description="Use these addresses to test or share the running Kanqual instance while network mode is enabled."
+                title={t("appSettings.network.connectionAddressesTitle")}
+                description={t("appSettings.network.connectionAddressesDescription")}
               >
                 <CollaborationAddressCard
-                  label="Local Network"
-                  description="Reachable by devices on the same Wi-Fi or LAN. Share this address with collaborators on your local network."
+                  label={t("appSettings.network.localNetwork")}
+                  description={t("appSettings.network.localNetworkDescription")}
                   host={localIpError ? null : localIp}
                   port={8090}
                   loading={!localIp && !localIpError}
@@ -1646,8 +1681,8 @@ export function AppSettingsView() {
                 />
 
                 <CollaborationAddressCard
-                  label="External / Internet"
-                  description="Reachable from outside your network. Requires port forwarding configured on your router."
+                  label={t("appSettings.network.externalInternet")}
+                  description={t("appSettings.network.externalInternetDescription")}
                   host={externalIp}
                   port={8090}
                   loading={externalIpLoading}
@@ -1663,26 +1698,26 @@ export function AppSettingsView() {
       case "storage":
         return (
           <SettingsModalSection
-            title="Local Storage"
+            title={t("appSettings.storage.localStorageTitle")}
             description="Review where Kanqual stores its managed data and how much space the tracked folders currently use."
           >
             <div className="settings-row">
               <div className="settings-row-info">
-                <div className="settings-row-label">Storage mode</div>
+                <div className="settings-row-label">{t("appSettings.storage.storageMode")}</div>
                 <div className="settings-row-desc">
                   {appInfo?.portableMode === true
-                    ? "Portable"
+                    ? t("appSettings.storage.portable")
                     : appInfo?.portableMode === false
-                      ? "Installed / user profile"
-                      : "Loading..."}
+                      ? t("appSettings.storage.installed")
+                      : t("common.loading")}
                 </div>
               </div>
             </div>
 
             <div className="settings-row">
               <div className="settings-row-info">
-                <div className="settings-row-label">App data folder</div>
-                <div className="settings-row-desc settings-code-line">{appInfo?.appDataDir ?? "Loading..."}</div>
+                <div className="settings-row-label">{t("appSettings.storage.appDataFolder")}</div>
+                <div className="settings-row-desc settings-code-line">{appInfo?.appDataDir ?? t("common.loading")}</div>
               </div>
               {appInfo?.appDataDir && (
                 <button
@@ -1690,26 +1725,26 @@ export function AppSettingsView() {
                   type="button"
                   onClick={() => void navigator.clipboard.writeText(appInfo.appDataDir)}
                 >
-                  Copy Path
+                  {t("appSettings.storage.copyPath")}
                 </button>
               )}
             </div>
 
             <div className="app-settings-stats">
               <div className="app-settings-stat-card">
-                <strong>Database</strong>
+                <strong>{t("appSettings.storage.database")}</strong>
                 <span>{formatBytes(storageSummary.databaseBytes)}</span>
-                <small>{storageSummary.databaseFiles} files in `pb_data`</small>
+                <small>{formatStorageFileSummary(storageSummary.databaseFiles, "pb_data", t)}</small>
               </div>
               <div className="app-settings-stat-card">
-                <strong>Backups</strong>
+                <strong>{t("appSettings.storage.backups")}</strong>
                 <span>{formatBytes(storageSummary.backupBytes)}</span>
-                <small>{storageSummary.backupFiles} files in `project_backups`</small>
+                <small>{formatStorageFileSummary(storageSummary.backupFiles, "project_backups", t)}</small>
               </div>
               <div className="app-settings-stat-card">
-                <strong>Total tracked storage</strong>
+                <strong>{t("appSettings.storage.totalTrackedStorage")}</strong>
                 <span>{formatBytes(storageSummary.databaseBytes + storageSummary.backupBytes)}</span>
-                <small>Database plus managed backup files</small>
+                <small>{t("appSettings.storage.totalTrackedStorageDescription")}</small>
               </div>
             </div>
           </SettingsModalSection>
@@ -1720,7 +1755,7 @@ export function AppSettingsView() {
         }
         return (
           <SettingsModalSection
-            title="Launch Behavior"
+            title={t("appSettings.startup.title")}
             description="Choose what Kanqual should reopen automatically when someone starts the app on this device."
           >
             <label className="settings-toggle-row">
@@ -1754,17 +1789,45 @@ export function AppSettingsView() {
             </label>
           </SettingsModalSection>
         );
+      case "language":
+        return (
+          <SettingsModalSection
+            title={t("appSettings.language.title")}
+            description={t("appSettings.language.description")}
+          >
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-label">{t("appSettings.language.label")}</div>
+                <div className="settings-row-desc">{t("appSettings.language.description")}</div>
+              </div>
+              <select
+                className="form-input"
+                value={locale}
+                onChange={(e) => {
+                  setLocale(e.target.value as (typeof SUPPORTED_LOCALES)[number]);
+                  setNotice(t("appSettings.language.saved"));
+                }}
+              >
+                {SUPPORTED_LOCALES.map((option) => (
+                  <option key={option} value={option}>
+                    {LOCALE_LABELS[option]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </SettingsModalSection>
+        );
       case "import":
         return (
           <>
             <SettingsModalSection
-              title="Default Import Mode"
-              description="Choose which workflow the new document dialog should open with by default."
+              title={t("appSettings.documentImport.title")}
+              description={t("appSettings.documentImport.titleDescription")}
             >
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <div className="settings-row-label">Default import mode</div>
-                  <div className="settings-row-desc">Choose whether the new document dialog starts in upload mode or paste mode.</div>
+                  <div className="settings-row-label">{t("appSettings.documentImport.defaultModeLabel")}</div>
+                  <div className="settings-row-desc">{t("appSettings.documentImport.defaultModeDescription")}</div>
                 </div>
                 <div className="segmented-control">
                   {(["upload", "paste"] as const).map((option) => (
@@ -1775,9 +1838,11 @@ export function AppSettingsView() {
                       onClick={() => persist({
                         ...settings,
                         documentImport: { ...settings.documentImport, defaultMode: option },
-                      }, "Document import defaults saved.")}
+                      }, t("appSettings.documentImport.saved"))}
                     >
-                      {option === "upload" ? "Upload" : "Paste"}
+                      {option === "upload"
+                        ? t("appSettings.documentImport.upload")
+                        : t("appSettings.documentImport.paste")}
                     </button>
                   ))}
                 </div>
@@ -1785,13 +1850,13 @@ export function AppSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Import Safeguards"
-              description="Set the defaults Kanqual should apply while it prepares uploaded or pasted text for a new document."
+              title={t("appSettings.documentImport.safeguardsTitle")}
+              description={t("appSettings.documentImport.safeguardsDescription")}
             >
               <label className="settings-toggle-row">
                 <span>
-                  <strong>Auto-name documents from uploaded files</strong>
-                  <small>Pre-fills the document name from the selected filename when the name field is empty.</small>
+                  <strong>{t("appSettings.documentImport.autoNameLabel")}</strong>
+                  <small>{t("appSettings.documentImport.autoNameDescription")}</small>
                 </span>
                 <input
                   type="checkbox"
@@ -1799,14 +1864,14 @@ export function AppSettingsView() {
                   onChange={(e) => persist({
                     ...settings,
                     documentImport: { ...settings.documentImport, autoNameFromFile: e.target.checked },
-                  }, "Document import defaults saved.")}
+                  }, t("appSettings.documentImport.saved"))}
                 />
               </label>
 
               <label className="settings-toggle-row">
                 <span>
-                  <strong>Trim imported text automatically</strong>
-                  <small>Removes leading and trailing whitespace from pasted text and extracted file contents before save.</small>
+                  <strong>{t("appSettings.documentImport.trimImportedTextLabel")}</strong>
+                  <small>{t("appSettings.documentImport.trimImportedTextDescription")}</small>
                 </span>
                 <input
                   type="checkbox"
@@ -1814,14 +1879,14 @@ export function AppSettingsView() {
                   onChange={(e) => persist({
                     ...settings,
                     documentImport: { ...settings.documentImport, trimImportedText: e.target.checked },
-                  }, "Document import defaults saved.")}
+                  }, t("appSettings.documentImport.saved"))}
                 />
               </label>
 
               <label className="settings-toggle-row">
                 <span>
-                  <strong>Warn before creating empty imports</strong>
-                  <small>Shows a confirmation if a file produces no extracted text and you continue anyway.</small>
+                  <strong>{t("appSettings.documentImport.warnBeforeEmptyImportLabel")}</strong>
+                  <small>{t("appSettings.documentImport.warnBeforeEmptyImportDescription")}</small>
                 </span>
                 <input
                   type="checkbox"
@@ -1829,7 +1894,7 @@ export function AppSettingsView() {
                   onChange={(e) => persist({
                     ...settings,
                     documentImport: { ...settings.documentImport, warnBeforeEmptyImport: e.target.checked },
-                  }, "Document import defaults saved.")}
+                  }, t("appSettings.documentImport.saved"))}
                 />
               </label>
             </SettingsModalSection>
@@ -1838,13 +1903,13 @@ export function AppSettingsView() {
       case "privacy":
         return (
           <SettingsModalSection
-            title="Local Privacy Controls"
+            title={t("appSettings.privacy.localControlsTitle")}
             description="Choose how much local activity and device-level identity information Kanqual should retain on this machine."
           >
             <label className="settings-toggle-row">
               <span>
-                <strong>Hide stored file names in document details</strong>
-                <small>Masks filename metadata in the document detail view on this device.</small>
+                <strong>{t("appSettings.privacy.maskFilePathsLabel")}</strong>
+                <small>{t("appSettings.privacy.maskFilePathsDescription")}</small>
               </span>
               <input
                 type="checkbox"
@@ -1858,8 +1923,8 @@ export function AppSettingsView() {
 
             <label className="settings-toggle-row">
               <span>
-                <strong>Clear recent projects on sign-out</strong>
-                <small>Removes the local recent-project list whenever you sign out of Kanqual.</small>
+                <strong>{t("appSettings.privacy.clearRecentProjectsOnSignOutLabel")}</strong>
+                <small>{t("appSettings.privacy.clearRecentProjectsOnSignOutDescription")}</small>
               </span>
               <input
                 type="checkbox"
@@ -1873,8 +1938,8 @@ export function AppSettingsView() {
 
             <label className="settings-toggle-row">
               <span>
-                <strong>Forget remembered usernames on sign-out</strong>
-                <small>Removes saved local accounts and recent server connections so no usernames appear on the login screen after logout.</small>
+                <strong>{t("appSettings.privacy.forgetLoginIdentitiesOnLogoutLabel")}</strong>
+                <small>{t("appSettings.privacy.forgetLoginIdentitiesOnLogoutDescription")}</small>
               </span>
               <input
                 type="checkbox"
@@ -1890,31 +1955,35 @@ export function AppSettingsView() {
       case "diagnostics":
         return (
           <SettingsModalSection
-            title="Health Checks"
+            title={t("appSettings.diagnostics.healthChecksTitle")}
             description="Inspect the local runtime, storage connection, and core service endpoint for this installation."
           >
             <div className="settings-row">
               <div className="settings-row-info">
-                <div className="settings-row-label">App version</div>
+                <div className="settings-row-label">{t("appSettings.diagnostics.appVersion")}</div>
                 <div className="settings-row-desc">{appInfo?.appVersion ?? "Loading..."}</div>
               </div>
             </div>
 
             <div className="settings-row">
               <div className="settings-row-info">
-                <div className="settings-row-label">Local database</div>
+                <div className="settings-row-label">{t("appSettings.diagnostics.localDatabase")}</div>
                 <div className="settings-row-desc">
-                  {dbHealth === "checking" ? "Checking local PocketBase health..." : dbHealth === "ok" ? "Healthy" : "Unavailable"}
+                  {dbHealth === "checking"
+                    ? t("appSettings.diagnostics.databaseChecking")
+                    : dbHealth === "ok"
+                      ? t("appSettings.diagnostics.databaseHealthy")
+                      : t("appSettings.diagnostics.databaseUnavailable")}
                 </div>
               </div>
               <button className="btn" type="button" onClick={() => void refreshDiagnostics()} disabled={storageBusy}>
-                Re-check
+                {t("appSettings.diagnostics.recheck")}
               </button>
             </div>
 
             <div className="settings-row">
               <div className="settings-row-info">
-                <div className="settings-row-label">Database endpoint</div>
+                <div className="settings-row-label">{t("appSettings.diagnostics.databaseEndpoint")}</div>
                 <div className="settings-row-desc settings-code-line">http://127.0.0.1:8090</div>
               </div>
             </div>
@@ -1922,13 +1991,13 @@ export function AppSettingsView() {
         );
       case "administration":
         if (!canAccessAdministration) {
-          return <div className="settings-empty-state">You do not have permission to access administration tools on this device.</div>;
+          return <div className="settings-empty-state">{t("appSettings.admin.emptyState")}</div>;
         }
         return (
           <>
             <SettingsModalSection
-              title="Administration Shortcuts"
-              description="Open the main administrator workspaces for project-level or user-level management."
+              title={t("appSettings.admin.shortcutsTitle")}
+              description={t("appSettings.admin.shortcutsDescription")}
             >
               <div className="app-settings-stats">
                 <button
@@ -1936,9 +2005,9 @@ export function AppSettingsView() {
                   className="app-settings-stat-card app-settings-stat-card--button"
                   onClick={() => handleOpenAdminView("projects")}
                 >
-                  <strong>Project Administration</strong>
-                  <span>Open Projects</span>
-                  <small>Manage projects, ownership, and project-level administration.</small>
+                  <strong>{t("appSettings.admin.projectAdministration")}</strong>
+                  <span>{t("appSettings.admin.openProjects")}</span>
+                  <small>{t("appSettings.admin.projectAdministrationDescription")}</small>
                 </button>
                 <button
                   type="button"
@@ -1946,36 +2015,36 @@ export function AppSettingsView() {
                   onClick={() => handleOpenAdminView("users")}
                   disabled={!activeProject}
                 >
-                  <strong>User Administration</strong>
-                  <span>{activeProject ? "Open Project Users" : "Open a project first"}</span>
-                  <small>Manage members and roles in the currently active project.</small>
+                  <strong>{t("appSettings.admin.userAdministration")}</strong>
+                  <span>{activeProject ? t("appSettings.admin.openProjectUsers") : t("appSettings.admin.openProjectFirst")}</span>
+                  <small>{t("appSettings.admin.userAdministrationDescription")}</small>
                 </button>
               </div>
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Registered Users"
-              description="Delete local KanQual accounts from this device. Your current administrator account cannot be removed here."
+              title={t("appSettings.admin.registeredUsersTitle")}
+              description={t("appSettings.admin.registeredUsersDescription")}
             >
               <div className="users-table-wrap app-settings-admin-users-table-wrap">
                 <table className="users-table app-settings-admin-users-table">
                   <thead>
                     <tr>
-                      <th className="users-th" style={{ width: "42%" }}>Username</th>
-                      <th className="users-th" style={{ width: "18%" }}>Status</th>
-                      <th className="users-th" style={{ width: "24%" }}>Last Login</th>
-                      <th className="users-th" style={{ width: "16%" }}>Action</th>
+                      <th className="users-th" style={{ width: "42%" }}>{t("appSettings.admin.userTable.username")}</th>
+                      <th className="users-th" style={{ width: "18%" }}>{t("appSettings.admin.userTable.status")}</th>
+                      <th className="users-th" style={{ width: "24%" }}>{t("appSettings.admin.userTable.lastLogin")}</th>
+                      <th className="users-th" style={{ width: "16%" }}>{t("appSettings.admin.userTable.action")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {adminBusy && (
                       <tr>
-                        <td colSpan={4} className="users-td-msg">Loading users...</td>
+                        <td colSpan={4} className="users-td-msg">{t("appSettings.admin.userTable.loadingUsers")}</td>
                       </tr>
                     )}
                     {!adminBusy && !registeredUserTableRows.length && canViewLocalUsers && (
                       <tr>
-                        <td colSpan={4} className="users-td-msg">No registered users found.</td>
+                        <td colSpan={4} className="users-td-msg">{t("appSettings.admin.userTable.noRegisteredUsers")}</td>
                       </tr>
                     )}
                     {!canViewLocalUsers && (
@@ -1993,10 +2062,12 @@ export function AppSettingsView() {
                         </td>
                         <td className="users-td">
                           <span className={`users-activity-status ${entry.active ? "users-activity-status--active" : "users-activity-status--inactive"}`}>
-                            {entry.active ? "Active" : "Inactive"}
+                            {entry.active ? t("projectUsers.tabs.active") : t("projectUsers.tabs.inactive")}
                           </span>
                         </td>
-                        <td className="users-td users-td--muted">{formatAdminDateTime(entry.lastLoginAt)}</td>
+                        <td className="users-td users-td--muted">
+                          {formatAdminDateTime(entry.lastLoginAt, t("projectUsers.lastLoginNever"), formatDateTime)}
+                        </td>
                         <td className="users-td">
                           <button
                             type="button"
@@ -2004,7 +2075,11 @@ export function AppSettingsView() {
                             onClick={() => void handleDeleteRegisteredUser(entry.id)}
                             disabled={adminBusy || entry.isCurrentUser || !canDeleteLocalUsers}
                           >
-                            {entry.isCurrentUser ? "Current Account" : !canDeleteLocalUsers ? "No Permission" : "Delete"}
+                            {entry.isCurrentUser
+                              ? t("appSettings.admin.userTable.currentAccount")
+                              : !canDeleteLocalUsers
+                                ? t("appSettings.admin.userTable.noPermissionAction")
+                                : t("appSettings.admin.userTable.deleteAction")}
                           </button>
                         </td>
                       </tr>
@@ -2015,15 +2090,15 @@ export function AppSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Destructive Maintenance"
+              title={t("appSettings.admin.destructiveMaintenanceTitle")}
               tone="danger"
-              description="Wipe all local KanQual records on this device, including users, projects, and stored working data."
+              description={t("appSettings.admin.clearAppDataDescription")}
             >
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <div className="settings-row-label">Clear App Data</div>
+                  <div className="settings-row-label">{t("appSettings.admin.clearAppDataTitle")}</div>
                   <div className="settings-row-desc">
-                    Wipe all local KanQual records on this device, including users, projects, and stored working data.
+                    {t("appSettings.admin.clearAppDataDescription")}
                   </div>
                 </div>
                 <button
@@ -2032,7 +2107,7 @@ export function AppSettingsView() {
                   onClick={() => void handleClearAppData()}
                   disabled={adminBusy || !canClearLocalAppData}
                 >
-                  Clear App Data
+                  {t("appSettings.admin.clearAppDataAction")}
                 </button>
               </div>
 
@@ -2043,13 +2118,13 @@ export function AppSettingsView() {
       case "updates":
         return (
           <SettingsModalSection
-            title="Update Preferences"
+            title={t("appSettings.updates.title")}
             description="Control whether Kanqual checks for newer releases automatically and where to review them manually."
           >
             <label className="settings-toggle-row">
               <span>
-                <strong>Check for updates automatically</strong>
-                <small>Checks GitHub releases on startup and shows a warning when a newer version is available.</small>
+                <strong>{t("appSettings.updates.autoCheckLabel")}</strong>
+                <small>{t("appSettings.updates.autoCheckDescription")}</small>
               </span>
               <input
                 type="checkbox"
@@ -2063,15 +2138,15 @@ export function AppSettingsView() {
 
             <div className="settings-row">
               <div className="settings-row-info">
-                <div className="settings-row-label">Latest releases</div>
-                <div className="settings-row-desc">Open the KanQual GitHub releases page in your default browser.</div>
+                <div className="settings-row-label">{t("appSettings.updates.latestReleasesLabel")}</div>
+                <div className="settings-row-desc">{t("appSettings.updates.latestReleasesDescription")}</div>
               </div>
               <button
                 className="btn"
                 type="button"
                 onClick={() => void openUrl(GITHUB_RELEASES_URL)}
               >
-                Open Releases Page
+                {t("appSettings.updates.openReleasesPage")}
               </button>
             </div>
           </SettingsModalSection>
@@ -2083,7 +2158,7 @@ export function AppSettingsView() {
         return (
           <div className="app-settings-modal-sections">
             <SettingsModalSection
-              title="AI Assist Status"
+              title={t("appSettings.aiAssist.statusTitle")}
               description="Check whether embeddings, the local server, and the selected model are ready before you start an AI Assist workflow."
             >
               <div className="ai-assist-settings-status-grid">
@@ -2115,7 +2190,7 @@ export function AppSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Step 1: Embedding Runtime"
+              title={t("appSettings.aiAssist.labels.embeddingRuntimeStep")}
               description="Download the local embedding model Kanqual uses for search and retrieval, then open tuning only when you need to adjust indexing behavior."
             >
               {embeddingModelError && <div className="form-error project-settings-error">{embeddingModelError}</div>}
@@ -2289,7 +2364,7 @@ export function AppSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Step 2: Local LLM Connection"
+              title={t("appSettings.aiAssist.labels.localLlmConnectionStep")}
               description="Turn on the local server integration, test it, and open the connection settings only when you need to change the endpoint."
             >
               <label className="settings-toggle-row">
@@ -2427,7 +2502,7 @@ export function AppSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Step 3: Model Defaults"
+              title={t("appSettings.aiAssist.labels.modelDefaultsStep")}
               description="Choose the local model Kanqual should use, then expand advanced defaults only when you want to tune generation behavior."
             >
               <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
@@ -2459,7 +2534,7 @@ export function AppSettingsView() {
               </fieldset>
 
               <details className="ai-assist-settings-disclosure">
-                <summary className="ai-assist-settings-disclosure-summary">Advanced generation defaults</summary>
+                <summary className="ai-assist-settings-disclosure-summary">{t("appSettings.aiAssist.labels.advancedGenerationDefaults")}</summary>
                 <div className="ai-assist-settings-disclosure-body">
                   <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                     <label className="form-label">
@@ -2636,8 +2711,8 @@ export function AppSettingsView() {
           <section className="app-settings-about-card">
             <div className="app-settings-about-header">
               <div className="app-settings-about-copy">
-                <h2>About KanQual</h2>
-                <p>Release, citation, license, and dependency information for this installation.</p>
+                <h2>{t("appSettings.about.title")}</h2>
+                <p>{t("appSettings.about.description")}</p>
               </div>
               <button
                 type="button"
@@ -2645,20 +2720,22 @@ export function AppSettingsView() {
                 onClick={() => setAboutCardExpanded((expanded) => !expanded)}
                 aria-expanded={aboutCardExpanded}
               >
-                {aboutCardExpanded ? "Collapse" : "Expand"}
+                {aboutCardExpanded
+                  ? t("appSettings.about.collapse")
+                  : t("appSettings.about.expand")}
               </button>
             </div>
             {aboutCardExpanded && (
             <div className="app-settings-about-body">
               <section className="about-kanqual-section">
-                <h4>Release</h4>
+                <h4>{t("appSettings.about.release")}</h4>
                 <div className="about-kanqual-meta-grid">
                   <div className="about-kanqual-meta-card">
-                    <span className="about-kanqual-meta-label">Version</span>
+                    <span className="about-kanqual-meta-label">{t("appSettings.about.version")}</span>
                     <strong>{appInfo?.appVersion ?? "0.9.1"}</strong>
                   </div>
                   <div className="about-kanqual-meta-card">
-                    <span className="about-kanqual-meta-label">Release date</span>
+                    <span className="about-kanqual-meta-label">{t("appSettings.about.releaseDate")}</span>
                     <strong>{RELEASE_DATE}</strong>
                   </div>
                 </div>
@@ -2667,55 +2744,52 @@ export function AppSettingsView() {
               <hr className="about-kanqual-separator" />
 
               <section className="about-kanqual-section">
-                <h4>Created By</h4>
+                <h4>{t("appSettings.about.createdBy")}</h4>
                 <p>
-                  Created by Mehmet Cansoy - Associate Prof. of Sociology at Fairfield University
+                  {t("appSettings.about.createdByBody")}
                 </p>
               </section>
 
               <hr className="about-kanqual-separator" />
 
               <section className="about-kanqual-section">
-                <h4>Citation</h4>
+                <h4>{t("appSettings.about.citation")}</h4>
                 <p>
-                  If you cite KanQual in scientific publications, use a software citation that
-                  includes the author, year, software title, version, and institution.
+                  {t("appSettings.about.citationNote")}
                 </p>
                 <div className="about-kanqual-citation">
-                  Cansoy, M. (2026). <em>KanQual</em> (Version {appInfo?.appVersion ?? "0.9.1"}){" "}
-                  [Computer software]. https://github.com/KanQual/kanqual
+                  {t("appSettings.about.citationExample", {
+                    version: appInfo?.appVersion ?? "0.9.1",
+                  })}
                 </div>
               </section>
 
               <hr className="about-kanqual-separator" />
 
               <section className="about-kanqual-section">
-                <h4>License</h4>
+                <h4>{t("appSettings.about.license")}</h4>
                 <p>
-                  KanQual is released under the Apache License 2.0. This allows personal,
-                  academic, organizational, and commercial use, including modification and
-                  redistribution, as long as the Apache 2.0 terms and notices are preserved.
+                  {t("appSettings.about.licenseBody")} {t("appSettings.about.licenseNote")}
                 </p>
               </section>
 
               <hr className="about-kanqual-separator" />
 
               <section className="about-kanqual-section">
-                <h4>Dependency Licenses</h4>
+                <h4>{t("appSettings.about.dependencyLicenses")}</h4>
                 <p className="about-kanqual-license-note">
-                  Complete release inventory of the dependency licenses currently resolved in this
-                  build of KanQual.
+                  {t("appSettings.about.dependencyLicensesNote")}
                 </p>
 
                 <div className="about-kanqual-license-block">
-                  <h5>JavaScript / TypeScript</h5>
+                  <h5>{t("appSettings.about.javascriptTypescript")}</h5>
                   <div className="about-kanqual-license-table-wrap">
                     <table className="about-kanqual-license-table">
                       <thead>
                         <tr>
-                          <th>Package</th>
-                          <th>Version</th>
-                          <th>License</th>
+                          <th>{t("appSettings.about.package")}</th>
+                          <th>{t("appSettings.about.version")}</th>
+                          <th>{t("appSettings.about.license")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2732,14 +2806,14 @@ export function AppSettingsView() {
                 </div>
 
                 <div className="about-kanqual-license-block">
-                  <h5>Rust</h5>
+                  <h5>{t("appSettings.about.rust")}</h5>
                   <div className="about-kanqual-license-table-wrap">
                     <table className="about-kanqual-license-table">
                       <thead>
                         <tr>
-                          <th>Crate</th>
-                          <th>Version</th>
-                          <th>License</th>
+                          <th>{t("appSettings.about.crate")}</th>
+                          <th>{t("appSettings.about.version")}</th>
+                          <th>{t("appSettings.about.license")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2798,13 +2872,15 @@ export function AppSettingsView() {
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">Network mode</div>
+            <div className="settings-row-label">{t("appSettings.network.networkMode")}</div>
             <div className="settings-row-desc">
               {networkMode === "local"
-                ? "Local only ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â data is not accessible from other devices."
+                ? t("appSettings.network.localOnlyDescription")
                 : localIp
-                  ? `Network mode active ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â other devices can connect at http://${localIp}:8090`
-                  : "Network mode active ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â other devices on your local network can connect."}
+                  ? t("appSettings.network.activeWithAddress", {
+                      address: `http://${localIp}:8090`,
+                    })
+                  : t("appSettings.network.activeWithoutAddress")}
             </div>
           </div>
           <div className="segmented-control">
@@ -2817,8 +2893,10 @@ export function AppSettingsView() {
                 disabled={networkSwitching}
               >
                 {networkSwitching && option !== networkMode
-                  ? "Restarting..."
-                  : option === "local" ? "Local only" : "Allow network"}
+                  ? t("appSettings.network.restarting")
+                  : option === "local"
+                    ? t("appSettings.network.localOnlyOption")
+                    : t("appSettings.network.allowNetworkOption")}
               </button>
             ))}
           </div>
@@ -2837,8 +2915,8 @@ export function AppSettingsView() {
               Kanqual always reverts to local-only mode on next launch. When a project is open, LAN/local mode changes are also written to that project's log.
             </div>
             <CollaborationAddressCard
-              label="Local Network"
-              description="Reachable by devices on the same Wi-Fi or LAN. Share this address with collaborators on your local network."
+              label={t("appSettings.network.localNetwork")}
+              description={t("appSettings.network.localNetworkDescription")}
               host={localIpError ? null : localIp}
               port={8090}
               loading={!localIp && !localIpError}
@@ -2849,8 +2927,8 @@ export function AppSettingsView() {
             />
 
             <CollaborationAddressCard
-              label="External / Internet"
-              description="Reachable from outside your network. Requires port forwarding configured on your router."
+              label={t("appSettings.network.externalInternet")}
+              description={t("appSettings.network.externalInternetDescription")}
               host={externalIp}
               port={8090}
               loading={externalIpLoading}
@@ -2873,7 +2951,7 @@ export function AppSettingsView() {
       <section className="settings-section settings-section--wide">
         <div className="settings-section-header">
           <div>
-            <h2 className="settings-section-title">Data Location & Storage</h2>
+            <h2 className="settings-section-title">{t("appSettings.storage.localStorageTitle")}</h2>
           </div>
           {appInfo?.appDataDir && (
             <button
@@ -2888,39 +2966,39 @@ export function AppSettingsView() {
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">Storage mode</div>
+            <div className="settings-row-label">{t("appSettings.storage.storageMode")}</div>
             <div className="settings-row-desc">
               {appInfo?.portableMode === true
-                ? "Portable"
+                ? t("appSettings.storage.portable")
                 : appInfo?.portableMode === false
-                  ? "Installed / user profile"
-                  : "Loading..."}
+                  ? t("appSettings.storage.installed")
+                  : t("common.loading")}
             </div>
           </div>
         </div>
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">App data folder</div>
-            <div className="settings-row-desc settings-code-line">{appInfo?.appDataDir ?? "Loading..."}</div>
+            <div className="settings-row-label">{t("appSettings.storage.appDataFolder")}</div>
+            <div className="settings-row-desc settings-code-line">{appInfo?.appDataDir ?? t("common.loading")}</div>
           </div>
         </div>
 
         <div className="app-settings-stats">
           <div className="app-settings-stat-card">
-            <strong>Database</strong>
+            <strong>{t("appSettings.storage.database")}</strong>
             <span>{formatBytes(storageSummary.databaseBytes)}</span>
-            <small>{storageSummary.databaseFiles} files in `pb_data`</small>
+            <small>{formatStorageFileSummary(storageSummary.databaseFiles, "pb_data", t)}</small>
           </div>
           <div className="app-settings-stat-card">
-            <strong>Backups</strong>
+            <strong>{t("appSettings.storage.backups")}</strong>
             <span>{formatBytes(storageSummary.backupBytes)}</span>
-            <small>{storageSummary.backupFiles} files in `project_backups`</small>
+            <small>{formatStorageFileSummary(storageSummary.backupFiles, "project_backups", t)}</small>
           </div>
           <div className="app-settings-stat-card">
-            <strong>Total tracked storage</strong>
+            <strong>{t("appSettings.storage.totalTrackedStorage")}</strong>
             <span>{formatBytes(storageSummary.databaseBytes + storageSummary.backupBytes)}</span>
-            <small>Database plus managed backup files</small>
+            <small>{t("appSettings.storage.totalTrackedStorageDescription")}</small>
           </div>
         </div>
       </section>
@@ -2928,7 +3006,7 @@ export function AppSettingsView() {
       <section className="settings-section settings-section--wide">
         <div className="settings-section-header">
           <div>
-            <h2 className="settings-section-title">Startup & Session</h2>
+            <h2 className="settings-section-title">{t("appSettings.sectionTitles.startup")}</h2>
           </div>
         </div>
 
@@ -2951,14 +3029,14 @@ export function AppSettingsView() {
       <section className="settings-section settings-section--wide">
         <div className="settings-section-header">
           <div>
-            <h2 className="settings-section-title">Document Import</h2>
+            <h2 className="settings-section-title">{t("appSettings.sectionTitles.documentImport")}</h2>
           </div>
         </div>
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">Default import mode</div>
-            <div className="settings-row-desc">Choose whether the new document dialog starts in upload mode or paste mode.</div>
+            <div className="settings-row-label">{t("appSettings.documentImport.defaultModeLabel")}</div>
+            <div className="settings-row-desc">{t("appSettings.documentImport.defaultModeDescription")}</div>
           </div>
           <div className="segmented-control">
             {(["upload", "paste"] as const).map((option) => (
@@ -2969,9 +3047,11 @@ export function AppSettingsView() {
                 onClick={() => persist({
                   ...settings,
                   documentImport: { ...settings.documentImport, defaultMode: option },
-                }, "Document import defaults saved.")}
+                }, t("appSettings.documentImport.saved"))}
               >
-                {option === "upload" ? "Upload" : "Paste"}
+                {option === "upload"
+                  ? t("appSettings.documentImport.upload")
+                  : t("appSettings.documentImport.paste")}
               </button>
             ))}
           </div>
@@ -2979,8 +3059,8 @@ export function AppSettingsView() {
 
         <label className="settings-toggle-row">
           <span>
-            <strong>Auto-name documents from uploaded files</strong>
-            <small>Pre-fills the document name from the selected filename when the name field is empty.</small>
+            <strong>{t("appSettings.documentImport.autoNameLabel")}</strong>
+            <small>{t("appSettings.documentImport.autoNameDescription")}</small>
           </span>
           <input
             type="checkbox"
@@ -2988,14 +3068,14 @@ export function AppSettingsView() {
             onChange={(e) => persist({
               ...settings,
               documentImport: { ...settings.documentImport, autoNameFromFile: e.target.checked },
-            }, "Document import defaults saved.")}
+            }, t("appSettings.documentImport.saved"))}
           />
         </label>
 
         <label className="settings-toggle-row">
           <span>
-            <strong>Trim imported text automatically</strong>
-            <small>Removes leading and trailing whitespace from pasted text and extracted file contents before save.</small>
+            <strong>{t("appSettings.documentImport.trimImportedTextLabel")}</strong>
+            <small>{t("appSettings.documentImport.trimImportedTextDescription")}</small>
           </span>
           <input
             type="checkbox"
@@ -3003,14 +3083,14 @@ export function AppSettingsView() {
             onChange={(e) => persist({
               ...settings,
               documentImport: { ...settings.documentImport, trimImportedText: e.target.checked },
-            }, "Document import defaults saved.")}
+            }, t("appSettings.documentImport.saved"))}
           />
         </label>
 
         <label className="settings-toggle-row">
           <span>
-            <strong>Warn before creating empty imports</strong>
-            <small>Shows a confirmation if a file produces no extracted text and you continue anyway.</small>
+            <strong>{t("appSettings.documentImport.warnBeforeEmptyImportLabel")}</strong>
+            <small>{t("appSettings.documentImport.warnBeforeEmptyImportDescription")}</small>
           </span>
           <input
             type="checkbox"
@@ -3018,7 +3098,7 @@ export function AppSettingsView() {
             onChange={(e) => persist({
               ...settings,
               documentImport: { ...settings.documentImport, warnBeforeEmptyImport: e.target.checked },
-            }, "Document import defaults saved.")}
+            }, t("appSettings.documentImport.saved"))}
           />
         </label>
       </section>
@@ -3032,8 +3112,8 @@ export function AppSettingsView() {
 
         <label className="settings-toggle-row">
           <span>
-            <strong>Hide stored file names in document details</strong>
-            <small>Masks filename metadata in the document detail view on this device.</small>
+            <strong>{t("appSettings.privacy.maskFilePathsLabel")}</strong>
+            <small>{t("appSettings.privacy.maskFilePathsDescription")}</small>
           </span>
           <input
             type="checkbox"
@@ -3047,8 +3127,8 @@ export function AppSettingsView() {
 
         <label className="settings-toggle-row">
           <span>
-            <strong>Clear recent projects on sign-out</strong>
-            <small>Removes the local recent-project list whenever you sign out of Kanqual.</small>
+            <strong>{t("appSettings.privacy.clearRecentProjectsOnSignOutLabel")}</strong>
+            <small>{t("appSettings.privacy.clearRecentProjectsOnSignOutDescription")}</small>
           </span>
           <input
             type="checkbox"
@@ -3062,8 +3142,8 @@ export function AppSettingsView() {
 
         <label className="settings-toggle-row">
           <span>
-            <strong>Forget remembered usernames on sign-out</strong>
-            <small>Removes saved local accounts and recent server connections so no usernames appear on the login screen after logout.</small>
+            <strong>{t("appSettings.privacy.forgetLoginIdentitiesOnLogoutLabel")}</strong>
+            <small>{t("appSettings.privacy.forgetLoginIdentitiesOnLogoutDescription")}</small>
           </span>
           <input
             type="checkbox"
@@ -3085,26 +3165,30 @@ export function AppSettingsView() {
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">App version</div>
+            <div className="settings-row-label">{t("appSettings.diagnostics.appVersion")}</div>
             <div className="settings-row-desc">{appInfo?.appVersion ?? "Loading..."}</div>
           </div>
         </div>
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">Local database</div>
+            <div className="settings-row-label">{t("appSettings.diagnostics.localDatabase")}</div>
             <div className="settings-row-desc">
-              {dbHealth === "checking" ? "Checking local PocketBase health..." : dbHealth === "ok" ? "Healthy" : "Unavailable"}
+              {dbHealth === "checking"
+                ? t("appSettings.diagnostics.databaseChecking")
+                : dbHealth === "ok"
+                  ? t("appSettings.diagnostics.databaseHealthy")
+                  : t("appSettings.diagnostics.databaseUnavailable")}
             </div>
           </div>
           <button className="btn" type="button" onClick={() => void refreshDiagnostics()} disabled={storageBusy}>
-            Re-check
+            {t("appSettings.diagnostics.recheck")}
           </button>
         </div>
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">Database endpoint</div>
+            <div className="settings-row-label">{t("appSettings.diagnostics.databaseEndpoint")}</div>
             <div className="settings-row-desc settings-code-line">http://127.0.0.1:8090</div>
           </div>
         </div>
@@ -3119,8 +3203,8 @@ export function AppSettingsView() {
 
         <label className="settings-toggle-row">
           <span>
-            <strong>Check for updates automatically</strong>
-            <small>Checks GitHub releases on startup and shows a warning when a newer version is available.</small>
+            <strong>{t("appSettings.updates.autoCheckLabel")}</strong>
+            <small>{t("appSettings.updates.autoCheckDescription")}</small>
           </span>
           <input
             type="checkbox"
@@ -3134,15 +3218,15 @@ export function AppSettingsView() {
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-label">Latest releases</div>
-            <div className="settings-row-desc">Open the KanQual GitHub releases page in your default browser.</div>
+            <div className="settings-row-label">{t("appSettings.updates.latestReleasesLabel")}</div>
+            <div className="settings-row-desc">{t("appSettings.updates.latestReleasesDescription")}</div>
           </div>
           <button
             className="btn"
             type="button"
             onClick={() => void openUrl(GITHUB_RELEASES_URL)}
           >
-            Open Releases Page
+            {t("appSettings.updates.openReleasesPage")}
           </button>
         </div>
 
@@ -3158,7 +3242,7 @@ export function AppSettingsView() {
                 <h2 className="settings-section-title">{activeSettingsCard.title}</h2>
               </div>
               <button className="btn" type="button" onClick={() => setActiveSettingsModal(null)}>
-                Close
+                {t("appSettings.shell.close")}
               </button>
             </div>
             <div className="app-settings-modal-body">
@@ -3168,12 +3252,12 @@ export function AppSettingsView() {
             </div>
             <div className="app-settings-modal-footer">
               {shouldShowAppAutoSaveNotice(activeSettingsCard.id) ? (
-                <p className="app-settings-modal-footer-note">Changes save automatically on this device.</p>
+                <p className="app-settings-modal-footer-note">{t("appSettings.shell.autoSaveNotice")}</p>
               ) : (
                 <span />
               )}
               <button className="btn btn--primary" type="button" onClick={() => setActiveSettingsModal(null)}>
-                Done
+                {t("appSettings.shell.done")}
               </button>
             </div>
           </div>
@@ -3183,12 +3267,12 @@ export function AppSettingsView() {
       {confirmEnableNetworkMode && (
         <div className="modal-overlay" onClick={() => !networkSwitching && setConfirmEnableNetworkMode(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Enable Network Mode</h2>
+            <h2>{t("appSettings.network.enableTitle")}</h2>
             <p className="import-project-copy">
-              Other devices on your trusted local network will be able to attempt to connect to this Kanqual session until you switch back to local-only mode or close the app.
+              {t("appSettings.network.enableBody")}
             </p>
             <div className="settings-warning settings-warning--danger">
-              Only enable network mode on a network you trust. Kanqual will return to local-only mode the next time the app launches.
+              {t("appSettings.network.enableWarning")}
             </div>
             <div className="form-actions">
               <button
@@ -3197,7 +3281,7 @@ export function AppSettingsView() {
                 onClick={() => setConfirmEnableNetworkMode(false)}
                 disabled={networkSwitching}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -3205,7 +3289,9 @@ export function AppSettingsView() {
                 onClick={() => void handleConfirmEnableNetworkMode()}
                 disabled={networkSwitching}
               >
-                {networkSwitching ? "Enabling..." : "Enable Network Mode"}
+                {networkSwitching
+                  ? t("appSettings.network.enabling")
+                  : t("appSettings.network.enableAction")}
               </button>
             </div>
           </div>

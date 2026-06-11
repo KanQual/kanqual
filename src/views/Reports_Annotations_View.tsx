@@ -8,16 +8,18 @@ import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
-let excelJsPromise: Promise<any> | null = null;
+let writeExcelFilePromise: Promise<typeof import("write-excel-file/browser")> | null = null;
 let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
 let docxPromise: Promise<typeof import("docx")> | null = null;
 
-async function loadExcelJs() {
-  if (!excelJsPromise) {
-    excelJsPromise = import("exceljs");
+async function loadWriteExcelFile() {
+  if (!writeExcelFilePromise) {
+    writeExcelFilePromise = import("write-excel-file/browser");
   }
-  return excelJsPromise;
+  return writeExcelFilePromise;
 }
 
 async function loadJsPdf() {
@@ -122,7 +124,7 @@ type AnnotationSortBy = "document" | "code" | "coder" | "quoteLength" | "quote";
 function fmtDate(iso: string): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -205,11 +207,13 @@ function svgToDataUrl(svg: string): string {
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
-const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "name",          label: "Name",       width: "40%" },
-  { key: "createdByName", label: "Created By", width: "28%" },
-  { key: "createdAt",     label: "Created",    width: "32%" },
-];
+function getCols(t: ReturnType<typeof useI18n>["t"]): { key: SortCol; label: string; width: string }[] {
+  return [
+    { key: "name", label: t("reportsAnnotations.labels.name"), width: "40%" },
+    { key: "createdByName", label: t("reportsAnnotations.createdBy"), width: "28%" },
+    { key: "createdAt", label: t("reportsAnnotations.created"), width: "32%" },
+  ];
+}
 
 // ─── SVG → PNG helper ────────────────────────────────────────────────────────
 
@@ -239,6 +243,7 @@ function svgToPngDataUrl(svgString: string): Promise<string> {
   });
 }
 
+
 // ─── Export Modal ─────────────────────────────────────────────────────────────
 
 function ExportModal({
@@ -256,29 +261,30 @@ function ExportModal({
   onExportXLSX: () => void;
   exportingFormat: string | null;
 }) {
+  const { t } = useI18n();
   const options = [
     {
       key: "html",
-      label: "HTML",
-      description: "Can be opened in a web browser and is closest to what you see in the app.",
+      label: t("reportsAnnotations.fileTypes.html"),
+      description: t("reportsAnnotations.exportOptions.htmlDescription"),
       onClick: onExportHTML,
     },
     {
       key: "pdf",
-      label: "PDF",
-      description: "Uses a simpler layout and is the best for sharing.",
+      label: t("reportsAnnotations.fileTypes.pdf"),
+      description: t("reportsAnnotations.exportOptions.pdfDescription"),
       onClick: onExportPDF,
     },
     {
       key: "docx",
       label: "DOCX",
-      description: "Uses a simpler layout and is the best for further editing.",
+      description: t("reportsAnnotations.exportOptions.docxDescription"),
       onClick: onExportDOCX,
     },
     {
       key: "xlsx",
       label: "XLSX",
-      description: "Exports metadata, statistics charts, and all annotations into a structured Excel workbook.",
+      description: t("reportsAnnotations.exportWorkbookDescription"),
       onClick: onExportXLSX,
     },
   ] as const;
@@ -286,7 +292,7 @@ function ExportModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>Export Report</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsAnnotations.exportTitle")}</h2>
         <div
           style={{
             display: "grid",
@@ -320,13 +326,13 @@ function ExportModal({
                 </div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {exportingFormat === option.key ? "Exporting..." : `Export as ${option.label}`}
+                {exportingFormat === option.key ? t("reportsAnnotations.exporting") : t("reportsAnnotations.exportAs", { format: option.label })}
               </div>
             </button>
           ))}
         </div>
         <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>Cancel</button>
+          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("reportsAnnotations.cancel")}</button>
         </div>
       </div>
     </div>
@@ -350,6 +356,7 @@ function ReportPage({
   onBack: () => void;
   onUseSettings?: (settings: ReportSettings) => void;
 }) {
+  const { t } = useI18n();
   const { pb, activeProject, documents: storeDocs, codes: storeCodes, createCodeReport, canCurrentUser } = useStore();
   const { user: currentUser } = useAuth();
 
@@ -507,12 +514,12 @@ function ReportPage({
         setCaseItems(caseRecs.map((r) => ({ id: r.id, name: r.name })));
         setCaseAttributeItems(caseAttrRecs.map((r) => ({
           id: r.id,
-          name: r.name ?? "Untitled attribute",
+          name: r.name ?? t("reportsAnnotations.labels.untitledAttribute"),
           dataType: r.data_type ?? "text",
         })));
         setDocumentAttributeItems(docAttrRecs.map((r) => ({
           id: r.id,
-          name: r.name ?? "Untitled attribute",
+          name: r.name ?? t("reportsAnnotations.labels.untitledAttribute"),
           dataType: r.data_type ?? "text",
         })));
 
@@ -521,7 +528,7 @@ function ReportPage({
         });
         setUserItems(
           memberRecs
-            .map((r) => { const u = r.expand?.user; return u ? { id: u.id, name: u.name || u.email || "Unknown" } : null; })
+            .map((r) => { const u = r.expand?.user; return u ? { id: u.id, name: u.name || u.email || t("reportsCodes.exportSections.unknown") } : null; })
             .filter(Boolean) as UserItem[],
         );
 
@@ -761,7 +768,10 @@ function ReportPage({
   }, [selDocAttrIds, storeDocs, documentAttributeMap, documentAttributeItems, documentAttributeFilters, documentAttributeValueStats]);
 
   const caseFilterDocIds = useMemo(() => {
-    if (selCaseIds.size === 0) return new Set<string>();
+    const standaloneSelectedDocIds = new Set(
+      [...selDocIds].filter((docId) => (docCaseMap.get(docId)?.size ?? 0) === 0),
+    );
+    if (selCaseIds.size === 0) return standaloneSelectedDocIds;
     const ids = new Set<string>();
     for (const cId of selCaseIds) {
       if (caseIdsMatchingSelectedAttributes && !caseIdsMatchingSelectedAttributes.has(cId)) continue;
@@ -770,8 +780,12 @@ function ReportPage({
         ids.add(dId);
       }
     }
+    for (const docId of standaloneSelectedDocIds) {
+      if (docIdsMatchingSelectedAttributes && !docIdsMatchingSelectedAttributes.has(docId)) continue;
+      ids.add(docId);
+    }
     return ids;
-  }, [selCaseIds, caseDocMap, caseIdsMatchingSelectedAttributes, docIdsMatchingSelectedAttributes]);
+  }, [selCaseIds, selDocIds, caseDocMap, docCaseMap, caseIdsMatchingSelectedAttributes, docIdsMatchingSelectedAttributes]);
 
   const filteredAnns = useMemo(() => {
     if (isFrozen) return frozenAnns;
@@ -1106,7 +1120,7 @@ function ReportPage({
     if (!canStartReports) return;
     if (!activeProject || !name.trim()) return;
     if (selCaseIds.size === 0 || selDocIds.size === 0 || selCodeIds.size === 0 || selUserIds.size === 0) {
-      setError("Select at least one case, document, code, and user before saving the report.");
+      setError(t("reportsAnnotations.errors.selectAtLeastOne"));
       return;
     }
     setSaving(true);
@@ -1206,19 +1220,19 @@ function ReportPage({
   const includedUserItems = displayUserItems.filter((item) => selUserIds.has(item.id));
 
   const summaryCards: { key: string; label: string; value: number; items: SummaryItem[]; expandable?: boolean }[] = [
-    { key: "cases",       label: "Cases",       value: caseCount,           items: includedCaseItems },
-    { key: "documents",   label: "Documents",   value: docCount,            items: includedDocumentItems },
-    { key: "codes",       label: "Codes",       value: codeCount,           items: includedCodeItems },
-    { key: "users",       label: "Users",       value: userCount,           items: includedUserItems },
-    { key: "annotations", label: "Annotations", value: filteredAnns.length, items: [], expandable: false },
+    { key: "cases",       label: t("reportsAnnotations.labels.cases"),       value: caseCount,           items: includedCaseItems },
+    { key: "documents",   label: t("reportsAnnotations.labels.documents"),   value: docCount,            items: includedDocumentItems },
+    { key: "codes",       label: t("reportsAnnotations.labels.codes"),       value: codeCount,           items: includedCodeItems },
+    { key: "users",       label: t("reportsAnnotations.labels.users"),       value: userCount,           items: includedUserItems },
+    { key: "annotations", label: t("reportsAnnotations.labels.annotations"), value: filteredAnns.length, items: [], expandable: false },
   ];
 
   function getCoderName(userId: string): string {
-    return displayUserItems.find((u) => u.id === userId)?.name || "Unknown";
+    return displayUserItems.find((u) => u.id === userId)?.name || t("reportsCodes.exportSections.unknown");
   }
 
   function getCodeName(ann: AnnItem): string {
-    return ann.codeName || storeCodes.find((code) => code.id === ann.codeId)?.label || "Unknown";
+    return ann.codeName || storeCodes.find((code) => code.id === ann.codeId)?.label || t("reportsCodes.exportSections.unknown");
   }
 
   function getCaseNameForAnn(ann: AnnItem): string {
@@ -1381,8 +1395,8 @@ function ReportPage({
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{item.name}</div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: stat?.textValues ?? [] })}>All</button>
-                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: [] })}>Clear</button>
+                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: stat?.textValues ?? [] })}>{t("reportsCodes.actions.all")}</button>
+                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: [] })}>{t("reportsCodes.actions.clear")}</button>
                 </div>
               </div>
               <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-surface)" }}>
@@ -1514,7 +1528,7 @@ function ReportPage({
         }
         case "none":
         default:
-          return { key: "all", label: "Annotations" };
+          return { key: "all", label: t("reportsAnnotations.labels.annotations") };
       }
     };
 
@@ -1701,12 +1715,12 @@ function ReportPage({
   }
 
   function getCleanReportHtml(contentMap: Map<string, string> = new Map()): string {
-    const title = name || "Untitled Report";
-    const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown");
+    const title = name || t("reportsAnnotations.untitledReport");
+    const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"));
     const createdAt = row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString());
     const descriptionHtml = getExportDescriptionHtml();
-    const groupLabels: Record<string, string> = { none: "None", code: "Code", document: "Document", coder: "Coder" };
-    const sortLabels: Record<string, string> = { document: "Document", code: "Code", coder: "Coder", quoteLength: "Quote Length", quote: "Quote (A–Z)" };
+    const groupLabels: Record<string, string> = { none: t("reportsAnnotations.exportLabels.none"), code: t("reportsAnnotations.exportLabels.code"), document: t("reportsAnnotations.exportLabels.document"), coder: t("reportsAnnotations.exportLabels.coder") };
+    const sortLabels: Record<string, string> = { document: t("reportsAnnotations.exportLabels.document"), code: t("reportsAnnotations.exportLabels.code"), coder: t("reportsAnnotations.exportLabels.coder"), quoteLength: t("reportsAnnotations.exportLabels.quoteLength"), quote: t("reportsAnnotations.exportLabels.quoteAZ") };
 
     const filterRows: string[] = [];
     if (selCaseIds.size > 0) {
@@ -1726,18 +1740,18 @@ function ReportPage({
       filterRows.push(`<tr><td><strong>Users</strong></td><td>${escapeHtml(names)}</td></tr>`);
     }
     if (caseFilterDetails.length > 0)
-      filterRows.push(`<tr><td><strong>Case Attributes</strong></td><td>${escapeHtml(caseFilterDetails.join("; "))}</td></tr>`);
+      filterRows.push(`<tr><td><strong>${escapeHtml(t("reportsAnnotations.exportLabels.caseAttributes"))}</strong></td><td>${escapeHtml(caseFilterDetails.join("; "))}</td></tr>`);
     if (documentFilterDetails.length > 0)
-      filterRows.push(`<tr><td><strong>Document Attributes</strong></td><td>${escapeHtml(documentFilterDetails.join("; "))}</td></tr>`);
+      filterRows.push(`<tr><td><strong>${escapeHtml(t("reportsAnnotations.exportLabels.documentAttributes"))}</strong></td><td>${escapeHtml(documentFilterDetails.join("; "))}</td></tr>`);
     const filtersHtml = filterRows.length > 0
-      ? `<h2>Applied Filters</h2><table class="details">${filterRows.join("")}</table>`
+      ? `<h2>${escapeHtml(t("reportsAnnotations.appliedFilters"))}</h2><table class="details">${filterRows.join("")}</table>`
       : "";
 
     const statisticsHtml = [
-      { title: "Code Coverage", subtitle: `% of ${coverageStats.totalChars.toLocaleString()} characters`, image: getCoverageChartSvg(true) },
-      { title: "Annotations Per Code", subtitle: "Count of annotations by code", image: getAnnotationFrequencyChartSvg(true) },
-      { title: "Annotations Per Document", subtitle: "Count of annotations by document", image: getAnnotationDocumentChartSvg(true) },
-      { title: "Annotation Length", subtitle: "Box-and-whisker summary in characters", image: getAnnotationLengthChartSvg(true) },
+      { title: t("reportsAnnotations.charts.codeCoverage"), subtitle: t("reportsAnnotations.charts.codeCoverageSubtitle", { count: formatCurrentNumber(coverageStats.totalChars) }), image: getCoverageChartSvg(true) },
+      { title: t("reportsAnnotations.charts.annotationsPerCode"), subtitle: t("reportsAnnotations.charts.annotationsPerCodeSubtitle"), image: getAnnotationFrequencyChartSvg(true) },
+      { title: t("reportsAnnotations.charts.annotationsPerDocument"), subtitle: t("reportsAnnotations.charts.annotationsPerDocumentSubtitle"), image: getAnnotationDocumentChartSvg(true) },
+      { title: t("reportsAnnotations.charts.annotationLength"), subtitle: t("reportsAnnotations.charts.annotationLengthSubtitle"), image: getAnnotationLengthChartSvg(true) },
     ]
       .filter((item) => item.image)
       .map((item) => `
@@ -1773,7 +1787,7 @@ function ReportPage({
     }).join("");
 
     const annotationHtml = sortedAnns.length === 0
-      ? `<p class="muted">No annotations were captured in this report.</p>`
+      ? `<p class="muted">${escapeHtml(t("reportsAnnotations.empty.noAnnotationsCaptured"))}</p>`
       : annotationGroupBy === "none"
         ? annGroupHtml(sortedAnns)
         : groupedAnns.map((group) => `
@@ -1813,8 +1827,8 @@ function ReportPage({
   <body>
     <h1>${escapeHtml(title)}</h1>
     <table class="details">
-      <tr><td><strong>Created by</strong></td><td>${escapeHtml(createdBy)}</td></tr>
-      <tr><td><strong>Created</strong></td><td>${escapeHtml(createdAt)}</td></tr>
+      <tr><td><strong>${escapeHtml(t("reportsAnnotations.createdBy"))}</strong></td><td>${escapeHtml(createdBy)}</td></tr>
+      <tr><td><strong>${escapeHtml(t("reportsAnnotations.created"))}</strong></td><td>${escapeHtml(createdAt)}</td></tr>
       <tr><td><strong>Group by</strong></td><td>${escapeHtml(groupLabels[annotationGroupBy] ?? annotationGroupBy)}</td></tr>
       <tr><td><strong>Sort by</strong></td><td>${escapeHtml(sortLabels[annotationSortBy] ?? annotationSortBy)}</td></tr>
     </table>
@@ -1825,7 +1839,7 @@ function ReportPage({
       <tr><td>${caseCount}</td><td>${docCount}</td><td>${codeCount}</td><td>${userCount}</td><td>${filteredAnns.length}</td></tr>
     </table>
     ${filtersHtml}
-    ${statisticsHtml ? `<h2>Statistics</h2>${statisticsHtml}` : ""}
+    ${statisticsHtml ? `<h2>${escapeHtml(t("reportsAnnotations.statistics"))}</h2>${statisticsHtml}` : ""}
     <h2>Annotations</h2>
     ${annotationHtml}
   </body>
@@ -1836,112 +1850,146 @@ function ReportPage({
     if (!canExportReports) return;
     try {
       setExportingFormat("xlsx");
-      const path = await save({ defaultPath: `${name || "Report"}.xlsx`, filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }] });
+      const path = await save({ defaultPath: `${name || t("reportsAnnotations.untitledReport")}.xlsx`, filters: [{ name: t("reportsAnnotations.fileTypes.excelWorkbook"), extensions: ["xlsx"] }] });
       if (!path) return;
 
-      const ExcelJS = await loadExcelJs();
-      const workbook = new ExcelJS.Workbook();
-      workbook.creator = currentUser?.name || currentUser?.email || "Kanqual";
-      workbook.created = new Date();
-
-      const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE1E4EA" } };
-      function styleHeaderCell(cell: any) { cell.font = { bold: true }; cell.fill = HEADER_FILL; }
-
-      const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown");
+      const { default: writeXlsxFile } = await loadWriteExcelFile();
+      const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"));
       const createdAt = row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString());
-      const groupLabels: Record<string, string> = { none: "None", code: "Code", document: "Document", coder: "Coder" };
-      const sortLabels: Record<string, string> = { document: "Document", code: "Code", coder: "Coder", quoteLength: "Quote Length", quote: "Quote (A–Z)" };
+      const groupLabels: Record<string, string> = { none: t("reportsAnnotations.exportLabels.none"), code: t("reportsAnnotations.exportLabels.code"), document: t("reportsAnnotations.exportLabels.document"), coder: t("reportsAnnotations.exportLabels.coder") };
+      const sortLabels: Record<string, string> = { document: t("reportsAnnotations.exportLabels.document"), code: t("reportsAnnotations.exportLabels.code"), coder: t("reportsAnnotations.exportLabels.coder"), quoteLength: t("reportsAnnotations.exportLabels.quoteLength"), quote: t("reportsAnnotations.exportLabels.quoteAZ") };
 
       // ── Sheet 1: Report metadata ─────────────────────────────────────────
-      const meta = workbook.addWorksheet("Report");
-      meta.columns = [{ width: 22 }, { width: 62 }];
+      const headerCell = (value: string) => ({
+        value,
+        fontWeight: "bold" as const,
+        backgroundColor: "#E1E4EA",
+      });
+      const titleCellValue = (value: string, columnSpan = 1) => ({
+        value,
+        fontWeight: "bold" as const,
+        fontSize: 16,
+        ...(columnSpan > 1 ? { columnSpan } : {}),
+      });
+      const sectionCell = (value: string) => ({ value, fontWeight: "bold" as const });
+      const subheadingCell = (value: string) => ({
+        value,
+        fontStyle: "italic" as const,
+        textColor: "#687385",
+      });
+      const wrappedCell = (value: string) => ({
+        value,
+        wrap: true,
+        verticalAlign: "top" as const,
+      });
 
-      meta.mergeCells("A1:B1");
-      const titleCell = meta.getCell("A1");
-      titleCell.value = name || "Untitled Report";
-      titleCell.font = { bold: true, size: 16 };
-
-      meta.addRow([]);
-      meta.addRow(["Created by", createdBy]);
-      meta.addRow(["Created", createdAt]);
-      meta.addRow(["Group by", groupLabels[annotationGroupBy] ?? annotationGroupBy]);
-      meta.addRow(["Sort by", sortLabels[annotationSortBy] ?? annotationSortBy]);
+      const metaRows: Array<Array<any>> = [
+        [titleCellValue(name || t("reportsAnnotations.untitledReport"), 2), null],
+        [],
+        [t("reportsAnnotations.createdBy"), createdBy],
+        [t("reportsAnnotations.created"), createdAt],
+        ["Group by", groupLabels[annotationGroupBy] ?? annotationGroupBy],
+        ["Sort by", sortLabels[annotationSortBy] ?? annotationSortBy],
+      ];
 
       const description = htmlToPlainText(getExportDescriptionHtml());
       if (description) {
-        meta.addRow([]);
-        const dh = meta.addRow(["Description"]); dh.getCell(1).font = { bold: true };
-        for (const line of description.split(/\n+/).filter(Boolean)) meta.addRow([line]);
+        metaRows.push([]);
+        metaRows.push([sectionCell("Description")]);
+        for (const line of description.split(/\n+/).filter(Boolean)) {
+          metaRows.push([line]);
+        }
       }
 
-      meta.addRow([]);
-      const sh = meta.addRow(["Summary"]); sh.getCell(1).font = { bold: true };
-      meta.addRow(["Cases",       caseCount]);
-      meta.addRow(["Documents",   docCount]);
-      meta.addRow(["Codes",       codeCount]);
-      meta.addRow(["Users",       userCount]);
-      meta.addRow(["Annotations", filteredAnns.length]);
+      metaRows.push([]);
+      metaRows.push([sectionCell("Summary")]);
+      metaRows.push(["Cases", caseCount]);
+      metaRows.push(["Documents", docCount]);
+      metaRows.push(["Codes", codeCount]);
+      metaRows.push(["Users", userCount]);
+      metaRows.push(["Annotations", filteredAnns.length]);
 
       const filterLines: Array<[string, string]> = [];
       if (selCaseIds.size  > 0) filterLines.push(["Cases",       displayCaseItems.filter(c => selCaseIds.has(c.id)).map(c => c.name).join(", ")]);
       if (selDocIds.size   > 0) filterLines.push(["Documents",   storeDocs.filter(d => selDocIds.has(d.id)).map(d => d.name).join(", ")]);
       if (selCodeIds.size  > 0) filterLines.push(["Codes",       storeCodes.filter(c => selCodeIds.has(c.id)).map(c => c.label).join(", ")]);
       if (selUserIds.size  > 0) filterLines.push(["Users",       displayUserItems.filter(u => selUserIds.has(u.id)).map(u => u.name).join(", ")]);
-      if (caseFilterDetails.length     > 0) filterLines.push(["Case Attributes",     caseFilterDetails.join("; ")]);
-      if (documentFilterDetails.length > 0) filterLines.push(["Document Attributes", documentFilterDetails.join("; ")]);
+      if (caseFilterDetails.length     > 0) filterLines.push([t("reportsAnnotations.exportLabels.caseAttributes"),     caseFilterDetails.join("; ")]);
+      if (documentFilterDetails.length > 0) filterLines.push([t("reportsAnnotations.exportLabels.documentAttributes"), documentFilterDetails.join("; ")]);
       if (filterLines.length > 0) {
-        meta.addRow([]);
-        const fh = meta.addRow(["Applied Filters"]); fh.getCell(1).font = { bold: true };
-        for (const [label, value] of filterLines) meta.addRow([label, value]);
-      }
-
-      // ── Sheet 2: Statistics charts ───────────────────────────────────────
-      const statsSheet = workbook.addWorksheet("Statistics");
-      statsSheet.columns = [{ width: 10 }];
-      let sr = 1;
-
-      const charts = [
-        { title: "Code Coverage",            subtitle: `% of ${coverageStats.totalChars.toLocaleString()} characters`, svg: getCoverageChartSvg(true) },
-        { title: "Annotations Per Code",     subtitle: "Count of annotations by code",               svg: getAnnotationFrequencyChartSvg(true) },
-        { title: "Annotations Per Document", subtitle: "Count of annotations by document",            svg: getAnnotationDocumentChartSvg(true) },
-        { title: "Annotation Length",        subtitle: "Box-and-whisker summary in characters",       svg: getAnnotationLengthChartSvg(true) },
-      ].filter((c): c is { title: string; subtitle: string; svg: string } => c.svg !== null);
-
-      for (const chart of charts) {
-        statsSheet.getCell(sr, 1).value = chart.title;
-        statsSheet.getCell(sr, 1).font = { bold: true, size: 13 };
-        sr++;
-        statsSheet.getCell(sr, 1).value = chart.subtitle;
-        statsSheet.getCell(sr, 1).font = { italic: true, color: { argb: "FF687385" } };
-        sr++;
-        try {
-          const png = await svgToPngDataUrl(chart.svg);
-          const wMatch = chart.svg.match(/width="(\d+)"/);
-          const hMatch = chart.svg.match(/height="(\d+)"/);
-          const nativeW = wMatch ? parseInt(wMatch[1], 10) : 760;
-          const nativeH = hMatch ? parseInt(hMatch[1], 10) : 260;
-          const displayW = 500;
-          const displayH = Math.round((nativeH / nativeW) * displayW);
-          const imgId = workbook.addImage({ base64: png.split(",")[1], extension: "png" });
-          statsSheet.addImage(imgId, { tl: { col: 0, row: sr - 1 }, ext: { width: displayW, height: displayH } });
-          sr += Math.ceil(displayH / 19) + 2;
-        } catch {
-          sr += 2;
+        metaRows.push([]);
+        metaRows.push([sectionCell(t("reportsAnnotations.appliedFilters"))]);
+        for (const [label, value] of filterLines) {
+          metaRows.push([label, value]);
         }
       }
 
+      // ── Sheet 2: Statistics charts ───────────────────────────────────────
+      const statsRows: Array<Array<any>> = [];
+      const pushStatsSection = (
+        title: string,
+        subtitle: string,
+        headers: string[],
+        rows: Array<Array<string | number>>,
+      ) => {
+        statsRows.push([{ value: title, fontWeight: "bold", fontSize: 13 }]);
+        statsRows.push([subheadingCell(subtitle)]);
+        if (rows.length === 0) {
+          statsRows.push([{ value: "No data available for this view.", textColor: "#687385", fontStyle: "italic" as const }]);
+        } else {
+          statsRows.push(headers.map((header) => headerCell(header)));
+          for (const row of rows) statsRows.push(row);
+        }
+        statsRows.push([]);
+      };
+
+      pushStatsSection(
+        t("reportsAnnotations.charts.codeCoverage"),
+        t("reportsAnnotations.charts.codeCoverageSubtitle", { count: formatCurrentNumber(coverageStats.totalChars) }),
+        ["Code", "Color", "Characters", "Percent"],
+        coverageStats.rows.map((row) => [
+          row.codeName,
+          row.codeColor,
+          row.chars,
+          `${row.pct < 0.1 ? "<0.1" : row.pct.toFixed(1)}%`,
+        ]),
+      );
+
+      pushStatsSection(
+        t("reportsAnnotations.charts.annotationsPerCode"),
+        t("reportsAnnotations.charts.annotationsPerCodeSubtitle"),
+        ["Code", "Color", "Annotations"],
+        annotationFrequencyStats.map((row) => [row.codeName, row.codeColor, row.count]),
+      );
+
+      pushStatsSection(
+        t("reportsAnnotations.charts.annotationsPerDocument"),
+        t("reportsAnnotations.charts.annotationsPerDocumentSubtitle"),
+        ["Document", "Annotations"],
+        annotationDocumentStats.map((row) => [row.documentName, row.count]),
+      );
+
+      pushStatsSection(
+        t("reportsAnnotations.charts.annotationLength"),
+        t("reportsAnnotations.charts.annotationLengthSubtitle"),
+        ["Code", "Color", "Annotations", "Min", "Q1", "Median", "Q3", "Max", "Mean"],
+        annotationLengthStats.rows.map((row) => [
+          row.codeName,
+          row.codeColor,
+          row.count,
+          row.min,
+          Number(row.q1.toFixed(1)),
+          Number(row.median.toFixed(1)),
+          Number(row.q3.toFixed(1)),
+          row.max,
+          Number(row.mean.toFixed(1)),
+        ]),
+      );
+
       // ── Sheet 3: Annotations data ────────────────────────────────────────
-      const annSheet = workbook.addWorksheet("Annotations");
       const withGroup = annotationGroupBy !== "none";
       const contentMap = await buildExportContentMap();
       const withContext = showContext && contentMap.size > 0;
-
-      annSheet.columns = [
-        ...(withGroup ? [{ width: 20 }] : []),
-        { width: 20 }, { width: 26 }, { width: 18 }, { width: 20 }, { width: 52 },
-        ...(withContext ? [{ width: 42 }, { width: 42 }] : []),
-        { width: 32 },
-      ];
 
       const headers = [
         ...(withGroup ? ["Group"] : []),
@@ -1949,9 +1997,7 @@ function ReportPage({
         ...(withContext ? ["Context Before", "Context After"] : []),
         "Note",
       ];
-      const hdrRow = annSheet.addRow(headers);
-      hdrRow.eachCell((cell: any) => styleHeaderCell(cell));
-      annSheet.views = [{ state: "frozen", ySplit: 1 }];
+      const annRows: Array<Array<any>> = [headers.map((header) => headerCell(header))];
 
       const annToGroup = new Map<string, string>();
       if (withGroup) {
@@ -1962,26 +2008,59 @@ function ReportPage({
 
       for (const ann of sortedAnns) {
         const ctx = withContext ? annContext(ann, contentMap) : null;
-        annSheet.addRow([
+        annRows.push([
           ...(withGroup ? [annToGroup.get(ann.id) ?? groupLabels[annotationGroupBy]] : []),
           getCaseNameForAnn(ann),
           ann.documentName,
           displayUserItems.find(u => u.id === ann.createdById)?.name || "—",
           getCodeName(ann),
-          ann.quote,
+          wrappedCell(ann.quote),
           ...(withContext ? [
             ctx ? (ctx.ellipsisBefore ? "…" : "") + ctx.before : "",
             ctx ? ctx.after + (ctx.ellipsisAfter ? "…" : "") : "",
           ] : []),
-          ann.note,
+          wrappedCell(ann.note),
         ]);
       }
 
-      const buffer = await workbook.xlsx.writeBuffer();
-      await writeFile(path, new Uint8Array(buffer as ArrayBuffer));
+      const file = writeXlsxFile(
+        [
+          {
+            sheet: "Report",
+            data: metaRows,
+            columns: [{ width: 22 }, { width: 62 }],
+          },
+          {
+            sheet: t("reportsAnnotations.statistics"),
+            data: statsRows,
+            columns: [{ width: 72 }],
+          },
+          {
+            sheet: "Annotations",
+            data: annRows,
+            columns: [
+              ...(withGroup ? [{ width: 20 }] : []),
+              { width: 20 },
+              { width: 26 },
+              { width: 18 },
+              { width: 20 },
+              { width: 52 },
+              ...(withContext ? [{ width: 42 }, { width: 42 }] : []),
+              { width: 32 },
+            ],
+            stickyRowsCount: 1,
+          },
+        ],
+        {
+          fontFamily: "Calibri",
+          fontSize: 11,
+        },
+      );
+      const blob = await file.toBlob();
+      await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
     } catch (e) {
       console.error("XLSX export failed:", e);
-      setError("XLSX export failed.");
+      setError(t("reportsAnnotations.errors.xlsxExportFailed"));
     } finally {
       setExportingFormat(null);
       setShowExportModal(false);
@@ -1992,12 +2071,12 @@ function ReportPage({
     if (!canExportReports) return;
     try {
       setExportingFormat("html");
-      const path = await save({ defaultPath: `${name || "Report"}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
+      const path = await save({ defaultPath: `${name || t("reportsAnnotations.untitledReport")}.html`, filters: [{ name: t("reportsAnnotations.fileTypes.html"), extensions: ["html"] }] });
       if (!path) return;
       const contentMap = await buildExportContentMap();
       await writeTextFile(path, getCleanReportHtml(contentMap));
     } catch (e) {
-      setError("HTML export failed.");
+      setError(t("reportsAnnotations.errors.htmlExportFailed"));
     } finally {
       setExportingFormat(null);
       setShowExportModal(false);
@@ -2008,7 +2087,7 @@ function ReportPage({
     if (!canExportReports) return;
     try {
       setExportingFormat("pdf");
-      const path = await save({ defaultPath: `${name || "Report"}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+      const path = await save({ defaultPath: `${name || t("reportsAnnotations.untitledReport")}.pdf`, filters: [{ name: t("reportsAnnotations.fileTypes.pdf"), extensions: ["pdf"] }] });
       if (!path) return;
       
       const { jsPDF } = await loadJsPdf();
@@ -2036,12 +2115,12 @@ function ReportPage({
         y += lines.length * lineHeight + gap;
       };
 
-      const pdfGroupLabels: Record<string, string> = { none: "None", code: "Code", document: "Document", coder: "Coder" };
-      const pdfSortLabels: Record<string, string> = { document: "Document", code: "Code", coder: "Coder", quoteLength: "Quote Length", quote: "Quote (A–Z)" };
+      const pdfGroupLabels: Record<string, string> = { none: t("reportsAnnotations.exportLabels.none"), code: t("reportsAnnotations.exportLabels.code"), document: t("reportsAnnotations.exportLabels.document"), coder: t("reportsAnnotations.exportLabels.coder") };
+      const pdfSortLabels: Record<string, string> = { document: t("reportsAnnotations.exportLabels.document"), code: t("reportsAnnotations.exportLabels.code"), coder: t("reportsAnnotations.exportLabels.coder"), quoteLength: t("reportsAnnotations.exportLabels.quoteLength"), quote: t("reportsAnnotations.exportLabels.quoteAZ") };
 
-      addText(name || "Untitled Report", 20, "bold", 14);
-      addText(`Created by: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown")}`, 10);
-      addText(`Created: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`, 10);
+      addText(name || t("reportsAnnotations.untitledReport"), 20, "bold", 14);
+      addText(`${t("reportsAnnotations.createdBy")}: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"))}`, 10);
+      addText(`${t("reportsAnnotations.created")}: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`, 10);
       addText(`Group by: ${pdfGroupLabels[annotationGroupBy] ?? annotationGroupBy}   Sort by: ${pdfSortLabels[annotationSortBy] ?? annotationSortBy}`, 10, "normal", 14);
 
       const description = htmlToPlainText(getExportDescriptionHtml());
@@ -2051,30 +2130,30 @@ function ReportPage({
       }
 
       addText("Summary", 14, "bold", 8);
-      addText(`Cases: ${caseCount}   Documents: ${docCount}   Codes: ${codeCount}   Users: ${userCount}   Annotations: ${filteredAnns.length}`, 10, "normal", 8);
+      addText(`${t("reportsAnnotations.labels.cases")}: ${caseCount}   ${t("reportsAnnotations.labels.documents")}: ${docCount}   ${t("reportsAnnotations.labels.codes")}: ${codeCount}   ${t("reportsAnnotations.labels.users")}: ${userCount}   ${t("reportsAnnotations.labels.annotations")}: ${filteredAnns.length}`, 10, "normal", 8);
 
       const pdfFilterLines: string[] = [];
-      if (selCaseIds.size > 0) pdfFilterLines.push(`Cases: ${displayCaseItems.filter((c) => selCaseIds.has(c.id)).map((c) => c.name).join(", ")}`);
-      if (selDocIds.size > 0)  pdfFilterLines.push(`Documents: ${storeDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
-      if (selCodeIds.size > 0) pdfFilterLines.push(`Codes: ${storeCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
-      if (selUserIds.size > 0) pdfFilterLines.push(`Users: ${displayUserItems.filter((u) => selUserIds.has(u.id)).map((u) => u.name).join(", ")}`);
-      if (caseFilterDetails.length > 0) pdfFilterLines.push(`Case Attributes: ${caseFilterDetails.join("; ")}`);
-      if (documentFilterDetails.length > 0) pdfFilterLines.push(`Document Attributes: ${documentFilterDetails.join("; ")}`);
+      if (selCaseIds.size > 0) pdfFilterLines.push(`${t("reportsAnnotations.labels.cases")}: ${displayCaseItems.filter((c) => selCaseIds.has(c.id)).map((c) => c.name).join(", ")}`);
+      if (selDocIds.size > 0)  pdfFilterLines.push(`${t("reportsAnnotations.labels.documents")}: ${storeDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
+      if (selCodeIds.size > 0) pdfFilterLines.push(`${t("reportsAnnotations.labels.codes")}: ${storeCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
+      if (selUserIds.size > 0) pdfFilterLines.push(`${t("reportsAnnotations.labels.users")}: ${displayUserItems.filter((u) => selUserIds.has(u.id)).map((u) => u.name).join(", ")}`);
+      if (caseFilterDetails.length > 0) pdfFilterLines.push(`${t("reportsAnnotations.exportLabels.caseAttributes")}: ${caseFilterDetails.join("; ")}`);
+      if (documentFilterDetails.length > 0) pdfFilterLines.push(`${t("reportsAnnotations.exportLabels.documentAttributes")}: ${documentFilterDetails.join("; ")}`);
       if (pdfFilterLines.length > 0) {
-        addText("Applied Filters", 14, "bold", 8);
+        addText(t("reportsAnnotations.appliedFilters"), 14, "bold", 8);
         for (const line of pdfFilterLines) addText(line, 9, "normal", 4);
         y += 10;
       }
 
       const pdfCharts = [
-        { title: "Code Coverage", svg: getCoverageChartSvg(true) },
-        { title: "Annotations Per Code", svg: getAnnotationFrequencyChartSvg(true) },
-        { title: "Annotations Per Document", svg: getAnnotationDocumentChartSvg(true) },
-        { title: "Annotation Length", svg: getAnnotationLengthChartSvg(true) },
+        { title: t("reportsAnnotations.charts.codeCoverage"), svg: getCoverageChartSvg(true) },
+        { title: t("reportsAnnotations.charts.annotationsPerCode"), svg: getAnnotationFrequencyChartSvg(true) },
+        { title: t("reportsAnnotations.charts.annotationsPerDocument"), svg: getAnnotationDocumentChartSvg(true) },
+        { title: t("reportsAnnotations.charts.annotationLength"), svg: getAnnotationLengthChartSvg(true) },
       ].filter((c): c is { title: string; svg: string } => c.svg !== null);
 
       if (pdfCharts.length > 0) {
-        addText("Statistics", 14, "bold", 8);
+        addText(t("reportsAnnotations.statistics"), 14, "bold", 8);
         for (const chart of pdfCharts) {
           addText(chart.title, 11, "bold", 4);
           try {
@@ -2112,7 +2191,7 @@ function ReportPage({
       };
 
       if (sortedAnns.length === 0) {
-        addText("No annotations were captured in this report.", 10, "italic");
+        addText(t("reportsAnnotations.empty.noAnnotationsCaptured"), 10, "italic");
       } else if (annotationGroupBy === "none") {
         for (const ann of sortedAnns) addAnnBlock(ann);
       } else {
@@ -2126,7 +2205,7 @@ function ReportPage({
       await writeFile(path, new Uint8Array(pdf.output("arraybuffer")));
     } catch (e) {
       console.error(e);
-      setError("PDF export failed.");
+      setError(t("reportsAnnotations.errors.pdfExportFailed"));
     } finally {
       setExportingFormat(null);
       setShowExportModal(false);
@@ -2137,7 +2216,7 @@ function ReportPage({
     if (!canExportReports) return;
     try {
       setExportingFormat("docx");
-      const path = await save({ defaultPath: `${name || "Report"}.docx`, filters: [{ name: "Word Document", extensions: ["docx"] }] });
+      const path = await save({ defaultPath: `${name || t("reportsAnnotations.untitledReport")}.docx`, filters: [{ name: t("reportsAnnotations.fileTypes.wordDocument"), extensions: ["docx"] }] });
       if (!path) return;
 
       const {
@@ -2149,27 +2228,27 @@ function ReportPage({
         TextRun,
       } = await loadDocx();
 
-      const docxGroupLabels: Record<string, string> = { none: "None", code: "Code", document: "Document", coder: "Coder" };
-      const docxSortLabels: Record<string, string> = { document: "Document", code: "Code", coder: "Coder", quoteLength: "Quote Length", quote: "Quote (A–Z)" };
+      const docxGroupLabels: Record<string, string> = { none: t("reportsAnnotations.exportLabels.none"), code: t("reportsAnnotations.exportLabels.code"), document: t("reportsAnnotations.exportLabels.document"), coder: t("reportsAnnotations.exportLabels.coder") };
+      const docxSortLabels: Record<string, string> = { document: t("reportsAnnotations.exportLabels.document"), code: t("reportsAnnotations.exportLabels.code"), coder: t("reportsAnnotations.exportLabels.coder"), quoteLength: t("reportsAnnotations.exportLabels.quoteLength"), quote: t("reportsAnnotations.exportLabels.quoteAZ") };
 
       const children: any[] = [
-        new Paragraph({ text: name || "Untitled Report", heading: HeadingLevel.TITLE }),
-        new Paragraph(`Created by: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || "Unknown")}`),
-        new Paragraph(`Created: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`),
+        new Paragraph({ text: name || t("reportsAnnotations.untitledReport"), heading: HeadingLevel.TITLE }),
+        new Paragraph(`${t("reportsAnnotations.createdBy")}: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"))}`),
+        new Paragraph(`${t("reportsAnnotations.created")}: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`),
         new Paragraph(`Group by: ${docxGroupLabels[annotationGroupBy] ?? annotationGroupBy}   |   Sort by: ${docxSortLabels[annotationSortBy] ?? annotationSortBy}`),
         new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }),
-        new Paragraph(`Cases: ${caseCount}   Documents: ${docCount}   Codes: ${codeCount}   Users: ${userCount}   Annotations: ${filteredAnns.length}`),
+        new Paragraph(`${t("reportsAnnotations.labels.cases")}: ${caseCount}   ${t("reportsAnnotations.labels.documents")}: ${docCount}   ${t("reportsAnnotations.labels.codes")}: ${codeCount}   ${t("reportsAnnotations.labels.users")}: ${userCount}   ${t("reportsAnnotations.labels.annotations")}: ${filteredAnns.length}`),
       ];
 
       const docxFilterLines: string[] = [];
-      if (selCaseIds.size > 0) docxFilterLines.push(`Cases: ${displayCaseItems.filter((c) => selCaseIds.has(c.id)).map((c) => c.name).join(", ")}`);
-      if (selDocIds.size > 0)  docxFilterLines.push(`Documents: ${storeDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
-      if (selCodeIds.size > 0) docxFilterLines.push(`Codes: ${storeCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
-      if (selUserIds.size > 0) docxFilterLines.push(`Users: ${displayUserItems.filter((u) => selUserIds.has(u.id)).map((u) => u.name).join(", ")}`);
-      if (caseFilterDetails.length > 0) docxFilterLines.push(`Case Attributes: ${caseFilterDetails.join("; ")}`);
-      if (documentFilterDetails.length > 0) docxFilterLines.push(`Document Attributes: ${documentFilterDetails.join("; ")}`);
+      if (selCaseIds.size > 0) docxFilterLines.push(`${t("reportsAnnotations.labels.cases")}: ${displayCaseItems.filter((c) => selCaseIds.has(c.id)).map((c) => c.name).join(", ")}`);
+      if (selDocIds.size > 0)  docxFilterLines.push(`${t("reportsAnnotations.labels.documents")}: ${storeDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
+      if (selCodeIds.size > 0) docxFilterLines.push(`${t("reportsAnnotations.labels.codes")}: ${storeCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
+      if (selUserIds.size > 0) docxFilterLines.push(`${t("reportsAnnotations.labels.users")}: ${displayUserItems.filter((u) => selUserIds.has(u.id)).map((u) => u.name).join(", ")}`);
+      if (caseFilterDetails.length > 0) docxFilterLines.push(`${t("reportsAnnotations.exportLabels.caseAttributes")}: ${caseFilterDetails.join("; ")}`);
+      if (documentFilterDetails.length > 0) docxFilterLines.push(`${t("reportsAnnotations.exportLabels.documentAttributes")}: ${documentFilterDetails.join("; ")}`);
       if (docxFilterLines.length > 0) {
-        children.push(new Paragraph({ text: "Applied Filters", heading: HeadingLevel.HEADING_1 }));
+        children.push(new Paragraph({ text: t("reportsAnnotations.appliedFilters"), heading: HeadingLevel.HEADING_1 }));
         for (const line of docxFilterLines) children.push(new Paragraph(line));
       }
 
@@ -2182,14 +2261,14 @@ function ReportPage({
       }
 
       const docxCharts = [
-        { title: "Code Coverage", svg: getCoverageChartSvg(true) },
-        { title: "Annotations Per Code", svg: getAnnotationFrequencyChartSvg(true) },
-        { title: "Annotations Per Document", svg: getAnnotationDocumentChartSvg(true) },
-        { title: "Annotation Length", svg: getAnnotationLengthChartSvg(true) },
+        { title: t("reportsAnnotations.charts.codeCoverage"), svg: getCoverageChartSvg(true) },
+        { title: t("reportsAnnotations.charts.annotationsPerCode"), svg: getAnnotationFrequencyChartSvg(true) },
+        { title: t("reportsAnnotations.charts.annotationsPerDocument"), svg: getAnnotationDocumentChartSvg(true) },
+        { title: t("reportsAnnotations.charts.annotationLength"), svg: getAnnotationLengthChartSvg(true) },
       ].filter((c): c is { title: string; svg: string } => c.svg !== null);
 
       if (docxCharts.length > 0) {
-        children.push(new Paragraph({ text: "Statistics", heading: HeadingLevel.HEADING_1 }));
+        children.push(new Paragraph({ text: t("reportsAnnotations.statistics"), heading: HeadingLevel.HEADING_1 }));
         for (const chart of docxCharts) {
           children.push(new Paragraph({ children: [new TextRun({ text: chart.title, bold: true })] }));
           try {
@@ -2236,9 +2315,9 @@ function ReportPage({
         }
       };
 
-      children.push(new Paragraph({ text: "Annotations", heading: HeadingLevel.HEADING_1 }));
+      children.push(new Paragraph({ text: t("reportsAnnotations.annotationsTitle"), heading: HeadingLevel.HEADING_1 }));
       if (sortedAnns.length === 0) {
-        children.push(new Paragraph({ children: [new TextRun({ text: "No annotations were captured in this report.", italics: true })] }));
+        children.push(new Paragraph({ children: [new TextRun({ text: t("reportsAnnotations.empty.noAnnotationsCaptured"), italics: true })] }));
       } else if (annotationGroupBy === "none") {
         for (const ann of sortedAnns) addDocxAnn(ann);
       } else {
@@ -2250,14 +2329,14 @@ function ReportPage({
 
       const doc = new DocxDocument({
         creator: currentUser?.name || currentUser?.email || "Kanqual",
-        title: name || "Report",
+        title: name || t("reportsAnnotations.untitledReport"),
         sections: [{ children }],
       });
       const buffer = await (await Packer.toBlob(doc)).arrayBuffer();
       await writeFile(path, new Uint8Array(buffer));
     } catch (e) {
       console.error(e);
-      setError("DOCX export failed.");
+      setError(t("reportsAnnotations.errors.docxExportFailed"));
     } finally {
       setExportingFormat(null);
       setShowExportModal(false);
@@ -2266,27 +2345,26 @@ function ReportPage({
 
   return (
     <div className="annotate-view">
-      <div className="workspace-back-row workspace-back-row--annotate">
-        <button className="btn" onClick={onBack}>Back to Reports</button>
-      </div>
+      
 
       {/* ── Top bar ── */}
-      <div className="annotate-back-bar" style={{ alignItems: "center", paddingBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
+        <button className="btn" onClick={onBack}>{t("reportsAnnotations.backToReports")}</button>
+        <div className="report-action-group" style={{ gap: 10 }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           <button
             className="btn btn--secondary"
             title={
               !isFrozen
-                ? "Reports must be saved before they can be exported"
+                ? t("reportsAnnotations.exportSavedOnly")
                 : !canExportReports
                   ? "You do not have permission to export reports"
-                  : "Export Report"
+                  : t("reportsAnnotations.exportTitle")
             }
             disabled={!isFrozen || !canExportReports}
             onClick={() => setShowExportModal(true)}
           >
-            Export
+            {t("reportsAnnotations.exportButton")}
           </button>
           {isFrozen && onUseSettings && canStartReports && (
             <button
@@ -2302,12 +2380,12 @@ function ReportPage({
                 documentAttributeFilters: row!.snapshot?.documentAttributeFilters ?? {},
               })}
             >
-              Use Settings for New Report
+              {t("reportsAnnotations.useSettingsForNewReport")}
             </button>
           )}
           {!isFrozen && (
             <button className="btn btn--primary" onClick={handleSave} disabled={saving || !name.trim() || !canStartReports}>
-              {saving ? "Saving…" : "Save Report"}
+              {saving ? t("reportsAnnotations.saving") : t("reportsAnnotations.saveReport")}
             </button>
           )}
         </div>
@@ -2318,14 +2396,14 @@ function ReportPage({
 
         {/* Left: filter panels */}
         <div className="annotate-left">
-          <div className="annotate-left-title">Include in Report:</div>
+          <div className="annotate-left-title">{t("reportsAnnotations.includeInReport")}</div>
 
           {/* Cases */}
           <div className="annotate-card">
             <div className="annotate-card-header" style={{ gap: 8 }}>
               <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("cases")}>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="annotate-card-title">Cases ({selCaseIds.size})</span>
+                  <span className="annotate-card-title">{t("reportsAnnotations.panels.cases", { count: selCaseIds.size })}</span>
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
@@ -2343,15 +2421,15 @@ function ReportPage({
               <>
                 {!isFrozen && !dataLoading && displayCaseItems.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCases(new Set(displayCaseItems.map(c => c.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCases(new Set(displayCaseItems.map(c => c.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="code-list">
                 {dataLoading
-                  ? <li className="code-list-empty">Loading…</li>
+                  ? <li className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</li>
                   : displayCaseItems.length === 0
-                    ? <li className="code-list-empty">No cases.</li>
+                    ? <li className="code-list-empty">{t("reportsAnnotations.empty.noCases")}</li>
                     : displayCaseItems.map((c) => (
                         <li key={c.id} className="code-item"
                           style={{ cursor: isFrozen ? "default" : "pointer" }}
@@ -2376,7 +2454,7 @@ function ReportPage({
             <div className="annotate-card-header" style={{ gap: 8 }}>
               <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("documents")}>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="annotate-card-title">Documents ({selDocIds.size})</span>
+                  <span className="annotate-card-title">{t("reportsAnnotations.panels.documents", { count: selDocIds.size })}</span>
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
@@ -2394,8 +2472,8 @@ function ReportPage({
               <>
                 {!isFrozen && storeDocs.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromDocuments(new Set(storeDocs.map(d => d.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromDocuments(new Set(storeDocs.map(d => d.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="code-list">
@@ -2423,15 +2501,15 @@ function ReportPage({
           {/* Codes */}
           <div className="annotate-card">
             <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("codes")}>
-              <span className="annotate-card-title">Codes ({selCodeIds.size})</span>
+              <span className="annotate-card-title">{t("reportsAnnotations.panels.codes", { count: selCodeIds.size })}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("codes") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("codes") && (
               <>
                 {!isFrozen && storeCodes.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCodes(new Set(storeCodes.map(c => c.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCodes(new Set(storeCodes.map(c => c.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
@@ -2460,22 +2538,22 @@ function ReportPage({
           {/* Users */}
           <div className="annotate-card">
             <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("users")}>
-              <span className="annotate-card-title">Users ({selUserIds.size})</span>
+              <span className="annotate-card-title">{t("reportsAnnotations.panels.users", { count: selUserIds.size })}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("users") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("users") && (
               <>
                 {!isFrozen && !dataLoading && displayUserItems.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromUsers(new Set(displayUserItems.map(u => u.id)))}>All</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>Clear</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromUsers(new Set(displayUserItems.map(u => u.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
                   {dataLoading
-                    ? <li className="code-list-empty">Loading…</li>
+                    ? <li className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</li>
                     : displayUserItems.length === 0
-                      ? <li className="code-list-empty">No users.</li>
+                      ? <li className="code-list-empty">{t("reportsAnnotations.empty.noUsers")}</li>
                       : displayUserItems.map((u) => (
                           <li key={u.id} className="code-item"
                             style={{ cursor: isFrozen ? "default" : "pointer" }}
@@ -2506,27 +2584,27 @@ function ReportPage({
 
           {/* Title */}
           <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">Report Title</span></div>
+            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsAnnotations.reportTitle")}</span></div>
             <div style={{ padding: "10px 14px" }}>
               {!isFrozen ? (
-                <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Report name…" autoFocus={isNew} />
+                <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("reportsAnnotations.reportNamePlaceholder")} autoFocus={isNew} />
               ) : (
-                <p className="case-card-value">{name || "Untitled Report"}</p>
+                <p className="case-card-value">{name || t("reportsAnnotations.untitledReport")}</p>
               )}
             </div>
           </div>
 
           {/* Details */}
           <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">Details</span></div>
+            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsAnnotations.details")}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 14px", fontSize: 13 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               <span>
-                <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>Created By </span>
+              <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsAnnotations.createdBy")} </span>
                 <span>{row ? row.createdByName : (currentUser?.name || currentUser?.email || "—")}</span>
               </span>
               <span>
-                <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>Created </span>
+                <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsAnnotations.created")} </span>
                 <span>{row ? fmtDate(row.createdAt) : "—"}</span>
               </span>
               {isFrozen && (
@@ -2545,11 +2623,11 @@ function ReportPage({
               {(caseFilterDetails.length > 0 || documentFilterDetails.length > 0) && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--color-border)", paddingTop: 10 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    Applied Filters
+                    {t("reportsAnnotations.appliedFilters")}
                   </div>
                   {caseFilterDetails.length > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <div style={{ fontWeight: 500 }}>Cases</div>
+                      <div style={{ fontWeight: 500 }}>{t("reportsAnnotations.labels.cases")}</div>
                       {caseFilterDetails.map((detail) => (
                         <div key={`case-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                           {detail}
@@ -2559,7 +2637,7 @@ function ReportPage({
                   )}
                   {documentFilterDetails.length > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <div style={{ fontWeight: 500 }}>Documents</div>
+                      <div style={{ fontWeight: 500 }}>{t("reportsAnnotations.labels.documents")}</div>
                       {documentFilterDetails.map((detail) => (
                         <div key={`document-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                           {detail}
@@ -2576,12 +2654,12 @@ function ReportPage({
           {(!isFrozen || showDescription) && (
             <div className="annotate-card" style={{ flexShrink: 0 }}>
               <div className="annotate-card-header">
-                <span className="annotate-card-title">Report Description</span>
+                <span className="annotate-card-title">{t("reportsAnnotations.reportDescription")}</span>
                 {!isFrozen ? (
                   <label className="toggle-switch" style={{ marginBottom: 0 }}>
                     <input type="checkbox" checked={showDescription} onChange={(e) => setShowDescription(e.target.checked)} />
                     <span className="toggle-track"><span className="toggle-thumb" /></span>
-                    <span style={{ fontSize: 13 }}>Add description</span>
+                    <span style={{ fontSize: 13 }}>{t("reportsAnnotations.addDescription")}</span>
                   </label>
                 ) : null}
               </div>
@@ -2647,7 +2725,7 @@ function ReportPage({
                   >
                     {items.length === 0 ? (
                       <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>
-                        None included.
+                        {t("reportsAnnotations.noneIncluded")}
                       </div>
                     ) : (
                       items.map((item) => (
@@ -2672,19 +2750,19 @@ function ReportPage({
           {(!isFrozen || showCoverage) && (
             <div className="annotate-card" style={{ flexShrink: 0 }}>
               <div className="annotate-card-header">
-                <span className="annotate-card-title">Statistics</span>
+                <span className="annotate-card-title">{t("reportsAnnotations.statistics")}</span>
                 {!isFrozen ? (
                   <label className="toggle-switch" style={{ marginBottom: 0 }}>
                     <input type="checkbox" checked={showCoverage} onChange={(e) => setShowCoverage(e.target.checked)} />
                     <span className="toggle-track"><span className="toggle-thumb" /></span>
-                    <span style={{ fontSize: 13 }}>Show statistics</span>
+                    <span style={{ fontSize: 13 }}>{t("reportsAnnotations.controls.showStatistics")}</span>
                   </label>
                 ) : null}
               </div>
               {showCoverage && (
                 <div style={{ padding: "12px 14px" }}>
                   {dataLoading ? (
-                    <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading…</p>
+                    <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsAnnotations.loadingEllipsis")}</p>
                   ) : filteredAnns.length === 0 ? (
                     <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No statistics data for the current filters.</p>
                   ) : (() => {
@@ -2703,9 +2781,9 @@ function ReportPage({
                       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>Code Coverage</div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.codeCoverage")}</div>
                             <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                              % of {coverageStats.totalChars.toLocaleString()} characters
+                              {t("reportsAnnotations.charts.codeCoverageSubtitle", { count: formatCurrentNumber(coverageStats.totalChars) })}
                             </div>
                           </div>
                           {coverageStats.rows.length === 0 ? (
@@ -2717,7 +2795,7 @@ function ReportPage({
                                   <span style={{ fontSize: 12, width: 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.codeName}</span>
                                   <div style={{ flex: 1, height: 12, position: "relative" }}>
                                     <div
-                                      title={`Code: ${row.codeName}\nCoverage: ${row.pct.toFixed(1)}%\nCharacters: ${row.chars.toLocaleString()}`}
+                                      title={t("reportsAnnotations.charts.coverageTooltip", { code: row.codeName, coverage: row.pct.toFixed(1), characters: formatCurrentNumber(row.chars) })}
                                       style={{ width: `${(row.pct / coverageScale) * 100}%`, height: "100%", background: row.codeColor, borderRadius: 6, transition: "width 0.3s ease" }}
                                     />
                                   </div>
@@ -2731,9 +2809,9 @@ function ReportPage({
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>Annotations Per Code</div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.annotationsPerCode")}</div>
                             <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                              Count of visible annotations by code
+                              {t("reportsAnnotations.charts.annotationsPerCodeSubtitle")}
                             </div>
                           </div>
                           {annotationFrequencyStats.length === 0 ? (
@@ -2745,7 +2823,7 @@ function ReportPage({
                                   <span style={{ fontSize: 12, width: 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.codeName}</span>
                                   <div style={{ flex: 1, height: 12, position: "relative" }}>
                                     <div
-                                      title={`Code: ${row.codeName}\nAnnotations: ${row.count}`}
+                                      title={t("reportsAnnotations.charts.annotationsTooltip", { code: row.codeName, count: row.count })}
                                       style={{ width: `${(row.count / countScale) * 100}%`, height: "100%", background: row.codeColor, borderRadius: 6, transition: "width 0.3s ease" }}
                                     />
                                   </div>
@@ -2759,9 +2837,9 @@ function ReportPage({
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>Annotations Per Document</div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.annotationsPerDocument")}</div>
                             <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                              Count of visible annotations by document
+                              {t("reportsAnnotations.charts.annotationsPerDocumentSubtitle")}
                             </div>
                           </div>
                           {annotationDocumentStats.length === 0 ? (
@@ -2774,7 +2852,7 @@ function ReportPage({
                                     <span style={{ fontSize: 12, width: 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.documentName}</span>
                                     <div style={{ flex: 1, height: 12, position: "relative" }}>
                                       <div
-                                        title={`Document: ${row.documentName}\nAnnotations: ${row.count}`}
+                                        title={t("reportsAnnotations.charts.documentAnnotationsTooltip", { document: row.documentName, count: row.count })}
                                         style={{ width: `${(row.count / documentCountScale) * 100}%`, height: "100%", background: "var(--color-text-muted)", borderRadius: 6, transition: "width 0.3s ease" }}
                                       />
                                     </div>
@@ -2789,19 +2867,21 @@ function ReportPage({
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>Annotation Length</div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.annotationLength")}</div>
                             <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                              Box-and-whisker summary in characters
+                              {t("reportsAnnotations.charts.annotationLengthSubtitle")}
                             </div>
                           </div>
                           {annotationLengthStats.rows.length === 0 ? (
-                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No annotation length data for the current filters.</p>
+                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>
+                              {t("reportsAnnotations.empty.noAnnotationLengthForFilters")}
+                            </p>
                           ) : (
                             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                               <svg
                                 viewBox={`0 0 320 ${Math.max(56 + annotationLengthStats.rows.length * 42, 96)}`}
                                 role="img"
-                                aria-label="Annotation length box and whisker plot by code"
+                                aria-label={t("reportsAnnotations.charts.annotationLengthAriaLabel")}
                                 style={{ width: "100%", height: Math.max(56 + annotationLengthStats.rows.length * 42, 96), overflow: "visible" }}
                               >
                                 {annotationLengthStats.rows.map((row, index) => {
@@ -2810,7 +2890,7 @@ function ReportPage({
                                   const rowBoxBottom = rowY + 12;
                                   return (
                                     <g key={row.codeId}>
-                                      <title>{`Code: ${row.codeName}\nMin: ${Math.round(row.min)}\nQ1: ${Math.round(row.q1)}\nMedian: ${Math.round(row.median)}\nQ3: ${Math.round(row.q3)}\nMax: ${Math.round(row.max)}\nAnnotations: ${row.count}\nMean: ${row.mean.toFixed(1)}`}</title>
+                                      <title>{t("reportsAnnotations.charts.annotationLengthTooltip", { code: row.codeName, min: Math.round(row.min), q1: Math.round(row.q1), median: Math.round(row.median), q3: Math.round(row.q3), max: Math.round(row.max), count: row.count, mean: row.mean.toFixed(1) })}</title>
                                       <text
                                         x={labelWidth}
                                         y={rowY + 4}
@@ -2837,7 +2917,9 @@ function ReportPage({
                                         rx="6"
                                       />
                                       <line x1={valueToX(row.median)} y1={rowBoxTop} x2={valueToX(row.median)} y2={rowBoxBottom} stroke={row.codeColor} strokeWidth="2" />
-                                      <text x={lineEnd + 6} y={rowY + 4} fontSize="10" fill="var(--color-text-muted)">{row.count} anns</text>
+                                      <text x={lineEnd + 6} y={rowY + 4} fontSize="10" fill="var(--color-text-muted)">
+                                        {t("reportsAnnotations.charts.annotationsCountShort", { count: row.count })}
+                                      </text>
                                     </g>
                                   );
                                 })}
@@ -2845,9 +2927,9 @@ function ReportPage({
                                 <text x={lineEnd} y={16} textAnchor="middle" fontSize="10" fill="var(--color-text-muted)">{Math.round(annotationLengthStats.maxValue)}</text>
                               </svg>
                               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "var(--color-text-muted)" }}>
-                                <span>Codes = {annotationLengthStats.rows.length}</span>
-                                <span>Max length = {Math.round(annotationLengthStats.maxValue)}</span>
-                                <span>Total annotations = {annotationLengthStats.rows.reduce((sum, row) => sum + row.count, 0)}</span>
+                                <span>{t("reportsAnnotations.charts.codesCount", { count: annotationLengthStats.rows.length })}</span>
+                                <span>{t("reportsAnnotations.charts.maxLengthValue", { value: Math.round(annotationLengthStats.maxValue) })}</span>
+                                <span>{t("reportsAnnotations.charts.totalAnnotationsValue", { count: annotationLengthStats.rows.reduce((sum, row) => sum + row.count, 0) })}</span>
                               </div>
                             </div>
                           )}
@@ -2863,35 +2945,35 @@ function ReportPage({
           {/* Annotations */}
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Annotations{filteredAnns.length > 0 ? ` (${filteredAnns.length})` : ""}</span>
+              <span className="annotate-card-title">{t("reportsAnnotations.annotationsTitle")}{filteredAnns.length > 0 ? ` (${filteredAnns.length})` : ""}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
-                  <span style={{ whiteSpace: "nowrap" }}>Group by</span>
+                  <span style={{ whiteSpace: "nowrap" }}>{t("reportsAnnotations.controls.groupBy")}</span>
                   <select
                     className="form-input"
                     value={annotationGroupBy}
                     onChange={(e) => setAnnotationGroupBy(e.target.value as AnnotationGroupBy)}
                     style={{ padding: "2px 22px 2px 8px", fontSize: 11, minWidth: 96 }}
                   >
-                    <option value="none">None</option>
-                    <option value="code">Code</option>
-                    <option value="document">Document</option>
-                    <option value="coder">Coder</option>
+                    <option value="none">{t("reportsAnnotations.none")}</option>
+                    <option value="code">{t("reportsAnnotations.controls.code")}</option>
+                    <option value="document">{t("reportsAnnotations.controls.document")}</option>
+                    <option value="coder">{t("reportsAnnotations.controls.coder")}</option>
                   </select>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
-                  <span style={{ whiteSpace: "nowrap" }}>Sort by</span>
+                  <span style={{ whiteSpace: "nowrap" }}>{t("reportsAnnotations.controls.sortBy")}</span>
                   <select
                     className="form-input"
                     value={annotationSortBy}
                     onChange={(e) => setAnnotationSortBy(e.target.value as AnnotationSortBy)}
                     style={{ padding: "2px 22px 2px 8px", fontSize: 11, minWidth: 116 }}
                   >
-                    <option value="document">Document</option>
-                    <option value="code">Code</option>
-                    <option value="coder">Coder</option>
-                    <option value="quoteLength">Quote length</option>
-                    <option value="quote">Quote A-Z</option>
+                    <option value="document">{t("reportsAnnotations.controls.document")}</option>
+                    <option value="code">{t("reportsAnnotations.controls.code")}</option>
+                    <option value="coder">{t("reportsAnnotations.controls.coder")}</option>
+                    <option value="quoteLength">{t("reportsAnnotations.controls.quoteLength")}</option>
+                    <option value="quote">{t("reportsAnnotations.controls.quoteAZ")}</option>
                   </select>
                 </label>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2916,17 +2998,17 @@ function ReportPage({
                 )}
                 {isFrozen && showContext && (
                   <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    Context: {contextChars} chars
+                    {t("reportsAnnotations.controls.contextChars", { count: contextChars })}
                   </span>
                 )}
                 </div>
               </div>
             </div>
             {dataLoading ? (
-              <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--color-text-muted)" }}>Loading…</div>
+              <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsAnnotations.loadingEllipsis")}</div>
             ) : filteredAnns.length === 0 ? (
               <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--color-text-muted)" }}>
-                {isFrozen ? "No annotations were captured in this report." : (allAnns.length === 0 ? "No annotations in this project yet." : "No annotations match the current filters.")}
+                {isFrozen ? t("reportsAnnotations.empty.noAnnotationsCaptured") : (allAnns.length === 0 ? t("reportsAnnotations.empty.noAnnotationsInProject") : t("reportsAnnotations.empty.noAnnotationsForFilters"))}
               </div>
             ) : (
               <div style={{ padding: "0 14px 14px" }}>
@@ -2990,20 +3072,20 @@ function ReportPage({
         <div className="modal-overlay" onClick={() => setShowCaseAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>Filter Cases by Attributes</h2>
-              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>Close</button>
+              <h2 style={{ margin: 0 }}>{t("reportsAnnotations.filters.caseTitle")}</h2>
+              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsAnnotations.close")}</button>
             </div>
             {!isFrozen && !dataLoading && displayCaseAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => selectAllCaseAttributes()}>All</button>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearCaseAttributeSelections()}>Clear</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => selectAllCaseAttributes()}>{t("reportsCodes.actions.all")}</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearCaseAttributeSelections()}>{t("reportsCodes.actions.clear")}</button>
               </div>
             )}
             <ul className="code-list">
               {dataLoading
-                ? <li className="code-list-empty">Loading…</li>
+                ? <li className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</li>
                 : displayCaseAttributeItems.length === 0
-                  ? <li className="code-list-empty">No case attributes.</li>
+                  ? <li className="code-list-empty">{t("reportsAnnotations.empty.noCaseAttributes")}</li>
                   : displayCaseAttributeItems.map((item) => (
                       <li
                         key={item.id}
@@ -3020,7 +3102,7 @@ function ReportPage({
                           onClick={(e) => e.stopPropagation()}
                         />
                         <span className="code-label">{item.name}</span>
-                        <span className="users-filter-count">{item.dataType === "datetime" ? "Date/time" : item.dataType}</span>
+                        <span className="users-filter-count">{item.dataType === "datetime" ? t("reportsAnnotations.attributeTypes.datetime") : item.dataType}</span>
                       </li>
                     ))
               }
@@ -3040,20 +3122,20 @@ function ReportPage({
         <div className="modal-overlay" onClick={() => setShowDocumentAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>Filter Documents by Attributes</h2>
-              <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>Close</button>
+              <h2 style={{ margin: 0 }}>{t("reportsAnnotations.filters.documentTitle")}</h2>
+              <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>{t("reportsAnnotations.close")}</button>
             </div>
             {!isFrozen && !dataLoading && displayDocumentAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => selectAllDocumentAttributes()}>All</button>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearDocumentAttributeSelections()}>Clear</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => selectAllDocumentAttributes()}>{t("reportsCodes.actions.all")}</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearDocumentAttributeSelections()}>{t("reportsCodes.actions.clear")}</button>
               </div>
             )}
             <ul className="code-list">
               {dataLoading
-                ? <li className="code-list-empty">Loading…</li>
+                ? <li className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</li>
                 : displayDocumentAttributeItems.length === 0
-                  ? <li className="code-list-empty">No document attributes.</li>
+                  ? <li className="code-list-empty">{t("reportsAnnotations.empty.noDocumentAttributes")}</li>
                   : displayDocumentAttributeItems.map((item) => (
                       <li
                         key={item.id}
@@ -3070,7 +3152,7 @@ function ReportPage({
                           onClick={(e) => e.stopPropagation()}
                         />
                         <span className="code-label">{item.name}</span>
-                        <span className="users-filter-count">{item.dataType === "datetime" ? "Date/time" : item.dataType}</span>
+                        <span className="users-filter-count">{item.dataType === "datetime" ? t("reportsAnnotations.attributeTypes.datetime") : item.dataType}</span>
                       </li>
                     ))
               }
@@ -3103,6 +3185,8 @@ function ReportPage({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function CodeReportsView() {
+  const { t } = useI18n();
+  const cols = getCols(t);
   const { activeProject, pb, canCurrentUser, deleteCodeReport } = useStore();
   const canCreateReports = canCurrentUser("createReports") && canCurrentUser("editReportConfiguration");
   const canDeleteReports = canCurrentUser("deleteReports");
@@ -3159,7 +3243,7 @@ export function CodeReportsView() {
       setRows(annotationRows);
       return annotationRows;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load reports.");
+      setError(e instanceof Error ? e.message : t("reportsAnnotations.errors.loadReportsFailed"));
       return [];
     } finally {
       setLoading(false);
@@ -3202,7 +3286,7 @@ export function CodeReportsView() {
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete report.");
+      setError(e instanceof Error ? e.message : t("reportsAnnotations.errors.deleteReportFailed"));
       setConfirmDelete(null);
     } finally {
       setDeleteLoading(false);
@@ -3249,12 +3333,12 @@ export function CodeReportsView() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Annotation Reports</h1>
+          <h1>{t("reportsAnnotations.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             aria-label="Show annotation reports help"
-            title="Show Help"
+            title={t("reportsAnnotations.openHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -3264,9 +3348,9 @@ export function CodeReportsView() {
           className="btn btn--primary"
           onClick={() => setShowNew(true)}
           disabled={!canCreateReports}
-          title={!canCreateReports ? "You do not have permission to create annotation reports" : undefined}
+          title={!canCreateReports ? t("reportsAnnotations.newReportDenied") : undefined}
         >
-          + New Report
+          {t("reportsAnnotations.newReport")}
         </button>
       </header>
 
@@ -3278,7 +3362,7 @@ export function CodeReportsView() {
             <table className="users-table">
               <thead>
                 <tr>
-                  {COLS.map((col) => (
+                  {cols.map((col) => (
                     <th key={col.key} style={{ width: col.width }}
                       className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
                       onClick={() => handleSort(col.key)}
@@ -3290,8 +3374,8 @@ export function CodeReportsView() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={3} className="users-td-msg">Loading…</td></tr>}
-                {!loading && sorted.length === 0 && <tr><td colSpan={3} className="users-td-msg">No reports yet.</td></tr>}
+                {loading && <tr><td colSpan={3} className="users-td-msg">{t("reportsAnnotations.loading")}</td></tr>}
+                {!loading && sorted.length === 0 && <tr><td colSpan={3} className="users-td-msg">{t("reportsAnnotations.noReports")}</td></tr>}
                 {!loading && sorted.map((row) => (
                   <tr key={row.id} className="users-row"
                     onClick={() => setOpenRow(row)}
@@ -3311,19 +3395,22 @@ export function CodeReportsView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Annotation Reports Help</h2>
+            <h2>{t("reportsAnnotations.help.title")}</h2>
             <p className="users-guide-copy">
-              Create a report, select an existing report, apply filters, review summaries, statistics, and annotation lists, and export or delete reports when permitted.
+              {t("reportsAnnotations.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use annotation reports to analyze annotations across codes, documents, cases, and coders. Create or open a report, apply filters, then inspect the resulting sections.
+              {t("reportsAnnotations.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Report visibility and management depend on role. Filters affect the report output, not the underlying annotation data.
+              {t("reportsAnnotations.help.line2")}
+            </p>
+            <p className="users-guide-copy">
+              {t("reportsAnnotations.help.line3")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("reportsAnnotations.close")}
               </button>
             </div>
           </div>
@@ -3332,11 +3419,11 @@ export function CodeReportsView() {
 
       {contextMenu && (
         <div ref={contextMenuRef} className="context-menu" style={contextMenuStyle}>
-          <button className="context-menu-item" onClick={() => { setOpenRow(contextMenu.row); setContextMenu(null); }}>Open Report</button>
+          <button className="context-menu-item" onClick={() => { setOpenRow(contextMenu.row); setContextMenu(null); }}>{t("reportsAnnotations.openReport")}</button>
           {canDeleteReports ? (
-            <button className="context-menu-item context-menu-item--danger" onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}>Delete Report</button>
+            <button className="context-menu-item context-menu-item--danger" onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}>{t("reportsAnnotations.deleteReport")}</button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete reports">Delete Report</div>
+            <div className="context-menu-item context-menu-item--disabled" title={t("reportsAnnotations.deleteDenied")}>{t("reportsAnnotations.deleteReport")}</div>
           )}
         </div>
       )}
@@ -3344,15 +3431,15 @@ export function CodeReportsView() {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Report</h2>
+            <h2>{t("reportsAnnotations.deleteTitle")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete <strong>{confirmDelete.name}</strong>?
+              {t("reportsAnnotations.deleteBody", { name: confirmDelete.name })}
             </p>
-            <p className="modal-warning-text">This report will be permanently deleted and cannot be recovered.</p>
+            <p className="modal-warning-text">{t("reportsAnnotations.deleteWarning")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsAnnotations.cancel")}</button>
               <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? "Deleting…" : "Delete Report"}
+                {deleteLoading ? t("reportsAnnotations.deleting") : t("reportsAnnotations.deleteReport")}
               </button>
             </div>
           </div>

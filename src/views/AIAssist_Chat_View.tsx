@@ -4,6 +4,8 @@ import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { assertActiveLlmRuntime } from "../lib/llmRuntime";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 import {
   clearActiveProjectAiChatId,
   createProjectAiChat,
@@ -45,11 +47,14 @@ type SelectedChatContextState = {
   memoIds: string[];
 };
 
-function formatChatTimestamp(value: string | null | undefined): string {
-  if (!value) return "No messages yet";
+function formatChatTimestamp(
+  t: ReturnType<typeof useI18n>["t"],
+  value: string | null | undefined,
+): string {
+  if (!value) return t("aiAssist.chat.noMessagesYet");
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleString([], {
+  if (Number.isNaN(date.getTime())) return t("aiAssist.chat.unknownTimestamp");
+  return formatCurrentDateTime(date, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -84,15 +89,20 @@ function getCitationKind(citation: OllamaProjectChatCitation): CitationKind {
   return "other";
 }
 
-function formatCitationKindLabel(kind: CitationKind): string {
-  if (kind === "uncoded-text") return "Text";
-  if (kind === "project-description") return "Project Description";
-  if (kind === "code") return "Code";
-  if (kind === "annotation") return "Annotation";
-  if (kind === "case") return "Case";
-  if (kind === "memo") return "Memo";
-  if (kind === "document") return "Text";
-  return "Source";
+function formatCitationKindLabel(
+  kind: CitationKind,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (kind === "uncoded-text") return t("aiAssist.chat.citationKinds.text");
+  if (kind === "project-description") {
+    return t("aiAssist.chat.citationKinds.projectDescription");
+  }
+  if (kind === "code") return t("aiAssist.chat.citationKinds.code");
+  if (kind === "annotation") return t("aiAssist.chat.citationKinds.annotation");
+  if (kind === "case") return t("aiAssist.chat.citationKinds.case");
+  if (kind === "memo") return t("aiAssist.chat.citationKinds.memo");
+  if (kind === "document") return t("aiAssist.chat.citationKinds.text");
+  return t("aiAssist.chat.citationKinds.source");
 }
 
 function toggleString(list: string[], value: string): string[] {
@@ -145,6 +155,7 @@ function renderChatTextWithCitations(
 }
 
 export function AIAssistChatView() {
+  const { t } = useI18n();
   const {
     activeProject,
     setView,
@@ -177,6 +188,7 @@ export function AIAssistChatView() {
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
+  const [openCitationIds, setOpenCitationIds] = useState<Record<string, boolean>>({});
   const [contextPickerOpen, setContextPickerOpen] = useState(false);
   const [contextTab, setContextTab] = useState<ChatContextKind>("document");
   const [contextQuery, setContextQuery] = useState("");
@@ -430,6 +442,13 @@ export function AIAssistChatView() {
     setContextMenu(null);
   }
 
+  function toggleCitationOpen(messageId: string) {
+    setOpenCitationIds((current) => ({
+      ...current,
+      [messageId]: !current[messageId],
+    }));
+  }
+
   async function handleDeleteChat(chatId: string) {
     const targetChat = chats.find((chat) => chat.id === chatId);
     if (!targetChat || targetChat.createdById !== currentUserId) {
@@ -514,7 +533,7 @@ export function AIAssistChatView() {
       ?? (citation.codeId ? annotations.find((item) => item.codeId === citation.codeId)?.documentId : undefined);
 
     if (!targetDocumentId) {
-      setChatError("This citation does not point to a document that can be opened in Code Text.");
+      setChatError(t("aiAssist.chat.citationUnavailableInCodeText"));
       return;
     }
 
@@ -564,7 +583,7 @@ export function AIAssistChatView() {
     setPendingAnnId(null);
     setPendingTextCitation(null);
     setView("code-text");
-    setChatError("Opened the cited document, but there was no exact annotation or text span to highlight for this citation.");
+    setChatError(t("aiAssist.chat.citationOpenedWithoutHighlight"));
   }
 
   async function handleSendMessage() {
@@ -658,11 +677,12 @@ export function AIAssistChatView() {
       await logAction(
         activeProject.id,
         "project.ai_chat.message",
-        `Sent AI chat message in "${targetChatTitle}"`,
+        t("projectLog.labels.projectAiChatMessage", { chat: targetChatTitle }),
         nextChatId ?? createdChatId ?? undefined,
         {
           entityType: "project_ai_chat",
           chatId: nextChatId ?? createdChatId ?? null,
+          chatTitle: targetChatTitle,
           contextMode: selectedContextMode,
           messageCharCount: messageText.length,
           selectedDocumentIds: selectedContext.documentIds,
@@ -708,11 +728,12 @@ export function AIAssistChatView() {
       await logAction(
         activeProject.id,
         "project.ai_chat.response",
-        `Received AI chat response in "${targetChatTitle}"`,
+        t("projectLog.labels.projectAiChatResponse", { chat: targetChatTitle }),
         nextChatId ?? createdChatId ?? undefined,
         {
           entityType: "project_ai_chat",
           chatId: nextChatId ?? createdChatId ?? null,
+          chatTitle: targetChatTitle,
           model: response.model,
           usedContextItemCount: Array.isArray(response.usedContextItems)
             ? response.usedContextItems.length
@@ -737,7 +758,7 @@ export function AIAssistChatView() {
       setChatError("");
     } catch (error) {
       console.error("Project chat failed:", error);
-      setChatError(error instanceof Error ? error.message : "Could not get a response from the configured LLM.");
+      setChatError(error instanceof Error ? error.message : t("aiAssist.chat.errors.noResponse"));
     } finally {
       setSending(false);
     }
@@ -747,10 +768,10 @@ export function AIAssistChatView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Project Chat</h1>
+          <h1>{t("aiAssist.chat.emptyTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>Open a project first.</p>
+          <p>{t("aiAssist.chat.openProjectFirst")}</p>
         </div>
       </div>
     );
@@ -760,10 +781,10 @@ export function AIAssistChatView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Chat About Your Project</h1>
+          <h1>{t("aiAssist.chat.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>You do not have permission to use AI Assist chat for this project.</p>
+          <p>{t("aiAssist.chat.noPermission")}</p>
         </div>
       </div>
     );
@@ -773,10 +794,10 @@ export function AIAssistChatView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Chat About Your Project</h1>
+          <h1>{t("aiAssist.chat.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>Enable AI Assist in Project Settings before using project chat.</p>
+          <p>{t("aiAssist.chat.enableInProjectSettings")}</p>
         </div>
       </div>
     );
@@ -786,12 +807,12 @@ export function AIAssistChatView() {
     <div className="view ai-chat-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Chat About Your Project</h1>
+          <h1>{t("aiAssist.chat.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show AI Assist chat help"
-            title="Show Help"
+            aria-label={t("aiAssist.chat.openHelp")}
+            title={t("aiAssist.chat.showHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -802,19 +823,22 @@ export function AIAssistChatView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>AI Assist Chat Help</h2>
+            <h2>{t("aiAssist.chat.help.title")}</h2>
             <p className="users-guide-copy">
-              Create a chat, send a prompt, switch between chats, add context to a chat, review citations in responses, delete your own chats, and supervise other users' chats when your role allows it.
+              {t("aiAssist.chat.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use chat to ask grounded questions about the current project. Choose or create a chat, send a prompt, and inspect cited responses that point back to project evidence.
+              {t("aiAssist.chat.help.line2")}
+            </p>
+            <p className="users-guide-copy">
+              {t("aiAssist.chat.help.line3")}
             </p>
             <p className="users-guide-copy">
               Owners, editors, and administrators can view all project chats; coders and viewers only see their own. Supervisors can view but should not reply inside another user's private thread. Chat activity is logged in the project log.
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -827,14 +851,14 @@ export function AIAssistChatView() {
             <div>
             </div>
             <button type="button" className="btn btn--primary" onClick={handleNewChat}>
-              New Chat
+              {t("aiAssist.chat.newChat")}
             </button>
           </div>
 
           <div className="ai-chat-list">
             {sortedChats.length === 0 ? (
               <div className="empty-state ai-chat-empty-state">
-                <p>No project chats yet. Start a new chat to begin.</p>
+                <p>{t("aiAssist.chat.noChats")}</p>
               </div>
             ) : (
               sortedChats.map((chat) => {
@@ -851,9 +875,11 @@ export function AIAssistChatView() {
                       setContextMenu({ x: event.clientX, y: event.clientY, chatId: chat.id });
                     }}
                   >
-                    <strong>{shortenChatLabel(lastUserMessage?.text ?? "Untitled chat")}</strong>
-                    {isReadOnlyThread && <small>{chat.createdByName || "Project member"}'s chat</small>}
-                    <span>{formatChatTimestamp(lastUserMessage?.createdAt ?? chat.updatedAt)}</span>
+                    <strong>{shortenChatLabel(lastUserMessage?.text ?? t("aiAssist.chat.untitledChat"))}</strong>
+                    {isReadOnlyThread && (
+                      <small>{t("aiAssist.chat.memberChat", { owner: chat.createdByName || t("aiAssist.chat.projectMember") })}</small>
+                    )}
+                    <span>{formatChatTimestamp(t, lastUserMessage?.createdAt ?? chat.updatedAt)}</span>
                   </button>
                 );
               })
@@ -873,7 +899,7 @@ export function AIAssistChatView() {
               onClick={() => void handleDeleteChat(contextMenu.chatId)}
               disabled={chats.find((chat) => chat.id === contextMenu.chatId)?.createdById !== currentUserId}
             >
-              Delete Chat
+              {t("aiAssist.chat.deleteChat")}
             </button>
           </div>
         )}
@@ -883,10 +909,10 @@ export function AIAssistChatView() {
         <section className="ai-chat-main-panel">
             <div className="ai-chat-thread-header">
               <div>
-                <h2>{activeChat ? shortenChatLabel(getLastUserMessage(activeChat)?.text ?? "Untitled chat") : "New chat"}</h2>
-                <p>{activeChat ? `${activeChat.messages.length} messages in this conversation` : "Start a project chat on the right."}</p>
+                <h2>{activeChat ? shortenChatLabel(getLastUserMessage(activeChat)?.text ?? t("aiAssist.chat.untitledChat")) : t("aiAssist.chat.newChat")}</h2>
+                <p>{activeChat ? t("aiAssist.chat.messagesInConversation", { count: activeChat.messages.length }) : t("aiAssist.chat.startOnRight")}</p>
                 {activeChatReadOnly && (
-                  <p>This conversation belongs to {activeChat?.createdByName || "another project member"} and is view-only for your role.</p>
+                  <p>{t("aiAssist.chat.viewOnlyConversation", { owner: activeChat?.createdByName || t("aiAssist.chat.anotherProjectMember") })}</p>
                 )}
               </div>
             </div>
@@ -896,7 +922,7 @@ export function AIAssistChatView() {
           <div className="ai-chat-thread">
             {!activeChat || activeChat.messages.length === 0 ? (
               <div className="empty-state ai-chat-empty-state">
-                <p>Start by asking something about your project. This workspace will keep the chat history in the left column.</p>
+                <p>{t("aiAssist.chat.startPrompt")}</p>
               </div>
             ) : (
               activeChat.messages.map((message) => (
@@ -907,55 +933,64 @@ export function AIAssistChatView() {
                   <div className="ai-chat-message-meta">
                     <strong>
                       {message.role === "assistant"
-                        ? "AI Assist"
+                        ? t("aiAssist.chat.assistantName")
                         : message.createdById === currentUserId
-                          ? "You"
-                          : (message.createdByName || "Project member")}
+                          ? t("aiAssist.chat.you")
+                          : (message.createdByName || t("aiAssist.chat.projectMember"))}
                     </strong>
-                    <span>{formatChatTimestamp(message.createdAt)}</span>
+                    <span>{formatChatTimestamp(t, message.createdAt)}</span>
                   </div>
                   {message.role === "assistant" && (message.metadata?.citations?.length ?? 0) > 0
                     ? renderChatTextWithCitations(message.text, message.metadata?.citations ?? [], handleOpenCitation)
                     : <p>{message.text}</p>}
                   {message.role === "assistant" && message.metadata && (
                     <div className="ai-chat-message-footnote">
-                      {message.metadata.source && <span>Answered with {message.metadata.source === "copilot" ? "GitHub Models" : message.metadata.source === "blablador" ? "Blablador" : message.metadata.source === "openai" ? "OpenAI" : message.metadata.source === "anthropic" ? "Anthropic" : message.metadata.source === "host" ? "Host AI" : "Ollama"}</span>}
+                      {message.metadata.source && <span>{t("aiAssist.chat.answeredWith", { provider: message.metadata.source === "copilot" ? t("aiAssist.chat.providers.copilot") : message.metadata.source === "blablador" ? t("aiAssist.chat.providers.blablador") : message.metadata.source === "openai" ? t("aiAssist.chat.providers.openai") : message.metadata.source === "anthropic" ? t("aiAssist.chat.providers.anthropic") : message.metadata.source === "host" ? t("aiAssist.chat.providers.host") : t("aiAssist.chat.providers.ollama") })}</span>}
                       {typeof message.metadata.usedContextItems === "number" && (
-                        <span>{message.metadata.usedContextItems} indexed project items used</span>
+                        <span>{t("aiAssist.chat.indexedItemsUsed", { count: message.metadata.usedContextItems })}</span>
                       )}
-                      {message.metadata.model && <span>Model: {message.metadata.model}</span>}
+                      {message.metadata.model && <span>{t("aiAssist.chat.modelLabel", { model: message.metadata.model })}</span>}
                     </div>
                   )}
                   {message.role === "assistant" && (message.metadata?.citations?.length ?? 0) > 0 && (
-                    <details className="ai-chat-citations ai-chat-citations--collapsible">
-                      <summary className="ai-chat-citations-toggle">
-                        <strong>Citations</strong>
+                    <div className="ai-chat-citations ai-chat-citations--collapsible">
+                      <div className="ai-chat-citations-toggle">
+                        <strong>{t("aiAssist.chat.citations")}</strong>
                         <span>{message.metadata?.citations?.length ?? 0}</span>
-                      </summary>
-                      <div className="ai-chat-citation-list">
-                        {(message.metadata?.citations ?? []).map((citation, index) => {
-                          const kind = getCitationKind(citation);
-                          return (
-                            <button
-                              key={citation.id}
-                              type="button"
-                              className={`ai-chat-citation-link ai-chat-citation-link--${kind}`}
-                              onClick={() => handleOpenCitation(citation)}
-                              title={citation.preview}
-                            >
-                              <span className="ai-chat-citation-number">[{index + 1}]</span>
-                              <span className={`ai-chat-citation-kind ai-chat-citation-kind--${kind}`}>
-                                {formatCitationKindLabel(kind)}
-                              </span>
-                              <span className="ai-chat-citation-line">
-                                <strong>{formatCitationTitle(citation.title)}</strong>
-                                <small>{citation.preview}</small>
-                              </span>
-                            </button>
-                          );
-                        })}
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => toggleCitationOpen(message.id)}
+                        >
+                          {openCitationIds[message.id] ? t("aiAssist.chat.hideCitations") : t("aiAssist.chat.showCitations")}
+                        </button>
                       </div>
-                    </details>
+                      {openCitationIds[message.id] && (
+                        <div className="ai-chat-citation-list">
+                          {(message.metadata?.citations ?? []).map((citation, index) => {
+                            const kind = getCitationKind(citation);
+                            return (
+                              <button
+                                key={citation.id}
+                                type="button"
+                                className={`ai-chat-citation-link ai-chat-citation-link--${kind}`}
+                                onClick={() => handleOpenCitation(citation)}
+                                title={citation.preview}
+                              >
+                                <span className="ai-chat-citation-number">[{index + 1}]</span>
+                                <span className={`ai-chat-citation-kind ai-chat-citation-kind--${kind}`}>
+                                  {formatCitationKindLabel(kind, t)}:
+                                </span>
+                                <span className="ai-chat-citation-line">
+                                  <strong>{formatCitationTitle(citation.title)}</strong>
+                                  <small>{citation.preview}</small>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               ))
@@ -964,7 +999,7 @@ export function AIAssistChatView() {
 
           <div className="ai-chat-composer">
             <label className="form-label">
-              Message
+              {t("aiAssist.chat.messageTitle")}
               <div className="ai-chat-context-toolbar">
                 <button
                   type="button"
@@ -974,7 +1009,7 @@ export function AIAssistChatView() {
                     setContextQuery("");
                   }}
                 >
-                  Add Context
+                  {t("aiAssist.chat.addContext")}
                 </button>
                 {selectedContextChips.length > 0 && (
                   <button
@@ -1002,7 +1037,11 @@ export function AIAssistChatView() {
                       type="button"
                       className="ai-chat-context-chip"
                       onClick={() => removeContextChip(chip.kind, chip.id)}
-                      title={chip.detail ? `${chip.detail} - click to remove` : "Click to remove"}
+                      title={
+                        chip.detail
+                          ? t("aiAssist.chat.removeContextWithDetail", { detail: chip.detail })
+                          : t("aiAssist.chat.removeContext")
+                      }
                     >
                       <span>{chip.detail ? `${chip.detail}: ${chip.label}` : chip.label}</span>
                       <strong>×</strong>
@@ -1024,7 +1063,11 @@ export function AIAssistChatView() {
                 rows={5}
                 disabled={sending}
                 readOnly={activeChatReadOnly}
-                placeholder={activeChatReadOnly ? "This conversation is view-only for your role." : "Ask a question about this project..."}
+                placeholder={
+                  activeChatReadOnly
+                    ? t("aiAssist.chat.viewOnlyConversation", { owner: t("aiAssist.chat.anotherProjectMember") })
+                    : t("aiAssist.chat.askPlaceholder")
+                }
               />
             </label>
             <div className="form-actions">
@@ -1039,9 +1082,9 @@ export function AIAssistChatView() {
       {contextPickerOpen && (
         <div className="modal-overlay" onClick={() => setContextPickerOpen(false)}>
           <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-            <h2>Add Context</h2>
+            <h2>{t("aiAssist.chat.addContextTitle")}</h2>
             <p className="users-guide-copy">
-              Select cases, documents, codes, annotations, or memos for your next messages, then choose whether AI Assist should prioritize them or restrict retrieval to them.
+              {t("aiAssist.chat.addContextBody")}
             </p>
             <div className="form-label" style={{ marginBottom: 16 }}>
               <span style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>Context Mode</span>
@@ -1063,11 +1106,11 @@ export function AIAssistChatView() {
               </div>
               <p className="users-guide-copy" style={{ marginTop: 8, marginBottom: 0 }}>
                 {selectedContextMode === "restrict"
-                  ? "Only the selected context will be retrieved and cited."
-                  : "Selected context will be preferred, but AI Assist may still use other project context if it is more relevant."}
+                  ? t("aiAssist.chat.restrictModeHelp")
+                  : t("aiAssist.chat.preferModeHelp")}
               </p>
             </div>
-            <div className="ai-chat-context-modal-tabs" role="tablist" aria-label="Context item types">
+            <div className="ai-chat-context-modal-tabs" role="tablist" aria-label={t("aiAssist.chat.contextItemTypes")}>
               {([
                 ["document", `Documents (${documents.length})`],
                 ["case", `Cases (${cases.length})`],
@@ -1091,7 +1134,7 @@ export function AIAssistChatView() {
                 className="form-input"
                 value={contextQuery}
                 onChange={(event) => setContextQuery(event.target.value)}
-                placeholder={`Search ${contextTab}s...`}
+                placeholder={t("aiAssist.chat.searchContext", { kind: contextTab })}
                 autoFocus
               />
             </label>
@@ -1169,24 +1212,24 @@ export function AIAssistChatView() {
                 );
               })}
               {contextTab === "document" && filteredDocuments.length === 0 && (
-                <p className="users-guide-copy">No documents matched your search.</p>
+                <p className="users-guide-copy">{t("aiAssist.chat.noMatchingDocuments")}</p>
               )}
               {contextTab === "case" && filteredCases.length === 0 && (
-                <p className="users-guide-copy">No cases matched your search.</p>
+                <p className="users-guide-copy">{t("aiAssist.chat.noMatchingCases")}</p>
               )}
               {contextTab === "code" && filteredCodes.length === 0 && (
-                <p className="users-guide-copy">No codes matched your search.</p>
+                <p className="users-guide-copy">{t("aiAssist.chat.noMatchingCodes")}</p>
               )}
               {contextTab === "annotation" && filteredAnnotations.length === 0 && (
-                <p className="users-guide-copy">No annotations matched your search.</p>
+                <p className="users-guide-copy">{t("aiAssist.chat.noMatchingAnnotations")}</p>
               )}
               {contextTab === "memo" && filteredMemos.length === 0 && (
-                <p className="users-guide-copy">No memos matched your search.</p>
+                <p className="users-guide-copy">{t("aiAssist.chat.noMatchingMemos")}</p>
               )}
             </div>
             <div className="form-actions">
               <button type="button" className="btn" onClick={() => setContextPickerOpen(false)}>
-                Done
+                {t("aiAssist.chat.done")}
               </button>
             </div>
           </div>

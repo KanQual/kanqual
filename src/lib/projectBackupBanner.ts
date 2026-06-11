@@ -146,8 +146,12 @@ export function notifyProjectBackupsChanged(projectId: string): void {
 export async function loadProjectBackupBannerIssue(project: Project): Promise<ProjectBackupBannerIssue | null> {
   const manifest = await loadProjectBackupManifest(project);
   const storedIssue = readProjectBackupBannerIssue(project.id);
+  const pendingAttempt = readPendingProjectBackupAttempt(project.id);
   if (storedIssue && (storedIssue.kind === "failed" || storedIssue.kind === "interrupted")) {
     return storedIssue;
+  }
+  if (pendingAttempt) {
+    return null;
   }
   if (manifest.backups.length === 0) {
     return {

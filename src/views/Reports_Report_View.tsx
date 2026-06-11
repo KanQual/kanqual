@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
 
 export function ReportView() {
   const {
@@ -48,7 +49,7 @@ export function ReportView() {
   function handleExport() {
     const lines: string[] = [
       `# Report: ${project.name}`,
-      `Generated: ${new Date().toLocaleString()}`,
+      `Generated: ${formatCurrentDateTime(new Date())}`,
       "",
       "## Summary",
       `Documents: ${documents.length}`,

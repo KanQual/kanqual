@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type PocketBase from "pocketbase";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
-import { ROLE_LABELS } from "../types";
 import type { AppRole, PendingImportedUser, ProjectLogEntry, ProjectPresenceEntry, Role } from "../types";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { createUserAccount } from "../lib/pb";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 type ProjectLogDetails = Record<string, unknown>;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ type ActivityCounts = {
 function fmtDate(iso: string): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -161,6 +162,19 @@ function incrementActivityCount(
 const ALL_PROJECT_ROLES: Role[] = ["owner", "editor", "coder", "viewer"];
 const NON_OWNER_PROJECT_ROLES: Role[] = ["editor", "coder", "viewer"];
 
+function projectRoleLabel(t: ReturnType<typeof useI18n>["t"], role: Role): string {
+  switch (role) {
+    case "owner":
+      return t("projectUsers.roles.owner");
+    case "editor":
+      return t("projectUsers.roles.editor");
+    case "coder":
+      return t("projectUsers.roles.coder");
+    case "viewer":
+      return t("projectUsers.roles.viewer");
+  }
+}
+
 function getAssignableRoles(canTransferOwnership: boolean): Role[] {
   return canTransferOwnership ? ALL_PROJECT_ROLES : NON_OWNER_PROJECT_ROLES;
 }
@@ -205,6 +219,7 @@ function UserDetail({
   onRequestEdit: (row: MemberRow) => void;
   onRequestRemove: (row: MemberRow) => void;
 }) {
+  const { t } = useI18n();
   const [row, setRow] = useState(initialRow);
   const [annotCount, setAnnotCount] = useState<number | null>(null);
   const [memoCount, setMemoCount] = useState<number | null>(null);
@@ -255,7 +270,7 @@ function UserDetail({
     <div className="view user-detail">
       <div className="workspace-back-row workspace-back-row--split">
         <button className="btn user-detail-back" onClick={onBack}>
-          Back to Users
+          {t("projectUsers.userDetail.backToUsers")}
         </button>
         <div className="workspace-back-actions">
           <button
@@ -263,15 +278,15 @@ function UserDetail({
             className="btn btn--primary"
             onClick={() => onRequestEdit(row)}
             disabled={!canEdit}
-            title={!canEdit ? "You do not have permission to edit this user's role" : undefined}
+            title={!canEdit ? t("projectUsers.userDetail.editUser") : undefined}
           >
-            Edit User
+            {t("projectUsers.userDetail.editUser")}
           </button>
           <div className="user-detail-menu-wrap" ref={menuRef}>
             <button
               type="button"
               className="btn"
-              aria-label="User actions"
+              aria-label={t("projectUsers.userDetail.actionsLabel")}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
@@ -290,11 +305,11 @@ function UserDetail({
                       onRequestRemove(row);
                     }}
                   >
-                    Remove from Project
+                    {t("projectUsers.userDetail.removeFromProject")}
                   </button>
                 ) : (
-                  <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to remove this user from the project">
-                    Remove from Project
+                  <div className="context-menu-item context-menu-item--disabled" title={t("projectUsers.userDetail.removeDenied")}>
+                    {t("projectUsers.userDetail.removeFromProject")}
                   </div>
                 )}
               </div>
@@ -309,7 +324,7 @@ function UserDetail({
           <h2 className="user-detail-name">{row.name}</h2>
           <p className="user-detail-email">{row.email}</p>
           <span className={`role-badge role-badge--${row.role}`}>
-            {ROLE_LABELS[row.role]}
+            {projectRoleLabel(t, row.role)}
           </span>
         </div>
       </div>
@@ -317,20 +332,20 @@ function UserDetail({
       <div className="user-detail-stats">
         <div className="user-detail-stat">
           <span className="user-detail-stat-value">{annotCount ?? "..."}</span>
-          <span className="user-detail-stat-label">Annotations</span>
+          <span className="user-detail-stat-label">{t("projectUsers.columns.annotations")}</span>
         </div>
         <div className="user-detail-stat">
           <span className="user-detail-stat-value">{memoCount ?? "..."}</span>
-          <span className="user-detail-stat-label">Memos</span>
+          <span className="user-detail-stat-label">{t("projectUsers.columns.memos")}</span>
         </div>
       </div>
 
       <dl className="user-detail-meta">
-        <dt>Added By</dt>
+        <dt>{t("projectUsers.columns.addedBy")}</dt>
         <dd>{row.createdByName}</dd>
-        <dt>Account Created</dt>
+        <dt>{t("projectUsers.columns.accountCreated")}</dt>
         <dd>{fmtDate(row.createdAt)}</dd>
-        <dt>Last Login</dt>
+        <dt>{t("projectUsers.userDetail.lastLogin")}</dt>
         <dd>{row.lastLogin}</dd>
       </dl>
     </div>
@@ -356,6 +371,7 @@ function AddMemberModal({
   onClose: () => void;
   onLog: (action: string, label: string, recordId?: string, details?: ProjectLogDetails) => void;
 }) {
+  const { t } = useI18n();
   const [allUsers, setAllUsers]   = useState<{ id: string; name: string; email: string; userIdentifier: string }[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [role, setRole]           = useState<Role>(allowedRoles.includes("coder") ? "coder" : allowedRoles[0] ?? "viewer");
@@ -384,7 +400,7 @@ function AddMemberModal({
             })),
         ),
       )
-      .catch(() => setError("Failed to load users."))
+      .catch(() => setError(t("projectUsers.addMember.loadFailed")))
       .finally(() => setLoadingUsers(false));
   }, [pb, existingMemberIds]);
 
@@ -410,7 +426,7 @@ function AddMemberModal({
       });
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add member.");
+      setError(e instanceof Error ? e.message : t("projectUsers.addMember.addFailed"));
     } finally {
       setLoading(false);
     }
@@ -421,15 +437,15 @@ function AddMemberModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Add Member</h2>
+        <h2>{t("projectUsers.addMember.title")}</h2>
         <form className="form" onSubmit={handleSubmit}>
           <label className="form-label">
-            User
+            {t("projectUsers.addMember.user")}
             {loadingUsers ? (
-              <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Loading users…</p>
+              <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>{t("projectUsers.addMember.loadingUsers")}</p>
             ) : available.length === 0 ? (
               <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-                All registered users are already in this project.
+                {t("projectUsers.addMember.noAvailableUsers")}
               </p>
             ) : (
               <select
@@ -439,7 +455,7 @@ function AddMemberModal({
                 required
                 autoFocus
               >
-                <option value="">— select a user —</option>
+                <option value="">{t("projectUsers.addMember.selectUser")}</option>
                 {available.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name} ({u.email})
@@ -449,7 +465,7 @@ function AddMemberModal({
             )}
           </label>
           <label className="form-label">
-            Role
+            {t("projectUsers.addMember.role")}
             <select
               className="form-input"
               value={role}
@@ -457,25 +473,25 @@ function AddMemberModal({
             >
               {allowedRoles.map((allowedRole) => (
                 <option key={allowedRole} value={allowedRole}>
-                  {ROLE_LABELS[allowedRole]}
+                  {projectRoleLabel(t, allowedRole)}
                 </option>
               ))}
             </select>
           </label>
           {!allowedRoles.includes("owner") && (
             <p className="users-guide-copy" style={{ marginTop: 0 }}>
-              Ownership can only be assigned by a current owner or an administrator.
+              {t("projectUsers.addMember.ownershipNote")}
             </p>
           )}
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
             <button
               type="submit"
               className="btn btn--primary"
               disabled={loading || !selectedId || available.length === 0}
             >
-              {loading ? "Adding…" : "Add to Project"}
+              {loading ? t("projectUsers.addMember.adding") : t("projectUsers.addMember.addToProject")}
             </button>
           </div>
         </form>
@@ -505,6 +521,7 @@ function EditMemberModal({
   onLog: (action: string, label: string, recordId?: string, details?: ProjectLogDetails) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [role, setRole] = useState<Role>(
     allowedRoles.includes(row.role) ? row.role : allowedRoles[0] ?? row.role,
   );
@@ -535,7 +552,7 @@ function EditMemberModal({
       }
       onDone(role);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update user.");
+      setError(e instanceof Error ? e.message : t("projectUsers.editMember.updateFailed"));
     } finally {
       setLoading(false);
     }
@@ -544,13 +561,13 @@ function EditMemberModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Edit User Role</h2>
+        <h2>{t("projectUsers.editMember.title")}</h2>
         <form className="form" onSubmit={handleSubmit}>
           <p className="users-guide-copy" style={{ marginTop: 0 }}>
-            This only changes the user's role in the current project. Their name and email stay tied to their account.
+            {t("projectUsers.editMember.intro")}
           </p>
           <label className="form-label">
-            Role
+            {t("projectUsers.editMember.role")}
             <select
               className="form-input"
               value={role}
@@ -559,25 +576,25 @@ function EditMemberModal({
             >
               {allowedRoles.map((allowedRole) => (
                 <option key={allowedRole} value={allowedRole}>
-                  {ROLE_LABELS[allowedRole]}
+                  {projectRoleLabel(t, allowedRole)}
                 </option>
               ))}
             </select>
           </label>
           {soleOwnerLocked && (
             <p className="users-guide-copy" style={{ marginTop: 0 }}>
-              This user is currently the only owner of the project. Add or promote another owner before changing this role.
+              {t("projectUsers.editMember.soleOwnerLocked")}
             </p>
           )}
           {!allowedRoles.includes("owner") && row.role !== "owner" && (
             <p className="users-guide-copy" style={{ marginTop: 0 }}>
-              Ownership can only be assigned by a current owner or an administrator.
+              {t("projectUsers.editMember.ownershipNote")}
             </p>
           )}
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
             <button type="button" className="btn" onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </button>
             {canEdit && (
               <button
@@ -585,7 +602,7 @@ function EditMemberModal({
                 className="btn btn--primary"
                 disabled={loading || soleOwnerLocked}
               >
-                {loading ? "Saving…" : "Save Changes"}
+                {loading ? t("projectUsers.editMember.saving") : t("projectUsers.editMember.saveChanges")}
               </button>
             )}
           </div>
@@ -597,32 +614,33 @@ function EditMemberModal({
 
 // ─── Table column definitions ─────────────────────────────────────────────────
 
-const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "name",          label: "Name",       width: "18%" },
-  { key: "email",         label: "Email",      width: "22%" },
-  { key: "role",          label: "Role",       width: "10%" },
-  { key: "createdByName", label: "Added By", width: "18%" },
-  { key: "createdAt",     label: "Created",    width: "16%" },
-  { key: "lastLogin",     label: "Last Login", width: "16%" },
+const COLS: { key: SortCol; labelKey: keyof typeof import("../i18n/locales/en").en.projectUsers.columns; width: string }[] = [
+  { key: "name",          labelKey: "name", width: "18%" },
+  { key: "email",         labelKey: "email", width: "22%" },
+  { key: "role",          labelKey: "role", width: "10%" },
+  { key: "createdByName", labelKey: "addedBy", width: "18%" },
+  { key: "createdAt",     labelKey: "created", width: "16%" },
+  { key: "lastLogin",     labelKey: "lastLogin", width: "16%" },
 ];
 
-const ACTIVITY_COLS: Array<{ key: keyof ActivityRow | "active"; label: string; width: string }> = [
-  { key: "name", label: "User Name", width: "18%" },
-  { key: "active", label: "Currently Active", width: "10%" },
-  { key: "cumulativeActiveMinutes", label: "Active Time", width: "11%" },
-  { key: "loginCount", label: "Logins", width: "8%" },
-  { key: "casesCreated", label: "Cases", width: "8%" },
-  { key: "documentsCreated", label: "Documents", width: "9%" },
-  { key: "codesCreated", label: "Codes", width: "8%" },
-  { key: "annotationsCreated", label: "Annotations", width: "9%" },
-  { key: "memosCreated", label: "Memos", width: "8%" },
-  { key: "reportsCreated", label: "Reports", width: "8%" },
+const ACTIVITY_COLS: Array<{ key: keyof ActivityRow | "active"; labelKey: keyof typeof import("../i18n/locales/en").en.projectUsers.columns; width: string }> = [
+  { key: "name", labelKey: "userName", width: "18%" },
+  { key: "active", labelKey: "currentlyActive", width: "10%" },
+  { key: "cumulativeActiveMinutes", labelKey: "activeTime", width: "11%" },
+  { key: "loginCount", labelKey: "logins", width: "8%" },
+  { key: "casesCreated", labelKey: "cases", width: "8%" },
+  { key: "documentsCreated", labelKey: "documents", width: "9%" },
+  { key: "codesCreated", labelKey: "codes", width: "8%" },
+  { key: "annotationsCreated", labelKey: "annotations", width: "9%" },
+  { key: "memosCreated", labelKey: "memos", width: "8%" },
+  { key: "reportsCreated", labelKey: "reports", width: "8%" },
 ];
 
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function UsersView() {
+  const { t } = useI18n();
   const {
     activeProject,
     activeProjectPresenceUsers,
@@ -712,12 +730,12 @@ export function UsersView() {
             role: r.role as Role,
             createdByName: cb?.name || cb?.email || "—",
             createdAt: u?.created || r.created,
-            lastLogin: r.last_active ? fmtDate(r.last_active) : "Never",
+            lastLogin: r.last_active ? fmtDate(r.last_active) : t("projectUsers.lastLoginNever"),
           };
         }),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load users.");
+      setError(e instanceof Error ? e.message : t("projectUsers.addMember.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -834,7 +852,10 @@ export function UsersView() {
       await logAction(
         activeProject.id,
         "member.reassociate",
-        `Associated imported user "${importedUser.name}" with "${targetUser.name || targetUser.email}"`,
+        t("projectLog.labels.memberReassociated", {
+          importedUser: importedUser.name,
+          targetUser: targetUser.name || targetUser.email,
+        }),
       );
       updatePendingImportedUser(importedUser.userIdentifier, status);
       setSelectedImportedUser(null);
@@ -842,7 +863,7 @@ export function UsersView() {
       await loadMembers();
       clearPendingResolutionIfDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to associate imported user.");
+      setError(e instanceof Error ? e.message : t("projectUsers.importedUsers.associateFailed"));
     } finally {
       setResolutionBusy(false);
     }
@@ -891,13 +912,13 @@ export function UsersView() {
         });
       }));
 
-      await logAction(activeProject.id, "member.remove_unresolved", `Removed imported user "${removeImportedUser.name}" from project resolution`);
+      await logAction(activeProject.id, "member.remove_unresolved", t("projectLog.labels.memberRemovedUnresolved", { name: removeImportedUser.name }));
       updatePendingImportedUser(removeImportedUser.userIdentifier, "removed");
       setRemoveImportedUser(null);
       setSelectedImportedUser(null);
       clearPendingResolutionIfDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove imported user from the project.");
+      setError(e instanceof Error ? e.message : t("projectUsers.importedUsers.removeFailed"));
     } finally {
       setResolutionBusy(false);
     }
@@ -907,15 +928,15 @@ export function UsersView() {
     if (!tempPasswordUser) return;
     setError(null);
     if (!temporaryPassword || !confirmTemporaryPassword) {
-      setError("Enter the temporary password twice.");
+      setError(t("projectUsers.importedUsers.temporaryPasswordRequired"));
       return;
     }
     if (temporaryPassword.length < 8) {
-      setError("Temporary password must be at least 8 characters.");
+      setError(t("projectUsers.importedUsers.temporaryPasswordTooShort"));
       return;
     }
     if (temporaryPassword !== confirmTemporaryPassword) {
-      setError("Temporary passwords do not match.");
+      setError(t("projectUsers.importedUsers.temporaryPasswordMismatch"));
       return;
     }
 
@@ -944,7 +965,7 @@ export function UsersView() {
       setTemporaryPassword("");
       setConfirmTemporaryPassword("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create a temporary-password account.");
+      setError(e instanceof Error ? e.message : t("projectUsers.importedUsers.createTemporaryPasswordFailed"));
       setResolutionBusy(false);
     }
   }
@@ -1107,11 +1128,11 @@ export function UsersView() {
   }
 
   function getRemoveBlockReason(row: MemberRow | null): string | null {
-    if (!row) return "No user selected.";
-    if (!canRemoveMembers) return "You do not have permission to remove users from this project.";
-    if (row.userId === currentUser?.id) return "You cannot remove your own account from the project here.";
+    if (!row) return t("projectUsers.removeErrors.noneSelected");
+    if (!canRemoveMembers) return t("projectUsers.removeErrors.noPermission");
+    if (row.userId === currentUser?.id) return t("projectUsers.removeErrors.ownAccount");
     if (row.role === "owner" && !canTransferOwnership) {
-      return "Only project owners or administrators can remove a project owner.";
+      return t("projectUsers.removeErrors.ownerPermission");
     }
     if (row.role === "owner" && ownerCount <= 1) {
       return "A project must always have at least one owner.";
@@ -1136,7 +1157,7 @@ export function UsersView() {
         `Removed "${confirmDelete.name}" from project`,
       );
       await pb.collection("project_members").delete(confirmDelete.memberId);
-      if (activeProject) await logAction(activeProject.id, "member.remove", `Removed "${confirmDelete.name}" from project`, confirmDelete.memberId, {
+      if (activeProject) await logAction(activeProject.id, "member.remove", t("projectLog.labels.memberRemoved", { name: confirmDelete.name }), confirmDelete.memberId, {
         entityType: "project_member",
         userId: confirmDelete.userId,
         userIdentifier: confirmDelete.userIdentifier,
@@ -1146,7 +1167,7 @@ export function UsersView() {
       setSelectedRow((prev) => (prev?.memberId === confirmDelete.memberId ? null : prev));
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove user.");
+      setError(e instanceof Error ? e.message : t("projectUsers.removeModal.removeFailed"));
       setConfirmDelete(null);
     } finally {
       setDeleteLoading(false);
@@ -1197,13 +1218,12 @@ export function UsersView() {
             onClick={() => !deleteLoading && setConfirmDelete(null)}
           >
             <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <h2>Remove from Project</h2>
+              <h2>{t("projectUsers.removeModal.title")}</h2>
               <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                Remove <strong>{confirmDelete.name}</strong> from this project?
+                {t("projectUsers.removeModal.body", { name: confirmDelete.name })}
               </p>
               <p className="modal-warning-text">
-                Their account will not be deleted - they will simply lose access
-                to this project.
+                {t("projectUsers.removeModal.accessWarning")}
               </p>
               <div className="form-actions" style={{ marginTop: 24 }}>
                 <button
@@ -1211,14 +1231,14 @@ export function UsersView() {
                   onClick={() => setConfirmDelete(null)}
                   disabled={deleteLoading}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   className="btn btn--danger"
                   onClick={handleRemoveFromProject}
                   disabled={deleteLoading}
                 >
-                  {deleteLoading ? "Removing..." : "Remove from Project"}
+                  {deleteLoading ? t("projectUsers.removeModal.removing") : t("projectUsers.userDetail.removeFromProject")}
                 </button>
               </div>
             </div>
@@ -1235,13 +1255,13 @@ export function UsersView() {
       {/* Header */}
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Users</h1>
+          <h1>{t("projectUsers.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("projectUsers.openHelp")}
+            aria-label={t("projectUsers.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -1251,9 +1271,9 @@ export function UsersView() {
             className="btn btn--primary"
             onClick={() => setAddMemberOpen(true)}
             disabled={!canInviteMembers}
-            title={!canInviteMembers ? "You do not have permission to add users to this project" : undefined}
+            title={!canInviteMembers ? t("projectUsers.addUserDenied") : undefined}
           >
-            + Add User
+            {t("projectUsers.addUser")}
           </button>
         </div>
       </header>
@@ -1261,7 +1281,7 @@ export function UsersView() {
       {error && <p className="users-error">{error}</p>}
 
       <div className="users-content">
-        <div className="segmented-control" role="tablist" aria-label="User workspace views">
+        <div className="segmented-control" role="tablist" aria-label={t("projectUsers.tabs.workspaceViews")}>
           <button
             type="button"
             role="tab"
@@ -1269,7 +1289,7 @@ export function UsersView() {
             className={showActivityTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
             onClick={() => setShowActivityTable(false)}
           >
-            Details
+            {t("projectUsers.tabs.details")}
           </button>
           <button
             type="button"
@@ -1278,7 +1298,7 @@ export function UsersView() {
             className={showActivityTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             onClick={() => setShowActivityTable(true)}
           >
-            Activity
+            {t("projectUsers.tabs.activity")}
           </button>
         </div>
 
@@ -1300,7 +1320,7 @@ export function UsersView() {
                       className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
                       onClick={() => handleSort(col.key)}
                     >
-                      {col.label}
+                      {t(`projectUsers.columns.${col.labelKey}`)}
                       <span className="users-sort-icon">
                         {sortCol === col.key
                           ? sortDir === "asc"
@@ -1323,7 +1343,7 @@ export function UsersView() {
                 {!loading && sorted.length === 0 && (
                   <tr>
                     <td colSpan={6} className="users-td-msg">
-                      No users found.
+                      {t("projectUsers.noUsersFound")}
                     </td>
                   </tr>
                 )}
@@ -1342,7 +1362,7 @@ export function UsersView() {
                       <td className="users-td users-td--muted">{row.email}</td>
                       <td className="users-td">
                         <span className={`role-badge role-badge--${row.role}`}>
-                          {ROLE_LABELS[row.role]}
+                          {projectRoleLabel(t, row.role)}
                         </span>
                       </td>
                       <td className="users-td users-td--muted">{row.createdByName}</td>
@@ -1360,7 +1380,7 @@ export function UsersView() {
                 <tr>
                   {ACTIVITY_COLS.map((col) => (
                     <th key={col.key} style={{ width: col.width }} className="users-th">
-                      {col.label}
+                      {t(`projectUsers.columns.${col.labelKey}`)}
                     </th>
                   ))}
                 </tr>
@@ -1385,7 +1405,7 @@ export function UsersView() {
                     <td className="users-td users-td--name">{row.name}</td>
                     <td className="users-td">
                       <span className={`users-activity-status ${row.active ? "users-activity-status--active" : "users-activity-status--inactive"}`}>
-                        {row.active ? "Active" : "Inactive"}
+                        {row.active ? t("projectUsers.tabs.active") : t("projectUsers.tabs.inactive")}
                       </span>
                     </td>
                     <td className="users-td">{formatRoundedMinutes(row.cumulativeActiveMinutes)}</td>
@@ -1407,15 +1427,15 @@ export function UsersView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Users Help</h2>
+            <h2>{t("projectUsers.help.title")}</h2>
             <p className="users-guide-copy">
-              Review members and roles, add a member, open row details, edit a member role, remove a member, resolve imported users, and create a temporary password when needed.
+              {t("projectUsers.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use this page to manage who can access the project. Add registered users to the project, inspect current roles, switch between the details and activity tabs, and resolve user-account issues after imports or restores.
+              {t("projectUsers.help.line2")}
             </p>
             <p className="users-guide-copy">
-              User-management actions depend on project role and app role. Some imported-user flows create or reassociate workspace accounts.
+              {t("projectUsers.help.line3")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button
@@ -1423,7 +1443,7 @@ export function UsersView() {
                 className="btn"
                 onClick={() => setHelpOpen(false)}
               >
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1445,7 +1465,7 @@ export function UsersView() {
                 setContextMenu(null);
               }}
             >
-              Edit
+              {t("projectUsers.userDetail.editUser")}
             </button>
           )}
           {!getRemoveBlockReason(contextMenu.row) && (
@@ -1456,7 +1476,7 @@ export function UsersView() {
                 setContextMenu(null);
               }}
             >
-              Delete
+              {t("projectUsers.userDetail.removeFromProject")}
             </button>
           )}
         </div>
@@ -1465,17 +1485,19 @@ export function UsersView() {
       {activePendingResolution && (
         <div className="modal-overlay">
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-            <h2>Imported Users Need Configuration</h2>
+            <h2>{t("projectUsers.importedUsers.title")}</h2>
             <p className="import-project-copy">
-              These users came from the {activePendingResolution.source === "restore" ? "restored backup" : "imported project"}.
+              {activePendingResolution.source === "restore"
+                ? t("projectUsers.importedUsers.restoreSource")
+                : t("projectUsers.importedUsers.importSource")}
             </p>
             <div className="users-table-wrap" style={{ maxHeight: 360 }}>
               <table className="users-table">
                 <thead>
                   <tr>
-                    <th className="users-th">User</th>
-                    <th className="users-th">Email</th>
-                    <th className="users-th">Status</th>
+                    <th className="users-th">{t("projectUsers.columns.user")}</th>
+                    <th className="users-th">{t("projectUsers.columns.email")}</th>
+                    <th className="users-th">{t("projectUsers.columns.status")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1488,11 +1510,11 @@ export function UsersView() {
                       <td className="users-td users-td--name">{user.name}</td>
                       <td className="users-td users-td--muted">{user.email}</td>
                       <td className="users-td users-td--muted">
-                        {user.status === "no_access" && "No access to project"}
-                        {user.status === "associated_current_user" && "Associated with current account"}
-                        {user.status === "associated_existing_user" && "Associated with existing user"}
-                        {user.status === "temporary_password_created" && "Temporary password created"}
-                        {user.status === "removed" && "Removed from project"}
+                        {user.status === "no_access" && t("projectUsers.importedUsers.noAccessToProject")}
+                        {user.status === "associated_current_user" && t("projectUsers.importedUsers.associatedCurrentUser")}
+                        {user.status === "associated_existing_user" && t("projectUsers.importedUsers.associatedExistingUser")}
+                        {user.status === "temporary_password_created" && t("projectUsers.importedUsers.temporaryPasswordCreated")}
+                        {user.status === "removed" && t("projectUsers.importedUsers.removedFromProject")}
                       </td>
                     </tr>
                   ))}
@@ -1506,7 +1528,7 @@ export function UsersView() {
                 disabled={activePendingResolution.users.some((user) => user.status === "no_access")}
                 onClick={() => setPendingImportedUserResolution(null)}
               >
-                Done
+                {t("projectUsers.importedUsers.done")}
               </button>
             </div>
           </div>
@@ -1516,9 +1538,9 @@ export function UsersView() {
       {selectedImportedUser && currentUser && (
         <div className="modal-overlay">
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-            <h2>Resolve Imported User</h2>
+            <h2>{t("projectUsers.importedUsers.resolveTitle")}</h2>
             <p className="import-project-copy">
-              Choose what to do with <strong>{selectedImportedUser.name}</strong>.
+              {t("projectUsers.importedUsers.resolveBody", { name: selectedImportedUser.name })}
             </p>
             <div className="form">
               <button
@@ -1532,19 +1554,19 @@ export function UsersView() {
                   userIdentifier: currentUser.user_identifier || "",
                 }, "associated_current_user")}
               >
-                This is me
+                {t("projectUsers.importedUsers.thisIsMe")}
               </button>
               <label className="form-label">
-                Associate with an existing user
+                {t("projectUsers.importedUsers.associateExisting")}
                 {availableUsersLoading ? (
-                  <p className="users-td users-td--muted">Loading registered users…</p>
+                  <p className="users-td users-td--muted">{t("projectUsers.importedUsers.loadingRegisteredUsers")}</p>
                 ) : (
                   <select
                     className="form-input"
                     value={associateUserId}
                     onChange={(e) => setAssociateUserId(e.target.value)}
                   >
-                    <option value="">— select a user —</option>
+                    <option value="">{t("projectUsers.importedUsers.selectUser")}</option>
                     {availableUsers.map((user) => (
                       <option key={user.id} value={user.id}>
                         {user.name} ({user.email})
@@ -1564,7 +1586,7 @@ export function UsersView() {
                     void applyImportedUserAssociation(selectedImportedUser, target, "associated_existing_user");
                   }}
                 >
-                  Associate with Selected User
+                  {t("projectUsers.importedUsers.associateSelected")}
                 </button>
                 <button
                   type="button"
@@ -1572,7 +1594,7 @@ export function UsersView() {
                   disabled={resolutionBusy}
                   onClick={() => setRemoveImportedUser(selectedImportedUser)}
                 >
-                  Remove from Project
+                  {t("projectUsers.importedUsers.removeFromProject")}
                 </button>
                 <button
                   type="button"
@@ -1585,13 +1607,13 @@ export function UsersView() {
                     setSelectedImportedUser(null);
                   }}
                 >
-                  Create Temporary Password
+                  {t("projectUsers.importedUsers.createTemporaryPassword")}
                 </button>
               </div>
             </div>
             <div className="form-actions">
               <button type="button" className="btn" disabled={resolutionBusy} onClick={() => setSelectedImportedUser(null)}>
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           </div>
@@ -1601,15 +1623,15 @@ export function UsersView() {
       {tempPasswordUser && (
         <div className="modal-overlay">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Create Temporary Password</h2>
+            <h2>{t("projectUsers.importedUsers.createTemporaryPasswordTitle")}</h2>
             <p className="import-project-copy">
-              Create a temporary password for <strong>{tempPasswordUser.name}</strong>.
+              {t("projectUsers.importedUsers.createTemporaryPasswordBody", { name: tempPasswordUser.name })}
             </p>
             <p className="modal-warning-text">
-              Note this password before continuing. This user will be required to create a new password immediately after they log in.
+              {t("projectUsers.importedUsers.temporaryPasswordNote")}
             </p>
             <label className="form-label">
-              Temporary password
+                {t("projectUsers.importedUsers.temporaryPassword")}
               <input
                 className="form-input"
                 type="password"
@@ -1620,7 +1642,7 @@ export function UsersView() {
               />
             </label>
             <label className="form-label">
-              Confirm temporary password
+                {t("projectUsers.importedUsers.confirmTemporaryPassword")}
               <input
                 className="form-input"
                 type="password"
@@ -1640,7 +1662,7 @@ export function UsersView() {
                   setConfirmTemporaryPassword("");
                 }}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -1648,7 +1670,7 @@ export function UsersView() {
                 disabled={resolutionBusy}
                 onClick={() => void handleCreateTemporaryPasswordAccount()}
               >
-                {resolutionBusy ? "Creating..." : "Create Account"}
+                {resolutionBusy ? t("projectSettings.modal.creating") : t("projectUsers.importedUsers.createTemporaryPassword")}
               </button>
             </div>
           </div>
@@ -1658,12 +1680,12 @@ export function UsersView() {
       {removeImportedUser && (
         <div className="modal-overlay">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Remove from Project</h2>
+            <h2>{t("projectUsers.removeModal.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Remove <strong>{removeImportedUser.name}</strong> from this project?
+              {t("projectUsers.importedUsers.removeBody", { name: removeImportedUser.name })}
             </p>
             <p className="modal-warning-text">
-              This removes the imported user from the project reassociation flow and clears their unresolved user links.
+              {t("projectUsers.importedUsers.removeWarning")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button
@@ -1671,14 +1693,14 @@ export function UsersView() {
                 onClick={() => setRemoveImportedUser(null)}
                 disabled={resolutionBusy}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 className="btn btn--danger"
                 onClick={() => void handleRemoveImportedUserFromProject()}
                 disabled={resolutionBusy}
               >
-                {resolutionBusy ? "Removing…" : "Remove from Project"}
+                {resolutionBusy ? t("projectUsers.removeModal.removing") : t("projectUsers.importedUsers.removeFromProject")}
               </button>
             </div>
           </div>
@@ -1692,13 +1714,12 @@ export function UsersView() {
           onClick={() => !deleteLoading && setConfirmDelete(null)}
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Remove from Project</h2>
+            <h2>{t("projectUsers.removeModal.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Remove <strong>{confirmDelete.name}</strong> from this project?
+              {t("projectUsers.removeModal.body", { name: confirmDelete.name })}
             </p>
             <p className="modal-warning-text">
-              Their account will not be deleted — they will simply lose access
-              to this project.
+              {t("projectUsers.removeModal.accessWarning")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button
@@ -1706,14 +1727,14 @@ export function UsersView() {
                 onClick={() => setConfirmDelete(null)}
                 disabled={deleteLoading}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 className="btn btn--danger"
                 onClick={handleRemoveFromProject}
                 disabled={deleteLoading}
               >
-                {deleteLoading ? "Removing…" : "Remove from Project"}
+                {deleteLoading ? t("projectUsers.removeModal.removing") : t("projectUsers.userDetail.removeFromProject")}
               </button>
             </div>
           </div>

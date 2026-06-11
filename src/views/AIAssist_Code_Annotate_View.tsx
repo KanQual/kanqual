@@ -21,6 +21,8 @@ import {
 } from "../components/ProcessedTranscriptView";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
 
@@ -80,7 +82,7 @@ function clampPreviewToWholeWords(text: string, maxChars: number): string {
 function fmtDate(iso: string): string {
   if (!iso) return "";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -234,6 +236,7 @@ function ColorSuggestions({
 // ─── NewCodeModal ─────────────────────────────────────────────────────────────
 
 function NewCodeModal({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const { activeProject, codes, addCode } = useStore();
   const [label,    setLabel]    = useState("");
   const [desc,     setDesc]     = useState("");
@@ -266,7 +269,7 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
       if (fieldErrors && Object.keys(fieldErrors).length > 0) {
         setError(Object.entries(fieldErrors).map(([f, v]) => `${f}: ${v?.message ?? "invalid"}`).join(" · "));
       } else {
-        setError(e instanceof Error ? (e as Error).message : "Failed to create code.");
+        setError(e instanceof Error ? (e as Error).message : t("aiAssist.annotate.codebook.errors.failedToCreateCode"));
       }
     } finally {
       setLoading(false);
@@ -276,44 +279,44 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New Code</h2>
+        <h2>{t("aiAssist.annotate.codebook.newCode.title")}</h2>
         <form className="form" onSubmit={handleSubmit}>
           <label className="form-label">
-            Code Name
+            {t("aiAssist.annotate.codebook.newCode.codeName")}
             <input
               className="form-input"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Resilience"
+              placeholder={t("aiAssist.annotate.codebook.newCode.codeNamePlaceholder")}
               required
               autoFocus
             />
           </label>
           <label className="form-label">
-            Description
+            {t("aiAssist.annotate.codebook.newCode.description")}
             <textarea
               className="form-input code-desc-textarea"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              placeholder="Optional description…"
+              placeholder={t("aiAssist.annotate.codebook.newCode.descriptionPlaceholder")}
               rows={3}
             />
           </label>
           <label className="form-label">
-            Parent Code
+            {t("aiAssist.annotate.codebook.newCode.parentCode")}
             <select
               className="form-input"
               value={parentId}
               onChange={(e) => setParentId(e.target.value)}
             >
-              <option value="">— Top-level (no parent) —</option>
+              <option value="">{t("aiAssist.annotate.codebook.newCode.topLevelOption")}</option>
               {codes.map((c) => (
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
           </label>
           <label className="form-label">
-            Color
+            {t("aiAssist.annotate.codebook.newCode.color")}
             <div className="code-color-row" style={{ marginTop: 6 }}>
               <input
                 type="color"
@@ -325,14 +328,16 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
             </div>
             <ColorSuggestions suggestions={colorSuggestions} selected={color} onSelect={setColor} />
             <p className="code-color-hint">
-              {parentId ? "Suggested shades of the parent code's color" : "Suggested colors distinct from existing codes"}
+              {parentId
+                ? t("aiAssist.annotate.codebook.newCode.parentColorHint")
+                : t("aiAssist.annotate.codebook.newCode.distinctColorHint")}
             </p>
           </label>
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
             <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
-              {loading ? "Creating…" : "Create Code"}
+              {loading ? t("aiAssist.annotate.codebook.newCode.creating") : t("aiAssist.annotate.codebook.newCode.create")}
             </button>
           </div>
         </form>
@@ -344,6 +349,7 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
 // ─── EditCodeModal ────────────────────────────────────────────────────────────
 
 function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
+  const { t } = useI18n();
   const { codes, updateCode } = useStore();
   const [label,   setLabel]   = useState(code.label);
   const [color,   setColor]   = useState(code.color || "#6366f1");
@@ -365,7 +371,7 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
       await updateCode(code.id, { label: label.trim(), color, description: desc });
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? (e as Error).message : "Failed to save.");
+      setError(e instanceof Error ? (e as Error).message : t("aiAssist.annotate.codebook.errors.failedToSaveCode"));
     } finally {
       setLoading(false);
     }
@@ -374,10 +380,10 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Edit Code</h2>
+        <h2>{t("aiAssist.annotate.codebook.editCode.title")}</h2>
         <form className="form" onSubmit={handleSubmit}>
           <label className="form-label">
-            Code Name
+            {t("aiAssist.annotate.codebook.newCode.codeName")}
             <input
               className="form-input"
               value={label}
@@ -387,17 +393,17 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
             />
           </label>
           <label className="form-label">
-            Description
+            {t("aiAssist.annotate.codebook.newCode.description")}
             <textarea
               className="form-input code-desc-textarea"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              placeholder="Optional description…"
+              placeholder={t("aiAssist.annotate.codebook.newCode.descriptionPlaceholder")}
               rows={3}
             />
           </label>
           <label className="form-label">
-            Color
+            {t("aiAssist.annotate.codebook.newCode.color")}
             <div className="code-color-row" style={{ marginTop: 6 }}>
               <input
                 type="color"
@@ -411,9 +417,9 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
           </label>
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
             <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
-              {loading ? "Saving…" : "Save Changes"}
+              {loading ? t("aiAssist.annotate.codebook.editCode.saving") : t("aiAssist.annotate.codebook.editCode.saveChanges")}
             </button>
           </div>
         </form>
@@ -476,7 +482,7 @@ interface PendingSelection { start: number; end: number; quote: string; }
 
 function getPocketBaseErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
-    return error instanceof Error ? error.message : "Failed to create annotation.";
+    return error instanceof Error ? error.message : "";
   }
 
   const maybe = error as {
@@ -488,7 +494,7 @@ function getPocketBaseErrorMessage(error: unknown): string {
         .map(([field, detail]) => `${field}: ${detail.message || detail.code || "invalid value"}`)
         .join("; ")
     : "";
-  return details || maybe.response?.message || maybe.message || "Failed to create annotation.";
+  return details || maybe.response?.message || maybe.message || "";
 }
 
 const CODEBOOK_HEADER_H = 37;  // .annotate-card-header height
@@ -519,6 +525,7 @@ function CodebookPanel({
   annotationCountOverride?: Record<string, number>;
   readOnly?: boolean;
 }) {
+  const { t } = useI18n();
   const { codes, annotations, canCurrentUser, deleteCode, addAnnotation, activeDocument } = useStore();
   const canCreateCodes = canCurrentUser("createCode");
   const canEditCodes = canCurrentUser("editCode");
@@ -623,7 +630,9 @@ function CodebookPanel({
         onClearSelection();
         onAnnotationApplied();
       } catch (error) {
-        setAnnotationError(getPocketBaseErrorMessage(error));
+        setAnnotationError(
+          getPocketBaseErrorMessage(error) || t("aiAssist.annotate.errors.failedToCreateAnnotation"),
+        );
       }
     }
   }
@@ -641,7 +650,7 @@ function CodebookPanel({
   return (
     <div className="annotate-card" style={{ height: cardH, flexShrink: 0 }}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Codebook</span>
+        <span className="annotate-card-title">{t("aiAssist.annotate.codebook.title")}</span>
         {canCreateCodes && (
           <button className="btn btn--small btn--primary" onClick={() => setShowNewCode(true)}>
             + Code
@@ -662,7 +671,7 @@ function CodebookPanel({
 
       <ul ref={listRef} className="code-list">
         {codes.length === 0 && (
-          <li className="code-list-empty">No codes yet.</li>
+          <li className="code-list-empty">{t("aiAssist.annotate.codebook.empty.noCodesYet")}</li>
         )}
         {visible.map(({ code, depth, hasChildren }) => (
           <li
@@ -684,7 +693,7 @@ function CodebookPanel({
                 type="button"
                 className="code-collapse-btn"
                 onClick={(e) => { e.stopPropagation(); toggleCollapse(code.id); }}
-                title={collapsed.has(code.id) ? "Expand" : "Collapse"}
+                title={collapsed.has(code.id) ? t("aiAssist.annotate.codebook.actions.expand") : t("aiAssist.annotate.codebook.actions.collapse")}
               >
                 {collapsed.has(code.id) ? "▶" : "▼"}
               </button>
@@ -714,7 +723,7 @@ function CodebookPanel({
               className="context-menu-item"
               onClick={() => { setEditCode(contextMenu.code); setContextMenu(null); }}
             >
-              Edit Code
+              {t("aiAssist.annotate.codebook.actions.editCode")}
             </button>
           )}
           {canDeleteCodes && (
@@ -722,7 +731,7 @@ function CodebookPanel({
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDeleteCode(contextMenu.code); setContextMenu(null); }}
             >
-              Delete Code
+              {t("aiAssist.annotate.codebook.actions.deleteCode")}
             </button>
           )}
         </div>
@@ -732,17 +741,17 @@ function CodebookPanel({
       {confirmDeleteCode && (
         <div className="modal-overlay" onClick={() => !deletingCode && setConfirmDeleteCode(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Code</h2>
+            <h2>{t("aiAssist.annotate.codebook.deleteCode.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to delete <strong>{confirmDeleteCode.label}</strong>?
+              {t("aiAssist.annotate.codebook.deleteCode.bodyPrefix")} <strong>{confirmDeleteCode.label}</strong>?
             </p>
             <p className="modal-warning-text">
               All annotations made with this code will be permanently deleted. This cannot be undone.
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDeleteCode(null)} disabled={deletingCode}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDeleteCode(null)} disabled={deletingCode}>{t("common.cancel")}</button>
               <button className="btn btn--danger" onClick={handleDeleteCode} disabled={deletingCode}>
-                {deletingCode ? "Deleting…" : "Delete Code"}
+                {deletingCode ? t("aiAssist.annotate.codebook.deleteCode.deleting") : t("aiAssist.annotate.codebook.actions.deleteCode")}
               </button>
             </div>
           </div>
@@ -773,6 +782,7 @@ export function AnnotationDetailsPanel({
   onSelectAnn: (annId: string) => void;
   hiddenUserIds: Set<string>;
 }) {
+  const { t } = useI18n();
   const {
     annotations: allAnnotations,
     codes,
@@ -858,7 +868,7 @@ export function AnnotationDetailsPanel({
   return (
     <div className="annotate-card annotate-card--grow">
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Annotations ({annotations.length})</span>
+        <span className="annotate-card-title">{t("aiAssist.annotate.annotation.title", { count: annotations.length })}</span>
       </div>
 
       {selectedQuote && (
@@ -905,7 +915,7 @@ export function AnnotationDetailsPanel({
                     className="form-input"
                     value={noteDraft}
                     onChange={(e) => setNoteDraft(e.target.value)}
-                    placeholder="Add a note…"
+                    placeholder={t("aiAssist.annotate.annotation.note.placeholder")}
                     autoFocus
                     rows={2}
                     style={{ width: "100%", resize: "vertical", fontSize: 12 }}
@@ -916,10 +926,10 @@ export function AnnotationDetailsPanel({
                   />
                   <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                     <button className="btn btn--primary" style={{ fontSize: 11, padding: "2px 8px" }} onClick={handleSaveNote} disabled={savingNote}>
-                      {savingNote ? "Saving…" : "Save"}
+                      {savingNote ? t("aiAssist.annotate.annotation.note.saving") : t("common.save")}
                     </button>
                     <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => setEditingNoteAnn(null)} disabled={savingNote}>
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                   </div>
                 </div>
@@ -929,7 +939,7 @@ export function AnnotationDetailsPanel({
               <p className="annotation-meta">
                 {a.createdBy && <span>{a.createdBy}</span>}
                 {a.createdBy && a.createdAt && <span className="annotation-meta-sep">·</span>}
-                {a.createdAt && <span>{fmtDate(a.createdAt)}</span>}
+                {a.createdAt && <span>{t("aiAssist.annotate.annotation.createdAt", { value: fmtDate(a.createdAt) })}</span>}
               </p>
             </li>
           );
@@ -960,7 +970,7 @@ export function AnnotationDetailsPanel({
               className="context-menu-item context-menu-item--danger"
               onClick={() => { updateAnnotationNote(contextMenu.ann.id, ""); setContextMenu(null); }}
             >
-              Delete Note
+              {t("aiAssist.annotate.annotation.actions.deleteNote")}
             </button>
           )}
           <button
@@ -975,7 +985,7 @@ export function AnnotationDetailsPanel({
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDeleteAnn(contextMenu.ann); setContextMenu(null); }}
             >
-              Delete Annotation
+              {t("aiAssist.annotate.annotation.actions.deleteAnnotation")}
             </button>
           )}
         </div>
@@ -985,18 +995,18 @@ export function AnnotationDetailsPanel({
       {confirmDeleteAnn && (
         <div className="modal-overlay" onClick={() => !deletingAnn && setConfirmDeleteAnn(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Annotation</h2>
+            <h2>{t("aiAssist.annotate.annotation.delete.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to delete this annotation?
+              {t("aiAssist.annotate.annotation.delete.body")}
             </p>
             <blockquote className="annotation-quote" style={{ margin: "0 0 16px" }}>
               "{confirmDeleteAnn.quote}"
             </blockquote>
             <p className="modal-warning-text">This cannot be undone.</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>{t("common.cancel")}</button>
               <button className="btn btn--danger" onClick={handleDeleteAnn} disabled={deletingAnn}>
-                {deletingAnn ? "Deleting…" : "Delete Annotation"}
+                {deletingAnn ? t("aiAssist.annotate.annotation.delete.deleting") : t("aiAssist.annotate.annotation.actions.deleteAnnotation")}
               </button>
             </div>
           </div>
@@ -1029,6 +1039,7 @@ function RelevantSegmentsPanel({
   onToggleEmbedded?: () => void;
   embeddedDrawerMaxHeight?: number;
 }) {
+  const { t } = useI18n();
   const {
     activeProject,
     activeDocument,
@@ -1068,23 +1079,25 @@ function RelevantSegmentsPanel({
 
   async function handleStartSearch() {
     if (!activeProject) {
-      setLocalSearchError("Open a project before searching for relevant segments.");
+      setLocalSearchError(t("aiAssist.annotate.relevantSegments.errors.openProjectFirst"));
       return;
     }
     const codeForSearch = lockedCode ?? selectedCode;
     if (!codeForSearch) {
-      setLocalSearchError("Select a single code in the codebook first.");
+      setLocalSearchError(t("aiAssist.annotate.relevantSegments.errors.selectOneCodeFirst"));
       return;
     }
     if (!activeDocument) {
-      setLocalSearchError("Open a document before searching for relevant segments.");
+      setLocalSearchError(t("aiAssist.annotate.relevantSegments.errors.openDocumentFirst"));
       return;
     }
     if (isLocalWorkspace) {
       try {
         assertActiveLlmRuntime(llmSettings, "searching for relevant segments");
       } catch (error) {
-        setLocalSearchError(error instanceof Error ? error.message : "Configure AI Assist before searching for relevant segments.");
+        setLocalSearchError(
+          error instanceof Error ? error.message : t("aiAssist.annotate.relevantSegments.errors.configureAiAssistFirst"),
+        );
         return;
       }
     }
@@ -1112,7 +1125,7 @@ function RelevantSegmentsPanel({
           onClick={clearSearch}
           disabled={searching}
         >
-          Clear
+          {t("common.clear")}
         </button>
       )}
       <button
@@ -1120,7 +1133,11 @@ function RelevantSegmentsPanel({
         onClick={() => void handleStartSearch()}
         disabled={!effectiveCode || searching}
       >
-        {searching ? "Searching" : results.length > 0 ? "Run Again" : "Search"}
+        {searching
+          ? t("aiAssist.annotate.relevantSegments.actions.searching")
+          : results.length > 0
+            ? t("aiAssist.annotate.relevantSegments.actions.runAgain")
+            : t("aiAssist.annotate.relevantSegments.actions.search")}
       </button>
     </div>
   );
@@ -1131,17 +1148,19 @@ function RelevantSegmentsPanel({
         {effectiveCode ? (
           <>
             <span className="ai-segments-summary-label">
-              {lockedCode ? "Search locked to code" : "Selected code"}
+              {lockedCode
+                ? t("aiAssist.annotate.relevantSegments.labels.searchLockedToCode")
+                : t("aiAssist.annotate.relevantSegments.labels.selectedCode")}
             </span>
             <span className="ai-segments-summary-value">{effectiveCode.label}</span>
             {lockedCode && (
               <span className="ai-segments-summary-hint">
-                Search results will stay pinned to this code until you clear the search.
+                {t("aiAssist.annotate.relevantSegments.labels.searchPinnedHint")}
               </span>
             )}
           </>
         ) : (
-          <span className="annotation-list-empty">Select one code in the codebook to search for relevant segments.</span>
+          <span className="annotation-list-empty">{t("aiAssist.annotate.relevantSegments.empty.selectOneCode")}</span>
         )}
       </div>
 
@@ -1165,14 +1184,14 @@ function RelevantSegmentsPanel({
 
       {lastModel && !searching && (
         <p className="ai-segments-model-note">
-          Latest search model: <code>{lastModel}</code>
+          {t("aiAssist.annotate.relevantSegments.labels.latestSearchModel")}: <code>{lastModel}</code>
         </p>
       )}
 
       <ul className="annotation-list">
         {!searching && results.length === 0 && effectiveCode && !searchError && (
           <li className="annotation-list-empty">
-            Start a search to ask AI Assist which indexed project segments look most relevant to this code.
+            {t("aiAssist.annotate.relevantSegments.empty.startSearch")}
           </li>
         )}
         {results.map((segment) => (
@@ -1188,7 +1207,9 @@ function RelevantSegmentsPanel({
             >
               <div className="annotation-item-header">
                 <span className="annotation-code-badge ai-segments-badge">
-                  {segment.itemType === "annotation" ? "Annotation" : "Text"}
+                  {segment.itemType === "annotation"
+                    ? t("aiAssist.chat.citationKinds.annotation")
+                    : t("aiAssist.chat.citationKinds.text")}
                 </span>
                 <span className="ai-segments-score">{Math.round(segment.similarity * 100)}%</span>
               </div>
@@ -1215,8 +1236,8 @@ function RelevantSegmentsPanel({
             <span className="doc-inline-disclosure-chevron" aria-hidden="true">
               {embeddedOpen ? "▾" : "▸"}
             </span>
-            <span className="doc-inline-disclosure-label">Relevant Segments</span>
-            <span className="ai-segments-inline-badge">AI Suggested</span>
+            <span className="doc-inline-disclosure-label">{t("aiAssist.annotate.relevantSegments.title")}</span>
+            <span className="ai-segments-inline-badge">{t("aiAssist.annotate.relevantSegments.aiSuggested")}</span>
           </button>
           {headerActions}
         </div>
@@ -1235,7 +1256,7 @@ function RelevantSegmentsPanel({
   return (
     <div className="annotate-card annotate-card--grow">
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Relevant Segments</span>
+        <span className="annotate-card-title">{t("aiAssist.annotate.relevantSegments.title")}</span>
         {headerActions}
       </div>
       {content}
@@ -1473,6 +1494,7 @@ function DocumentViewer({
     drawerMaxHeight: number,
   ) => React.ReactNode;
 }) {
+  const { t } = useI18n();
   const {
     activeDocument,
     addDocument,
@@ -1812,7 +1834,7 @@ function DocumentViewer({
                 key={start}
                 data-citation-highlight="true"
                 className="citation-highlight"
-                title={scrollToCitationRange?.label ?? "Cited project text"}
+                title={scrollToCitationRange?.label ?? t("aiAssist.annotate.document.citedProjectText")}
               >
                 {seg}
               </mark>,
@@ -1899,7 +1921,7 @@ function DocumentViewer({
   if (!activeProject) {
     return (
       <div className="annotate-card annotate-card--grow doc-viewer--empty">
-        <p>Open a project first.</p>
+        <p>{t("aiAssist.analyze.empty.openProjectFirst")}</p>
       </div>
     );
   }
@@ -1915,7 +1937,7 @@ function DocumentViewer({
             <p className="doc-import-hint">Supports .txt, .md, .csv</p>
           </>
         ) : (
-          <p className="doc-import-hint">No document imported yet.</p>
+          <p className="doc-import-hint">{t("aiAssist.annotate.document.empty.noDocumentImportedYet")}</p>
         )}
       </div>
     );
@@ -1931,7 +1953,7 @@ function DocumentViewer({
               <button
                 type="button"
                 className="processed-transcript-outline-btn"
-                aria-label="Show transcript outline"
+                aria-label={t("aiAssist.annotate.document.showTranscriptOutline")}
                 aria-expanded={outlineOpen}
                 onClick={() => setOutlineOpen((open) => !open)}
               >
@@ -1963,8 +1985,8 @@ function DocumentViewer({
             type="button"
             className="doc-toolbar-filter-btn"
             onClick={onOpenFilters}
-            aria-label="Filter visible annotations"
-            title="Filter visible annotations"
+            aria-label={t("aiAssist.annotate.filters.title")}
+            title={t("aiAssist.annotate.filters.title")}
           >
             <FilterIcon className="filter-icon-svg" />
           </button>
@@ -2065,7 +2087,7 @@ function DocumentViewer({
                 setContextMenu(null);
               }}
             >
-              Delete Note
+              {t("aiAssist.annotate.annotation.actions.deleteNote")}
             </button>
           )}
           <button
@@ -2083,7 +2105,7 @@ function DocumentViewer({
                 setContextMenu(null);
               }}
             >
-              Delete Annotation
+              {t("aiAssist.annotate.annotation.actions.deleteAnnotation")}
             </button>
           )}
         </div>
@@ -2097,7 +2119,7 @@ function DocumentViewer({
               className="form-input"
               value={noteDraft}
               onChange={(event) => setNoteDraft(event.target.value)}
-              placeholder="Add a note..."
+              placeholder={t("aiAssist.annotate.annotation.note.placeholder")}
               autoFocus
               rows={5}
               style={{ width: "100%", resize: "vertical" }}
@@ -2107,9 +2129,9 @@ function DocumentViewer({
               }}
             />
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setEditingNoteAnn(null)} disabled={savingNote}>Cancel</button>
+              <button className="btn" onClick={() => setEditingNoteAnn(null)} disabled={savingNote}>{t("common.cancel")}</button>
               <button className="btn btn--primary" onClick={() => void handleSaveNote()} disabled={savingNote}>
-                {savingNote ? "Saving..." : "Save"}
+                {savingNote ? t("aiAssist.annotate.annotation.note.saving") : t("common.save")}
               </button>
             </div>
           </div>
@@ -2119,18 +2141,18 @@ function DocumentViewer({
       {confirmDeleteAnn && (
         <div className="modal-overlay" onClick={() => !deletingAnn && setConfirmDeleteAnn(null)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete Annotation</h2>
+            <h2>{t("aiAssist.annotate.annotation.delete.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to delete this annotation?
+              {t("aiAssist.annotate.annotation.delete.body")}
             </p>
             <blockquote className="annotation-quote" style={{ margin: "0 0 16px" }}>
               "{confirmDeleteAnn.quote}"
             </blockquote>
             <p className="modal-warning-text">This cannot be undone.</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDeleteAnn(null)} disabled={deletingAnn}>{t("common.cancel")}</button>
               <button className="btn btn--danger" onClick={() => void handleDeleteAnn()} disabled={deletingAnn}>
-                {deletingAnn ? "Deleting..." : "Delete Annotation"}
+                {deletingAnn ? t("aiAssist.annotate.annotation.delete.deleting") : t("aiAssist.annotate.annotation.actions.deleteAnnotation")}
               </button>
             </div>
           </div>
@@ -2186,6 +2208,7 @@ function AnnotationVisibilityModal({
   onClearCodes: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const { annotations, codes } = useStore();
 
   const users = useMemo(() => {
@@ -2224,22 +2247,22 @@ function AnnotationVisibilityModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal--wide annotation-filter-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Filter Visible Annotations</h2>
+        <h2>{t("aiAssist.annotate.filters.title")}</h2>
         <p style={{ marginBottom: 16, lineHeight: 1.5 }}>
-          Choose which annotations remain visible in the document viewer. By default, all annotations are shown.
+          {t("aiAssist.annotate.filters.body")}
         </p>
 
         <div className="annotation-filter-modal-grid">
           <div className="annotation-filter-group">
             <div className="annotation-filter-title-row">
-              <div className="annotation-filter-title">Codes</div>
+              <div className="annotation-filter-title">{t("aiAssist.annotate.filters.codes")}</div>
               <div className="annotation-filter-actions">
-                <button type="button" className="btn btn--small" onClick={onSelectAllCodes}>Select All</button>
-                <button type="button" className="btn btn--small" onClick={onClearCodes}>Clear</button>
+                <button type="button" className="btn btn--small" onClick={onSelectAllCodes}>{t("aiAssist.annotate.filters.selectAll")}</button>
+                <button type="button" className="btn btn--small" onClick={onClearCodes}>{t("aiAssist.annotate.filters.clear")}</button>
               </div>
             </div>
             {visibleCodes.length === 0 ? (
-              <p className="annotation-filter-empty">No coded annotations yet.</p>
+              <p className="annotation-filter-empty">{t("aiAssist.annotate.filters.noCodedAnnotationsYet")}</p>
             ) : (
               <ul className="annotation-filter-list">
                 {visibleCodes.map(({ code, depth }) => (
@@ -2268,14 +2291,14 @@ function AnnotationVisibilityModal({
 
           <div className="annotation-filter-group">
             <div className="annotation-filter-title-row">
-              <div className="annotation-filter-title">Users</div>
+              <div className="annotation-filter-title">{t("aiAssist.annotate.filters.users")}</div>
               <div className="annotation-filter-actions">
-                <button type="button" className="btn btn--small" onClick={onSelectAllUsers}>Select All</button>
-                <button type="button" className="btn btn--small" onClick={onClearUsers}>Clear</button>
+                <button type="button" className="btn btn--small" onClick={onSelectAllUsers}>{t("aiAssist.annotate.filters.selectAll")}</button>
+                <button type="button" className="btn btn--small" onClick={onClearUsers}>{t("aiAssist.annotate.filters.clear")}</button>
               </div>
             </div>
             {users.length === 0 ? (
-              <p className="annotation-filter-empty">No annotators yet.</p>
+              <p className="annotation-filter-empty">{t("aiAssist.annotate.filters.noAnnotatorsYet")}</p>
             ) : (
               <ul className="annotation-filter-list">
                 {users.map(({ id, name, count }) => (
@@ -2298,7 +2321,7 @@ function AnnotationVisibilityModal({
         </div>
 
         <div className="form-actions" style={{ marginTop: 20 }}>
-          <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
+          <button type="button" className="btn btn--primary" onClick={onClose}>{t("common.close")}</button>
         </div>
       </div>
     </div>
@@ -2789,23 +2812,24 @@ function AnalyzeExportModal({
   onExportDOCX: () => void;
   exportingFormat: string | null;
 }) {
+  const { t } = useI18n();
   const options = [
     {
       key: "html",
-      label: "HTML",
-      description: "Can be opened in a web browser and is closest to what you see in the app.",
+      label: t("aiAssist.annotate.export.htmlLabel"),
+      description: t("aiAssist.annotate.export.htmlDescription"),
       onClick: onExportHTML,
     },
     {
       key: "pdf",
-      label: "PDF",
-      description: "Uses a simpler layout and is the best for sharing.",
+      label: t("aiAssist.annotate.export.pdfLabel"),
+      description: t("aiAssist.annotate.export.pdfDescription"),
       onClick: onExportPDF,
     },
     {
       key: "docx",
-      label: "DOCX",
-      description: "Uses a simpler layout and is the best for further editing.",
+      label: t("aiAssist.annotate.export.docxLabel"),
+      description: t("aiAssist.annotate.export.docxDescription"),
       onClick: onExportDOCX,
     },
   ] as const;
@@ -2813,7 +2837,7 @@ function AnalyzeExportModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 760, width: "min(760px, calc(100vw - 32px))" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>Export Analysis Results</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("aiAssist.annotate.export.title")}</h2>
         <div
           style={{
             display: "grid",
@@ -2847,13 +2871,13 @@ function AnalyzeExportModal({
                 </div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {exportingFormat === option.key ? "Exporting..." : `Export as ${option.label}`}
+                {exportingFormat === option.key ? t("aiAssist.annotate.export.exporting") : t("aiAssist.annotate.export.exportAs", { format: option.label })}
               </div>
             </button>
           ))}
         </div>
         <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>Cancel</button>
+          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("common.cancel")}</button>
         </div>
       </div>
     </div>
@@ -2873,6 +2897,7 @@ function SaveAnalysisModal({
   onClose: () => void;
   onSave: (name: string) => void;
 }) {
+  const { t } = useI18n();
   const [name, setName] = useState(initialName);
 
   useEffect(() => {
@@ -2882,31 +2907,31 @@ function SaveAnalysisModal({
   return (
     <div className="modal-overlay" onClick={() => !loading && onClose()}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Save Analysis</h2>
+        <h2>{t("aiAssist.annotate.saveAnalysis.title")}</h2>
         <p style={{ marginBottom: 16, lineHeight: 1.5 }}>
-          Save this AI analysis to the project so it can be reopened from the analyses list.
+          {t("aiAssist.annotate.saveAnalysis.body")}
         </p>
         <label className="form-label">
-          Analysis name
+          {t("aiAssist.annotate.saveAnalysis.nameLabel")}
           <input
             className="form-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Analysis name..."
+            placeholder={t("aiAssist.annotate.saveAnalysis.namePlaceholder")}
             autoFocus
             disabled={loading}
           />
         </label>
         {error && <div className="form-error" style={{ marginTop: 12 }}>{error}</div>}
         <div className="form-actions" style={{ marginTop: 24 }}>
-          <button type="button" className="btn" onClick={onClose} disabled={loading}>Cancel</button>
+          <button type="button" className="btn" onClick={onClose} disabled={loading}>{t("common.cancel")}</button>
           <button
             type="button"
             className="btn btn--primary"
             onClick={() => onSave(name)}
             disabled={loading || !name.trim()}
           >
-            {loading ? "Saving..." : "Save Analysis"}
+            {loading ? t("aiAssist.annotate.statuses.saving") : t("aiAssist.annotate.saveAnalysis.action")}
           </button>
         </div>
       </div>
@@ -2936,33 +2961,37 @@ function parsePosition(text: string): { analysis: string; suggestions: string[] 
   };
 }
 
-const ANALYSIS_OPTIONS: { id: AnalysisId; title: string; description: string }[] = [
-  {
-    id: "conceptual-summary",
-    title: "Conceptual Summary",
-    description: "Narrative synthesis of what this code means across its annotations, plus up to 5 standout insights.",
-  },
-  {
-    id: "decomposition",
-    title: "Decomposition",
-    description: "Are there annotations, or groups of annotations, that do not fit the rest?",
-  },
-  {
-    id: "position",
-    title: "Position",
-    description: "Could this code belong somewhere else in the code hierarchy?",
-  },
-  {
-    id: "most-typical-annotation",
-    title: "Most Typical Annotations",
-    description: "The top 5 annotations that best exemplify the core meaning of this code.",
-  },
-  {
-    id: "most-unique-annotation",
-    title: "Most Unique Annotations",
-    description: "The top 5 annotations that are semantically most distinct from all others.",
-  },
-];
+function getAnalysisOptions(
+  t: ReturnType<typeof useI18n>["t"],
+): { id: AnalysisId; title: string; description: string }[] {
+  return [
+    {
+      id: "conceptual-summary",
+      title: t("aiAssist.annotate.analysis.conceptualSummaryTitle"),
+      description: t("aiAssist.annotate.analysisOptions.conceptualSummaryDescription"),
+    },
+    {
+      id: "decomposition",
+      title: t("aiAssist.annotate.analysis.decompositionTitle"),
+      description: t("aiAssist.annotate.analysisOptions.decompositionDescription"),
+    },
+    {
+      id: "position",
+      title: t("aiAssist.annotate.analysis.positionTitle"),
+      description: t("aiAssist.annotate.analysisOptions.positionDescription"),
+    },
+    {
+      id: "most-typical-annotation",
+      title: t("aiAssist.annotate.analysis.mostTypicalTitle"),
+      description: t("aiAssist.annotate.analysisOptions.mostTypicalDescription"),
+    },
+    {
+      id: "most-unique-annotation",
+      title: t("aiAssist.annotate.analysis.mostUniqueTitle"),
+      description: t("aiAssist.annotate.analysisOptions.mostUniqueDescription"),
+    },
+  ];
+}
 
 function AnalysisPanel({
   selectedCodeId,
@@ -2997,16 +3026,18 @@ function AnalysisPanel({
   onToggleEmbedded?: () => void;
   embeddedDrawerMaxHeight?: number;
 }) {
+  const { t } = useI18n();
   const { codes } = useStore();
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<AnalysisId>>(new Set());
+  const analysisOptions = getAnalysisOptions(t);
   const selectedCode = codes.find((c) => c.id === selectedCodeId) ?? null;
   const isBusy = summaryState.busy || typicalAnnotationState.busy || decompositionState.busy || positionState.busy || uniqueAnnotationsState.busy;
   const hasAnnotations = selectedCodeAnnotationCount > 0;
   const selectionBadge = readOnly
-    ? "Saved"
+    ? t("aiAssist.annotate.statuses.saved")
     : selectedAnalyses.size > 0
-      ? `${selectedAnalyses.size} Selected`
-      : "Choose Options";
+      ? t("aiAssist.annotate.analysis.selectedCount", { count: selectedAnalyses.size })
+      : t("aiAssist.annotate.analysis.chooseOptions");
 
   function getOptionStatus(id: AnalysisId): "idle" | "busy" | "done" | "error" {
     const stateMap: Record<AnalysisId, { busy: boolean; result: unknown; error: string }> = {
@@ -3039,7 +3070,7 @@ function AnalysisPanel({
       onClick={() => onRun(selectedAnalyses)}
       disabled={readOnly || !selectedCode || !hasAnnotations || selectedAnalyses.size === 0 || isBusy}
     >
-      {isBusy ? "Running..." : "Run"}
+      {isBusy ? t("aiAssist.annotate.statuses.running") : t("aiAssist.annotate.actions.run")}
     </button>
   );
 
@@ -3047,15 +3078,15 @@ function AnalysisPanel({
     <>
       {!selectedCode ? (
         <div className="ai-attribute-placeholder">
-          <p>Select a code from the codebook to see available analyses.</p>
+          <p>{t("aiAssist.annotate.analysis.selectCodePrompt")}</p>
         </div>
       ) : !hasAnnotations ? (
         <div className="ai-attribute-placeholder">
-          <p>This code has no annotations yet.</p>
+          <p>{t("aiAssist.annotate.analysis.noAnnotationsYet")}</p>
         </div>
       ) : (
         <div className="ai-analyze-options">
-          {ANALYSIS_OPTIONS.map((option) => {
+          {analysisOptions.map((option) => {
             const isSelected = selectedAnalyses.has(option.id);
             const status = getOptionStatus(option.id);
             const isExpanded = expandedDescriptions.has(option.id);
@@ -3079,7 +3110,7 @@ function AnalysisPanel({
                       <strong className="ai-analyze-option-title" title={option.title}>{option.title}</strong>
                       {status !== "idle" && (
                         <span className={`ai-analyze-option-status ai-analyze-option-status--${status}`}>
-                          {status === "busy" ? "Processing" : status === "done" ? "Done" : "Error"}
+                          {status === "busy" ? t("aiAssist.annotate.statuses.processing") : status === "done" ? t("aiAssist.annotate.statuses.done") : t("aiAssist.annotate.statuses.error")}
                         </span>
                       )}
                     </div>
@@ -3090,7 +3121,7 @@ function AnalysisPanel({
                       className="ai-analyze-option-toggle"
                       onClick={() => toggleDescription(option.id)}
                       aria-expanded={isExpanded}
-                      aria-label={isExpanded ? `Hide details for ${option.title}` : `Show details for ${option.title}`}
+                      aria-label={isExpanded ? t("aiAssist.annotate.analysis.hideDetailsFor", { title: option.title }) : t("aiAssist.annotate.analysis.showDetailsFor", { title: option.title })}
                     >
                       {isExpanded ? "▾" : "▸"}
                     </button>
@@ -3106,7 +3137,7 @@ function AnalysisPanel({
       )}
       {readOnly && selectedCode && hasAnnotations && (
         <div className="ai-attribute-placeholder" style={{ paddingTop: 0 }}>
-          <p>This saved analysis is read-only. Start a new analysis to explore other codes or prompts.</p>
+          <p>{t("aiAssist.annotate.analysis.readOnlyMessage")}</p>
         </div>
       )}
     </>
@@ -3126,6 +3157,7 @@ function AnalysisPanel({
               {embeddedOpen ? "▾" : "▸"}
             </span>
             <span className="doc-inline-disclosure-label">Analyze</span>
+            
             <span className="ai-analyze-inline-badge">{selectionBadge}</span>
           </button>
           {runButton}
@@ -3145,19 +3177,20 @@ function AnalysisPanel({
   return (
     <div className="annotate-card annotate-card--grow">
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Analyze</span>
+        <span className="annotate-card-title">{t("aiAssist.annotate.analysis.sectionTitle")}</span>
+        
         <button
           type="button"
           className="btn btn--small btn--primary"
           onClick={() => onRun(selectedAnalyses)}
           disabled={readOnly || !selectedCode || !hasAnnotations || selectedAnalyses.size === 0 || isBusy}
         >
-          {isBusy ? "Running…" : "Run"}
+          {isBusy ? t("aiAssist.annotate.statuses.running") : t("aiAssist.annotate.actions.run")}
         </button>
       </div>
       {!selectedCode ? (
         <div className="ai-attribute-placeholder">
-          <p>Select a code from the codebook to see available analyses.</p>
+          <p>{t("aiAssist.annotate.analysis.selectCodePrompt")}</p>
         </div>
       ) : !hasAnnotations ? (
         <div className="ai-attribute-placeholder">
@@ -3165,7 +3198,7 @@ function AnalysisPanel({
         </div>
       ) : (
         <div className="ai-analyze-options">
-          {ANALYSIS_OPTIONS.map((option) => {
+          {analysisOptions.map((option) => {
             const isSelected = selectedAnalyses.has(option.id);
             const status = getOptionStatus(option.id);
             const isExpanded = expandedDescriptions.has(option.id);
@@ -3189,7 +3222,7 @@ function AnalysisPanel({
                       <strong className="ai-analyze-option-title" title={option.title}>{option.title}</strong>
                       {status !== "idle" && (
                         <span className={`ai-analyze-option-status ai-analyze-option-status--${status}`}>
-                          {status === "busy" ? "Processing" : status === "done" ? "Done" : "Error"}
+                          {status === "busy" ? t("aiAssist.annotate.statuses.processing") : status === "done" ? t("aiAssist.annotate.statuses.done") : t("aiAssist.annotate.statuses.error")}
                         </span>
                       )}
                     </div>
@@ -3200,7 +3233,7 @@ function AnalysisPanel({
                       className="ai-analyze-option-toggle"
                       onClick={() => toggleDescription(option.id)}
                       aria-expanded={isExpanded}
-                      aria-label={isExpanded ? `Hide details for ${option.title}` : `Show details for ${option.title}`}
+                      aria-label={isExpanded ? t("aiAssist.annotate.analysis.hideDetailsFor", { title: option.title }) : t("aiAssist.annotate.analysis.showDetailsFor", { title: option.title })}
                     >
                       {isExpanded ? "▾" : "▸"}
                     </button>
@@ -3216,7 +3249,7 @@ function AnalysisPanel({
       )}
       {readOnly && selectedCode && hasAnnotations && (
         <div className="ai-attribute-placeholder" style={{ paddingTop: 0 }}>
-          <p>This saved analysis is read-only. Start a new analysis to explore other codes or prompts.</p>
+          <p>{t("aiAssist.annotate.analysis.readOnlyMessage")}</p>
         </div>
       )}
     </div>
@@ -3258,6 +3291,7 @@ function AnalysisResultPanel({
   onToggleAnalysis: (id: AnalysisId) => void;
   onRun: (selected: Set<AnalysisId>) => void;
 }) {
+  const { t } = useI18n();
   const { codes, documents, setActiveDocument, setPendingAnnId, setView } = useStore();
   const [tooltip, setTooltip] = useState<CitationTooltip>(null);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -3286,7 +3320,9 @@ function AnalysisResultPanel({
     || positionState.busy
     || uniqueAnnotationsState.busy;
 
-  const exportTitle = selectedCode?.label ? `${selectedCode.label} Analysis Results` : "Analysis Results";
+  const exportTitle = selectedCode?.label
+    ? t("aiAssist.annotate.export.analysisResultsWithCode", { code: selectedCode.label })
+    : t("aiAssist.annotate.export.analysisResults");
   const annotationCardStyle = selectedCode
     ? {
       background: `linear-gradient(180deg, ${withHexAlpha(selectedCode.color, "18")} 0%, ${withHexAlpha(selectedCode.color, "10")} 100%)`,
@@ -3312,7 +3348,7 @@ function AnalysisResultPanel({
     return (
       <details className="ai-chat-citations ai-chat-citations--collapsible ai-analyze-citations">
         <summary className="ai-chat-citations-toggle">
-          <strong>Citations</strong>
+          <strong>{t("aiAssist.annotate.citations")}</strong>
           <span>{citations.length}</span>
         </summary>
         <div className="ai-chat-citation-list">
@@ -3326,7 +3362,7 @@ function AnalysisResultPanel({
             >
               <span className="ai-chat-citation-number">[{index + 1}]</span>
               <span className="ai-chat-citation-kind ai-chat-citation-kind--annotation">
-                Annotation
+                {t("aiAssist.chat.citationKinds.annotation")}
               </span>
               <span className="ai-chat-citation-line">
                 <strong>{citation.documentName}</strong>
@@ -3345,12 +3381,12 @@ function AnalysisResultPanel({
     if (summaryResult) {
       const blocks = [summaryResult.summary];
       if (summaryResult.insights.length > 0) {
-        blocks.push("Key Insights:");
+        blocks.push(`${t("aiAssist.annotate.analysis.keyInsightsTitle")}:`);
         blocks.push(...summaryResult.insights.map((insight, index) => `${index + 1}. ${insight}`));
       }
-      blocks.push(`Generated with ${summaryResult.model}`);
+      blocks.push(t("aiAssist.annotate.generatedWithModel", { model: summaryResult.model }));
       sections.push({
-        title: "Conceptual Summary",
+        title: t("aiAssist.annotate.analysis.conceptualSummaryTitle"),
         blocks,
         citations: summaryResult.annotationRefs,
       });
@@ -3359,12 +3395,12 @@ function AnalysisResultPanel({
     if (decompositionResult) {
       const blocks = [decompositionResult.analysis];
       if (decompositionResult.outliers) {
-        blocks.push("Outliers or Sub-clusters:");
+        blocks.push(`${t("aiAssist.annotate.analysis.outliersTitle")}:`);
         blocks.push(decompositionResult.outliers);
       }
-      blocks.push(`Generated with ${decompositionResult.model}`);
+      blocks.push(t("aiAssist.annotate.generatedWithModel", { model: decompositionResult.model }));
       sections.push({
-        title: "Decomposition",
+        title: t("aiAssist.annotate.analysis.decompositionTitle"),
         blocks,
         citations: decompositionResult.annotationRefs,
       });
@@ -3373,12 +3409,12 @@ function AnalysisResultPanel({
     if (positionResult) {
       const blocks = [positionResult.analysis];
       if (positionResult.suggestions.length > 0) {
-        blocks.push("Suggestions:");
+        blocks.push(t("aiAssist.annotate.analysis.suggestionsLabel"));
         blocks.push(...positionResult.suggestions.map((suggestion, index) => `${index + 1}. ${suggestion}`));
       }
-      blocks.push(`Generated with ${positionResult.model}`);
+      blocks.push(t("aiAssist.annotate.generatedWithModel", { model: positionResult.model }));
       sections.push({
-        title: "Position",
+        title: t("aiAssist.annotate.analysis.positionTitle"),
         blocks,
         citations: positionResult.annotationRefs,
       });
@@ -3393,9 +3429,9 @@ function AnalysisResultPanel({
         if (reasoning) itemBlocks.push(reasoning);
         return itemBlocks;
       });
-      blocks.push(`Generated with ${typicalResult.model}`);
+      blocks.push(t("aiAssist.annotate.generatedWithModel", { model: typicalResult.model }));
       sections.push({
-        title: "Most Typical Annotations",
+        title: t("aiAssist.annotate.analysis.mostTypicalTitle"),
         blocks,
         citations: typicalResult.items.map((item) => item.annotationRef),
       });
@@ -3410,9 +3446,9 @@ function AnalysisResultPanel({
         if (reasoning) itemBlocks.push(reasoning);
         return itemBlocks;
       });
-      blocks.push(`Generated with ${uniqueResult.model}`);
+      blocks.push(t("aiAssist.annotate.generatedWithModel", { model: uniqueResult.model }));
       sections.push({
-        title: "Most Unique Annotations",
+        title: t("aiAssist.annotate.analysis.mostUniqueTitle"),
         blocks,
         citations: uniqueResult.items.map((item) => item.annotationRef),
       });
@@ -3439,7 +3475,7 @@ function AnalysisResultPanel({
         .map((block) => `<p>${escHtml(block)}</p>`)
         .join("");
       const citationsHtml = section.citations && section.citations.length > 0
-        ? `<div class="analysis-citations"><h4>Citations</h4><ol>${section.citations.map((ref, index) => `<li>[${index + 1}] <strong>${escHtml(ref.documentName)}</strong>: ${escHtml(ref.quote)}</li>`).join("")}</ol></div>`
+        ? `<div class="analysis-citations"><h4>${escHtml(t("aiAssist.annotate.citations"))}</h4><ol>${section.citations.map((ref, index) => `<li>[${index + 1}] <strong>${escHtml(ref.documentName)}</strong>: ${escHtml(ref.quote)}</li>`).join("")}</ol></div>`
         : "";
       return `<section><h2>${escHtml(section.title)}</h2>${blocksHtml}${citationsHtml}</section>`;
     }).join("");
@@ -3463,7 +3499,7 @@ function AnalysisResultPanel({
 </head>
 <body>
 <h1>${escHtml(exportTitle)}</h1>
-<p class="meta">Exported ${escHtml(fmtDate(new Date().toISOString()))}</p>
+<p class="meta">${escHtml(t("aiAssist.annotate.export.exportedAt", { value: fmtDate(new Date().toISOString()) }))}</p>
 ${sectionsHtml || "<p>No analysis results available.</p>"}
 </body>
 </html>`;
@@ -3512,7 +3548,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
       };
 
       addText(exportTitle, 20, "bold", 10);
-      addText(`Exported ${fmtDate(new Date().toISOString())}`, 10, "normal", 18);
+      addText(t("aiAssist.annotate.export.exportedAt", { value: fmtDate(new Date().toISOString()) }), 10, "normal", 18);
 
       for (const section of exportSections) {
         addText(section.title, 12, "bold", 6);
@@ -3520,7 +3556,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
           addText(block, 10, "normal", 6);
         }
         if (section.citations && section.citations.length > 0) {
-          addText("Citations", 9, "bold", 4);
+          addText(t("aiAssist.annotate.citations"), 9, "bold", 4);
           section.citations.forEach((ref, index) => {
             addText(`[${index + 1}] ${ref.documentName}`, 9, "bold", 2);
             addText(ref.quote, 9, "italic", 6);
@@ -3547,13 +3583,15 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
         sections: [{
           children: [
             new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: exportTitle })] }),
-            new Paragraph({ children: [new TextRun({ text: `Exported ${fmtDate(new Date().toISOString())}`, color: "666666" })] }),
+            new Paragraph({
+              children: [new TextRun({ text: t("aiAssist.annotate.export.exportedAt", { value: fmtDate(new Date().toISOString()) }), color: "666666" })],
+            }),
             new Paragraph({ children: [] }),
             ...exportSections.flatMap((section) => ([
               new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: section.title })] }),
               ...section.blocks.filter((block) => block.trim()).map((block) => new Paragraph({ children: [new TextRun({ text: block })] })),
               ...(section.citations && section.citations.length > 0 ? [
-                new Paragraph({ children: [new TextRun({ text: "Citations", bold: true })] }),
+                new Paragraph({ children: [new TextRun({ text: t("aiAssist.annotate.citations"), bold: true })] }),
                 ...section.citations.flatMap((ref, index) => [
                   new Paragraph({ children: [new TextRun({ text: `[${index + 1}] ${ref.documentName}`, bold: true })] }),
                   new Paragraph({ children: [new TextRun({ text: ref.quote, italics: true })] }),
@@ -3576,16 +3614,20 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
   return (
     <div ref={cardRef} className="annotate-card annotate-card--grow ai-analyze-results-card">
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Analysis Results</span>
+        <span className="annotate-card-title">{t("aiAssist.annotate.analysis.resultsTitle")}</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
             className="btn btn--small"
             onClick={() => setShowExportModal(true)}
             disabled={exportSections.length === 0 || !!exportingFormat}
-            title={exportSections.length === 0 ? "Run at least one analysis before exporting" : "Export Analysis Results"}
+            title={
+              exportSections.length === 0
+                ? t("aiAssist.annotate.export.runAnalysisBeforeExport")
+                : t("aiAssist.annotate.export.title")
+            }
           >
-            Export
+            {t("aiAssist.annotate.export.action")}
           </button>
           {savedRow ? (
             <button
@@ -3603,13 +3645,13 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
               disabled={!hasAnyActivity || saveBusy || hasBusyAnalysis}
               title={
                 hasBusyAnalysis
-                  ? "Wait for all selected analyses to finish before saving"
+                  ? t("aiAssist.annotate.saveAnalysis.waitForAnalyses")
                   : !hasAnyActivity
-                    ? "Run at least one analysis before saving"
-                    : "Save Analysis"
+                    ? t("aiAssist.annotate.saveAnalysis.runAnalysisBeforeSaving")
+                    : t("aiAssist.annotate.saveAnalysis.action")
               }
             >
-              {saveBusy ? "Saving..." : "Save Analysis"}
+              {saveBusy ? t("aiAssist.annotate.saveAnalysis.saving") : t("aiAssist.annotate.saveAnalysis.action")}
             </button>
           )}
         </div>
@@ -3646,7 +3688,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
           {(summaryState.busy || summaryState.result || summaryState.error) && (
             <div className="ai-analyze-result-section">
               <h3 className="ai-analyze-result-heading">
-                Conceptual Summary
+                {t("aiAssist.annotate.analysis.conceptualSummaryTitle")}
                 {summaryResultCode && (
                   <span className="ai-analyze-result-code-badge" style={{ background: summaryResultCode.color }}>
                     {summaryResultCode.label}
@@ -3673,7 +3715,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
                   </p>
                   {summaryResult.insights.length > 0 && (
                     <>
-                      <strong className="ai-analyze-result-subheading">Key Insights</strong>
+                      <strong className="ai-analyze-result-subheading">{t("aiAssist.annotate.analysis.keyInsightsTitle")}</strong>
                       <ol className="ai-analyze-insights-list">
                         {summaryResult.insights.map((insight, i) => (
                           <li key={i} className="ai-analyze-insight-item">
@@ -3683,7 +3725,9 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
                       </ol>
                     </>
                   )}
-                  <p className="backup-field-hint ai-analyze-result-meta">Generated with {summaryResult.model}</p>
+                  <p className="backup-field-hint ai-analyze-result-meta">
+                    {t("aiAssist.annotate.generatedWithModel", { model: summaryResult.model })}
+                  </p>
                   {renderCitationCards(summaryResult.annotationRefs)}
                 </>
               )}
@@ -3693,7 +3737,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
           {/* ── Decomposition ── */}
           {(decompositionState.busy || decompositionState.result || decompositionState.error) && (
             <div className="ai-analyze-result-section">
-              <h3 className="ai-analyze-result-heading">Decomposition</h3>
+              <h3 className="ai-analyze-result-heading">{t("aiAssist.annotate.analysis.decompositionTitle")}</h3>
               {decompositionState.busy && (
                 <div className="ai-segments-search-state ai-analyze-inline-progress">
                   <div className="ai-segments-progress" aria-hidden="true"><span className="ai-segments-progress-bar" /></div>
@@ -3708,13 +3752,15 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
                   </p>
                   {decompositionResult.outliers && (
                     <>
-                      <strong className="ai-analyze-result-subheading">Outliers or Sub-clusters</strong>
+                      <strong className="ai-analyze-result-subheading">{t("aiAssist.annotate.analysis.outliersTitle")}</strong>
                       <p className="ai-analyze-result-body">
                         {renderWithCitations(decompositionResult.outliers, decompositionResult.annotationRefs, handleCitationHover, () => setTooltip(null), handleCitationClick)}
                       </p>
                     </>
                   )}
-                  <p className="backup-field-hint ai-analyze-result-meta">Generated with {decompositionResult.model}</p>
+                  <p className="backup-field-hint ai-analyze-result-meta">
+                    {t("aiAssist.annotate.generatedWithModel", { model: decompositionResult.model })}
+                  </p>
                   {renderCitationCards(decompositionResult.annotationRefs)}
                 </>
               )}
@@ -3724,7 +3770,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
           {/* ── Position ── */}
           {(positionState.busy || positionState.result || positionState.error) && (
             <div className="ai-analyze-result-section">
-              <h3 className="ai-analyze-result-heading">Position</h3>
+              <h3 className="ai-analyze-result-heading">{t("aiAssist.annotate.analysis.positionTitle")}</h3>
               {positionState.busy && (
                 <div className="ai-segments-search-state ai-analyze-inline-progress">
                   <div className="ai-segments-progress" aria-hidden="true"><span className="ai-segments-progress-bar" /></div>
@@ -3749,7 +3795,9 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
                       </ol>
                     </>
                   )}
-                  <p className="backup-field-hint ai-analyze-result-meta">Generated with {positionResult.model}</p>
+                  <p className="backup-field-hint ai-analyze-result-meta">
+                    {t("aiAssist.annotate.generatedWithModel", { model: positionResult.model })}
+                  </p>
                   {renderCitationCards(positionResult.annotationRefs)}
                 </>
               )}
@@ -3759,7 +3807,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
           {/* ── Most Typical Annotations ── */}
           {(typicalAnnotationState.busy || typicalAnnotationState.result || typicalAnnotationState.error) && (
             <div className="ai-analyze-result-section">
-              <h3 className="ai-analyze-result-heading">Most Typical Annotations</h3>
+              <h3 className="ai-analyze-result-heading">{t("aiAssist.annotate.analysis.mostTypicalTitle")}</h3>
               {typicalAnnotationState.busy && (
                 <div className="ai-segments-search-state ai-analyze-inline-progress">
                   <div className="ai-segments-progress" aria-hidden="true"><span className="ai-segments-progress-bar" /></div>
@@ -3785,7 +3833,9 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
                       </button>
                     ))}
                   </div>
-                  <p className="backup-field-hint ai-analyze-result-meta">Generated with {typicalResult.model}</p>
+                  <p className="backup-field-hint ai-analyze-result-meta">
+                    {t("aiAssist.annotate.generatedWithModel", { model: typicalResult.model })}
+                  </p>
                 </>
               )}
             </div>
@@ -3794,7 +3844,7 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
           {/* ── Most Unique Annotations ── */}
           {(uniqueAnnotationsState.busy || uniqueAnnotationsState.result || uniqueAnnotationsState.error) && (
             <div className="ai-analyze-result-section">
-              <h3 className="ai-analyze-result-heading">Most Unique Annotations</h3>
+              <h3 className="ai-analyze-result-heading">{t("aiAssist.annotate.analysis.mostUniqueTitle")}</h3>
               {uniqueAnnotationsState.busy && (
                 <div className="ai-segments-search-state ai-analyze-inline-progress">
                   <div className="ai-segments-progress" aria-hidden="true"><span className="ai-segments-progress-bar" /></div>
@@ -3820,7 +3870,9 @@ ${sectionsHtml || "<p>No analysis results available.</p>"}
                       </button>
                     ))}
                   </div>
-                  <p className="backup-field-hint ai-analyze-result-meta">Generated with {uniqueResult.model}</p>
+                  <p className="backup-field-hint ai-analyze-result-meta">
+                    {t("aiAssist.annotate.generatedWithModel", { model: uniqueResult.model })}
+                  </p>
                 </>
               )}
             </div>
@@ -3873,6 +3925,8 @@ export function AIAnalyzeView({
   onSaved?: (row: AiAnalysisRow) => void;
   onStartNew?: () => void;
 } = {}) {
+  const { t } = useI18n();
+  const analysisOptions = getAnalysisOptions(t);
   const {
     activeProject,
     pb,
@@ -4106,15 +4160,15 @@ export function AIAnalyzeView({
     if (!activeProject) return;
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setSaveError("Enter a name for this analysis.");
+      setSaveError(t("aiAssist.annotate.saveAnalysis.enterName"));
       return;
     }
     if (hasBusyAnalysis) {
-      setSaveError("Wait for all selected analyses to finish before saving.");
+      setSaveError(t("aiAssist.annotate.saveAnalysis.waitForAnalyses"));
       return;
     }
     if (!hasSavableContent) {
-      setSaveError("Run at least one analysis before saving.");
+      setSaveError(t("aiAssist.annotate.saveAnalysis.runAnalysisBeforeSaving"));
       return;
     }
 
@@ -4141,7 +4195,7 @@ export function AIAnalyzeView({
           codeId: selectedCodeIdRef.current,
           snapshot,
         });
-        if (!record) throw new Error("Failed to save analysis.");
+        if (!record) throw new Error(t("aiAssist.annotate.errors.failedToSaveAnalysis"));
         const persisted = await pb.collection("ai_analyses").getOne(record.id, {
           expand: "created_by",
         });
@@ -4152,7 +4206,7 @@ export function AIAnalyzeView({
       }
       setShowSaveModal(false);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Failed to save analysis.");
+      setSaveError(error instanceof Error ? error.message : t("aiAssist.annotate.errors.failedToSaveAnalysis"));
     } finally {
       setSaveBusy(false);
     }
@@ -4206,7 +4260,7 @@ export function AIAnalyzeView({
     };
 
     if (activeProject) {
-      const selectedOptionLabels = ANALYSIS_OPTIONS
+      const selectedOptionLabels = analysisOptions
         .filter((option) => selected.has(option.id))
         .map((option) => option.title)
         .join(", ");
@@ -4231,7 +4285,7 @@ export function AIAnalyzeView({
           setSummaryState({ busy: false, result: nextResult, error: "" });
         }).catch((err) => {
           summaryResultRef.current = null;
-          setSummaryState({ busy: false, result: null, error: err instanceof Error ? err.message : "Could not generate conceptual summary." });
+          setSummaryState({ busy: false, result: null, error: err instanceof Error ? err.message : t("aiAssist.annotate.errors.failedToGenerateSummary") });
         });
       });
     }
@@ -4253,7 +4307,7 @@ export function AIAnalyzeView({
           setTypicalAnnotationState({ busy: false, result: nextResult, error: "" });
         }).catch((err) => {
           typicalAnnotationResultRef.current = null;
-          setTypicalAnnotationState({ busy: false, result: null, error: err instanceof Error ? err.message : "Could not identify most typical annotation." });
+          setTypicalAnnotationState({ busy: false, result: null, error: err instanceof Error ? err.message : t("aiAssist.annotate.errors.failedToFindTypicalAnnotation") });
         });
       });
     }
@@ -4269,7 +4323,7 @@ export function AIAnalyzeView({
           setDecompositionState({ busy: false, result: nextResult, error: "" });
         }).catch((err) => {
           decompositionResultRef.current = null;
-          setDecompositionState({ busy: false, result: null, error: err instanceof Error ? err.message : "Could not run decomposition analysis." });
+          setDecompositionState({ busy: false, result: null, error: err instanceof Error ? err.message : t("aiAssist.annotate.errors.failedToRunDecomposition") });
         });
       });
     }
@@ -4290,7 +4344,7 @@ export function AIAnalyzeView({
           setPositionState({ busy: false, result: nextResult, error: "" });
         }).catch((err) => {
           positionResultRef.current = null;
-          setPositionState({ busy: false, result: null, error: err instanceof Error ? err.message : "Could not run position analysis." });
+          setPositionState({ busy: false, result: null, error: err instanceof Error ? err.message : t("aiAssist.annotate.errors.failedToRunPosition") });
         });
       });
     }
@@ -4312,7 +4366,7 @@ export function AIAnalyzeView({
           setUniqueAnnotationsState({ busy: false, result: nextResult, error: "" });
         }).catch((err) => {
           uniqueAnnotationsResultRef.current = null;
-          setUniqueAnnotationsState({ busy: false, result: null, error: err instanceof Error ? err.message : "Could not identify most unique annotations." });
+          setUniqueAnnotationsState({ busy: false, result: null, error: err instanceof Error ? err.message : t("aiAssist.annotate.errors.failedToFindUniqueAnnotations") });
         });
       });
     }
@@ -4325,19 +4379,19 @@ export function AIAnalyzeView({
   const analyzeHelpModal = helpOpen ? (
     <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
       <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-        <h2>Analyze Help</h2>
+        <h2>{t("aiAssist.annotate.analyzeHelp.title")}</h2>
         <p className="users-guide-copy">
-          Select a code, choose one or more analysis actions, run analyses, inspect grounded results, and follow citations back to source annotations.
+          {t("aiAssist.annotate.analyzeHelp.line1")}
         </p>
         <p className="users-guide-copy">
-          Use this analysis workspace to generate code-focused AI interpretations. Pick a code in the left panel, run an analysis from the center tools, and review the grounded output on the right.
+          {t("aiAssist.annotate.analyzeHelp.line2")}
         </p>
         <p className="users-guide-copy">
-          Results cite underlying annotations so you can verify the evidence. Access depends on the AI analyze permission and whether AI Assist is enabled for the project.
+          {t("aiAssist.annotate.analyzeHelp.line3")}
         </p>
         <div className="form-actions" style={{ marginTop: 24 }}>
           <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-            Close
+            {t("common.close")}
           </button>
         </div>
       </div>
@@ -4347,13 +4401,13 @@ export function AIAnalyzeView({
   const analyzeHeader = (
     <header className="view-header">
       <div className="view-title-with-help">
-        <h1>Analyze Codes</h1>
+        <h1>{t("aiAssist.analyze.pageTitle")}</h1>
         <button
           type="button"
           className="users-help-icon-btn"
           onClick={() => setHelpOpen(true)}
-          title="Show Help"
-          aria-label="Show Help"
+          title={t("aiAssist.analyze.openHelp")}
+          aria-label={t("aiAssist.analyze.openHelp")}
       >
         <HelpIcon className="users-help-icon" />
       </button>
@@ -4363,7 +4417,7 @@ export function AIAnalyzeView({
 
   const analyzeBackRow = onBack ? (
     <div className="workspace-back-row">
-      <button className="btn" onClick={onBack}>Back to Analyses</button>
+      <button className="btn" onClick={onBack}>{t("aiAssist.annotate.actions.backToAnalyses")}</button>
     </div>
   ) : null;
 
@@ -4372,7 +4426,7 @@ export function AIAnalyzeView({
       <div className="view">
         {analyzeBackRow}
         {analyzeHeader}
-        <div className="empty-state"><p>Open a project first.</p></div>
+        <div className="empty-state"><p>{t("aiAssist.analyze.empty.openProjectFirst")}</p></div>
         {analyzeHelpModal}
       </div>
     );
@@ -4383,7 +4437,7 @@ export function AIAnalyzeView({
       <div className="view">
         {analyzeBackRow}
         {analyzeHeader}
-        <div className="empty-state"><p>You do not have permission to use AI Assist analyze tools for this project.</p></div>
+        <div className="empty-state"><p>{t("aiAssist.analyze.empty.noPermission")}</p></div>
         {analyzeHelpModal}
       </div>
     );
@@ -4394,7 +4448,7 @@ export function AIAnalyzeView({
       <div className="view">
         {analyzeBackRow}
         {analyzeHeader}
-        <div className="empty-state"><p>Enable AI Assist in Project Settings before using AI analysis tools.</p></div>
+        <div className="empty-state"><p>{t("aiAssist.analyze.empty.enableInProjectSettings")}</p></div>
         {analyzeHelpModal}
       </div>
     );
@@ -4404,18 +4458,18 @@ export function AIAnalyzeView({
       <div className="view annotate-view ai-assisted-coding-annotate-view">
         {onBack && (
           <div className="workspace-back-row workspace-back-row--annotate">
-            <button className="btn" onClick={onBack}>Back to Analyses</button>
+            <button className="btn" onClick={onBack}>{t("aiAssist.annotate.actions.backToAnalyses")}</button>
           </div>
         )}
         <div className="annotate-back-bar">
           <div className="users-title-wrap">
-            <h1>Analyze Codes</h1>
+            <h1>{t("aiAssist.analyze.pageTitle")}</h1>
             <button
               type="button"
               className="users-help-icon-btn"
               onClick={() => setHelpOpen(true)}
-              title="Show Help"
-              aria-label="Show Help"
+              title={t("aiAssist.analyze.openHelp")}
+              aria-label={t("aiAssist.analyze.openHelp")}
             >
               <HelpIcon className="users-help-icon" />
             </button>
@@ -4468,7 +4522,11 @@ export function AIAnalyzeView({
       </div>
       {showSaveModal && (
         <SaveAnalysisModal
-          initialName={savedRow?.name ?? (displayedSelectedCodeId ? `${codes.find((code) => code.id === displayedSelectedCodeId)?.label ?? "Code"} Analysis` : "")}
+          initialName={savedRow?.name ?? (displayedSelectedCodeId
+            ? t("aiAssist.annotate.saveAnalysis.defaultName", {
+              code: codes.find((code) => code.id === displayedSelectedCodeId)?.label ?? t("aiAssist.annotate.saveAnalysis.defaultCode"),
+            })
+            : "")}
           loading={saveBusy}
           error={saveError}
           onClose={() => { setShowSaveModal(false); setSaveError(""); }}
@@ -4482,6 +4540,7 @@ export function AIAnalyzeView({
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void } = {}) {
+  const { t } = useI18n();
   const {
     pendingAnnId,
     setPendingAnnId,
@@ -4649,18 +4708,18 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
     <div className="view annotate-view ai-assisted-coding-annotate-view">
       {onBack && (
         <div className="workspace-back-row workspace-back-row--annotate">
-          <button className="btn" onClick={() => { clearDocumentLockConflict(); onBack(); }}>Back to Documents</button>
+          <button className="btn" onClick={() => { clearDocumentLockConflict(); onBack(); }}>{t("aiAssist.annotate.actions.backToDocuments")}</button>
         </div>
       )}
       <div className="annotate-back-bar">
         <div className="view-title-with-help">
-          <h1>AI Assist Coding View</h1>
+          <h1>{t("aiAssist.annotate.codingViewTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setCodingHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("aiAssist.code.openHelp")}
+            aria-label={t("aiAssist.code.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -4669,19 +4728,19 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
       {codingHelpOpen && (
         <div className="modal-overlay" onClick={() => setCodingHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>AI Assist Coding View Help</h2>
+            <h2>{t("aiAssist.annotate.codingHelp.title")}</h2>
             <p className="users-guide-copy">
-              Choose or manage codes, review relevant AI-suggested segments, inspect the current document, create or refine coded annotations, and return to the document list.
+              {t("aiAssist.annotate.codingHelp.line1")}
             </p>
             <p className="users-guide-copy">
-              Use the left panel for code selection, the right panel for relevant-segment suggestions, and the center document viewer for the final coding action.
+              {t("aiAssist.annotate.codingHelp.line2")}
             </p>
             <p className="users-guide-copy">
-              This workspace uses a document lock so only one collaborator edits the same document at a time. Suggestions should be checked against the source text before coding.
+              {t("aiAssist.annotate.codingHelp.line3")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setCodingHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -4769,23 +4828,29 @@ export function AIAssistedCodingAnnotateView({ onBack }: { onBack?: () => void }
       {documentLockConflict && (
         <div className="modal-overlay" onClick={() => {}}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{documentLockConflict.reason === "kicked" ? "Removed From Document" : "Document Locked"}</h2>
+            <h2>
+              {documentLockConflict.reason === "kicked"
+                ? t("aiAssist.annotate.lockConflict.removedTitle")
+                : t("aiAssist.annotate.lockConflict.lockedTitle")}
+            </h2>
             {documentLockConflict.reason === "kicked" ? (
               <>
                 <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  <strong>{documentLockConflict.userName || "A project owner"}</strong> removed you from this document.
+                  <strong>{documentLockConflict.userName || t("aiAssist.annotate.lockConflict.projectOwner")}</strong>{" "}
+                  {t("aiAssist.annotate.lockConflict.removedBody")}
                 </p>
                 <p className="modal-warning-text">
-                  Kanqual is using a strict document lock across coding workspaces, so you will need to return to the AI Assisted Coding document list before you can annotate again.
+                  {t("aiAssist.annotate.lockConflict.removedWarning")}
                 </p>
               </>
             ) : (
               <>
                 <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  <strong>{documentLockConflict.userName || "Another user"}</strong> is currently annotating this document.
+                  <strong>{documentLockConflict.userName || t("aiAssist.code.labels.anotherUser")}</strong>{" "}
+                  {t("aiAssist.annotate.lockConflict.lockedBody")}
                 </p>
                 <p className="modal-warning-text">
-                  Kanqual is using a strict document lock across coding workspaces, so only one user can annotate a document at a time.
+                  {t("aiAssist.annotate.lockConflict.lockedWarning")}
                 </p>
               </>
             )}

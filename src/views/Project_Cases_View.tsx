@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 import {
   AttributeValuesModal as SharedAttributeValuesModal,
   type SharedAttributeDataType as AttributeDataType,
@@ -46,7 +48,7 @@ type SortDir = "asc" | "desc";
 function fmtDate(iso: string): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -79,23 +81,15 @@ const AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY = "kq_ai_assist_add_attribute_target";
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
-const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "name",          label: "Name",       width: "28%" },
-  { key: "documents",     label: "Documents",  width: "13%" },
-  { key: "memos",         label: "Memos",      width: "11%" },
-  { key: "createdByName", label: "Created By", width: "24%" },
-  { key: "createdAt",     label: "Created",    width: "24%" },
+const COLS: { key: SortCol; labelKey: "name" | "documents" | "memos" | "createdBy" | "created"; width: string }[] = [
+  { key: "name",          labelKey: "name",       width: "28%" },
+  { key: "documents",     labelKey: "documents",  width: "13%" },
+  { key: "memos",         labelKey: "memos",      width: "11%" },
+  { key: "createdByName", labelKey: "createdBy",  width: "24%" },
+  { key: "createdAt",     labelKey: "created",    width: "24%" },
 ];
 
 // ─── Rich text editor ─────────────────────────────────────────────────────────
-
-const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
-  { cmd: "bold",                label: "B",   title: "Bold" },
-  { cmd: "italic",              label: "I",   title: "Italic" },
-  { cmd: "underline",           label: "U",   title: "Underline" },
-  { cmd: "insertUnorderedList", label: "•—",  title: "Bullet list" },
-  { cmd: "insertOrderedList",   label: "1.",  title: "Numbered list" },
-];
 
 function RichTextEditor({
   initialHtml,
@@ -106,6 +100,14 @@ function RichTextEditor({
   editorRef: React.RefObject<HTMLDivElement | null>;
   resetKey: string;
 }) {
+  const { t } = useI18n();
+  const tools = [
+    { cmd: "bold", label: "B", title: t("projectCases.richText.bold") },
+    { cmd: "italic", label: "I", title: t("projectCases.richText.italic") },
+    { cmd: "underline", label: "U", title: t("projectCases.richText.underline") },
+    { cmd: "insertUnorderedList", label: "•—", title: t("projectCases.richText.bulletList") },
+    { cmd: "insertOrderedList", label: "1.", title: t("projectCases.richText.numberedList") },
+  ] as const;
   const id = useId();
 
   useEffect(() => {
@@ -120,15 +122,15 @@ function RichTextEditor({
   return (
     <div className="rte">
       <div className="rte-toolbar">
-        {RTE_TOOLS.map((t) => (
+        {tools.map((tool) => (
           <button
-            key={t.cmd}
+            key={tool.cmd}
             type="button"
             className="rte-btn"
-            title={t.title}
-            onMouseDown={(e) => { e.preventDefault(); execCmd(t.cmd); }}
+            title={tool.title}
+            onMouseDown={(e) => { e.preventDefault(); execCmd(tool.cmd); }}
           >
-            {t.label}
+            {tool.label}
           </button>
         ))}
       </div>
@@ -174,6 +176,7 @@ function CaseEditorModal({
     valuesByAttribute: Record<string, string>;
   }) => void;
 }) {
+  const { t } = useI18n();
   const [name, setName] = useState(initialName);
   const [valuesByAttribute, setValuesByAttribute] = useState<Record<string, string>>(initialValues);
   const notesRef = useRef<HTMLDivElement>(null);
@@ -189,21 +192,22 @@ function CaseEditorModal({
         <h2>{title}</h2>
         <div className="form">
           <label className="form-label">
-            Name
+            {t("projectCases.editor.nameLabel")}
             <input
               className="form-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              placeholder={t("projectCases.editor.namePlaceholder")}
               autoFocus
             />
           </label>
           <div className="form-label">
-            <span>Description</span>
+            <span>{t("projectCases.detail.description")}</span>
             <RichTextEditor initialHtml={initialNotes} editorRef={notesRef} resetKey={resetKey} />
           </div>
           {attributeDefs.length > 0 && (
             <div>
-              <h3 className="case-card-title" style={{ marginBottom: 10 }}>Attributes</h3>
+              <h3 className="case-card-title" style={{ marginBottom: 10 }}>{t("projectCases.editor.attributes")}</h3>
               <div className="case-detail-attributes-table-wrap">
                 <table className="case-detail-attributes-table">
                   <tbody>
@@ -242,7 +246,7 @@ function CaseEditorModal({
         </div>
         {error && <p className="auth-error">{error}</p>}
         <div className="form-actions">
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button className="btn" onClick={onCancel} disabled={saving}>{t("projectCases.editor.cancel")}</button>
           <button
             className="btn btn--primary"
             onClick={() => onSave({
@@ -252,7 +256,7 @@ function CaseEditorModal({
             })}
             disabled={saving || !name.trim()}
           >
-            {saving ? "Saving…" : (saveLabel ?? "Save Changes")}
+            {saving ? t("projectCases.editor.saving") : (saveLabel ?? t("projectCases.editor.saveChanges"))}
           </button>
         </div>
       </div>
@@ -287,6 +291,7 @@ function CaseDetail({
   onMemoAbout: () => void;
   onRequestDelete: (row: CaseRow) => void;
 }) {
+  const { t } = useI18n();
   const { setView, setPendingDocId, setPendingMemoId, activeProject, updateCase, logAction } = useStore();
   const [row,          setRow]          = useState(initialRow);
   const [showEditModal, setShowEditModal] = useState(startEditing);
@@ -415,7 +420,7 @@ function CaseDetail({
         await logAction(
           activeProject.id,
           "case_attribute.update",
-          `Updated ${changedAttributes.length} case attribute value${changedAttributes.length === 1 ? "" : "s"} for "${payload.name}"`,
+          t("projectLog.labels.caseAttributeValuesUpdated", { count: changedAttributes.length, name: payload.name }),
           row.id,
           {
             entityType: "case_attribute_values",
@@ -442,27 +447,27 @@ function CaseDetail({
   return (
     <div className="view case-detail-view">
       <div className="workspace-back-row workspace-back-row--split">
-        <button className="btn" onClick={onBack}>Back to Cases</button>
+        <button className="btn" onClick={onBack}>{t("projectCases.detail.backToCases")}</button>
         <div className="workspace-back-actions">
           <button
             type="button"
             className="btn btn--primary"
             onClick={() => setShowEditModal(true)}
             disabled={!canEdit}
-            title={!canEdit ? "You do not have permission to edit cases" : undefined}
+            title={!canEdit ? t("projectCases.detail.editDenied") : undefined}
           >
-            Edit Case
+            {t("projectCases.detail.editCase")}
           </button>
           <div className="user-detail-menu-wrap" ref={menuRef}>
             <button
               type="button"
               className="btn"
-              aria-label="Case actions"
+              aria-label={t("projectCases.detail.actionsLabel")}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
             >
-              Actions
+              {t("projectCases.detail.actionsButton")}
             </button>
             {menuOpen && (
               <div className="context-menu user-detail-menu" role="menu">
@@ -476,11 +481,11 @@ function CaseDetail({
                       onRequestDelete(row);
                     }}
                   >
-                    Delete Case
+                    {t("projectCases.detail.deleteCase")}
                   </button>
                 ) : (
-                  <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete cases">
-                    Delete Case
+                  <div className="context-menu-item context-menu-item--disabled" title={t("projectCases.detail.deleteDenied")}>
+                    {t("projectCases.detail.deleteCase")}
                   </div>
                 )}
               </div>
@@ -494,40 +499,40 @@ function CaseDetail({
 
         {/* Name card */}
         <div className="case-card">
-          <h3 className="case-card-title">Case</h3>
+          <h3 className="case-card-title">{t("projectCases.detail.caseCard")}</h3>
           <p className="case-card-value">{row.name}</p>
         </div>
 
         {/* Description card (formerly Notes) */}
         <div className="case-card">
-          <h3 className="case-card-title">Description</h3>
+          <h3 className="case-card-title">{t("projectCases.detail.description")}</h3>
           {row.notes ? (
             <div
               className="case-notes-body"
               dangerouslySetInnerHTML={{ __html: row.notes }}
             />
           ) : (
-            <p className="case-card-empty">No description yet.</p>
+            <p className="case-card-empty">{t("projectCases.detail.noDescription")}</p>
           )}
         </div>
 
         {/* Meta */}
         <dl className="user-detail-meta case-detail-meta">
-          <dt>Created By</dt><dd>{row.createdByName}</dd>
-          <dt>Created</dt>   <dd>{fmtDate(row.createdAt)}</dd>
+          <dt>{t("projectCases.detail.createdBy")}</dt><dd>{row.createdByName}</dd>
+          <dt>{t("projectCases.detail.created")}</dt><dd>{fmtDate(row.createdAt)}</dd>
         </dl>
 
         {/* Documents card */}
         <div className="case-card">
           <div className="case-card-header">
-              <h3 className="case-card-title">Documents</h3>
+              <h3 className="case-card-title">{t("projectCases.detail.documents")}</h3>
             <button
               className="btn btn--sm"
               onClick={() => setShowAssocDocs(true)}
               disabled={!canAssociateDocuments}
-              title={!canAssociateDocuments ? "You do not have permission to link documents to this case" : undefined}
+              title={!canAssociateDocuments ? t("projectCases.detail.associateDocumentsDenied") : undefined}
             >
-              Associate Documents
+              {t("projectCases.detail.associateDocuments")}
             </button>
           </div>
           {row.documents.length > 0 ? (
@@ -544,21 +549,21 @@ function CaseDetail({
               ))}
             </ul>
           ) : (
-            <p className="case-card-empty">No documents associated yet.</p>
+            <p className="case-card-empty">{t("projectCases.detail.noDocuments")}</p>
           )}
         </div>
 
         {/* Memos card */}
         <div className="case-card">
           <div className="case-card-header">
-              <h3 className="case-card-title">Memos</h3>
+              <h3 className="case-card-title">{t("projectCases.detail.memos")}</h3>
             <button
               className="btn btn--sm"
               onClick={onMemoAbout}
               disabled={!canMemoAbout}
-              title={!canMemoAbout ? "You do not have permission to create a memo about this case" : undefined}
+              title={!canMemoAbout ? t("projectCases.detail.memoDenied") : undefined}
             >
-              Memo About
+              {t("projectCases.detail.memoAbout")}
             </button>
           </div>
           {caseMemos.length > 0 ? (
@@ -575,7 +580,7 @@ function CaseDetail({
               ))}
             </ul>
           ) : (
-            <p className="case-card-empty">No memos associated.</p>
+            <p className="case-card-empty">{t("projectCases.detail.noMemos")}</p>
           )}
         </div>
 
@@ -584,10 +589,10 @@ function CaseDetail({
           <div className="case-detail-actions">
             {error && <p className="auth-error">{error}</p>}
             <button className="btn" onClick={() => handleToggleEdit(false)} disabled={saving}>
-              Cancel
+              {t("projectCases.detail.cancel")}
             </button>
             <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : "Save Changes"}
+              {saving ? t("projectCases.detail.saving") : t("projectCases.detail.saveChanges")}
             </button>
           </div>
         )}
@@ -607,7 +612,7 @@ function CaseDetail({
       )}
       {showEditModal && (
         <CaseEditorModal
-          title="Edit Case"
+          title={t("projectCases.editor.editTitle")}
           initialName={row.name}
           initialNotes={row.notes}
           attributeDefs={attributeDefs}
@@ -653,6 +658,7 @@ function AssociateDocumentsModal({
   onDone: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const { addCaseDocument, removeCaseDocument } = useStore();
   const [docs,        setDocs]        = useState<DocItem[]>([]);
   const [loading,     setLoading]     = useState(true);
@@ -759,7 +765,11 @@ function AssociateDocumentsModal({
       if (toAdd.length > 0 || toRemove.length > 0) {
         await onLog(
           "case.associations",
-          `Updated document associations for case "${caseRow.name}" (+${toAdd.length} / -${toRemove.length})`,
+          t("projectLog.labels.caseAssociationsUpdated", {
+            name: caseRow.name,
+            added: toAdd.length,
+            removed: toRemove.length,
+          }),
           caseRow.id,
         );
       }
@@ -784,13 +794,13 @@ function AssociateDocumentsModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-        <h2>Associate Documents — {caseRow.name}</h2>
+        <h2>{t("projectCases.associateDocuments.title")} - {caseRow.name}</h2>
 
         {loading ? (
           <p style={{ color: "var(--color-text-muted)", fontSize: 13 }}>Loading documents…</p>
         ) : docs.length === 0 ? (
           <p style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
-            No documents in this project yet.
+            {t("projectCases.associateDocuments.noDocuments")}
           </p>
         ) : (
           <div className="assoc-doc-table-wrap">
@@ -803,7 +813,7 @@ function AssociateDocumentsModal({
                       checked={allChecked}
                       ref={(el) => { if (el) el.indeterminate = someChecked; }}
                       onChange={toggleAll}
-                      title="Select all"
+                      title={t("projectCases.associateDocuments.selectAll")}
                     />
                   </th>
                   {(["name", "cases", "createdAt"] as DocSortCol[]).map((col) => (
@@ -813,7 +823,7 @@ function AssociateDocumentsModal({
                       onClick={() => handleSort(col)}
                       style={{ cursor: "pointer" }}
                     >
-                      {col === "name" ? "Name" : col === "cases" ? "Cases" : "Created"}
+                      {col === "name" ? t("projectCases.columns.name") : col === "cases" ? t("projectCases.columns.documents") : t("projectCases.columns.created")}
                       <span className="users-sort-icon">
                         {sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
@@ -853,15 +863,15 @@ function AssociateDocumentsModal({
 
         <div className="form-actions" style={{ marginTop: 20 }}>
           <span style={{ fontSize: 12, color: "var(--color-text-muted)", marginRight: "auto" }}>
-            {selected.size} selected
+            {t("projectCases.associateDocuments.selectedCount", { count: selected.size })}
           </span>
-          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn" onClick={onClose} disabled={saving}>{t("projectCases.associateDocuments.cancel")}</button>
           <button
             className="btn btn--primary"
             onClick={handleSave}
             disabled={saving || loading}
           >
-            {saving ? "Saving…" : "Save Associations"}
+            {saving ? t("projectCases.associateDocuments.saving") : t("projectCases.associateDocuments.saveAssociations")}
           </button>
         </div>
       </div>
@@ -873,6 +883,7 @@ function AssociateDocumentsModal({
 
 
 export function CasesView() {
+  const { t } = useI18n();
   const {
     activeProject,
     pb,
@@ -1157,7 +1168,7 @@ export function CasesView() {
     if (!value) return "";
     if (dataType === "datetime") {
       try {
-        return new Date(value).toLocaleString(undefined, {
+        return formatCurrentDateTime(value, {
           year: "numeric", month: "short", day: "numeric",
           hour: "2-digit", minute: "2-digit",
         });
@@ -1238,10 +1249,11 @@ export function CasesView() {
       await logAction(
         activeProject.id,
         draft.id ? "case_attribute.update" : "case_attribute.create",
-        `${draft.id ? "Updated" : "Added"} case attribute "${nextDef.name}"`,
+        t(draft.id ? "projectLog.labels.caseAttributeUpdated" : "projectLog.labels.caseAttributeAdded", { name: nextDef.name }),
         attrId,
         {
           entityType: "case_attribute",
+          name: nextDef.name,
           changedCaseIds: touchedCaseIds,
           changedValueCount: touchedCaseIds.length,
           dataType: nextDef.dataType,
@@ -1250,7 +1262,7 @@ export function CasesView() {
       );
       setAttributeValueDraft(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save attribute.");
+      setError(e instanceof Error ? e.message : t("projectCases.attributeSaveFailed"));
     } finally {
       setAttributeSaving(false);
     }
@@ -1281,7 +1293,7 @@ export function CasesView() {
         return next;
       });
       if (activeProject) {
-        await logAction(activeProject.id, "case_attribute.delete", `Deleted case attribute "${attr.name}"`, attr.id);
+        await logAction(activeProject.id, "case_attribute.delete", t("projectLog.labels.caseAttributeDeleted", { name: attr.name }), attr.id);
       }
       setAttributeContextMenu(null);
     } catch (e) {
@@ -1362,7 +1374,7 @@ export function CasesView() {
       setEditStartRow(null);
       setShowCreateModal(false);
     } catch (e) {
-      setCreateError(e instanceof Error ? e.message : "Failed to create case.");
+      setCreateError(e instanceof Error ? e.message : t("projectCases.editor.createFailed"));
     } finally {
       setCreateSaving(false);
     }
@@ -1374,7 +1386,7 @@ export function CasesView() {
     return (
       <MemoEditorView
         preselectedCaseIds={[memoForCase.id]}
-        backLabel="Back to Cases"
+        backLabel={t("projectCases.detail.backToCases")}
         onSaved={() => setMemoForCase(null)}
         onBack={() => setMemoForCase(null)}
       />
@@ -1407,29 +1419,25 @@ export function CasesView() {
             onClick={() => !deleteLoading && setConfirmDelete(null)}
           >
             <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <h2>Delete Case</h2>
+              <h2>{t("projectCases.deleteModal.title")}</h2>
               <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                Are you sure you want to permanently delete{" "}
-                <strong>{confirmDelete.name}</strong>?
+                {t("projectCases.deleteModal.body", { name: confirmDelete.name })}
               </p>
-              <p className="modal-warning-text">
-                All data associated with this case - including document associations
-                and any linked memos - will be permanently lost and cannot be recovered.
-              </p>
+              <p className="modal-warning-text">{t("projectCases.deleteModal.warning")}</p>
               <div className="form-actions" style={{ marginTop: 24 }}>
                 <button
                   className="btn"
                   onClick={() => setConfirmDelete(null)}
                   disabled={deleteLoading}
                 >
-                  Cancel
+                  {t("projectCases.deleteModal.cancel")}
                 </button>
                 <button
                   className="btn btn--danger"
                   onClick={handleDelete}
                   disabled={deleteLoading}
                 >
-                  {deleteLoading ? "Deleting…" : "Delete Case"}
+                  {deleteLoading ? t("projectCases.deleteModal.deleting") : t("projectCases.deleteModal.confirm")}
                 </button>
               </div>
             </div>
@@ -1446,13 +1454,13 @@ export function CasesView() {
       {/* Header */}
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Cases</h1>
+          <h1>{t("projectCases.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("projectCases.openHelp")}
+            aria-label={t("projectCases.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -1475,14 +1483,14 @@ export function CasesView() {
             title={
               showAttributesTable
                 ? !canCreateCaseAttributes
-                  ? "You do not have permission to create case attributes"
+                  ? t("projectCases.addAttributeDenied")
                   : undefined
                 : !canCreateCases
-                  ? "You do not have permission to create cases"
+                  ? t("projectCases.addCaseDenied")
                   : undefined
             }
           >
-            {showAttributesTable ? "+ Add Attribute" : "+ New Case"}
+            {showAttributesTable ? t("projectCases.addAttribute") : t("projectCases.addCase")}
           </button>
         </div>
       </header>
@@ -1491,7 +1499,7 @@ export function CasesView() {
 
       <div className="users-content">
           <div className="ai-assist-home-tabbar" style={{ marginBottom: 16 }}>
-            <div className="segmented-control" role="tablist" aria-label="Case workspace views">
+            <div className="segmented-control" role="tablist" aria-label={t("projectCases.workspaceViews")}>
               <button
                 type="button"
                 className={showAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
@@ -1499,7 +1507,7 @@ export function CasesView() {
                 aria-selected={!showAttributesTable}
                 onClick={() => setShowAttributesTable(false)}
               >
-                Details
+                {t("projectCases.tabs.details")}
               </button>
               <button
                 type="button"
@@ -1508,7 +1516,7 @@ export function CasesView() {
                 aria-selected={showAttributesTable}
                 onClick={() => setShowAttributesTable(true)}
               >
-                Attributes
+                {t("projectCases.tabs.attributes")}
               </button>
             </div>
           </div>
@@ -1532,7 +1540,7 @@ export function CasesView() {
                         setHoveredAttributeRow(null);
                       }}
                     >
-                      Case
+                      {t("projectCases.columns.case")}
                       <span className="users-sort-icon">
                         {attributeSortCol === "name" ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
@@ -1556,14 +1564,14 @@ export function CasesView() {
                         <span className="users-sort-icon">
                           {attributeSortCol === attr.id ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                         </span>
-                        <span className="case-attribute-type-label">{attr.dataType === "datetime" ? "Date/time" : attr.dataType}</span>
+                        <span className="case-attribute-type-label">{t(`projectCases.attributeTypes.${attr.dataType}` as const)}</span>
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">Loading...</td></tr>}
-                  {!loading && sortedAttributeRows.length === 0 && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No cases yet.</td></tr>}
+                  {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">{t("projectCases.empty.loading")}</td></tr>}
+                  {!loading && sortedAttributeRows.length === 0 && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">{t("projectCases.empty.noCases")}</td></tr>}
                   {!loading && sortedAttributeRows.map((row) => (
                     <tr key={row.id} className={`users-row${hoveredAttributeRow === row.id ? " case-attributes-row--hover" : ""}`}>
                       <td
@@ -1625,7 +1633,7 @@ export function CasesView() {
                       className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
                       onClick={() => handleSort(col.key)}
                     >
-                      {col.label}
+                      {t(`projectCases.columns.${col.labelKey}`)}
                       <span className="users-sort-icon">
                         {sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
@@ -1635,10 +1643,10 @@ export function CasesView() {
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={5} className="users-td-msg">Loading...</td></tr>
+                  <tr><td colSpan={5} className="users-td-msg">{t("projectCases.empty.loading")}</td></tr>
                 )}
                 {!loading && sorted.length === 0 && (
-                  <tr><td colSpan={5} className="users-td-msg">No cases yet.</td></tr>
+                  <tr><td colSpan={5} className="users-td-msg">{t("projectCases.empty.noCases")}</td></tr>
                 )}
                 {!loading && sorted.map((row) => (
                   <tr
@@ -1668,14 +1676,14 @@ export function CasesView() {
 
       {showCreateModal && (
         <CaseEditorModal
-          title="New Case"
+          title={t("projectCases.editor.createTitle")}
           initialName=""
           initialNotes=""
           attributeDefs={attributeDefs}
           initialValues={Object.fromEntries(attributeDefs.map((attr) => [attr.id, ""]))}
           saving={createSaving}
           error={createError}
-          saveLabel="Create Case"
+          saveLabel={t("projectCases.editor.createButton")}
           resetKey={`new-case:${attributeDefs.map((attr) => attr.id).join(",")}`}
           onCancel={() => {
             if (createSaving) return;
@@ -1689,14 +1697,14 @@ export function CasesView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{showAttributesTable ? "Case Attributes Help" : "Cases Help"}</h2>
+            <h2>{showAttributesTable ? t("projectCases.help.attributesTitle") : t("projectCases.help.casesTitle")}</h2>
             {showAttributesTable ? (
               <>
                 <p className="users-guide-copy">
-                  Review case attributes across cases, create a new attribute, edit attribute definitions, edit values, delete attributes when permitted, and switch back to the details tab.
+                  {t("projectCases.help.attributesLine1")}
                 </p>
                 <p className="users-guide-copy">
-                  Use the attribute table when you need a cross-case structured view instead of individual case cards. Create an attribute once, then fill or compare its values across cases.
+                  {t("projectCases.help.attributesLine1")}
                 </p>
                 <p className="users-guide-copy">
                   Attribute definitions are shared across the project. Editing rights depend on project permissions.
@@ -1705,19 +1713,19 @@ export function CasesView() {
             ) : (
               <>
                 <p className="users-guide-copy">
-                  Create, open, edit, or delete cases, associate documents to cases, switch between the details and attributes tabs, create or edit case attributes, and review structured case values.
+                  {t("projectCases.help.line2")}
                 </p>
                 <p className="users-guide-copy">
-                  Use Cases to manage the units of analysis in the project. Open a case for details, connect supporting documents, and switch to attribute view when you need structured case comparisons.
+                  {t("projectCases.help.line1")}
                 </p>
                 <p className="users-guide-copy">
-                  Case editing and deletion depend on role. Attribute editing uses shared project data, and associated documents can affect downstream analysis and reporting.
+                  {t("projectCases.help.line3")}
                 </p>
               </>
             )}
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1746,7 +1754,7 @@ export function CasesView() {
                     setAttributeContextMenu(null);
                   }}
                 >
-                  Edit Attribute
+                  {t("projectCases.editAttribute")}
                 </button>
               )}
               {canDeleteCaseAttributes && (
@@ -1754,7 +1762,7 @@ export function CasesView() {
                   className="context-menu-item context-menu-item--danger"
                   onClick={() => handleDeleteAttribute(attributeContextMenu.attr)}
                 >
-                  Delete Attribute
+                  {t("projectCases.contextMenu.deleteAttribute")}
                 </button>
               )}
             </>
@@ -1774,11 +1782,11 @@ export function CasesView() {
               className="context-menu-item"
               onClick={() => { setAssocDocCase(contextMenu.row); setContextMenu(null); }}
             >
-              Associate Documents with Case
+              {t("projectCases.contextMenu.associateDocuments")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to link documents to cases">
-              Associate Documents with Case
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCases.contextMenu.associateDocumentsDenied")}>
+              {t("projectCases.contextMenu.associateDocuments")}
             </div>
           )}
           {canMemoAboutCases ? (
@@ -1786,11 +1794,11 @@ export function CasesView() {
               className="context-menu-item"
               onClick={() => { setMemoForCase(contextMenu.row); setContextMenu(null); }}
             >
-              Memo About Case
+              {t("projectCases.contextMenu.memoAbout")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to create a memo about this case">
-              Memo About Case
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCases.contextMenu.memoDenied")}>
+              {t("projectCases.contextMenu.memoAbout")}
             </div>
           )}
           {canEditCases ? (
@@ -1798,11 +1806,11 @@ export function CasesView() {
               className="context-menu-item"
               onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
             >
-              Edit Case
+              {t("projectCases.contextMenu.editCase")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit cases">
-              Edit Case
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCases.contextMenu.editDenied")}>
+              {t("projectCases.contextMenu.editCase")}
             </div>
           )}
           {canDeleteCases ? (
@@ -1810,11 +1818,11 @@ export function CasesView() {
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}
             >
-              Delete Case
+              {t("projectCases.contextMenu.deleteCase")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete cases">
-              Delete Case
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCases.contextMenu.deleteDenied")}>
+              {t("projectCases.contextMenu.deleteCase")}
             </div>
           )}
         </div>
@@ -1827,29 +1835,25 @@ export function CasesView() {
           onClick={() => !deleteLoading && setConfirmDelete(null)}
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Case</h2>
+            <h2>{t("projectCases.deleteModal.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete{" "}
-              <strong>{confirmDelete.name}</strong>?
+              {t("projectCases.deleteModal.body", { name: confirmDelete.name })}
             </p>
-            <p className="modal-warning-text">
-              All data associated with this case — including document associations
-              and any linked memos — will be permanently lost and cannot be recovered.
-            </p>
+            <p className="modal-warning-text">{t("projectCases.deleteModal.warning")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button
                 className="btn"
                 onClick={() => setConfirmDelete(null)}
                 disabled={deleteLoading}
               >
-                Cancel
+                {t("projectCases.deleteModal.cancel")}
               </button>
               <button
                 className="btn btn--danger"
                 onClick={handleDelete}
                 disabled={deleteLoading}
               >
-                {deleteLoading ? "Deleting…" : "Delete Case"}
+                {deleteLoading ? t("projectCases.deleteModal.deleting") : t("projectCases.deleteModal.confirm")}
               </button>
             </div>
           </div>
@@ -1881,7 +1885,7 @@ export function CasesView() {
           saving={attributeSaving}
           onCancel={() => !attributeSaving && setAttributeValueDraft(null)}
           onSave={handleSaveAttribute}
-          emptyStateLabel="No cases yet."
+          emptyStateLabel={t("projectCases.empty.noCases")}
         />
       )}
     </div>

@@ -9,16 +9,18 @@ import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
-let excelJsPromise: Promise<any> | null = null;
+let writeExcelFilePromise: Promise<typeof import("write-excel-file/browser")> | null = null;
 let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
 let docxPromise: Promise<typeof import("docx")> | null = null;
 
-async function loadExcelJs() {
-  if (!excelJsPromise) {
-    excelJsPromise = import("exceljs");
+async function loadWriteExcelFile() {
+  if (!writeExcelFilePromise) {
+    writeExcelFilePromise = import("write-excel-file/browser");
   }
-  return excelJsPromise;
+  return writeExcelFilePromise;
 }
 
 async function loadJsPdf() {
@@ -171,23 +173,32 @@ interface CodeReportRow {
 
 type FrequencyViewMode = "table" | "chart" | "matrix";
 
-const FREQUENCY_VIEW_OPTIONS: Array<{ key: FrequencyViewMode; label: string }> = [
-  { key: "table", label: "Table" },
-  { key: "chart", label: "Bar Chart" },
-  { key: "matrix", label: "Heatmap" },
-];
+function getFrequencyViewOptions(t: ReturnType<typeof useI18n>["t"]): Array<{ key: FrequencyViewMode; label: string }> {
+  return [
+    { key: "table", label: t("reportsCodes.frequencyViews.table") },
+    { key: "chart", label: t("reportsCodes.frequencyViews.chart") },
+    { key: "matrix", label: t("reportsCodes.frequencyViews.heatmap") },
+  ];
+}
 
-const REPORT_LABELS: Record<CodeReportKind, string> = {
-  frequencies: "Code Frequencies",
-  summary: "Code Co-Occurrance",
-};
+function getCodeReportLabel(t: ReturnType<typeof useI18n>["t"], kind: CodeReportKind): string {
+  return kind === "frequencies"
+    ? t("reportsCodes.reportKinds.frequencies")
+    : t("reportsCodes.reportKinds.summary");
+}
 
-const CODE_REPORT_COLS: { key: CodeReportSortCol; label: string; width: string }[] = [
-  { key: "name", label: "Name", width: "34%" },
-  { key: "kind", label: "Type", width: "22%" },
-  { key: "createdByName", label: "Created By", width: "22%" },
-  { key: "createdAt", label: "Created", width: "22%" },
-];
+function getCodeReportColumns(t: ReturnType<typeof useI18n>["t"]): { key: CodeReportSortCol; label: string; width: string }[] {
+  return [
+    { key: "name", label: t("reportsCodes.tableColumns.name"), width: "34%" },
+    { key: "kind", label: t("reportsCodes.tableColumns.type"), width: "22%" },
+    { key: "createdByName", label: t("reportsCodes.tableColumns.createdBy"), width: "22%" },
+    { key: "createdAt", label: t("reportsCodes.tableColumns.created"), width: "22%" },
+  ];
+}
+
+function getAttributeTypeLabel(t: ReturnType<typeof useI18n>["t"], dataType: string): string {
+  return dataType === "datetime" ? t("reportsCodes.attributeTypes.datetime") : dataType;
+}
 
 function hasDescriptionContent(html: string | undefined): boolean {
   if (!html) return false;
@@ -273,7 +284,7 @@ function getPocketBaseErrorMessage(error: unknown): string {
 function fmtDate(iso?: string): string {
   if (!iso) return "-";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -537,7 +548,9 @@ function FrequencyReportCard({
   annotations: Annotation[];
   frozenRows?: FrozenFrequencyRow[];
 }) {
+  const { t } = useI18n();
   const [viewMode, setViewMode] = useState<FrequencyViewMode>("table");
+  const frequencyViewOptions = getFrequencyViewOptions(t);
   const annotationById = useMemo(() => new Map(annotations.map((ann) => [ann.id, ann])), [annotations]);
   const countForBucket = (column: FrequencyColumn, bucket: FrequencyCodeBucket) => {
     let value = 0;
@@ -579,7 +592,7 @@ function FrequencyReportCard({
       <div className="annotate-card-header">
         <span className="annotate-card-title">{section.title}</span>
         <div role="tablist" aria-label={`${section.title} frequency view`} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {FREQUENCY_VIEW_OPTIONS.map((option) => (
+          {frequencyViewOptions.map((option) => (
             <button
               key={option.key}
               type="button"
@@ -706,6 +719,7 @@ function FrequencyReportCard({
 }
 
 function CoOccurrenceMatrixCard({ section }: { section: CoOccurrenceSection }) {
+  const { t } = useI18n();
   if (section.singleEntityFreq) {
     const { entityLabel, codeCounts } = section.singleEntityFreq;
     return (
@@ -715,19 +729,19 @@ function CoOccurrenceMatrixCard({ section }: { section: CoOccurrenceSection }) {
         </div>
         <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-            Only one item selected — showing code frequencies for <strong>{entityLabel}</strong>.
+            {t("reportsCodes.singleEntity.oneItemSelected", { name: entityLabel })}
           </div>
           <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 300 }}>
             <table className="users-table">
               <thead>
                 <tr>
-                  <th className="users-th" style={{ minWidth: 160 }}>Code</th>
-                  <th className="users-th" style={{ minWidth: 100 }}>Annotations</th>
+                  <th className="users-th" style={{ minWidth: 160 }}>{t("reportsCodes.singleEntity.code")}</th>
+                  <th className="users-th" style={{ minWidth: 100 }}>{t("reportsCodes.singleEntity.annotations")}</th>
                 </tr>
               </thead>
               <tbody>
                 {codeCounts.length === 0 ? (
-                  <tr><td colSpan={2} className="users-td-msg">Select codes to see frequencies.</td></tr>
+                  <tr><td colSpan={2} className="users-td-msg">{t("reportsCodes.singleEntity.selectCodes")}</td></tr>
                 ) : codeCounts.map(({ code, count }) => (
                   <tr key={code.id} className="users-row">
                     <td className="users-td users-td--name">
@@ -830,6 +844,7 @@ function ExportModal({
   onExportXLSX: () => void;
   exportingFormat: string | null;
 }) {
+  const { t } = useI18n();
   const options = [
     {
       key: "html",
@@ -852,7 +867,7 @@ function ExportModal({
     {
       key: "xlsx",
       label: "XLSX",
-      description: "Exports metadata, report visuals, and detailed code-report results into a structured Excel workbook.",
+      description: t("reportsCodes.exportWorkbookDescription"),
       onClick: onExportXLSX,
     },
   ] as const;
@@ -860,7 +875,7 @@ function ExportModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>Export Report</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsCodes.exportTitle")}</h2>
         <div
           style={{
             display: "grid",
@@ -894,13 +909,13 @@ function ExportModal({
                 </div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {exportingFormat === option.key ? "Exporting..." : `Export as ${option.label}`}
+                {exportingFormat === option.key ? t("reportsCodes.exporting") : t("reportsCodes.exportAs", { format: option.label })}
               </div>
             </button>
           ))}
         </div>
         <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>Cancel</button>
+          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("reportsCodes.cancel")}</button>
         </div>
       </div>
     </div>
@@ -922,6 +937,7 @@ function CodeHierarchySelectionPanel({
   className?: string;
   showAllClear?: boolean;
 }) {
+  const { t } = useI18n();
   const [collapsedCodes, setCollapsedCodes] = useState<Set<string>>(new Set());
 
   const tree = useMemo(() => buildCodeTree(codes), [codes]);
@@ -947,17 +963,17 @@ function CodeHierarchySelectionPanel({
   return (
     <div className={`annotate-card${className ? ` ${className}` : ""}`}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Codes{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
+        <span className="annotate-card-title">{t("reportsCodes.panels.codes")}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
       </div>
       {showAllClear && !disabled && codes.length > 0 && (
         <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set(codes.map((item) => item.id)))}>All</button>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set())}>Clear</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set(codes.map((item) => item.id)))}>{t("reportsCodes.actions.all")}</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set())}>{t("reportsCodes.actions.clear")}</button>
         </div>
       )}
       <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
         {codes.length === 0 ? (
-          <li className="code-list-empty">No codes.</li>
+          <li className="code-list-empty">{t("reportsCodes.empty.noCodes")}</li>
         ) : visible.map(({ code, depth, hasChildren }) => (
           <li
             key={code.id}
@@ -970,7 +986,7 @@ function CodeHierarchySelectionPanel({
                 type="button"
                 className="code-collapse-btn"
                 onClick={(e) => { e.stopPropagation(); toggleCollapse(code.id); }}
-                title={collapsedCodes.has(code.id) ? "Expand" : "Collapse"}
+                title={collapsedCodes.has(code.id) ? t("reportsCodes.actions.expand") : t("reportsCodes.actions.collapse")}
               >
                 {collapsedCodes.has(code.id) ? "▶" : "▼"}
               </button>
@@ -1017,6 +1033,7 @@ function SelectionPanel({
   headerExtra?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <div className="annotate-card">
       <button
@@ -1034,8 +1051,8 @@ function SelectionPanel({
       </button>
       {!collapsed && selectAll && !disabled && !selectAll.disabled && (
         <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (!selectAll.checked) selectAll.onToggle(); }}>All</button>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (selectAll.checked) selectAll.onToggle(); }}>Clear</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (!selectAll.checked) selectAll.onToggle(); }}>{t("reportsCodes.actions.all")}</button>
+          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (selectAll.checked) selectAll.onToggle(); }}>{t("reportsCodes.actions.clear")}</button>
         </div>
       )}
       {!collapsed && children}
@@ -1050,17 +1067,18 @@ function NewCodeReportModal({
   onClose: () => void;
   onSelect: (kind: CodeReportKind) => void;
 }) {
+  const { t } = useI18n();
   const options = [
     {
       key: "frequencies",
-      label: "Code Frequencies",
-      description: "Compare how often codes appear across cases, documents, or coders with tables, charts, and heatmaps.",
+      label: t("reportsCodes.newModal.frequenciesLabel"),
+      description: t("reportsCodes.newModal.frequenciesDescription"),
       onClick: () => onSelect("frequencies"),
     },
     {
       key: "summary",
-      label: "Code Co-Occurrance",
-      description: "Explore how codes appear together across your data using co-occurrence matrices and summaries.",
+      label: t("reportsCodes.newModal.summaryLabel"),
+      description: t("reportsCodes.newModal.summaryDescription"),
       onClick: () => onSelect("summary"),
     },
   ] as const;
@@ -1068,7 +1086,7 @@ function NewCodeReportModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>New Report</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsCodes.newModal.title")}</h2>
         <div
           style={{
             display: "grid",
@@ -1107,7 +1125,7 @@ function NewCodeReportModal({
           ))}
         </div>
         <div className="form-actions" style={{ marginTop: 20 }}>
-          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn" onClick={onClose}>{t("reportsCodes.cancel")}</button>
         </div>
       </div>
     </div>
@@ -1129,6 +1147,7 @@ function CodeReportCreationPage({
   onSaved?: (row: CodeReportRow) => void;
   onUseSettings?: (settings: CodeReportSettings) => void;
 }) {
+  const { t } = useI18n();
   const { pb, activeProject, documents: storeDocuments, codes: storeCodes, createCodeReport, canCurrentUser } = useStore();
   const { user: currentUser } = useAuth();
   const isFrozen = !!row;
@@ -1261,24 +1280,24 @@ function CodeReportCreationPage({
         })));
         setCaseAttributeItems(caseAttrRecs.map((r) => ({
           id: r.id,
-          name: r.name ?? "Untitled attribute",
+          name: r.name ?? t("reportsCodes.untitledAttribute"),
           dataType: r.data_type ?? "text",
         })));
         setDocumentAttributeItems(docAttrRecs.map((r) => ({
           id: r.id,
-          name: r.name ?? "Untitled attribute",
+          name: r.name ?? t("reportsCodes.untitledAttribute"),
           dataType: r.data_type ?? "text",
         })));
         setUserItems(
           memberRecs
             .map((r) => {
               const u = r.expand?.user;
-              return u ? { id: u.id, name: u.name || u.email || "Unknown" } : null;
+              return u ? { id: u.id, name: u.name || u.email || t("reportsCodes.exportSections.unknown") } : null;
             })
             .filter(Boolean) as UserItem[],
         );
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load report filters.");
+        if (!cancelled) setError(e instanceof Error ? e.message : t("reportsCodes.errors.loadFilters"));
       } finally {
         if (!cancelled) setLoadingFilters(false);
       }
@@ -1288,7 +1307,7 @@ function CodeReportCreationPage({
     return () => { cancelled = true; };
   }, [isFrozen, pb, activeProject, storeDocuments]);
 
-  const reportLabel = REPORT_LABELS[reportKind];
+  const reportLabel = getCodeReportLabel(t, reportKind);
   const createdBy = row?.createdByName || currentUser?.name || currentUser?.email || "-";
   const visibleCases = selCaseIds.size;
   const visibleDocs = selDocIds.size;
@@ -1297,13 +1316,13 @@ function CodeReportCreationPage({
   const visibleCaseAttrs = selCaseAttrIds.size;
   const visibleDocAttrs = selDocAttrIds.size;
   const selectedCodeLabels = useMemo(() => {
-    if (selCodeIds.size === 0) return "No codes selected";
+    if (selCodeIds.size === 0) return t("reportsCodes.noCodesSelected");
     const tree = buildCodeTree(codes);
     const labels = tree
       .filter((node) => selCodeIds.has(node.code.id))
       .map((node) => node.code.label);
-    return labels.length > 0 ? labels.join(", ") : "No codes selected";
-  }, [codes, selCodeIds]);
+    return labels.length > 0 ? labels.join(", ") : t("reportsCodes.noCodesSelected");
+  }, [codes, selCodeIds, t]);
 
   const codeBuckets = useMemo(() => {
     if (selCodeIds.size === 0) return [] as FrequencyCodeBucket[];
@@ -1534,10 +1553,12 @@ function CodeReportCreationPage({
           allowedByCases.add(docId);
         }
       }
-      next = new Set([...next].filter((docId) => allowedByCases.has(docId)));
+      next = new Set(
+        [...next].filter((docId) => allowedByCases.has(docId) || (documentCaseMap.get(docId)?.size ?? 0) === 0),
+      );
     }
     return next;
-  }, [selDocIds, docIdsMatchingSelectedAttributes, filteredSelectedCaseIds, caseDocumentMap]);
+  }, [selDocIds, docIdsMatchingSelectedAttributes, filteredSelectedCaseIds, caseDocumentMap, documentCaseMap]);
 
   const selectedAnnotations = useMemo(
     () => allAnnotations.filter((ann) =>
@@ -1599,7 +1620,7 @@ function CodeReportCreationPage({
         return count;
       })),
     });
-    const normalizeValue = (value: string) => value.trim() || "No value";
+      const normalizeValue = (value: string) => value.trim() || t("reportsCodes.exportSections.noValue");
     const countPerCode = (anns: Annotation[]) =>
       codesForMatrix.map((code) => ({ code, count: anns.filter((a) => a.codeId === code.id).length }));
     const sections: CoOccurrenceSection[] = [];
@@ -1612,7 +1633,7 @@ function CodeReportCreationPage({
         key: "users",
         title: "Users",
         matrices: [],
-        singleEntityFreq: { entityLabel: user?.name || "Unknown", codeCounts: countPerCode(anns) },
+        singleEntityFreq: { entityLabel: user?.name || t("reportsCodes.exportSections.unknown"), codeCounts: countPerCode(anns) },
       });
     } else if (selUserIds.size > 1) {
       const entityCodeSets = userItems
@@ -1633,7 +1654,7 @@ function CodeReportCreationPage({
         key: "cases",
         title: "Cases",
         matrices: [],
-        singleEntityFreq: { entityLabel: caseItem?.name || "Unknown", codeCounts: countPerCode(filtered) },
+        singleEntityFreq: { entityLabel: caseItem?.name || t("reportsCodes.exportSections.unknown"), codeCounts: countPerCode(filtered) },
       });
     } else if (filteredSelectedCaseIds.size > 1) {
       const entityCodeSets = caseItems
@@ -1657,7 +1678,7 @@ function CodeReportCreationPage({
         key: "documents",
         title: "Documents",
         matrices: [],
-        singleEntityFreq: { entityLabel: doc?.name || "Unknown", codeCounts: countPerCode(anns) },
+        singleEntityFreq: { entityLabel: doc?.name || t("reportsCodes.exportSections.unknown"), codeCounts: countPerCode(anns) },
       });
     } else if (filteredSelectedDocIds.size > 1) {
       const entityCodeSets = documents
@@ -1771,8 +1792,8 @@ function CodeReportCreationPage({
       for (const attr of caseAttributeItems.filter((item) => selCaseAttrIds.has(item.id))) {
         const values = caseAttributeValues.filter((item) => item.attributeId === attr.id && filteredSelectedCaseIds.has(item.ownerId));
         for (const value of values) {
-          const label = `${attr.name}: ${value.value.trim() || "No value"}`;
-          const columnKey = `${attr.id}:${value.value.trim() || "No value"}`;
+          const label = `${attr.name}: ${value.value.trim() || t("reportsCodes.exportSections.noValue")}`;
+          const columnKey = `${attr.id}:${value.value.trim() || t("reportsCodes.exportSections.noValue")}`;
           if (!caseAttrColumns.has(columnKey)) {
             caseAttrColumns.set(columnKey, { id: columnKey, label, annotationIds: new Set() });
           }
@@ -1805,8 +1826,8 @@ function CodeReportCreationPage({
       for (const attr of documentAttributeItems.filter((item) => selDocAttrIds.has(item.id))) {
         const values = documentAttributeValues.filter((item) => item.attributeId === attr.id && filteredSelectedDocIds.has(item.ownerId));
         for (const value of values) {
-          const label = `${attr.name}: ${value.value.trim() || "No value"}`;
-          const columnKey = `${attr.id}:${value.value.trim() || "No value"}`;
+          const label = `${attr.name}: ${value.value.trim() || t("reportsCodes.exportSections.noValue")}`;
+          const columnKey = `${attr.id}:${value.value.trim() || t("reportsCodes.exportSections.noValue")}`;
           if (!docAttrColumns.has(columnKey)) {
             docAttrColumns.set(columnKey, { id: columnKey, label, annotationIds: new Set() });
           }
@@ -2030,7 +2051,7 @@ function CodeReportCreationPage({
               <div key={item.id} style={{ border: "1px solid var(--color-border)", borderRadius: 10, padding: 12, background: "var(--color-surface-alt)" }}>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{item.name}</div>
                 {stat?.minNumber == null || stat.maxNumber == null ? (
-                  <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No numeric values are available for this attribute yet.</div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsCodes.filterEditors.noNumericValues")}</div>
                 ) : (
                   <>
                     <div style={{ position: "relative", height: 34, marginBottom: 10 }}>
@@ -2148,13 +2169,13 @@ function CodeReportCreationPage({
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{item.name}</div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: stat?.textValues ?? [] })}>All</button>
-                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: [] })}>Clear</button>
+                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: stat?.textValues ?? [] })}>{t("reportsCodes.actions.all")}</button>
+                  <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} disabled={isFrozen} onClick={() => onUpdate(item.id, { selectedValues: [] })}>{t("reportsCodes.actions.clear")}</button>
                 </div>
               </div>
               <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-surface)" }}>
                 {(stat?.textValues ?? []).length === 0 ? (
-                  <div style={{ padding: 10, fontSize: 12, color: "var(--color-text-muted)" }}>No text values are available for this attribute yet.</div>
+                  <div style={{ padding: 10, fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsCodes.filterEditors.noTextValues")}</div>
                 ) : (
                   <ul className="code-list">
                     {(stat?.textValues ?? []).map((value) => (
@@ -2223,9 +2244,9 @@ function CodeReportCreationPage({
           return `${item.name}: any date/time`;
         }
         const selectedValues = filter.selectedValues ?? stats.get(item.id)?.textValues ?? [];
-        if (selectedValues.length === 0) return `${item.name}: no values selected`;
+        if (selectedValues.length === 0) return `${item.name}: ${t("reportsCodes.exportSections.noValuesSelected")}`;
         if (selectedValues.length <= 3) return `${item.name}: ${selectedValues.join(", ")}`;
-        return `${item.name}: ${selectedValues.slice(0, 3).join(", ")} +${selectedValues.length - 3} more`;
+        return `${item.name}: ${selectedValues.slice(0, 3).join(", ")} ${t("reportsCodes.exportSections.more", { count: selectedValues.length - 3 })}`;
       });
   }
 
@@ -2241,7 +2262,7 @@ function CodeReportCreationPage({
   const selectedSummaryCards = [
     {
       key: "cases",
-      label: "Cases",
+      label: t("reportsCodes.panels.cases"),
       value: visibleCases,
       items: caseItems
         .filter((item) => selCaseIds.has(item.id))
@@ -2249,7 +2270,7 @@ function CodeReportCreationPage({
     },
     {
       key: "documents",
-      label: "Documents",
+      label: t("reportsCodes.panels.documents"),
       value: visibleDocs,
       items: documents
         .filter((item) => selDocIds.has(item.id))
@@ -2257,7 +2278,7 @@ function CodeReportCreationPage({
     },
     {
       key: "codes",
-      label: "Codes",
+      label: t("reportsCodes.panels.codes"),
       value: visibleCodes,
       items: buildCodeTree(codes)
         .filter((node) => selCodeIds.has(node.code.id))
@@ -2265,7 +2286,7 @@ function CodeReportCreationPage({
     },
     {
       key: "users",
-      label: "Users",
+      label: t("reportsCodes.panels.users"),
       value: visibleUsers,
       items: userItems
         .filter((item) => selUserIds.has(item.id))
@@ -2444,7 +2465,7 @@ function CodeReportCreationPage({
     return `
       <svg xmlns="http://www.w3.org/2000/svg" font-family="Aptos, Calibri, Arial, sans-serif" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
         <rect width="100%" height="100%" fill="#ffffff" />
-        <text x="18" y="22" font-size="16" font-weight="700" fill="#1f2933">${escapeHtml(sectionTitle)} Bar Chart</text>
+        <text x="18" y="22" font-size="16" font-weight="700" fill="#1f2933">${escapeHtml(sectionTitle)} ${escapeHtml(t("reportsCodes.exportSections.chartSuffix"))}</text>
         ${rows}
       </svg>
     `;
@@ -2485,8 +2506,8 @@ function CodeReportCreationPage({
   function getExportHtml(): string {
     const description = currentDescriptionHtml();
     const appliedFilters = [
-      ...caseFilterDetails.map((detail) => `Cases: ${detail}`),
-      ...documentFilterDetails.map((detail) => `Documents: ${detail}`),
+      ...caseFilterDetails.map((detail) => `${t("reportsCodes.panels.cases")}: ${detail}`),
+      ...documentFilterDetails.map((detail) => `${t("reportsCodes.panels.documents")}: ${detail}`),
     ];
     const formatList = (values: string[], emptyLabel: string) => values.length > 0 ? values.join(", ") : emptyLabel;
     const resultsHtml = reportKind === "frequencies"
@@ -2523,9 +2544,9 @@ function CodeReportCreationPage({
               <tr><th>${escapeHtml(section.title)}</th>${tableHeader}</tr>
               ${tableRowsHtml || `<tr><td colspan="${displayBuckets.length + 1}" class="muted">No selected items.</td></tr>`}
             </table>
-            <h3>Bar Chart</h3>
+            <h3>{t("reportsCodes.frequencyViews.chart")}</h3>
             <div class="chart-block">${chartSvg}</div>
-            <h3>Heatmap</h3>
+            <h3>{t("reportsCodes.frequencyViews.heatmap")}</h3>
             <table class="summary">
               <tr><th>Code</th>${tableRows.map((row) => `<th>${escapeHtml(row.label)}</th>`).join("")}</tr>
               ${heatmapRows || `<tr><td colspan="${tableRows.length + 1}" class="muted">Select codes to build the matrix.</td></tr>`}
@@ -2564,7 +2585,7 @@ function CodeReportCreationPage({
 <html>
   <head>
     <meta charset="utf-8">
-    <title>${escapeHtml(name || "Untitled Report")}</title>
+    <title>${escapeHtml(name || t("reportsCodes.exportSections.untitledReport"))}</title>
     <style>
       body { font-family: Aptos, Calibri, Arial, sans-serif; color: #1f2933; line-height: 1.45; }
       h1 { font-size: 26px; margin: 0 0 8px; }
@@ -2581,19 +2602,19 @@ function CodeReportCreationPage({
     </style>
   </head>
   <body>
-    <h1>${escapeHtml(name || "Untitled Report")}</h1>
+    <h1>${escapeHtml(name || t("reportsCodes.exportSections.untitledReport"))}</h1>
     <table class="details">
       <tr><td><strong>Type</strong></td><td>${escapeHtml(reportLabel)}</td></tr>
-      <tr><td><strong>Created by</strong></td><td>${escapeHtml(createdBy)}</td></tr>
+      <tr><td><strong>${escapeHtml(t("reportsCodes.exportSections.createdBy"))}</strong></td><td>${escapeHtml(createdBy)}</td></tr>
       <tr><td><strong>Created</strong></td><td>${escapeHtml(row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString()))}</td></tr>
-      <tr><td><strong>Selected codes</strong></td><td>${escapeHtml(selectedCodeLabels)}</td></tr>
-      <tr><td><strong>Included cases</strong></td><td>${escapeHtml(formatList(includedCaseNames, "No cases selected"))}</td></tr>
-      <tr><td><strong>Included documents</strong></td><td>${escapeHtml(formatList(includedDocumentNames, "No documents selected"))}</td></tr>
-      <tr><td><strong>Included users</strong></td><td>${escapeHtml(formatList(includedUserNames, "No users selected"))}</td></tr>
-      ${appliedFilters.length > 0 ? `<tr><td><strong>Applied filters</strong></td><td>${escapeHtml(appliedFilters.join(" | "))}</td></tr>` : ""}
+      <tr><td><strong>${escapeHtml(t("reportsCodes.exportSections.selectedCodes"))}</strong></td><td>${escapeHtml(selectedCodeLabels)}</td></tr>
+      <tr><td><strong>${escapeHtml(t("reportsCodes.includedCases"))}</strong></td><td>${escapeHtml(formatList(includedCaseNames, t("reportsCodes.noCasesSelected")))}</td></tr>
+      <tr><td><strong>${escapeHtml(t("reportsCodes.includedDocuments"))}</strong></td><td>${escapeHtml(formatList(includedDocumentNames, t("reportsCodes.noDocumentsSelected")))}</td></tr>
+      <tr><td><strong>${escapeHtml(t("reportsCodes.includedUsers"))}</strong></td><td>${escapeHtml(formatList(includedUserNames, t("reportsCodes.noUsersSelected")))}</td></tr>
+      ${appliedFilters.length > 0 ? `<tr><td><strong>${escapeHtml(t("reportsCodes.exportSections.appliedFilters"))}</strong></td><td>${escapeHtml(appliedFilters.join(" | "))}</td></tr>` : ""}
     </table>
-    ${description ? `<h2>Description</h2><div class="description">${description}</div>` : ""}
-    <h2>Summary</h2>
+    ${description ? `<h2>${escapeHtml(t("reportsCodes.exportSections.description"))}</h2><div class="description">${description}</div>` : ""}
+    <h2>${escapeHtml(t("reportsCodes.exportSections.summary"))}</h2>
     <table class="summary">
       <tr><th>Users</th><th>Cases</th><th>Case Attributes</th><th>Documents</th><th>Document Attributes</th><th>Codes</th></tr>
       <tr><td>${visibleUsers}</td><td>${visibleCases}</td><td>${visibleCaseAttrs}</td><td>${visibleDocs}</td><td>${visibleDocAttrs}</td><td>${visibleCodes}</td></tr>
@@ -2625,170 +2646,135 @@ function CodeReportCreationPage({
       const path = await save({ defaultPath: `${name || "Report"}.xlsx`, filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }] });
       if (!path) return;
 
-      const ExcelJS = await loadExcelJs();
-      const workbook = new ExcelJS.Workbook();
-      workbook.creator = currentUser?.name || currentUser?.email || "Kanqual";
-      workbook.created = new Date();
-
-      const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE1E4EA" } };
-
-      function styleHeader(cell: any) {
-        cell.font = { bold: true };
-        cell.fill = HEADER_FILL;
-      }
+      const { default: writeXlsxFile } = await loadWriteExcelFile();
+      const headerCell = (value: string) => ({
+        value,
+        fontWeight: "bold" as const,
+        backgroundColor: "#E1E4EA",
+      });
+      const titleCellValue = (value: string, columnSpan = 1) => ({
+        value,
+        fontWeight: "bold" as const,
+        fontSize: 16,
+        ...(columnSpan > 1 ? { columnSpan } : {}),
+      });
+      const sectionCell = (value: string, columnSpan = 1) => ({
+        value,
+        fontWeight: "bold" as const,
+        fontSize: 12,
+        ...(columnSpan > 1 ? { columnSpan } : {}),
+      });
+      const colorValueCell = (value: number, maxValue: number) => {
+        if (!(value > 0) || !(maxValue > 0)) return value;
+        const backgroundColor = heatmapColorStatic(value, maxValue);
+        const t = value / Math.max(1, maxValue);
+        return {
+          value,
+          backgroundColor,
+          textColor: t > 0.55 ? "#FFFFFF" : "#374151",
+        };
+      };
 
       // ── Metadata sheet ────────────────────────────────────────────────────
-      const meta = workbook.addWorksheet("Report");
-      meta.columns = [{ width: 22 }, { width: 54 }];
-
-      meta.mergeCells("A1:B1");
-      const titleCell = meta.getCell("A1");
-      titleCell.value = name || "Untitled Report";
-      titleCell.font = { bold: true, size: 16 };
-
-      meta.addRow([]);
-      meta.addRow(["Type", reportLabel]);
-      meta.addRow(["Created by", createdBy]);
-      meta.addRow(["Created", row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())]);
+      const metaRows: Array<Array<any>> = [
+        [titleCellValue(name || t("reportsCodes.exportSections.untitledReport"), 2), null],
+        [],
+        ["Type", reportLabel],
+        [t("reportsCodes.exportSections.createdBy"), createdBy],
+        ["Created", row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())],
+      ];
 
       const description = htmlToPlainText(currentDescriptionHtml() ?? "");
       if (description) {
-        meta.addRow([]);
-        const dh = meta.addRow(["Description"]);
-        dh.getCell(1).font = { bold: true };
-        for (const line of description.split(/\n+/).filter(Boolean)) meta.addRow([line]);
+        metaRows.push([]);
+        metaRows.push([sectionCell(t("reportsCodes.exportSections.description"))]);
+        for (const line of description.split(/\n+/).filter(Boolean)) metaRows.push([line]);
       }
 
-      meta.addRow([]);
-      const sh = meta.addRow(["Summary"]);
-      sh.getCell(1).font = { bold: true };
-      meta.addRow(["Users", visibleUsers]);
-      meta.addRow(["Cases", visibleCases]);
-      meta.addRow(["Case Attributes", visibleCaseAttrs]);
-      meta.addRow(["Documents", visibleDocs]);
-      meta.addRow(["Document Attributes", visibleDocAttrs]);
-      meta.addRow(["Codes", visibleCodes]);
+      metaRows.push([]);
+      metaRows.push([sectionCell(t("reportsCodes.exportSections.summary"))]);
+      metaRows.push(["Users", visibleUsers]);
+      metaRows.push(["Cases", visibleCases]);
+      metaRows.push(["Case Attributes", visibleCaseAttrs]);
+      metaRows.push(["Documents", visibleDocs]);
+      metaRows.push(["Document Attributes", visibleDocAttrs]);
+      metaRows.push(["Codes", visibleCodes]);
+
+      const sheets: Array<any> = [
+        {
+          sheet: "Report",
+          data: metaRows,
+          columns: [{ width: 22 }, { width: 54 }],
+        },
+      ];
 
       // ── Frequency section sheets ──────────────────────────────────────────
       if (reportKind === "frequencies") {
         for (const { section, displayBuckets, tableRows, matrix, maxCell } of frequencyExportSections) {
-          const ws = workbook.addWorksheet(section.title.slice(0, 31));
-          ws.columns = [
-            { width: 26 },
-            ...displayBuckets.map(() => ({ width: 14 })),
-          ];
-          let r = 1;
-
-          // Section title
-          ws.mergeCells(r, 1, r, Math.max(2, displayBuckets.length + 1));
-          const stCell = ws.getCell(r, 1);
-          stCell.value = section.title;
-          stCell.font = { bold: true, size: 14 };
-          r += 2;
+          const sectionRows: Array<Array<any>> = [];
+          const maxSheetColumns = Math.max(2, displayBuckets.length + 1, tableRows.length + 1);
+          sectionRows.push([titleCellValue(section.title, maxSheetColumns), ...Array(Math.max(0, maxSheetColumns - 1)).fill(null)]);
+          sectionRows.push([]);
 
           // — Frequency table —————————————————————————————————————————————
-          ws.getCell(r, 1).value = "Frequency Table";
-          ws.getCell(r, 1).font = { bold: true, size: 12 };
-          r++;
-
-          const hRow = ws.getRow(r);
-          styleHeader(hRow.getCell(1));
-          hRow.getCell(1).value = section.title;
-          for (let c = 0; c < displayBuckets.length; c++) {
-            const hc = hRow.getCell(c + 2);
-            styleHeader(hc);
-            hc.value = displayBuckets[c].label;
-          }
-          r++;
+          sectionRows.push([sectionCell(t("reportsCodes.exportSections.frequencyTable"), Math.max(2, displayBuckets.length + 1)), ...Array(Math.max(0, Math.max(2, displayBuckets.length + 1) - 1)).fill(null)]);
+          sectionRows.push([headerCell(section.title), ...displayBuckets.map((bucket) => headerCell(bucket.label))]);
 
           for (const tRow of tableRows) {
-            const dRow = ws.getRow(r);
-            dRow.getCell(1).value = tRow.label;
-            for (let c = 0; c < displayBuckets.length; c++) {
-              const value = tRow.values[c] ?? 0;
-              const dc = dRow.getCell(c + 2);
-              dc.value = value;
-              if (value > 0 && maxCell > 0) {
-                dc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + heatmapColorStatic(value, maxCell).slice(1) } };
-              }
-            }
-            r++;
+            sectionRows.push([
+              tRow.label,
+              ...displayBuckets.map((_, index) => colorValueCell(tRow.values[index] ?? 0, maxCell)),
+            ]);
           }
-          r++;
+          sectionRows.push([]);
 
           // — Bar chart ————————————————————————————————————————————————————
-          if (tableRows.length > 0 && displayBuckets.length > 0) {
-            ws.getCell(r, 1).value = "Bar Chart";
-            ws.getCell(r, 1).font = { bold: true, size: 12 };
-            r++;
-            try {
-              const svg = buildFreqBarChartSvg(tableRows, displayBuckets, maxCell);
-              const png = await svgToPngDataUrl(svg);
-              const svgHMatch = svg.match(/height="(\d+)"/);
-              const nativeH = svgHMatch ? parseInt(svgHMatch[1], 10) : 400;
-              const imgW = 500;
-              const imgH = Math.round((nativeH / 700) * imgW);
-              const imgId = workbook.addImage({ base64: png.split(",")[1], extension: "png" });
-              ws.addImage(imgId, { tl: { col: 0, row: r - 1 }, ext: { width: imgW, height: imgH } });
-              r += Math.ceil(imgH / 19) + 1;
-            } catch { /* skip on failure */ }
-            r++;
-          }
+          
 
           // — Heatmap ——————————————————————————————————————————————————————
           if (matrix.length > 0 && tableRows.length > 0) {
+            sectionRows.push([sectionCell(t("reportsCodes.frequencyViews.heatmap"), Math.max(2, tableRows.length + 1)), ...Array(Math.max(0, Math.max(2, tableRows.length + 1) - 1)).fill(null)]);
+            sectionRows.push([headerCell("Code"), ...tableRows.map((tableRow) => headerCell(tableRow.label))]);
             // Adjust columns for heatmap (codes × categories — may differ from freq table)
-            const hmColCount = tableRows.length + 1;
-            if (hmColCount > ws.columnCount) {
-              for (let c = ws.columnCount + 1; c <= hmColCount; c++) ws.getColumn(c).width = 14;
-            }
-
-            ws.getCell(r, 1).value = "Heatmap";
-            ws.getCell(r, 1).font = { bold: true, size: 12 };
-            r++;
-
-            const hmHdr = ws.getRow(r);
-            styleHeader(hmHdr.getCell(1));
-            hmHdr.getCell(1).value = "Code";
-            for (let j = 0; j < tableRows.length; j++) {
-              const hc = hmHdr.getCell(j + 2);
-              styleHeader(hc);
-              hc.value = tableRows[j].label;
-            }
-            r++;
 
             for (const matRow of matrix) {
-              const mRow = ws.getRow(r);
-              mRow.getCell(1).value = matRow.bucket.label;
-              for (let j = 0; j < matRow.cells.length; j++) {
-                const value = matRow.cells[j] ?? 0;
-                const mc = mRow.getCell(j + 2);
-                mc.value = value;
-                const hexColor = heatmapColorStatic(value, maxCell).slice(1);
-                mc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + hexColor } };
-                const t = value / Math.max(1, maxCell);
-                mc.font = { color: { argb: t > 0.55 ? "FFFFFFFF" : "FF374151" } };
-              }
-              r++;
+              sectionRows.push([
+                matRow.bucket.label,
+                ...matRow.cells.map((value) => colorValueCell(value ?? 0, maxCell)),
+              ]);
             }
+
           }
+          sheets.push({
+            sheet: section.title.slice(0, 31),
+            data: sectionRows,
+            columns: [
+              { width: 26 },
+              ...Array.from({ length: maxSheetColumns - 1 }, () => ({ width: 14 })),
+            ],
+          });
         }
 
       // ── Co-occurrence sheet ───────────────────────────────────────────────
       } else {
-        const ws = workbook.addWorksheet("Co-Occurrence");
-        ws.columns = [{ width: 18 }, { width: 30 }, { width: 24 }, { width: 10 }];
-        const coHdr = ws.addRow(["Section", "Category", "Code", "Count"]);
-        coHdr.eachCell((cell: any) => styleHeader(cell));
-        for (const rowItem of reportExportRows) {
-          for (const v of rowItem.values) {
-            ws.addRow([rowItem.section, rowItem.category, v.code, v.value]);
-          }
-        }
+        sheets.push({
+          sheet: "Co-Occurrence",
+          data: [
+            [t("reportsCodes.exportSections.section"), t("reportsCodes.exportSections.category"), t("reportsCodes.exportSections.code"), t("reportsCodes.exportSections.count")].map((value) => headerCell(value)),
+            ...reportExportRows.flatMap((rowItem) =>
+              rowItem.values.map((value) => [rowItem.section, rowItem.category, value.code, value.value]),
+            ),
+          ],
+          columns: [{ width: 18 }, { width: 30 }, { width: 24 }, { width: 10 }],
+        });
       }
 
-      const buffer = await workbook.xlsx.writeBuffer();
-      await writeFile(path, new Uint8Array(buffer as ArrayBuffer));
+      const file = writeXlsxFile(sheets, {
+        fontFamily: "Calibri",
+        fontSize: 11,
+      });
+      const blob = await file.toBlob();
+      await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
     } catch (e) {
       console.error("XLSX export failed:", e);
       setError("XLSX export failed.");
@@ -2827,31 +2813,31 @@ function CodeReportCreationPage({
       };
 
       // ── Report header ────────────────────────────────────────────────────────
-      addText(name || "Untitled Report", 20, "bold", 14);
+      addText(name || t("reportsCodes.exportSections.untitledReport"), 20, "bold", 14);
       addText(`Type: ${reportLabel}`, 10);
-      addText(`Created by: ${createdBy}`, 10);
-      addText(`Created: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`, 10, "normal", 14);
+      addText(`${t("reportsCodes.exportSections.createdBy")}: ${createdBy}`, 10);
+      addText(`${t("reportsCodes.exportSections.created")}: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`, 10, "normal", 14);
 
       const description = htmlToPlainText(currentDescriptionHtml() ?? "");
       if (description) {
-        addText("Description", 14, "bold", 8);
+        addText(t("reportsCodes.exportSections.description"), 14, "bold", 8);
         addText(description, 10, "normal", 14);
       }
 
-      addText("Summary", 14, "bold", 8);
-      addText(`Users: ${visibleUsers}   Cases: ${visibleCases}   Case Attributes: ${visibleCaseAttrs}   Documents: ${visibleDocs}   Document Attributes: ${visibleDocAttrs}   Codes: ${visibleCodes}`, 10, "normal", 14);
+      addText(t("reportsCodes.exportSections.summary"), 14, "bold", 8);
+      addText(`${t("reportsCodes.panels.users")}: ${visibleUsers}   ${t("reportsCodes.panels.cases")}: ${visibleCases}   ${t("reportsCodes.filterButtons.caseAttributes")}: ${visibleCaseAttrs}   ${t("reportsCodes.panels.documents")}: ${visibleDocs}   ${t("reportsCodes.filterButtons.documentAttributes")}: ${visibleDocAttrs}   ${t("reportsCodes.panels.codes")}: ${visibleCodes}`, 10, "normal", 14);
 
       // ── Frequencies ──────────────────────────────────────────────────────────
       if (reportKind === "frequencies") {
         if (frequencyExportSections.length === 0) {
-          addText("No frequency data was included in this report.", 10, "italic");
+          addText(t("reportsCodes.noFrequencyData"), 10, "italic");
         }
 
         for (const { section, displayBuckets, tableRows, matrix, maxCell } of frequencyExportSections) {
           addText(section.title, 16, "bold", 10);
 
           // — Table ——————————————————————————————————————————————————————————
-          addText("Frequency Table", 12, "bold", 6);
+          addText(t("reportsCodes.exportSections.frequencyTable"), 12, "bold", 6);
           {
             const cellH = 18;
             const labelColW = Math.min(160, contentWidth * 0.32);
@@ -2903,7 +2889,7 @@ function CodeReportCreationPage({
 
           // — Bar chart ————————————————————————————————————————————————————————
           if (tableRows.length > 0 && displayBuckets.length > 0) {
-            addText("Bar Chart", 12, "bold", 6);
+            addText(t("reportsCodes.frequencyViews.chart"), 12, "bold", 6);
             try {
               const svg = buildFreqBarChartSvg(tableRows, displayBuckets, maxCell);
               const png = await svgToPngDataUrl(svg);
@@ -2918,7 +2904,7 @@ function CodeReportCreationPage({
 
           // — Heatmap ——————————————————————————————————————————————————————————
           if (matrix.length > 0 && tableRows.length > 0) {
-            addText("Heatmap", 12, "bold", 6);
+            addText(t("reportsCodes.frequencyViews.heatmap"), 12, "bold", 6);
             try {
               const svg = buildFreqHeatmapSvg(matrix, tableRows, maxCell);
               const png = await svgToPngDataUrl(svg);
@@ -2938,7 +2924,7 @@ function CodeReportCreationPage({
       // ── Co-occurrence ────────────────────────────────────────────────────────
       } else {
         if (coOccurrenceSections.length === 0) {
-          addText("No co-occurrence data was included in this report.", 10, "italic");
+          addText(t("reportsCodes.noCoOccurrenceData"), 10, "italic");
         }
 
         for (const section of coOccurrenceSections) {
@@ -2947,7 +2933,7 @@ function CodeReportCreationPage({
           // — Single-entity frequency table ————————————————————————————————
           if (section.singleEntityFreq) {
             const { entityLabel, codeCounts } = section.singleEntityFreq;
-            addText(`Only one item selected — code frequencies for ${entityLabel}`, 10, "italic", 6);
+            addText(t("reportsCodes.exportSections.oneItemSelected", { name: entityLabel }), 10, "italic", 6);
 
             const cellH = 18;
             const labelColW = Math.round(contentWidth * 0.6);
@@ -3201,34 +3187,34 @@ function CodeReportCreationPage({
       }
 
       const children: any[] = [
-        new Paragraph({ text: name || "Untitled Report", heading: HeadingLevel.TITLE }),
+        new Paragraph({ text: name || t("reportsCodes.exportSections.untitledReport"), heading: HeadingLevel.TITLE }),
         new Paragraph(`Type: ${reportLabel}`),
-        new Paragraph(`Created by: ${createdBy}`),
-        new Paragraph(`Created: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`),
+        new Paragraph(`${t("reportsCodes.exportSections.createdBy")}: ${createdBy}`),
+        new Paragraph(`${t("reportsCodes.exportSections.created")}: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`),
       ];
 
       const description = htmlToPlainText(currentDescriptionHtml() ?? "");
       const appliedFilters = [
-        ...caseFilterDetails.map((detail) => `Cases: ${detail}`),
-        ...documentFilterDetails.map((detail) => `Documents: ${detail}`),
+        ...caseFilterDetails.map((detail) => `${t("reportsCodes.panels.cases")}: ${detail}`),
+        ...documentFilterDetails.map((detail) => `${t("reportsCodes.panels.documents")}: ${detail}`),
       ];
       if (description) {
-        children.push(new Paragraph({ text: "Description", heading: HeadingLevel.HEADING_1 }));
+        children.push(new Paragraph({ text: t("reportsCodes.exportSections.description"), heading: HeadingLevel.HEADING_1 }));
         for (const line of description.split(/\n+/).filter(Boolean)) children.push(new Paragraph(line));
       }
 
-      children.push(new Paragraph({ text: "Report Details", heading: HeadingLevel.HEADING_1 }));
-      children.push(buildDocxSingleValueTable("Field", "Value", [
-        { label: "Selected codes", value: selectedCodeLabels },
-        { label: "Included cases", value: includedCaseNames.length > 0 ? includedCaseNames.join(", ") : "No cases selected" },
-        { label: "Included documents", value: includedDocumentNames.length > 0 ? includedDocumentNames.join(", ") : "No documents selected" },
-        { label: "Included users", value: includedUserNames.length > 0 ? includedUserNames.join(", ") : "No users selected" },
-        ...(appliedFilters.length > 0 ? [{ label: "Applied filters", value: appliedFilters.join(" | ") }] : []),
+      children.push(new Paragraph({ text: t("reportsCodes.reportDetails"), heading: HeadingLevel.HEADING_1 }));
+      children.push(buildDocxSingleValueTable(t("reportsCodes.exportSections.field"), t("reportsCodes.exportSections.value"), [
+        { label: t("reportsCodes.exportSections.selectedCodes"), value: selectedCodeLabels },
+        { label: t("reportsCodes.includedCases"), value: includedCaseNames.length > 0 ? includedCaseNames.join(", ") : t("reportsCodes.noCasesSelected") },
+        { label: t("reportsCodes.includedDocuments"), value: includedDocumentNames.length > 0 ? includedDocumentNames.join(", ") : t("reportsCodes.noDocumentsSelected") },
+        { label: t("reportsCodes.includedUsers"), value: includedUserNames.length > 0 ? includedUserNames.join(", ") : t("reportsCodes.noUsersSelected") },
+        ...(appliedFilters.length > 0 ? [{ label: t("reportsCodes.exportSections.appliedFilters"), value: appliedFilters.join(" | ") }] : []),
       ]));
       children.push(new Paragraph(""));
 
-      children.push(new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }));
-      children.push(buildDocxSingleValueTable("Item", "Count", [
+      children.push(new Paragraph({ text: t("reportsCodes.exportSections.summary"), heading: HeadingLevel.HEADING_1 }));
+      children.push(buildDocxSingleValueTable(t("reportsCodes.exportSections.item"), t("reportsCodes.exportSections.count"), [
         { label: "Users", value: visibleUsers },
         { label: "Cases", value: visibleCases },
         { label: "Case Attributes", value: visibleCaseAttrs },
@@ -3241,20 +3227,20 @@ function CodeReportCreationPage({
       // ── Frequencies ────────────────────────────────────────────────────────
       if (reportKind === "frequencies") {
         if (frequencyExportSections.length === 0) {
-          children.push(new Paragraph({ children: [new TextRun({ text: "No frequency data was included in this report.", italics: true })] }));
+          children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.noFrequencyData"), italics: true })] }));
         }
 
         for (const { section, displayBuckets, tableRows, matrix, maxCell } of frequencyExportSections) {
           children.push(new Paragraph({ text: section.title, heading: HeadingLevel.HEADING_1 }));
 
           // — Table ————————————————————————————————————————————————————————
-          children.push(new Paragraph({ children: [new TextRun({ text: "Frequency Table", bold: true })] }));
+          children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.exportSections.frequencyTable"), bold: true })] }));
           children.push(buildDocxFreqTable(section.title, tableRows, displayBuckets));
           children.push(new Paragraph(""));
 
           // — Bar chart ——————————————————————————————————————————————————————
           if (tableRows.length > 0 && displayBuckets.length > 0) {
-            children.push(new Paragraph({ children: [new TextRun({ text: "Bar Chart", bold: true })] }));
+            children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.frequencyViews.chart"), bold: true })] }));
             try {
               const svg = buildFreqBarChartSvg(tableRows, displayBuckets, maxCell);
               const png = await svgToPngDataUrl(svg);
@@ -3271,7 +3257,7 @@ function CodeReportCreationPage({
 
           // — Heatmap ————————————————————————————————————————————————————————
           if (matrix.length > 0 && tableRows.length > 0) {
-            children.push(new Paragraph({ children: [new TextRun({ text: "Heatmap", bold: true })] }));
+            children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.frequencyViews.heatmap"), bold: true })] }));
             try {
               const svg = buildFreqHeatmapSvg(matrix, tableRows, maxCell);
               const png = await svgToPngDataUrl(svg);
@@ -3293,15 +3279,15 @@ function CodeReportCreationPage({
       } else {
         children.push(new Paragraph({ text: "Co-Occurrence", heading: HeadingLevel.HEADING_1 }));
         if (coOccurrenceSections.length === 0) {
-          children.push(new Paragraph({ children: [new TextRun({ text: "No co-occurrence data was included in this report.", italics: true })] }));
+          children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.noCoOccurrenceData"), italics: true })] }));
         } else {
           for (const section of coOccurrenceSections) {
             children.push(new Paragraph({ text: section.title, heading: HeadingLevel.HEADING_2 }));
 
             if (section.singleEntityFreq) {
               const { entityLabel, codeCounts } = section.singleEntityFreq;
-              children.push(new Paragraph({ children: [new TextRun({ text: `Only one item selected — code frequencies for ${entityLabel}`, italics: true })] }));
-              children.push(buildDocxSingleValueTable("Code", "Annotations", codeCounts.map((item) => ({
+              children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.exportSections.oneItemSelected", { name: entityLabel }), italics: true })] }));
+              children.push(buildDocxSingleValueTable(t("reportsCodes.exportSections.code"), t("reportsCodes.singleEntity.annotations"), codeCounts.map((item) => ({
                 label: item.code.label,
                 value: item.count,
               }))));
@@ -3341,11 +3327,9 @@ function CodeReportCreationPage({
 
   return (
     <div className="annotate-view">
-      <div className="workspace-back-row workspace-back-row--annotate">
-        <button className="btn" onClick={onBack}>Back to Reports</button>
-      </div>
-      <div className="annotate-back-bar" style={{ alignItems: "center", paddingBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
+        <button className="btn" onClick={onBack}>{t("reportsCodes.backToReports")}</button>
+        <div className="report-action-group" style={{ gap: 10 }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           <button
             className="btn btn--secondary"
@@ -3354,12 +3338,12 @@ function CodeReportCreationPage({
                 ? "Only saved reports can be exported"
                 : !canExportReports
                   ? "You do not have permission to export reports"
-                  : "Export Report"
+                  : t("reportsCodes.exportTitle")
             }
             disabled={!isFrozen || !canExportReports}
             onClick={() => setShowExportModal(true)}
           >
-            Export
+            {t("reportsCodes.export")}
           </button>
           {isFrozen ? (
             canStartReports ? (
@@ -3367,7 +3351,7 @@ function CodeReportCreationPage({
               className="btn btn--primary"
               onClick={() => onUseSettings?.(row!.snapshot.settings)}
             >
-              New Report From Settings
+              {t("reportsCodes.newFromSettings")}
             </button>
             ) : null
           ) : (
@@ -3380,7 +3364,7 @@ function CodeReportCreationPage({
 
       <div className="annotate-layout ann-report-annotate-layout">
         <div className="annotate-left">
-          <div className="annotate-left-title">Include in Report:</div>
+          <div className="annotate-left-title">{t("reportsCodes.panels.includeInReport")}</div>
 
           <CodeHierarchySelectionPanel
             codes={codes}
@@ -3392,7 +3376,7 @@ function CodeReportCreationPage({
           />
 
           <SelectionPanel
-            title="Cases"
+            title={t("reportsCodes.panels.cases")}
             count={selCaseIds.size}
             collapsed={collapsed.has("cases")}
             onToggleCollapsed={() => togglePanel("cases")}
@@ -3401,8 +3385,8 @@ function CodeReportCreationPage({
               <button
                 type="button"
                 className="filter-icon-button filter-icon-button--compact"
-                aria-label="Filter cases by attributes"
-                title="Filter cases by attributes"
+                aria-label={t("reportsCodes.filterButtons.caseAttributes")}
+                title={t("reportsCodes.filterButtons.caseAttributes")}
                 onClick={(e) => { e.stopPropagation(); setShowCaseAttributeFilters(true); }}
               >
                 <FilterIcon className="filter-icon-svg" />
@@ -3418,9 +3402,9 @@ function CodeReportCreationPage({
           >
             <ul className="code-list">
               {loadingFilters ? (
-                <li className="code-list-empty">Loading...</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.loading")}</li>
               ) : caseItems.length === 0 ? (
-                <li className="code-list-empty">No cases.</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.noCases")}</li>
               ) : caseItems.map((item) => (
                 <li key={item.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && applySelectionFromCases((() => { const next = new Set(selCaseIds); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })())}>
                   <input
@@ -3438,7 +3422,7 @@ function CodeReportCreationPage({
           </SelectionPanel>
 
           <SelectionPanel
-            title="Documents"
+            title={t("reportsCodes.panels.documents")}
             count={selDocIds.size}
             collapsed={collapsed.has("documents")}
             onToggleCollapsed={() => togglePanel("documents")}
@@ -3447,8 +3431,8 @@ function CodeReportCreationPage({
               <button
                 type="button"
                 className="filter-icon-button filter-icon-button--compact"
-                aria-label="Filter documents by attributes"
-                title="Filter documents by attributes"
+                aria-label={t("reportsCodes.filterButtons.documentAttributes")}
+                title={t("reportsCodes.filterButtons.documentAttributes")}
                 onClick={(e) => { e.stopPropagation(); setShowDocumentAttributeFilters(true); }}
               >
                 <FilterIcon className="filter-icon-svg" />
@@ -3464,7 +3448,7 @@ function CodeReportCreationPage({
           >
             <ul className="code-list">
               {documents.length === 0 ? (
-                <li className="code-list-empty">No documents.</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.noDocuments")}</li>
               ) : documents.map((doc) => (
                 <li key={doc.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && applySelectionFromDocuments((() => { const next = new Set(selDocIds); if (next.has(doc.id)) next.delete(doc.id); else next.add(doc.id); return next; })())}>
                   <input
@@ -3482,7 +3466,7 @@ function CodeReportCreationPage({
           </SelectionPanel>
 
           <SelectionPanel
-            title="Users"
+            title={t("reportsCodes.panels.users")}
             count={selUserIds.size}
             collapsed={collapsed.has("users")}
             onToggleCollapsed={() => togglePanel("users")}
@@ -3497,9 +3481,9 @@ function CodeReportCreationPage({
           >
             <ul className="code-list">
               {loadingFilters ? (
-                <li className="code-list-empty">Loading...</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.loading")}</li>
               ) : userItems.length === 0 ? (
-                <li className="code-list-empty">No users.</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.noUsers")}</li>
               ) : userItems.map((item) => (
                 <li key={item.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && applySelectionFromUsers((() => { const next = new Set(selUserIds); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })())}>
                   <input
@@ -3523,40 +3507,40 @@ function CodeReportCreationPage({
           style={{ overflowY: "auto", gap: 10, flexDirection: "column", display: "flex", paddingTop: 2, paddingBottom: 2 }}
         >
           <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">Report Title</span></div>
+            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsCodes.reportTitle")}</span></div>
             <div style={{ padding: "10px 14px" }}>
-              <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={`${reportLabel} report name...`} autoFocus={!isFrozen} disabled={isFrozen} />
+              <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("reportsCodes.reportNamePlaceholder")} autoFocus={!isFrozen} disabled={isFrozen} />
             </div>
           </div>
 
           <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">Report Details</span></div>
+            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsCodes.reportDetails")}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", fontSize: 13 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
                 <span>
-                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>Type </span>
+                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsCodes.summary.type")} </span>
                   <span>{reportLabel}</span>
                 </span>
                 <span>
-                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>Created By </span>
+                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsCodes.summary.createdBy")} </span>
                   <span>{createdBy}</span>
                 </span>
                 <span>
-                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>Created </span>
-                  <span>{row ? fmtDate(row.createdAt) : fmtDate()}</span>
+                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsCodes.summary.created")} </span>
+                  <span>{row ? fmtDate(row.createdAt) : "-"}</span>
                 </span>
               </div>
               <div>
-                <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>Selected Codes </span>
+                <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsCodes.selectedCodes")} </span>
                 <span>{selectedCodeLabels}</span>
               </div>
               {(caseFilterDetails.length > 0 || documentFilterDetails.length > 0) && (
                 <div>
-                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>Applied Filters </span>
+                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsCodes.appliedFilters")} </span>
                   <span>
                     {[
-                      ...caseFilterDetails.map((detail) => `Cases: ${detail}`),
-                      ...documentFilterDetails.map((detail) => `Documents: ${detail}`),
+                      ...caseFilterDetails.map((detail) => `${t("reportsCodes.panels.cases")}: ${detail}`),
+                      ...documentFilterDetails.map((detail) => `${t("reportsCodes.panels.documents")}: ${detail}`),
                     ].join(" | ")}
                   </span>
                 </div>
@@ -3566,27 +3550,27 @@ function CodeReportCreationPage({
 
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Report Description</span>
+              <span className="annotate-card-title">{t("reportsCodes.reportDescription")}</span>
               <button
                 className="btn btn--small"
                 onClick={() => setShowDescription((prev) => !prev)}
                 aria-pressed={showDescription}
                 disabled={isFrozen}
               >
-                {showDescription ? "Remove Description" : "Add Description"}
+                {showDescription ? t("reportsCodes.exportSections.removeDescription") : t("reportsCodes.exportSections.addDescription")}
               </button>
             </div>
             {showDescription && descriptionEditor && (
               <>
                 {!isFrozen && <div className="report-description-toolbar" style={{ padding: "6px 10px", borderBottom: "1px solid var(--color-border)" }}>
-                  <button className={`rte-btn${descriptionEditor.isActive("bold") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleBold().run(); }} title="Bold">B</button>
-                  <button className={`rte-btn${descriptionEditor.isActive("italic") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleItalic().run(); }} title="Italic"><em>I</em></button>
-                  <button className={`rte-btn${descriptionEditor.isActive("strike") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleStrike().run(); }} title="Strikethrough"><s>S</s></button>
+                  <button className={`rte-btn${descriptionEditor.isActive("bold") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleBold().run(); }} title={t("reportsCodes.richText.bold")}>B</button>
+                  <button className={`rte-btn${descriptionEditor.isActive("italic") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleItalic().run(); }} title={t("reportsCodes.richText.italic")}><em>I</em></button>
+                  <button className={`rte-btn${descriptionEditor.isActive("strike") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleStrike().run(); }} title={t("reportsCodes.richText.strikethrough")}><s>S</s></button>
                   <span className="rte-divider" />
-                  <button className={`rte-btn${descriptionEditor.isActive("bulletList") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleBulletList().run(); }} title="Bullet list">-</button>
-                  <button className={`rte-btn${descriptionEditor.isActive("orderedList") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleOrderedList().run(); }} title="Numbered list">1.</button>
+                  <button className={`rte-btn${descriptionEditor.isActive("bulletList") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleBulletList().run(); }} title={t("reportsCodes.richText.bulletList")}>-</button>
+                  <button className={`rte-btn${descriptionEditor.isActive("orderedList") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleOrderedList().run(); }} title={t("reportsCodes.richText.numberedList")}>1.</button>
                   <span className="rte-divider" />
-                  <button className={`rte-btn${descriptionEditor.isActive("blockquote") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleBlockquote().run(); }} title="Blockquote">"</button>
+                  <button className={`rte-btn${descriptionEditor.isActive("blockquote") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); descriptionEditor.chain().focus().toggleBlockquote().run(); }} title={t("reportsCodes.richText.blockquote")}>"</button>
                 </div>}
                 <EditorContent editor={descriptionEditor} />
               </>
@@ -3631,7 +3615,7 @@ function CodeReportCreationPage({
                   >
                     {item.items.length === 0 ? (
                       <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>
-                        None included.
+                        {t("reportsCodes.noneIncluded")}
                       </div>
                     ) : item.items.map((included) => (
                       <div
@@ -3682,20 +3666,20 @@ function CodeReportCreationPage({
         <div className="modal-overlay" onClick={() => setShowCaseAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>Filter Cases by Attributes</h2>
-              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>Close</button>
+              <h2 style={{ margin: 0 }}>{t("reportsCodes.filters.caseTitle")}</h2>
+              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsCodes.close")}</button>
             </div>
             {!isFrozen && !loadingFilters && caseAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllCaseAttributes}>All</button>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={clearCaseAttributeSelections}>Clear</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllCaseAttributes}>{t("reportsCodes.actions.all")}</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={clearCaseAttributeSelections}>{t("reportsCodes.actions.clear")}</button>
               </div>
             )}
             <ul className="code-list">
               {loadingFilters ? (
-                <li className="code-list-empty">Loading...</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.loading")}</li>
               ) : caseAttributeItems.length === 0 ? (
-                <li className="code-list-empty">No case attributes.</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.noCaseAttributes")}</li>
               ) : caseAttributeItems.map((item) => (
                 <li
                   key={item.id}
@@ -3715,7 +3699,7 @@ function CodeReportCreationPage({
                     onClick={(e) => e.stopPropagation()}
                   />
                   <span className="code-label">{item.name}</span>
-                  <span className="users-filter-count">{item.dataType === "datetime" ? "Date/time" : item.dataType}</span>
+                  <span className="users-filter-count">{getAttributeTypeLabel(t, item.dataType)}</span>
                 </li>
               ))}
             </ul>
@@ -3734,20 +3718,20 @@ function CodeReportCreationPage({
         <div className="modal-overlay" onClick={() => setShowDocumentAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>Filter Documents by Attributes</h2>
-              <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>Close</button>
+              <h2 style={{ margin: 0 }}>{t("reportsCodes.filters.documentTitle")}</h2>
+              <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>{t("reportsCodes.close")}</button>
             </div>
             {!isFrozen && !loadingFilters && documentAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllDocumentAttributes}>All</button>
-                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={clearDocumentAttributeSelections}>Clear</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllDocumentAttributes}>{t("reportsCodes.actions.all")}</button>
+                <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={clearDocumentAttributeSelections}>{t("reportsCodes.actions.clear")}</button>
               </div>
             )}
             <ul className="code-list">
               {loadingFilters ? (
-                <li className="code-list-empty">Loading...</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.loading")}</li>
               ) : documentAttributeItems.length === 0 ? (
-                <li className="code-list-empty">No document attributes.</li>
+                <li className="code-list-empty">{t("reportsCodes.empty.noDocumentAttributes")}</li>
               ) : documentAttributeItems.map((item) => (
                 <li
                   key={item.id}
@@ -3767,7 +3751,7 @@ function CodeReportCreationPage({
                     onClick={(e) => e.stopPropagation()}
                   />
                   <span className="code-label">{item.name}</span>
-                  <span className="users-filter-count">{item.dataType === "datetime" ? "Date/time" : item.dataType}</span>
+                  <span className="users-filter-count">{getAttributeTypeLabel(t, item.dataType)}</span>
                 </li>
               ))}
             </ul>
@@ -3786,7 +3770,9 @@ function CodeReportCreationPage({
 }
 
 export function CodesView() {
+  const { t } = useI18n();
   const { activeProject, pb, canCurrentUser, deleteCodeReport } = useStore();
+  const codeReportColumns = getCodeReportColumns(t);
   const canCreateReports = canCurrentUser("createReports") && canCurrentUser("editReportConfiguration");
   const canDeleteReports = canCurrentUser("deleteReports");
 
@@ -3841,7 +3827,7 @@ export function CodesView() {
       setRows(mappedRows);
       return mappedRows;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load reports.");
+      setError(e instanceof Error ? e.message : t("reportsCodes.errors.loadReports"));
       return [];
     } finally {
       setLoading(false);
@@ -3868,8 +3854,8 @@ export function CodesView() {
   }, []);
 
   const sorted = [...rows].sort((a, b) => {
-    const aValue = sortCol === "kind" ? REPORT_LABELS[a.snapshot.kind] : String(a[sortCol]);
-    const bValue = sortCol === "kind" ? REPORT_LABELS[b.snapshot.kind] : String(b[sortCol]);
+    const aValue = sortCol === "kind" ? getCodeReportLabel(t, a.snapshot.kind) : String(a[sortCol]);
+    const bValue = sortCol === "kind" ? getCodeReportLabel(t, b.snapshot.kind) : String(b[sortCol]);
     const cmp = aValue.localeCompare(bValue, undefined, { sensitivity: "base" });
     return sortDir === "asc" ? cmp : -cmp;
   });
@@ -3890,7 +3876,7 @@ export function CodesView() {
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete report.");
+      setError(e instanceof Error ? e.message : t("reportsCodes.errors.deleteReport"));
       setConfirmDelete(null);
     } finally {
       setDeleteLoading(false);
@@ -3931,12 +3917,12 @@ export function CodesView() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Code Reports</h1>
+          <h1>{t("reportsCodes.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show code reports help"
-            title="Show Help"
+            aria-label={t("reportsCodes.openHelp")}
+            title={t("reportsCodes.openHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -3946,9 +3932,9 @@ export function CodesView() {
           className="btn btn--primary"
           onClick={() => setShowNewModal(true)}
           disabled={!canCreateReports}
-          title={!canCreateReports ? "You do not have permission to create code reports" : undefined}
+          title={!canCreateReports ? t("reportsCodes.newReportDenied") : undefined}
         >
-          + New Report
+          {t("reportsCodes.newReport")}
         </button>
       </header>
 
@@ -3960,7 +3946,7 @@ export function CodesView() {
             <table className="users-table">
               <thead>
                 <tr>
-                  {CODE_REPORT_COLS.map((col) => (
+                  {codeReportColumns.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
@@ -3974,8 +3960,8 @@ export function CodesView() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={4} className="users-td-msg">Loading...</td></tr>}
-                {!loading && sorted.length === 0 && <tr><td colSpan={4} className="users-td-msg">No reports yet.</td></tr>}
+                {loading && <tr><td colSpan={4} className="users-td-msg">{t("reportsCodes.loading")}</td></tr>}
+                {!loading && sorted.length === 0 && <tr><td colSpan={4} className="users-td-msg">{t("reportsCodes.noReports")}</td></tr>}
                 {!loading && sorted.map((row) => (
                   <tr
                     key={row.id}
@@ -3987,7 +3973,7 @@ export function CodesView() {
                     }}
                   >
                     <td className="users-td users-td--name">{row.name}</td>
-                    <td className="users-td users-td--muted">{REPORT_LABELS[row.snapshot.kind]}</td>
+                    <td className="users-td users-td--muted">{getCodeReportLabel(t, row.snapshot.kind)}</td>
                     <td className="users-td users-td--muted">{row.createdByName}</td>
                     <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
                   </tr>
@@ -4001,19 +3987,19 @@ export function CodesView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Code Reports Help</h2>
+            <h2>{t("reportsCodes.help.title")}</h2>
             <p className="users-guide-copy">
-              Create or open a code report, review descriptions, summaries, and report sections, compare codes across project dimensions, and delete a report when permitted.
+              {t("reportsCodes.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use code reports to compare coding patterns across the project. Open a report from the list or create a new one, then read the summary sections generated for that report.
+              {t("reportsCodes.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Report actions depend on your role. Reports reflect current project data and may change as coding changes.
+              {t("reportsCodes.help.line3")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("reportsCodes.close")}
               </button>
             </div>
           </div>
@@ -4022,11 +4008,11 @@ export function CodesView() {
 
       {contextMenu && (
         <div ref={contextMenuRef} className="context-menu" style={contextMenuStyle}>
-          <button className="context-menu-item" onClick={() => { setOpenSavedRow(contextMenu.row); setContextMenu(null); }}>Open Report</button>
+          <button className="context-menu-item" onClick={() => { setOpenSavedRow(contextMenu.row); setContextMenu(null); }}>{t("reportsCodes.openReport")}</button>
           {canDeleteReports ? (
-            <button className="context-menu-item context-menu-item--danger" onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}>Delete Report</button>
+            <button className="context-menu-item context-menu-item--danger" onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}>{t("reportsCodes.deleteReport")}</button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete reports">Delete Report</div>
+            <div className="context-menu-item context-menu-item--disabled" title={t("reportsCodes.deleteDenied")}>{t("reportsCodes.deleteReport")}</div>
           )}
         </div>
       )}
@@ -4034,15 +4020,15 @@ export function CodesView() {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Report</h2>
+            <h2>{t("reportsCodes.deleteTitle")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete <strong>{confirmDelete.name}</strong>?
+              {t("reportsCodes.deleteBody", { name: confirmDelete.name })}
             </p>
-            <p className="modal-warning-text">This report will be permanently deleted and cannot be recovered.</p>
+            <p className="modal-warning-text">{t("reportsCodes.deleteWarning")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsCodes.cancel")}</button>
               <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? "Deleting..." : "Delete Report"}
+                {deleteLoading ? t("reportsCodes.deleting") : t("reportsCodes.deleteReport")}
               </button>
             </div>
           </div>

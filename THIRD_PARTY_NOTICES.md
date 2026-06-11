@@ -195,7 +195,6 @@ Resolved packages: 365
 | `estree-walker` | `2.0.2` | `MIT` |
 | `events` | `3.3.0` | `MIT` |
 | `evp_bytestokey` | `1.0.3` | `MIT` |
-| `exceljs` | `4.4.0` | `MIT` |
 | `fast-csv` | `4.3.6` | `MIT` |
 | `fast-equals` | `5.4.0` | `MIT` |
 | `fast-png` | `6.4.0` | `MIT` |

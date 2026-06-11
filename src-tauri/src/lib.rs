@@ -1328,13 +1328,15 @@ fn is_interviewer_style_speaker_label(value: &str) -> bool {
     )
 }
 
-fn infer_inline_speaker_label(text: &str) -> Option<String> {
-    let first_line = text.lines().next()?.trim_start();
-    if first_line.is_empty() {
+fn extract_leading_inline_speaker_label(text: &str) -> Option<(String, String)> {
+    let trimmed = text.trim_start();
+    let leading_ws_len = text.len().saturating_sub(trimmed.len());
+    let leading_ws = &text[..leading_ws_len];
+    if trimmed.is_empty() {
         return None;
     }
 
-    if let Some(rest) = first_line.strip_prefix('[') {
+    if let Some(rest) = trimmed.strip_prefix('[') {
         let end = rest.find(']')?;
         let candidate = rest[..end].trim();
         let after = rest[end + 1..].trim_start();
@@ -1353,14 +1355,19 @@ fn infer_inline_speaker_label(text: &str) -> Option<String> {
         {
             return None;
         }
-        return Some(candidate.to_string());
+        let after_delimiter = after[after.chars().next()?.len_utf8()..].trim_start();
+        let cleaned = format!("{}{}", leading_ws, after_delimiter).trim().to_string();
+        return Some((candidate.to_string(), cleaned));
     }
 
-    let delimiter_index = first_line
-        .find(':')
-        .or_else(|| first_line.find(" - "))
-        .or_else(|| first_line.find(" – "))
-        .or_else(|| first_line.find(" — "))?;
+    let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
+    let first_line = &trimmed[..first_line_end];
+    let delimiter = [":", " - ", " – ", " — "]
+        .into_iter()
+        .filter_map(|pattern| first_line.find(pattern).map(|index| (index, pattern)))
+        .min_by_key(|(index, _)| *index)?;
+    let delimiter_index = delimiter.0;
+    let delimiter_text = delimiter.1;
     if delimiter_index == 0 || delimiter_index > 32 {
         return None;
     }
@@ -1377,7 +1384,47 @@ fn infer_inline_speaker_label(text: &str) -> Option<String> {
     {
         return None;
     }
-    Some(candidate.to_string())
+    let after_delimiter = trimmed[delimiter_index + delimiter_text.len()..].trim_start();
+    let cleaned = format!("{}{}", leading_ws, after_delimiter).trim().to_string();
+    Some((candidate.to_string(), cleaned))
+}
+
+fn extract_transcript_leading_metadata(text: &str) -> (String, Option<String>, String) {
+    let mut remaining = text.to_string();
+    let mut speaker_id: Option<String> = None;
+    let mut timestamps: Vec<String> = Vec::new();
+
+    loop {
+        let mut changed = false;
+
+        let (without_timestamps, timestamp_text) = extract_leading_timestamp_metadata(&remaining);
+        if !timestamp_text.is_empty() {
+            timestamps.push(timestamp_text);
+            remaining = without_timestamps;
+            changed = true;
+        }
+
+        if speaker_id.is_none() {
+            if let Some((detected_speaker_id, without_speaker_label)) =
+                extract_leading_inline_speaker_label(&remaining)
+            {
+                speaker_id = Some(detected_speaker_id);
+                remaining = without_speaker_label;
+                changed = true;
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    (remaining.trim().to_string(), speaker_id, timestamps.join(" "))
+}
+
+fn infer_inline_speaker_label(text: &str) -> Option<String> {
+    let (_, speaker_id, _) = extract_transcript_leading_metadata(text);
+    speaker_id
 }
 
 fn split_text_on_inline_speaker_labels(text: &str) -> Vec<String> {
@@ -6437,21 +6484,17 @@ async fn process_document_with_ollama(
             };
 
             for (piece_index, text) in pieces.into_iter().enumerate() {
-                if !chunk_built.is_empty() { chunk_built.push_str("\n\n"); }
-                let start_offset = base_offset + chunk_built.len();
-                chunk_built.push_str(&text);
-                let end_offset = base_offset + chunk_built.len();
-                let inferred_speaker_id = infer_inline_speaker_label(&text);
+                let (text, inferred_speaker_id, timestamp_text) =
+                    extract_transcript_leading_metadata(&text);
+                if text.trim().is_empty() {
+                    continue;
+                }
                 let mut segment_type = model_segment_type;
                 let speaker_id = if !model_speaker_id.is_empty() && piece_index == 0 {
                     model_speaker_id.clone()
                 } else {
                     inferred_speaker_id.unwrap_or_default()
                 };
-                let (text, timestamp_text) = extract_leading_timestamp_metadata(&text);
-                if text.trim().is_empty() {
-                    continue;
-                }
                 if segment_type == "metadata" && !speaker_id.is_empty() {
                     segment_type = if is_interviewer_style_speaker_label(&speaker_id) {
                         "question"
@@ -6459,6 +6502,10 @@ async fn process_document_with_ollama(
                         "answer"
                     };
                 }
+                if !chunk_built.is_empty() { chunk_built.push_str("\n\n"); }
+                let start_offset = base_offset + chunk_built.len();
+                chunk_built.push_str(&text);
+                let end_offset = base_offset + chunk_built.len();
                 segments_output.push(OllamaDocumentSegmentOutput {
                     segment_type: segment_type.to_string(),
                     speaker_id,
@@ -6631,21 +6678,17 @@ async fn process_document_chunk_with_ollama(
         };
 
         for (piece_index, text) in pieces.into_iter().enumerate() {
-            if !processed_content.is_empty() { processed_content.push_str("\n\n"); }
-            let start_offset = processed_content.len();
-            processed_content.push_str(&text);
-            let end_offset = processed_content.len();
-            let inferred_speaker_id = infer_inline_speaker_label(&text);
+            let (text, inferred_speaker_id, timestamp_text) =
+                extract_transcript_leading_metadata(&text);
+            if text.trim().is_empty() {
+                continue;
+            }
             let mut segment_type = model_segment_type;
             let speaker_id = if !model_speaker_id.is_empty() && piece_index == 0 {
                 model_speaker_id.clone()
             } else {
                 inferred_speaker_id.unwrap_or_default()
             };
-            let (text, timestamp_text) = extract_leading_timestamp_metadata(&text);
-            if text.trim().is_empty() {
-                continue;
-            }
             if segment_type == "metadata" && !speaker_id.is_empty() {
                 segment_type = if is_interviewer_style_speaker_label(&speaker_id) {
                     "question"
@@ -6653,6 +6696,10 @@ async fn process_document_chunk_with_ollama(
                     "answer"
                 };
             }
+            if !processed_content.is_empty() { processed_content.push_str("\n\n"); }
+            let start_offset = processed_content.len();
+            processed_content.push_str(&text);
+            let end_offset = processed_content.len();
             segments.push(OllamaDocumentSegmentOutput {
                 segment_type: segment_type.to_string(),
                 speaker_id,
@@ -7350,6 +7397,7 @@ pub fn run() {
 mod tests {
     use super::{
         app_role_allows_embedding_model_management,
+        extract_transcript_leading_metadata,
         normalized_project_role,
         project_role_allows_embedding_build,
     };
@@ -7378,6 +7426,26 @@ mod tests {
         assert_eq!(normalized_project_role(Some("viewer")), "viewer");
         assert_eq!(normalized_project_role(Some("unexpected")), "viewer");
         assert_eq!(normalized_project_role(None), "viewer");
+    }
+
+    #[test]
+    fn transcript_cleanup_strips_timestamp_then_speaker_prefixes() {
+        let (text, speaker_id, timestamp_text) =
+            extract_transcript_leading_metadata("[00:01:02] Interviewer: Thanks for joining us.");
+
+        assert_eq!(text, "Thanks for joining us.");
+        assert_eq!(speaker_id.as_deref(), Some("Interviewer"));
+        assert_eq!(timestamp_text, "[00:01:02]");
+    }
+
+    #[test]
+    fn transcript_cleanup_strips_speaker_then_timestamp_prefixes() {
+        let (text, speaker_id, timestamp_text) =
+            extract_transcript_leading_metadata("P1: [00:01:02-00:01:05] I felt supported.");
+
+        assert_eq!(text, "I felt supported.");
+        assert_eq!(speaker_id.as_deref(), Some("P1"));
+        assert_eq!(timestamp_text, "[00:01:02-00:01:05]");
     }
 }
 

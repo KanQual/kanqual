@@ -1,6 +1,12 @@
+import type { LocaleCode } from "../i18n/types";
+
 export type StartupSettings = {
   autoLoginLastUser: boolean;
   reopenLastProject: boolean;
+};
+
+export type UiSettings = {
+  locale: LocaleCode;
 };
 
 export type DocumentImportMode = "upload" | "paste";
@@ -53,6 +59,7 @@ export type LlmSettings = {
 };
 
 export type AppSettings = {
+  ui: UiSettings;
   startup: StartupSettings;
   documentImport: DocumentImportSettings;
   privacy: PrivacySecuritySettings;
@@ -65,6 +72,9 @@ export const LAST_PROJECT_ID_KEY = "kq_last_project_id";
 export const RECENT_PROJECTS_KEY = "kq_recent_projects";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  ui: {
+    locale: "en",
+  },
   startup: {
     autoLoginLastUser: false,
     reopenLastProject: false,
@@ -196,6 +206,10 @@ export function readAppSettings(): AppSettings {
     if (!raw) return DEFAULT_APP_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
     return {
+      ui: {
+        ...DEFAULT_APP_SETTINGS.ui,
+        ...parsed.ui,
+      },
       startup: {
         ...DEFAULT_APP_SETTINGS.startup,
         ...parsed.startup,

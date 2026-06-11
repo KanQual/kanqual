@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,7 +45,7 @@ type SortDir = "asc" | "desc";
 function fmtDate(iso: string): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -268,6 +270,7 @@ function CodeDetail({
   onRequestDelete: (row: CodeRow) => void;
 }) {
   const { updateCode, documents, setActiveDocument, setPendingAnnId, setView } = useStore();
+  const { t } = useI18n();
   const [row,       setRow]      = useState(initialRow);
   const [showEditModal, setShowEditModal] = useState(startEditing);
   const [saving,    setSaving]   = useState(false);
@@ -371,7 +374,7 @@ function CodeDetail({
   return (
     <div className="view doc-detail-view">
       <div className="workspace-back-row workspace-back-row--split">
-        <button className="btn" onClick={onBack}>Back to Codebook</button>
+        <button className="btn" onClick={onBack}>{t("projectCodebook.actions.backToCodebook")}</button>
         {(canEditCode || canDeleteCode) && (
           <div className="workspace-back-actions">
             <button
@@ -379,20 +382,20 @@ function CodeDetail({
               className="btn btn--primary"
               onClick={() => setShowEditModal(true)}
               disabled={!canEditCode}
-              title={!canEditCode ? "You do not have permission to edit codes" : undefined}
+              title={!canEditCode ? t("projectCodebook.permissions.cannotEditCodes") : undefined}
             >
-              Edit Code
+              {t("projectCodebook.actions.editCode")}
             </button>
             <div className="user-detail-menu-wrap" ref={menuRef}>
               <button
                 type="button"
                 className="btn"
-                aria-label="Code actions"
+                aria-label={t("projectCodebook.actions.codeActions")}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((open) => !open)}
               >
-                Actions
+                {t("projectCodebook.actions.actions")}
               </button>
               {menuOpen && (
                 <div className="context-menu user-detail-menu" role="menu">
@@ -406,11 +409,11 @@ function CodeDetail({
                         onRequestDelete(row);
                       }}
                     >
-                      Delete Code
+                      {t("projectCodebook.actions.deleteCode")}
                     </button>
                   ) : (
-                    <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete codes">
-                      Delete Code
+                    <div className="context-menu-item context-menu-item--disabled" title={t("projectCodebook.permissions.cannotDeleteCodes")}>
+                      {t("projectCodebook.actions.deleteCode")}
                     </div>
                   )}
                 </div>
@@ -425,7 +428,7 @@ function CodeDetail({
         <div className="doc-detail-left">
 
           <div className="case-card">
-            <h3 className="case-card-title">Code</h3>
+            <h3 className="case-card-title">{t("projectCodebook.detail.code")}</h3>
             <p className="case-card-value" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <ColorSwatch color={row.color} size={18} />
               {row.label}
@@ -433,13 +436,13 @@ function CodeDetail({
           </div>
 
           <dl className="user-detail-meta case-detail-meta">
-            <dt>Created By</dt> <dd>{row.createdByName}</dd>
-            <dt>Created</dt>    <dd>{fmtDate(row.createdAt)}</dd>
-            <dt>Parent</dt>     <dd>{row.parentLabel || "—"}</dd>
+            <dt>{t("projectCodebook.table.createdBy")}</dt> <dd>{row.createdByName}</dd>
+            <dt>{t("projectCodebook.table.created")}</dt>    <dd>{fmtDate(row.createdAt)}</dd>
+            <dt>{t("projectCodebook.detail.parent")}</dt>     <dd>{row.parentLabel || "—"}</dd>
           </dl>
 
           <div className="case-card">
-            <h3 className="case-card-title">Color</h3>
+            <h3 className="case-card-title">{t("projectCodebook.detail.color")}</h3>
             <div className="code-color-row">
               <ColorSwatch color={row.color} size={18} />
               <span className="code-color-hex">{row.color || "-"}</span>
@@ -447,11 +450,11 @@ function CodeDetail({
           </div>
 
           <div className="case-card">
-            <h3 className="case-card-title">Description</h3>
+            <h3 className="case-card-title">{t("projectCodebook.detail.description")}</h3>
             {row.description ? (
               <p style={{ fontSize: 14, lineHeight: 1.6 }}>{row.description}</p>
             ) : (
-              <p className="case-card-empty">No description.</p>
+              <p className="case-card-empty">{t("projectCodebook.detail.noDescription")}</p>
             )}
           </div>
 
@@ -461,12 +464,12 @@ function CodeDetail({
         <div className="doc-detail-right">
           <div className="case-card doc-content-card">
             <h3 className="case-card-title">
-              Annotations{annotations.length > 0 ? ` (${annotations.length})` : ""}
+              {t("projectCodebook.detail.annotations")}{annotations.length > 0 ? ` (${annotations.length})` : ""}
             </h3>
             {loadingAnn ? (
-              <p className="case-card-empty">Loading annotations…</p>
+              <p className="case-card-empty">{t("projectCodebook.detail.loadingAnnotations")}</p>
             ) : annotations.length === 0 ? (
-              <p className="case-card-empty">No annotations with this code yet.</p>
+              <p className="case-card-empty">{t("projectCodebook.detail.noAnnotations")}</p>
             ) : (
               <ul className="code-ann-list">
                 {annotations.map((a) => (
@@ -499,8 +502,8 @@ function CodeDetail({
       {showEditModal && (
         <NewCodeModal
           allCodes={allCodes}
-          title="Edit Code"
-          submitLabel="Save Changes"
+          title={t("projectCodebook.modal.editTitle")}
+          submitLabel={t("projectCodebook.modal.saveChanges")}
           initialLabel={row.label}
           initialDescription={row.description}
           initialColor={row.color || "#6366f1"}
@@ -522,8 +525,8 @@ function CodeDetail({
 
 function NewCodeModal({
   allCodes,
-  title = "New Code",
-  submitLabel = "Create Code",
+  title,
+  submitLabel,
   initialLabel = "",
   initialDescription = "",
   initialColor = "#6366f1",
@@ -546,7 +549,10 @@ function NewCodeModal({
   onClose: () => void;
 }) {
   const { addCode } = useStore();
+  const { t } = useI18n();
   const { user: currentUser } = useAuth();
+  const resolvedTitle = title ?? t("projectCodebook.modal.newTitle");
+  const resolvedSubmitLabel = submitLabel ?? t("projectCodebook.modal.createCode");
   const [label,    setLabel]    = useState(initialLabel);
   const [desc,     setDesc]     = useState(initialDescription);
   const [color,    setColor]    = useState(initialColor);
@@ -598,9 +604,9 @@ function NewCodeModal({
     } catch (e) {
       const fieldErrors = (e as { data?: { data?: Record<string, { message?: string }> } }).data?.data;
       if (fieldErrors && Object.keys(fieldErrors).length > 0) {
-        setError(Object.entries(fieldErrors).map(([f, v]) => `${f}: ${v?.message ?? "invalid"}`).join(" · "));
+        setError(Object.entries(fieldErrors).map(([f, v]) => `${f}: ${v?.message ?? t("projectCodebook.errors.invalidField")}`).join(" · "));
       } else {
-        setError(e instanceof Error ? (e as Error).message : "Failed to create code.");
+        setError(e instanceof Error ? (e as Error).message : t("projectCodebook.errors.createFailed"));
       }
     } finally {
       setLoading(false);
@@ -610,11 +616,11 @@ function NewCodeModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>{title}</h2>
+        <h2>{resolvedTitle}</h2>
         <form className="form" onSubmit={handleSubmit}>
 
           <label className="form-label">
-            Code Name
+            {t("projectCodebook.modal.codeName")}
             <input
               className="form-input"
               value={label}
@@ -626,24 +632,24 @@ function NewCodeModal({
           </label>
 
           <label className="form-label">
-            Description
+            {t("projectCodebook.detail.description")}
             <textarea
               className="form-input code-desc-textarea"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              placeholder="Optional description…"
+              placeholder={t("projectCodebook.modal.optionalDescription")}
               rows={3}
             />
           </label>
 
           <label className="form-label">
-            Parent Code
+            {t("projectCodebook.modal.parentCode")}
             <select
               className="form-input"
               value={parentId}
               onChange={(e) => handleParentChange(e.target.value)}
             >
-              <option value="">— Top-level (no parent) —</option>
+              <option value="">{t("projectCodebook.modal.topLevelOption")}</option>
               {availableCodes.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.parentLabel ? `${c.parentLabel} › ${c.label}` : c.label}
@@ -653,7 +659,7 @@ function NewCodeModal({
           </label>
 
           <label className="form-label">
-            Color
+            {t("projectCodebook.detail.color")}
             <div className="code-color-row" style={{ marginTop: 6 }}>
               <input
                 type="color"
@@ -670,17 +676,17 @@ function NewCodeModal({
             />
             <p className="code-color-hint">
               {parentId
-                ? "Suggested shades of the parent code's color"
-                : "Suggested colors distinct from existing codes"}
+                ? t("projectCodebook.modal.parentColorHint")
+                : t("projectCodebook.modal.distinctColorHint")}
             </p>
           </label>
 
           {error && <p className="auth-error">{error}</p>}
 
           <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
             <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
-              {loading ? "Saving..." : submitLabel}
+              {loading ? t("projectCodebook.statuses.saving") : resolvedSubmitLabel}
             </button>
           </div>
 
@@ -694,6 +700,7 @@ function NewCodeModal({
 
 export function CodebookView() {
   const { activeProject, pb, canCurrentUser, deleteCode, pendingCodeId, setPendingCodeId } = useStore();
+  const { t } = useI18n();
   const canCreateCodes = canCurrentUser("createCode");
   const canEditCodes = canCurrentUser("editCode");
   const canDeleteCodes = canCurrentUser("deleteCode");
@@ -723,6 +730,13 @@ export function CodebookView() {
   const [selectedRow,   setSelectedRow]   = useState<CodeRow | null>(null);
   const [editStartRow,  setEditStartRow]  = useState<CodeRow | null>(null);
   const [memoForCode,   setMemoForCode]   = useState<CodeRow | null>(null);
+  const localizedCols = [
+    { ...COLS[0], label: t("projectCodebook.table.name") },
+    { ...COLS[1], label: t("projectCodebook.table.createdBy") },
+    { ...COLS[2], label: t("projectCodebook.table.created") },
+    { ...COLS[3], label: t("projectCodebook.table.cases") },
+    { ...COLS[4], label: t("projectCodebook.table.documents") },
+  ];
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -793,7 +807,7 @@ export function CodebookView() {
         }),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load codes.");
+      setError(e instanceof Error ? e.message : t("projectCodebook.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -854,7 +868,7 @@ export function CodebookView() {
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete code.");
+      setError(e instanceof Error ? e.message : t("projectCodebook.errors.deleteFailed"));
       setConfirmDelete(null);
     } finally {
       setDeleteLoading(false);
@@ -867,7 +881,7 @@ export function CodebookView() {
     return (
       <MemoEditorView
         preselectedCodeIds={[memoForCode.id]}
-        backLabel="Back to Codebook"
+        backLabel={t("projectCodebook.actions.backToCodebook")}
         onSaved={() => setMemoForCode(null)}
         onBack={() => setMemoForCode(null)}
       />
@@ -891,21 +905,19 @@ export function CodebookView() {
         {confirmDelete && (
           <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <h2>Delete Code</h2>
+              <h2>{t("projectCodebook.deleteModal.title")}</h2>
               <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                Are you sure you want to permanently delete <strong>{confirmDelete.label}</strong>?
+                {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
               </p>
               <p className="modal-warning-text">
-                All annotations made with this code will be permanently deleted. Child
-                codes will not be deleted but will become top-level codes. This cannot
-                be undone.
+                {t("projectCodebook.deleteModal.warning")}
               </p>
               <div className="form-actions" style={{ marginTop: 24 }}>
                 <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                  {deleteLoading ? "Deleting…" : "Delete Code"}
+                  {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
                 </button>
               </div>
             </div>
@@ -921,13 +933,13 @@ export function CodebookView() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Codebook</h1>
+          <h1>{t("projectCodebook.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("projectCodebook.showHelp")}
+            aria-label={t("projectCodebook.showHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -939,9 +951,9 @@ export function CodebookView() {
             setNewCodeOpen(true);
           }}
           disabled={!canCreateCodes}
-          title={!canCreateCodes ? "You do not have permission to create codes" : undefined}
+          title={!canCreateCodes ? t("projectCodebook.permissions.cannotCreateCodes") : undefined}
         >
-          + New Code
+          {t("projectCodebook.actions.newCode")}
         </button>
       </header>
 
@@ -957,7 +969,7 @@ export function CodebookView() {
         <table className="users-table">
           <thead>
             <tr>
-              {COLS.map((col) => (
+              {localizedCols.map((col) => (
                 <th
                   key={col.key}
                   style={{ width: col.width }}
@@ -974,10 +986,10 @@ export function CodebookView() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={5} className="users-td-msg">Loading…</td></tr>
+              <tr><td colSpan={5} className="users-td-msg">{t("projectCodebook.statuses.loading")}</td></tr>
             )}
             {!loading && visible.length === 0 && (
-              <tr><td colSpan={5} className="users-td-msg">No codes yet.</td></tr>
+              <tr><td colSpan={5} className="users-td-msg">{t("projectCodebook.empty.noCodes")}</td></tr>
             )}
             {!loading && visible.map((node) => (
               <tr
@@ -1000,7 +1012,7 @@ export function CodebookView() {
                         type="button"
                         className="code-collapse-btn"
                         onClick={(e) => { e.stopPropagation(); toggleCollapse(node.id); }}
-                        title={collapsed.has(node.id) ? "Expand" : "Collapse"}
+                        title={collapsed.has(node.id) ? t("projectCodebook.actions.expand") : t("projectCodebook.actions.collapse")}
                       >
                         {collapsed.has(node.id) ? "▶" : "▼"}
                       </button>
@@ -1025,19 +1037,19 @@ export function CodebookView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Codebook Help</h2>
+            <h2>{t("projectCodebook.help.title")}</h2>
             <p className="users-guide-copy">
-              Create codes, edit code labels, descriptions, colors, and hierarchy, delete codes, review code usage, open code details, and manage nested codes.
+              {t("projectCodebook.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use the Codebook page to maintain the project's coding structure. Open a code to inspect or edit it, and build hierarchy by nesting codes under parents.
+              {t("projectCodebook.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Code creation, editing, and deletion are role-limited. Deleting codes can affect existing annotations that depend on them.
+              {t("projectCodebook.help.line3")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -1056,11 +1068,11 @@ export function CodebookView() {
               className="context-menu-item"
               onClick={() => { setMemoForCode(contextMenu.row); setContextMenu(null); }}
             >
-              Memo About Code
+              {t("projectCodebook.actions.memoAboutCode")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to create a memo about this code">
-              Memo About Code
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCodebook.permissions.cannotMemoAboutCode")}>
+              {t("projectCodebook.actions.memoAboutCode")}
             </div>
           )}
           {canEditCodes ? (
@@ -1068,11 +1080,11 @@ export function CodebookView() {
               className="context-menu-item"
               onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
             >
-              Edit Code
+              {t("projectCodebook.actions.editCode")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to edit codes">
-              Edit Code
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCodebook.permissions.cannotEditCodes")}>
+              {t("projectCodebook.actions.editCode")}
             </div>
           )}
           {canCreateCodes ? (
@@ -1084,11 +1096,11 @@ export function CodebookView() {
                 setContextMenu(null);
               }}
             >
-              Create Child Code
+              {t("projectCodebook.actions.createChildCode")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to create child codes">
-              Create Child Code
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCodebook.permissions.cannotCreateChildCodes")}>
+              {t("projectCodebook.actions.createChildCode")}
             </div>
           )}
           {canDeleteCodes ? (
@@ -1096,11 +1108,11 @@ export function CodebookView() {
               className="context-menu-item context-menu-item--danger"
               onClick={() => { setConfirmDelete(contextMenu.row); setContextMenu(null); }}
             >
-              Delete Code
+              {t("projectCodebook.actions.deleteCode")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="You do not have permission to delete codes">
-              Delete Code
+            <div className="context-menu-item context-menu-item--disabled" title={t("projectCodebook.permissions.cannotDeleteCodes")}>
+              {t("projectCodebook.actions.deleteCode")}
             </div>
           )}
         </div>
@@ -1110,21 +1122,19 @@ export function CodebookView() {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Code</h2>
+            <h2>{t("projectCodebook.deleteModal.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete <strong>{confirmDelete.label}</strong>?
+              {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
             </p>
             <p className="modal-warning-text">
-              All annotations made with this code will be permanently deleted. Child
-              codes will not be deleted but will become top-level codes. This cannot
-              be undone.
+              {t("projectCodebook.deleteModal.warning")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? "Deleting…" : "Delete Code"}
+                {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
               </button>
             </div>
           </div>

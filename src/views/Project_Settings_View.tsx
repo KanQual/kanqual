@@ -5,7 +5,6 @@ import { readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import {
-  backupDisplayReason,
   backupRetentionStatus,
   createProjectBackup,
   DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES,
@@ -52,6 +51,7 @@ import {
 import {
   formatProjectLogDateTime,
   projectLogAccessModeLabel,
+  projectLogActionLabel,
   projectLogActionCategory,
   ProjectLogTable,
   PROJECT_LOG_ACTION_LABELS,
@@ -59,6 +59,8 @@ import {
 import type { PendingImportedUser, Project, ProjectLogEntry, ProjectUploadedFile } from "../types";
 import { PROJECT_UPLOADED_FILES_COLLECTION } from "../lib/projectUploadedFiles";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDate, formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 const RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
   { cmd: "bold", label: "B", title: "Bold" },
@@ -108,16 +110,16 @@ void restoredUserNotice;
 
 function mismatchNotes(summary: {
   identityChecks: { backendMatched: boolean; usersTableMatched: boolean; allUsersPresent: boolean };
-}): string[] {
+}, t: ReturnType<typeof useI18n>["t"]): string[] {
   const notes: string[] = [];
   if (!summary.identityChecks.backendMatched) {
-    notes.push("It appears to be a new instance of Kanqual.");
+    notes.push(t("projectSettings.shell.newKanqualInstance"));
   } else if (!summary.identityChecks.usersTableMatched) {
-    notes.push("The users table identifier does not match this instance. It appears the users table was recreated from scratch.");
+    notes.push(t("projectSettings.shell.userTableMismatch"));
   } else if (!summary.identityChecks.allUsersPresent) {
-    notes.push("One or more users from the restored project do not exist in the current users table.");
+    notes.push(t("projectSettings.shell.restoredUsersMissing"));
   }
-  notes.push("In the next screen, you will need to configure what to do with the associated user accounts.");
+  notes.push(t("projectSettings.shell.configureAssociatedUsersNext"));
   return notes;
 }
 
@@ -174,7 +176,7 @@ function safeExportName(name: string): string {
 
 function restoredProjectName(projectName: string, projects: Project[]): string {
   const stamp = new Date()
-    .toLocaleString([], {
+    .toLocaleString("en-CA", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -192,7 +194,7 @@ function restoredProjectName(projectName: string, projects: Project[]): string {
 function formatBackupDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
+  return formatCurrentDateTime(date, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -202,7 +204,7 @@ function formatBackupDate(value: string): string {
 }
 
 function formatBackupDay(date: Date): string {
-  return date.toLocaleDateString([], {
+  return formatCurrentDate(date, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -210,42 +212,78 @@ function formatBackupDay(date: Date): string {
 }
 
 function formatBackupHour(date: Date): string {
-  return `${date.toLocaleTimeString([], { hour: "numeric" })} on ${formatBackupDay(date)}`;
+  return formatCurrentDateTime(date, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+  });
 }
 
-function backupRetentionLabels(status: BackupRetentionStatus): string[] {
-  const labels: string[] = [];
+function backupReasonLabel(
+  reason: ProjectBackupEntry["reason"],
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (reason === "manual") return t("projectSettings.modal.backupReasonManual");
+  if (reason === "session") return t("projectSettings.modal.backupReasonSession");
+  return t("projectSettings.modal.backupReasonAutomatic");
+}
+
+function backupRetentionLabels(
+  status: BackupRetentionStatus,
+  t: ReturnType<typeof useI18n>["t"],
+): Array<{ label: string; promotion: boolean }> {
+  const labels: Array<{ label: string; promotion: boolean }> = [];
   if (status.category === "latest") {
-    labels.push("Latest automatic backup");
+    labels.push({ label: t("projectSettings.modal.backupRetentionLatest"), promotion: false });
   } else if (status.category === "hourly" && status.bucketStart) {
-    labels.push(`Hourly backup for ${formatBackupHour(status.bucketStart)}`);
+    labels.push({
+      label: t("projectSettings.modal.backupRetentionHourly", { time: formatBackupHour(status.bucketStart) }),
+      promotion: false,
+    });
   } else if (status.category === "daily" && status.bucketStart) {
-    labels.push(`Daily backup for ${formatBackupDay(status.bucketStart)}`);
+    labels.push({
+      label: t("projectSettings.modal.backupRetentionDaily", { date: formatBackupDay(status.bucketStart) }),
+      promotion: false,
+    });
   } else if (status.category === "weekly" && status.bucketStart) {
-    labels.push(`Weekly backup for week of ${formatBackupDay(status.bucketStart)}`);
+    labels.push({
+      label: t("projectSettings.modal.backupRetentionWeekly", { date: formatBackupDay(status.bucketStart) }),
+      promotion: false,
+    });
   } else if (status.category === "pending-delete") {
-    labels.push("Deletes on next cleanup");
+    labels.push({ label: t("projectSettings.modal.backupDeletesOnNextCleanup"), promotion: false });
   }
 
   if (status.promotion) {
-    labels.push(`Will become the ${status.promotion} backup`);
+    labels.push({
+      label: t("projectSettings.modal.backupWillBecomePromotion", { promotion: status.promotion }),
+      promotion: true,
+    });
   } else if (
     status.category !== "pending-delete" &&
     status.deletionDate &&
     status.deletionDate.getTime() > Date.now()
   ) {
-    labels.push(`Retained until ${formatBackupDay(status.deletionDate)}`);
+    labels.push({
+      label: t("projectSettings.modal.backupRetainedUntil", { date: formatBackupDay(status.deletionDate) }),
+      promotion: false,
+    });
   }
   return labels;
 }
 
-function backupTriggerLabel(backup: ProjectBackupEntry, logEntries: ProjectLogEntry[]): string {
+function backupTriggerLabel(
+  backup: ProjectBackupEntry,
+  logEntries: ProjectLogEntry[],
+  t: ReturnType<typeof useI18n>["t"],
+): string {
   if (backup.manual) return "";
-  if (backup.sourceLogLabel) return backup.sourceLogLabel;
+  if (backup.sourceLogAction) return projectLogActionLabel(backup.sourceLogAction, t);
   const logEntry = logEntries.find((entry) => entry.occurredAt === backup.sourceLogAt);
-  if (logEntry?.label) return logEntry.label;
-  if (backup.reason === "session") return "Project session changed";
-  return "Scheduled automatic backup";
+  if (logEntry?.action) return projectLogActionLabel(logEntry.action, t);
+  if (backup.reason === "session") return t("projectSettings.modal.backupTriggerSessionChanged");
+  return t("projectSettings.modal.backupTriggerScheduled");
 }
 
 type EmbeddingModelStatus = {
@@ -266,7 +304,7 @@ function formatEstimateRange(lowSeconds: number | null, highSeconds: number | nu
 }
 
 function formatCount(value: number): string {
-  return value.toLocaleString();
+  return formatCurrentNumber(value);
 }
 
 function csvEscape(value: string): string {
@@ -308,6 +346,7 @@ export function ProjectSettingsView() {
     deleteProjectUploadedFile,
     isLocalWorkspace,
   } = useStore();
+  const { t } = useI18n();
   const [exporting, setExporting] = useState<"json" | "xlsx" | "qdpx" | "encrypted" | null>(null);
   const [projectLogExporting, setProjectLogExporting] = useState(false);
   const [codebookBusy, setCodebookBusy] = useState<"export" | "import" | null>(null);
@@ -431,7 +470,7 @@ export function ProjectSettingsView() {
       })
       .catch((error) => {
         console.error("Failed to load project backups:", error);
-        if (!cancelled) setBackupError("Could not load project backups.");
+        if (!cancelled) setBackupError(t("projectSettings.modal.projectBackupsLoadFailed"));
       });
     return () => {
       cancelled = true;
@@ -601,7 +640,7 @@ export function ProjectSettingsView() {
       setDetailsOpen(false);
     } catch (error) {
       console.error("Project details update failed:", error);
-      setDetailsError(error instanceof Error ? error.message : "Project details update failed. Please try again.");
+      setDetailsError(error instanceof Error ? error.message : t("projectSettings.modal.detailsUpdateFailed"));
     } finally {
       setDetailsSaving(false);
     }
@@ -617,10 +656,10 @@ export function ProjectSettingsView() {
         defaultPath: `${safeExportName(activeProject.name)}_export.${extension}`,
         filters: [
           format === "json"
-            ? { name: "Kanqual JSON Backup", extensions: ["json"] }
+            ? { name: t("projectSettings.modal.exportJsonBackupDialog"), extensions: ["json"] }
             : format === "xlsx"
-              ? { name: "Excel Workbook", extensions: ["xlsx"] }
-              : { name: "REFI-QDA Project", extensions: ["qdpx"] },
+              ? { name: t("projectSettings.modal.exportExcelWorkbookDialog"), extensions: ["xlsx"] }
+              : { name: t("projectSettings.modal.exportRefiQdaProjectDialog"), extensions: ["qdpx"] },
         ],
       });
       if (!path) return;
@@ -633,11 +672,17 @@ export function ProjectSettingsView() {
       } else {
         await writeFile(path, makeRefiQdaProject(data));
       }
-      await logAction(activeProject.id, "project.export", `Exported project as ${format.toUpperCase()}`);
+      await logAction(
+        activeProject.id,
+        "project.export",
+        t("projectLog.labels.projectExport", { format: format.toUpperCase() }),
+        undefined,
+        { exportFormat: format.toUpperCase() },
+      );
       setActiveProjectSettingsModal(null);
     } catch (error) {
       console.error("Project export failed:", error);
-      setExportError("Project export failed. Please try again.");
+      setExportError(t("projectSettings.modal.projectExportFailed"));
     } finally {
       setExporting(null);
     }
@@ -646,11 +691,11 @@ export function ProjectSettingsView() {
   async function handleEncryptedBackupExport() {
     if (!activeProject || !canExportProject) return;
     if (!encryptedBackupPassword) {
-      setExportError("Enter a password to export an encrypted backup.");
+      setExportError(t("projectSettings.modal.enterPasswordError"));
       return;
     }
     if (encryptedBackupPassword !== encryptedBackupPasswordConfirm) {
-      setExportError("The encrypted backup passwords do not match.");
+      setExportError(t("projectSettings.modal.passwordMismatchError"));
       return;
     }
 
@@ -659,7 +704,7 @@ export function ProjectSettingsView() {
     try {
       const path = await save({
         defaultPath: `${safeExportName(activeProject.name)}_encrypted_backup.kqbe`,
-        filters: [{ name: "Kanqual Encrypted Backup", extensions: ["kqbe"] }],
+        filters: [{ name: t("projectSettings.modal.exportEncryptedBackupDialog"), extensions: ["kqbe"] }],
       });
       if (!path) return;
 
@@ -673,7 +718,7 @@ export function ProjectSettingsView() {
       });
 
       await writeTextFile(path, encryptedBackup);
-      await logAction(activeProject.id, "project.encrypted_backup.export", "Exported encrypted project backup", undefined, {
+      await logAction(activeProject.id, "project.encrypted_backup.export", t("projectLog.labels.projectEncryptedBackupExport"), undefined, {
         entityType: "encrypted_project_backup",
         fileName: path.split(/[/\\]/).pop() ?? path,
         exportFormat: "kqbe",
@@ -684,7 +729,9 @@ export function ProjectSettingsView() {
       setActiveProjectSettingsModal(null);
     } catch (error) {
       console.error("Encrypted project backup export failed:", error);
-      setExportError(error instanceof Error ? error.message : "Encrypted project backup export failed. Please try again.");
+      setExportError(
+        error instanceof Error ? error.message : t("projectSettings.modal.encryptedBackupExportFailed"),
+      );
     } finally {
       setExporting(null);
     }
@@ -697,7 +744,7 @@ export function ProjectSettingsView() {
     try {
       const path = await save({
         defaultPath: `${safeExportName(activeProject.name)}_project_log.csv`,
-        filters: [{ name: "CSV File", extensions: ["csv"] }],
+        filters: [{ name: t("projectSettings.modal.csvFileDialog"), extensions: ["csv"] }],
       });
       if (!path) return;
 
@@ -711,7 +758,7 @@ export function ProjectSettingsView() {
           [
             csvEscape(formatProjectLogDateTime(entry.occurredAt)),
             csvEscape(entry.userName || "-"),
-            csvEscape(projectLogAccessModeLabel(entry.accessMode)),
+            csvEscape(projectLogAccessModeLabel(entry.accessMode, t)),
             csvEscape(projectLogActionCategory(entry.action)),
             csvEscape(PROJECT_LOG_ACTION_LABELS[entry.action] ?? entry.action),
             csvEscape(entry.label),
@@ -720,10 +767,10 @@ export function ProjectSettingsView() {
       ];
 
       await writeTextFile(path, lines.join("\n"));
-      await logAction(activeProject.id, "project.log.export", "Exported project log as CSV");
+      await logAction(activeProject.id, "project.log.export", t("projectSettings.shell.projectLogCsvExported"));
     } catch (error) {
       console.error("Project log export failed:", error);
-      setExportError("Project log export failed. Please try again.");
+      setExportError(t("projectSettings.modal.projectLogExportFailed"));
     } finally {
       setProjectLogExporting(false);
     }
@@ -740,7 +787,7 @@ export function ProjectSettingsView() {
       clearPendingProjectBackupAttempt(activeProject.id);
       clearProjectBackupBannerIssue(activeProject.id);
       notifyProjectBackupsChanged(activeProject.id);
-      await logAction(activeProject.id, "project.backup.create", "Created a manual project backup", entry.file, {
+      await logAction(activeProject.id, "project.backup.create", t("projectSettings.modal.manualBackupLog"), entry.file, {
         entityType: "project_backup",
         backupKind: "manual",
         backupFile: entry.file,
@@ -752,10 +799,10 @@ export function ProjectSettingsView() {
         sizeBytes: entry.sizeBytes,
         manual: entry.manual,
       });
-      setBackupNotice("Manual backup created. It will be retained indefinitely.");
+      setBackupNotice(t("projectSettings.modal.manualBackupCreated"));
     } catch (error) {
       console.error("Manual backup failed:", error);
-      const message = error instanceof Error ? error.message : "Manual backup failed. Please try again.";
+      const message = error instanceof Error ? error.message : t("projectSettings.modal.manualBackupFailed");
       writeProjectBackupBannerIssue(activeProject.id, "failed", message);
       notifyProjectBackupsChanged(activeProject.id);
       setBackupError(message);
@@ -776,7 +823,7 @@ export function ProjectSettingsView() {
       setAutomaticIntervalDraft(backupPolicy.automaticIntervalMinutes);
     } catch (error) {
       console.error("Failed to load backup policy:", error);
-      setBackupError("Could not load backup settings.");
+      setBackupError(t("projectSettings.modal.backupSettingsLoadFailed"));
     }
   }
 
@@ -796,7 +843,12 @@ export function ProjectSettingsView() {
       await logAction(
         activeProject.id,
         "project.backup.settings",
-        `Updated backup settings (interval ${automaticIntervalDraft} min, hourly ${retentionDraft.hourlyHours}h, daily ${retentionDraft.dailyDays}d, weekly ${retentionDraft.weeklyWeeks}w)`,
+        t("projectSettings.modal.backupSettingsUpdatedLog", {
+          interval: automaticIntervalDraft,
+          hourly: retentionDraft.hourlyHours,
+          daily: retentionDraft.dailyDays,
+          weekly: retentionDraft.weeklyWeeks,
+        }),
         undefined,
         {
           entityType: "project_backup_settings",
@@ -809,10 +861,10 @@ export function ProjectSettingsView() {
           backupCount: manifest.backups.length,
         },
       );
-      setBackupNotice("Backup settings saved.");
+      setBackupNotice(t("projectSettings.modal.backupSettingsSaved"));
     } catch (error) {
       console.error("Backup settings update failed:", error);
-      setBackupError("Could not save backup settings.");
+      setBackupError(t("projectSettings.modal.backupSettingsSaveFailed"));
     } finally {
       setBackupBusy(null);
     }
@@ -831,7 +883,7 @@ export function ProjectSettingsView() {
       const description = typeof data.project.description === "string" ? data.project.description : "";
       const project = await createProject(restoredProjectName(backupName, projects), description);
       const summary = await importProjectBackupIntoProject(pb, data, project.id);
-      await logAction(project.id, "project.restore_backup", `Restored backup from ${formatBackupDate(restoreBackup.createdAt)}`, restoreBackup.file, {
+      await logAction(project.id, "project.restore_backup", t("projectLog.labels.projectRestoreBackup", { date: formatBackupDate(restoreBackup.createdAt) }), restoreBackup.file, {
         entityType: "project_backup",
         backupFile: restoreBackup.file,
         backupCreatedAt: restoreBackup.createdAt,
@@ -854,14 +906,14 @@ export function ProjectSettingsView() {
         setRestoreResolutionIntro({
           project,
           users: summary.importedUsers,
-          notes: mismatchNotes(summary),
+          notes: mismatchNotes(summary, t),
         });
       } else {
         setRestoreCompleteProject(project);
       }
     } catch (error) {
       console.error("Backup restore failed:", error);
-      setBackupError(error instanceof Error ? error.message : "Backup restore failed. Please try again.");
+      setBackupError(error instanceof Error ? error.message : t("projectSettings.shell.restoreBackupFailed"));
     } finally {
       setBackupBusy(null);
     }
@@ -879,7 +931,9 @@ export function ProjectSettingsView() {
       await logAction(
         activeProject.id,
         "project.backup.delete",
-        `Deleted manual backup from ${formatBackupDate(deleteBackup.createdAt)}`,
+        t("projectSettings.modal.manualBackupDeletedLog", {
+          date: formatBackupDate(deleteBackup.createdAt),
+        }),
         deleteBackup.file,
         {
           entityType: "project_backup",
@@ -895,10 +949,10 @@ export function ProjectSettingsView() {
         },
       );
       setDeleteBackup(null);
-      setBackupNotice("Manual backup deleted.");
+      setBackupNotice(t("projectSettings.modal.manualBackupDeleted"));
     } catch (error) {
       console.error("Manual backup delete failed:", error);
-      setBackupError(error instanceof Error ? error.message : "Manual backup could not be deleted.");
+      setBackupError(error instanceof Error ? error.message : t("projectSettings.modal.manualBackupDeleteFailed"));
     } finally {
       setBackupBusy(null);
     }
@@ -911,17 +965,17 @@ export function ProjectSettingsView() {
     try {
       const path = await save({
         defaultPath: `${safeExportName(activeProject.name)}_codebook.qdc`,
-        filters: [{ name: "REFI-QDA Codebook", extensions: ["qdc", "xml"] }],
+        filters: [{ name: t("projectSettings.modal.refiQdaCodebookDialog"), extensions: ["qdc", "xml"] }],
       });
       if (!path) return;
 
       const data = await fetchProjectExportData(pb, activeProject);
       await writeTextFile(path, makeRefiQdaCodebook(data));
-      await logAction(activeProject.id, "codebook.export", "Exported REFI-QDA codebook");
+      await logAction(activeProject.id, "codebook.export", t("projectSettings.modal.codebookExportedLog"));
       setActiveProjectSettingsModal(null);
     } catch (error) {
       console.error("Codebook export failed:", error);
-      setCodebookError("Codebook export failed. Please try again.");
+      setCodebookError(t("projectSettings.modal.codebookExportFailed"));
     } finally {
       setCodebookBusy(null);
     }
@@ -934,21 +988,21 @@ export function ProjectSettingsView() {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: "REFI-QDA Codebook", extensions: ["qdc", "xml"] }],
+        filters: [{ name: t("projectSettings.modal.refiQdaCodebookDialog"), extensions: ["qdc", "xml"] }],
       });
       if (!selected || Array.isArray(selected)) return;
 
-      await ensureProjectSafetyBackup("codebook.import", "Imported REFI-QDA codebook");
+      await ensureProjectSafetyBackup("codebook.import", t("projectSettings.modal.codebookImportedLog"));
       const raw = await readTextFile(selected);
       const codes = parseRefiQdaCodebook(raw);
       const summary = await importRefiQdaCodebookIntoProject(pb, codes, activeProject.id);
       const importedCount = summary.tableCounts.codes ?? 0;
-      await logAction(activeProject.id, "codebook.import", `Imported REFI-QDA codebook (${importedCount} codes)`);
+      await logAction(activeProject.id, "codebook.import", t("projectSettings.modal.codebookImportedCountLog", { count: importedCount }));
       setCodebookImportResult({ importedCount });
       setActiveProjectSettingsModal(null);
     } catch (error) {
       console.error("Codebook import failed:", error);
-      setCodebookError(error instanceof Error ? error.message : "Codebook import failed. Please try again.");
+      setCodebookError(error instanceof Error ? error.message : t("projectSettings.modal.codebookImportFailed"));
     } finally {
       setCodebookBusy(null);
     }
@@ -965,7 +1019,13 @@ export function ProjectSettingsView() {
     if (!enabled) {
       await persistAiAssistSettings({ ...projectAiAssistSettings, enabled: false });
       if (activeProject) {
-        await logAction(activeProject.id, "project.ai_assist.update", "Disabled AI Assist for this project");
+        await logAction(
+          activeProject.id,
+          "project.ai_assist.update",
+          t("projectLog.labels.projectAiAssistDisabled"),
+          undefined,
+          { enabled: false },
+        );
       }
       return;
     }
@@ -977,7 +1037,13 @@ export function ProjectSettingsView() {
       "AI Assist enabled. Finish the remaining setup steps to make all AI Assist tools ready.",
     );
     setAiAssistError("");
-    await logAction(activeProject.id, "project.ai_assist.update", "Enabled AI Assist for this project");
+    await logAction(
+      activeProject.id,
+      "project.ai_assist.update",
+      t("projectLog.labels.projectAiAssistEnabled"),
+      undefined,
+      { enabled: true },
+    );
     try {
       if (!isLocalWorkspace) {
         if (projectAiAssistRuntimeStatus.hostEmbeddingModelInstalled !== true) {
@@ -1120,7 +1186,7 @@ export function ProjectSettingsView() {
       setAiAssistNotice("Deleted local embeddings for this project. AI Assist has been turned off until embeddings are rebuilt.");
     } catch (error) {
       console.error("Failed to delete project embeddings:", error);
-      setAiAssistError(error instanceof Error ? error.message : "Could not delete local embeddings for this project.");
+      setAiAssistError(error instanceof Error ? error.message : t("projectSettings.modal.deleteEmbeddingsError"));
     } finally {
       setAiAssistDeletingIndex(false);
     }
@@ -1158,50 +1224,50 @@ export function ProjectSettingsView() {
   const projectSettingsCards = [
     {
       id: "details",
-      title: "Project Details",
-      description: "Update the project name and read-only description shown on Project Home.",
+      title: t("projectSettings.overview.cards.detailsTitle"),
+      description: t("projectSettings.overview.cards.detailsDescription"),
       visible: canEditProjectMetadata,
       tone: "default",
     },
     {
       id: "document-import",
-      title: "Document Import",
-      description: "Set shared defaults for how newly imported documents are saved into this project.",
+      title: t("projectSettings.overview.cards.documentImportTitle"),
+      description: t("projectSettings.overview.cards.documentImportDescription"),
       visible: canEditProjectMetadata,
       tone: "default",
     },
     {
       id: "uploaded-files",
-      title: "Uploaded Source Files",
-      description: "Review retained uploaded files and explicitly delete them without affecting derived documents or cases.",
+      title: t("projectSettings.overview.cards.uploadedFilesTitle"),
+      description: t("projectSettings.overview.cards.uploadedFilesDescription"),
       visible: canManageUploadedFiles,
       tone: "default",
     },
     {
       id: "backups",
-      title: "Project Backups",
-      description: "Create backups, review retention, and restore a new copy of the project when needed.",
+      title: t("projectSettings.overview.cards.backupsTitle"),
+      description: t("projectSettings.overview.cards.backupsDescription"),
       visible: canManageBackups || canRestoreProjectBackup,
       tone: "admin",
     },
     {
       id: "log",
-      title: "Project Log",
-      description: "Review project activity and audit changes made across the project.",
+      title: t("projectSettings.overview.cards.logTitle"),
+      description: t("projectSettings.overview.cards.logDescription"),
       visible: canAccessProjectSettings,
       tone: "default",
     },
     {
       id: "export",
-      title: "Project Export",
-      description: "Export the project for review, migration, or secure off-device storage.",
+      title: t("projectSettings.overview.cards.exportTitle"),
+      description: t("projectSettings.overview.cards.exportDescription"),
       visible: canExportProject,
       tone: "network",
     },
     {
       id: "codebook",
-      title: "Codebook Exchange",
-      description: "Import or export the code hierarchy using the REFI-QDA Codebook standard.",
+      title: t("projectSettings.overview.cards.codebookTitle"),
+      description: t("projectSettings.overview.cards.codebookDescription"),
       visible: canExchangeCodebook,
       tone: "default",
     },
@@ -1212,20 +1278,20 @@ export function ProjectSettingsView() {
   const projectSettingsSectionDefs = [
     {
       id: "setup",
-      eyebrow: "Project Setup",
-      title: "Manage the shared defaults that shape this project's day-to-day work.",
+      eyebrow: t("projectSettings.overview.sections.setupEyebrow"),
+      title: t("projectSettings.overview.sections.setupTitle"),
       cardIds: ["details", "document-import"],
     },
     {
       id: "project-data",
-      eyebrow: "Project Data",
-      title: "Review the files, backups, and audit history that belong to this project.",
+      eyebrow: t("projectSettings.overview.sections.projectDataEyebrow"),
+      title: t("projectSettings.overview.sections.projectDataTitle"),
       cardIds: ["uploaded-files", "backups", "log"],
     },
     {
       id: "exchange",
-      eyebrow: "Exchange",
-      title: "Move project materials into or out of Kanqual.",
+      eyebrow: t("projectSettings.overview.sections.exchangeEyebrow"),
+      title: t("projectSettings.overview.sections.exchangeTitle"),
       cardIds: ["export", "codebook"],
     },
   ] satisfies Array<{
@@ -1258,41 +1324,41 @@ export function ProjectSettingsView() {
             isActiveProjectBuild && projectEmbeddingBuildStatus?.phase === "cancelling";
           const embeddingStatusLabel =
             isProjectBuildRunning
-              ? "Building in background"
+              ? t("projectSettings.modal.buildingInBackground")
               : isProjectBuildCancelling
-                ? "Cancelling build"
+                ? t("projectSettings.modal.cancellingBuild")
                 : aiAssistIndexStatus?.exists
-                  ? "Ready"
-                  : "Not built";
+                  ? t("projectSettings.modal.ready")
+                  : t("projectSettings.modal.notBuilt");
           const embeddingStatusDetail =
             isProjectBuildRunning
               ? `${projectEmbeddingBuildStatus?.completedItems ?? 0} of ${projectEmbeddingBuildStatus?.totalItems ?? 0} items indexed`
               : isProjectBuildCancelling
-                ? "Current project embedding build is stopping."
+                ? t("projectSettings.modal.stoppingBuild")
                 : aiAssistIndexStatus?.exists
                   ? [
                       aiAssistIndexStatus.itemCount
                         ? `${aiAssistIndexStatus.itemCount} embedded items`
                         : "Indexed items available",
                       aiAssistIndexStatus.generatedAtMs
-                        ? `Last generated ${new Date(aiAssistIndexStatus.generatedAtMs).toLocaleString()}`
+                        ? `Last generated ${formatCurrentDateTime(aiAssistIndexStatus.generatedAtMs)}`
                         : "",
                     ].filter(Boolean).join(" • ")
                   : isLocalWorkspace
-                    ? "No local project embeddings have been built yet."
-                    : "No host project embeddings have been built yet.";
+                    ? t("projectSettings.modal.notBuiltLocal")
+                    : t("projectSettings.modal.notBuiltHost");
         return (
           <div className="app-settings-modal-sections">
             {aiAssistError && <div className="form-error project-settings-error">{aiAssistError}</div>}
             {aiAssistNotice && <div className="settings-success project-settings-success">{aiAssistNotice}</div>}
             <SettingsModalSection
-              title="Project AI Assist"
-              description="Turn project-level AI help on or off for everyone working in this project."
+              title={t("projectSettings.modal.aiAssistTitle")}
+              description={t("projectSettings.modal.aiAssistDescription")}
             >
               <label className="settings-toggle-row">
                 <span>
-                  <strong>Enable AI assistance</strong>
-                  <small>When disabled, project AI Assist features stay off even if the device is configured for AI Assist.</small>
+                  <strong>{t("projectSettings.modal.enableAiAssistance")}</strong>
+                  <small>{t("projectSettings.modal.enableAiAssistanceDescription")}</small>
                 </span>
                 <input
                   type="checkbox"
@@ -1304,11 +1370,11 @@ export function ProjectSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Project Embeddings"
+              title={t("projectSettings.modal.projectEmbeddingsTitle")}
               description={
                 isLocalWorkspace
-                  ? "Review the status of this project's local embeddings for AI Assist retrieval and rebuild them when needed."
-                  : "Review the status of this project's host embeddings for AI Assist retrieval and rebuild them when needed."
+                  ? t("projectSettings.modal.localEmbeddingsDescription")
+                  : t("projectSettings.modal.hostEmbeddingsDescription")
               }
             >
               <div className="app-settings-stats ai-assist-embedding-stats">
@@ -1343,10 +1409,10 @@ export function ProjectSettingsView() {
                   title={canBuildProjectEmbeddings ? undefined : "You do not have permission to build project embeddings."}
                 >
                   {isProjectBuildRunning
-                    ? "Building..."
+                    ? t("projectSettings.modal.building")
                     : aiAssistIndexStatus?.exists
-                      ? "Re-run Embeddings"
-                      : "Run Embeddings"}
+                      ? t("projectSettings.modal.rerunEmbeddings")
+                      : t("projectSettings.modal.runEmbeddings")}
                 </button>
                 <button
                   type="button"
@@ -1361,7 +1427,7 @@ export function ProjectSettingsView() {
                         : undefined
                   }
                 >
-                  {aiAssistDeletingIndex ? "Deleting..." : "Delete Embeddings"}
+                  {aiAssistDeletingIndex ? t("projectSettings.shell.deleting") : t("projectSettings.modal.deleteEmbeddings")}
                 </button>
               </div>
 
@@ -1378,8 +1444,8 @@ export function ProjectSettingsView() {
         return (
           <div className="app-settings-modal-sections">
             <SettingsModalSection
-              title="Current Details"
-              description="Review the current project name and description before opening the editor."
+              title={t("projectSettings.modal.currentDetailsTitle")}
+              description={t("projectSettings.modal.currentDetailsDescription")}
             >
               <div className="project-details-card">
                 <div>
@@ -1391,12 +1457,12 @@ export function ProjectSettingsView() {
                     />
                   ) : (
                     <p className="project-details-description project-details-description--empty">
-                      No project description has been added yet.
+                      {t("projectSettings.modal.noProjectDescription")}
                     </p>
                   )}
                 </div>
                 <button className="btn btn--primary" onClick={openDetailsModal}>
-                  Edit Project Details
+                  {t("projectSettings.shell.editProjectDetails")}
                 </button>
               </div>
             </SettingsModalSection>
@@ -1408,13 +1474,13 @@ export function ProjectSettingsView() {
             {documentImportError && <div className="form-error project-settings-error">{documentImportError}</div>}
             {documentImportNotice && <div className="settings-success project-settings-success">{documentImportNotice}</div>}
             <SettingsModalSection
-              title="Shared Import Defaults"
-              description="Control the default metadata behavior everyone should use when importing new documents into this project."
+              title={t("projectSettings.modal.sharedImportDefaultsTitle")}
+              description={t("projectSettings.modal.sharedImportDefaultsDescription")}
             >
               <label className="settings-toggle-row">
                 <span>
-                  <strong>Store original filename</strong>
-                  <small>Use the uploaded filename as stored document metadata by default for everyone importing into this project.</small>
+                  <strong>{t("projectSettings.modal.storeOriginalFilename")}</strong>
+                  <small>{t("projectSettings.modal.storeOriginalFilenameDescription")}</small>
                 </span>
                 <input
                   type="checkbox"
@@ -1433,8 +1499,8 @@ export function ProjectSettingsView() {
             {uploadedFilesError && <div className="form-error project-settings-error">{uploadedFilesError}</div>}
             {uploadedFilesNotice && <div className="settings-success project-settings-success">{uploadedFilesNotice}</div>}
             <SettingsModalSection
-              title="Retained Source Files"
-              description="Uploaded source files are retained separately from editable project documents. Deleting a document does not remove its original uploaded file."
+              title={t("projectSettings.modal.retainedSourceFilesTitle")}
+              description={t("projectSettings.modal.retainedSourceFilesDescription")}
             >
               <div className="backup-list">
                 {visibleUploadedFiles.length > 0 ? (
@@ -1442,17 +1508,21 @@ export function ProjectSettingsView() {
                     <div key={file.id} className="backup-list-item">
                       <div>
                         <div className="backup-list-title">
-                          {file.originalFileName || file.uploadedFile || "Unnamed upload"}
-                          <span className="backup-badge backup-badge--scheduled">{file.status}</span>
+                          {file.originalFileName || file.uploadedFile || t("projectSettings.modal.unnamedUpload")}
+                          <span className="backup-badge backup-badge--scheduled">
+                            {file.status === "orphaned"
+                              ? t("projectSettings.modal.orphanedBadge")
+                              : t("projectSettings.modal.linkedBadge")}
+                          </span>
                         </div>
                         <div className="backup-list-meta">
-                          {(file.mimeType || "Unknown type")}
+                          {(file.mimeType || t("projectSettings.modal.unknownFileType"))}
                           {file.sizeBytes > 0 ? ` | ${formatBackupSize(file.sizeBytes)}` : ""}
-                          {file.documentId ? ` | Linked document: ${documents.find((doc) => doc.id === file.documentId)?.name ?? "Deleted document"}` : ""}
-                          {file.caseId ? ` | Linked case: ${cases.find((item) => item.id === file.caseId)?.name ?? "Deleted case"}` : ""}
+                          {file.documentId ? ` | ${t("projectSettings.modal.linkedDocument")}: ${documents.find((doc) => doc.id === file.documentId)?.name ?? t("projectSettings.modal.deletedDocument")}` : ""}
+                          {file.caseId ? ` | ${t("projectSettings.modal.linkedCase")}: ${cases.find((item) => item.id === file.caseId)?.name ?? t("projectSettings.modal.deletedCase")}` : ""}
                         </div>
                         <div className="backup-list-meta">
-                          Uploaded {formatBackupDate(file.createdAt)}
+                          {t("projectSettings.modal.uploadedAt", { date: formatBackupDate(file.createdAt) })}
                         </div>
                       </div>
                       <div className="backup-header-actions">
@@ -1463,7 +1533,7 @@ export function ProjectSettingsView() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Download
+                            {t("common.download")}
                           </a>
                         )}
                         <button
@@ -1471,14 +1541,14 @@ export function ProjectSettingsView() {
                           type="button"
                           onClick={() => setUploadedFileDeleteTarget(file)}
                         >
-                          Delete Source File
+                          {t("projectSettings.shell.deleteSourceFile")}
                         </button>
                       </div>
                     </div>
                   ))
                 ) : (
                   <div className="empty-state backup-empty-state">
-                    <p>No retained uploaded source files are currently available for this project.</p>
+                    <p>{t("projectSettings.modal.noRetainedUploadedFiles")}</p>
                   </div>
                 )}
               </div>
@@ -1489,13 +1559,13 @@ export function ProjectSettingsView() {
         return (
           <div className="app-settings-modal-sections">
             <SettingsModalSection
-              title="Project Activity"
-              description={`Review activity for ${activeProject!.name}. Delete actions automatically create a project backup instead of inline restore actions.`}
+              title={t("projectSettings.modal.projectActivityTitle")}
+              description={t("projectSettings.modal.projectActivityDescription", { projectName: activeProject!.name })}
             >
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <div className="settings-row-label">Export log</div>
-                  <div className="settings-row-desc">Download the project activity log as a CSV file for external review.</div>
+                  <div className="settings-row-label">{t("projectSettings.modal.exportLogTitle")}</div>
+                  <div className="settings-row-desc">{t("projectSettings.modal.exportLogDescription")}</div>
                 </div>
                 <button
                   className="btn"
@@ -1503,7 +1573,7 @@ export function ProjectSettingsView() {
                   onClick={() => void handleProjectLogExport()}
                   disabled={projectLogExporting}
                 >
-                  {projectLogExporting ? "Exporting..." : "Export CSV"}
+                  {projectLogExporting ? t("projectSettings.modal.exporting") : t("projectSettings.modal.exportCsv")}
                 </button>
               </div>
             {exportError && <p className="auth-error">{exportError}</p>}
@@ -1518,14 +1588,14 @@ export function ProjectSettingsView() {
             {backupNotice && <div className="settings-success project-settings-success">{backupNotice}</div>}
 
             <SettingsModalSection
-              title="Backup Controls"
-              description="Automatic backups are stored privately in app data for this project. Restore always creates a new project so the current project stays untouched."
+              title={t("projectSettings.modal.backupControlsTitle")}
+              description={t("projectSettings.modal.backupControlsDescription")}
             >
               <div className="backup-header-actions">
                 {canManageBackups && (
                   <>
                     <button className="btn btn--primary" onClick={handleManualBackup} disabled={!!backupBusy}>
-                      {backupBusy === "manual" ? "Creating..." : "Create Backup Now"}
+                      {backupBusy === "manual" ? t("projectSettings.modal.creating") : t("projectSettings.modal.createBackupNow")}
                     </button>
                   </>
                 )}
@@ -1541,13 +1611,13 @@ export function ProjectSettingsView() {
                     }
                   }}
                 >
-                  <summary className="ai-assist-settings-disclosure-summary">Backup settings</summary>
+                  <summary className="ai-assist-settings-disclosure-summary">{t("projectSettings.modal.backupControlsTitle")}</summary>
                   <div className="ai-assist-settings-disclosure-body">
                     <form className="form" onSubmit={handleBackupSettingsSave}>
                       <label className="form-label">
-                        Minimum automatic backup interval
+                        {t("projectSettings.modal.minimumAutomaticBackupInterval")}
                         <span className="backup-field-hint">
-                          Automatic backups will not be created more often than this, even when project changes are detected.
+                          {t("projectSettings.modal.minimumAutomaticBackupIntervalHint")}
                         </span>
                         <input
                           className="form-input"
@@ -1562,8 +1632,8 @@ export function ProjectSettingsView() {
 
                       <div className="backup-retention-form backup-retention-form--modal">
                         <label className="form-label">
-                          Hourly window
-                          <span className="backup-field-hint">Keep one automatic backup per hour for this many hours.</span>
+                          {t("projectSettings.modal.hourlyWindow")}
+                          <span className="backup-field-hint">{t("projectSettings.modal.hourlyWindowHint")}</span>
                           <input
                             className="form-input"
                             type="number"
@@ -1574,8 +1644,8 @@ export function ProjectSettingsView() {
                           />
                         </label>
                         <label className="form-label">
-                          Daily window
-                          <span className="backup-field-hint">Keep one automatic backup per day for this many days.</span>
+                          {t("projectSettings.modal.dailyWindow")}
+                          <span className="backup-field-hint">{t("projectSettings.modal.dailyWindowHint")}</span>
                           <input
                             className="form-input"
                             type="number"
@@ -1586,8 +1656,8 @@ export function ProjectSettingsView() {
                           />
                         </label>
                         <label className="form-label">
-                          Weekly window
-                          <span className="backup-field-hint">Keep one automatic backup per week for this many weeks.</span>
+                          {t("projectSettings.modal.weeklyWindow")}
+                          <span className="backup-field-hint">{t("projectSettings.modal.weeklyWindowHint")}</span>
                           <input
                             className="form-input"
                             type="number"
@@ -1601,7 +1671,7 @@ export function ProjectSettingsView() {
 
                       <div className="project-export-actions project-export-actions--modal">
                         <button type="submit" className="btn btn--primary" disabled={backupBusy === "settings"}>
-                          {backupBusy === "settings" ? "Saving..." : "Save Backup Settings"}
+                          {backupBusy === "settings" ? t("projectSettings.shell.saving") : t("projectSettings.modal.saveBackupSettings")}
                         </button>
                       </div>
                     </form>
@@ -1611,8 +1681,8 @@ export function ProjectSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="Available Backups"
-              description="Review each retained backup, see why it was created, and restore a copy when you need to recover prior project state."
+              title={t("projectSettings.modal.availableBackupsTitle")}
+              description={t("projectSettings.modal.availableBackupsDescription")}
             >
               <div className="backup-list">
                 {backupManifest?.backups.length ? (
@@ -1629,33 +1699,33 @@ export function ProjectSettingsView() {
                         <div className="backup-list-title">
                           {formatBackupDate(backup.createdAt)}
                           {backup.manual ? (
-                            <span className="backup-badge">Retained indefinitely</span>
+                            <span className="backup-badge">{t("projectSettings.modal.retainedIndefinitely")}</span>
                           ) : (
                             backupRetentionLabels(backupRetentionStatus(
                               backup,
                               backupManifest.backups,
                               backupManifest.retention,
                               backupStatusNow,
-                            )).map((label) => (
+                            ), t).map((item) => (
                               <span
-                                key={label}
+                                key={item.label}
                                 className={`backup-badge ${
-                                  label.startsWith("Will become") ? "backup-badge--promotion" : "backup-badge--scheduled"
+                                  item.promotion ? "backup-badge--promotion" : "backup-badge--scheduled"
                                 }`}
                               >
-                                {label}
+                                {item.label}
                               </span>
                             ))
                           )}
                         </div>
                         <div className="backup-list-meta">
-                          {backupDisplayReason(backup.reason)} backup
+                          {t("projectSettings.modal.backupReasonLine", { reason: backupReasonLabel(backup.reason, t) })}
                           {formatBackupSize(backup.sizeBytes) ? ` | ${formatBackupSize(backup.sizeBytes)}` : ""}
                         </div>
                         {!backup.manual && (
                           <div className="backup-trigger-row">
                             <span className="backup-badge backup-badge--trigger">
-                              Triggered by: {backupTriggerLabel(backup, logEntries)}
+                              {t("projectSettings.modal.triggeredBy")}: {backupTriggerLabel(backup, logEntries, t)}
                             </span>
                           </div>
                         )}
@@ -1665,13 +1735,13 @@ export function ProjectSettingsView() {
                         onClick={() => setRestoreBackup(backup)}
                         disabled={!!backupBusy || !canRestoreProjectBackup}
                       >
-                        Restore
+                        {t("projectSettings.shell.restore")}
                       </button>
                     </div>
                   ))
                 ) : (
                   <div className="empty-state backup-empty-state">
-                    <p>No backups have been created for this project yet.</p>
+                    <p>{t("projectSettings.modal.noProjectBackupsYet")}</p>
                   </div>
                 )}
               </div>
@@ -1683,36 +1753,36 @@ export function ProjectSettingsView() {
           <div className="app-settings-modal-sections">
             {exportError && <p className="auth-error">{exportError}</p>}
             <SettingsModalSection
-              title="Recommended: Encrypted Backup"
+              title={t("projectSettings.modal.encryptedBackupTitle")}
               description={
                 <>
-                  <strong>Use this when you need a secure full-project backup for cloud storage, file sharing, USB transfer, or any other off-device storage.</strong>
+                  <strong>{t("projectSettings.modal.encryptedBackupLead")}</strong>
                   <br />
-                  Keep the password in a secure password manager because Kanqual cannot recover it later.
+                  {t("projectSettings.modal.encryptedBackupNote")}
                 </>
               }
               tone="warning"
             >
               <div className="form">
                 <label className="form-label">
-                  Backup password
+                  {t("projectSettings.modal.backupPassword")}
                   <input
                     className="form-input"
                     type="password"
                     value={encryptedBackupPassword}
                     onChange={(e) => setEncryptedBackupPassword(e.target.value)}
-                    placeholder="Enter a password"
+                    placeholder={t("projectSettings.modal.enterPassword")}
                     autoComplete="new-password"
                   />
                 </label>
                 <label className="form-label">
-                  Confirm password
+                  {t("projectSettings.modal.confirmPassword")}
                   <input
                     className="form-input"
                     type="password"
                     value={encryptedBackupPasswordConfirm}
                     onChange={(e) => setEncryptedBackupPasswordConfirm(e.target.value)}
-                    placeholder="Re-enter the password"
+                    placeholder={t("projectSettings.modal.reenterPassword")}
                     autoComplete="new-password"
                   />
                 </label>
@@ -1722,40 +1792,40 @@ export function ProjectSettingsView() {
                     onClick={() => void handleEncryptedBackupExport()}
                     disabled={!!exporting || !encryptedBackupPassword || !encryptedBackupPasswordConfirm}
                   >
-                    {exporting === "encrypted" ? "Exporting..." : "Export Encrypted Backup"}
+                    {exporting === "encrypted" ? t("projectSettings.modal.exporting") : t("projectSettings.modal.exportEncryptedBackup")}
                   </button>
                 </div>
               </div>
             </SettingsModalSection>
             <SettingsModalSection
-              title="Other Whole-Project Exports"
+              title={t("projectSettings.modal.wholeProjectExportsTitle")}
               description={
                 <>
-                  <strong>Use these when you need to move the full project into another system or create a readable Kanqual-native export.</strong>
+                  <strong>{t("projectSettings.modal.wholeProjectExportsLead")}</strong>
                   <br />
-                  These exports are not encrypted and can contain project content, coding, memos, and user-linked metadata in readable form.
+                  {t("projectSettings.modal.wholeProjectExportsNote")}
                 </>
               }
               tone="danger"
             >
               <div className="project-export-actions project-export-actions--modal">
                 <button className="btn" onClick={() => handleExport("json")} disabled={!!exporting}>
-                  {exporting === "json" ? "Exporting..." : "Export JSON Backup"}
+                  {exporting === "json" ? t("projectSettings.modal.exporting") : t("projectSettings.modal.exportJsonBackup")}
                 </button>
                 <button className="btn" onClick={() => handleExport("qdpx")} disabled={!!exporting}>
-                  {exporting === "qdpx" ? "Exporting..." : "Export REFI-QDA Project"}
+                  {exporting === "qdpx" ? t("projectSettings.modal.exporting") : t("projectSettings.modal.exportRefiQdaProject")}
                 </button>
               </div>
               <div className="app-settings-modal-section-body">
               </div>
             </SettingsModalSection>
             <SettingsModalSection
-              title="Review Export"
-              description="Use this when you want to inspect, report on, or analyze project contents outside Kanqual without moving the full project."
+              title={t("projectSettings.modal.reviewExportTitle")}
+              description={t("projectSettings.modal.reviewExportDescription")}
             >
               <div className="project-export-actions project-export-actions--modal">
                 <button className="btn btn--primary" onClick={() => handleExport("xlsx")} disabled={!!exporting}>
-                  {exporting === "xlsx" ? "Exporting..." : "Export Excel Workbook"}
+                  {exporting === "xlsx" ? t("projectSettings.modal.exporting") : t("projectSettings.modal.exportExcelWorkbook")}
                 </button>
               </div>
             </SettingsModalSection>
@@ -1766,15 +1836,15 @@ export function ProjectSettingsView() {
           <div className="app-settings-modal-sections">
             {codebookError && <p className="auth-error">{codebookError}</p>}
             <SettingsModalSection
-              title="Codebook Exchange"
-              description="Import or export only the code hierarchy using the REFI-QDA Codebook standard."
+              title={t("projectSettings.modal.codebookExchangeTitle")}
+              description={t("projectSettings.modal.codebookExchangeDescription")}
             >
               <div className="project-export-actions project-export-actions--modal">
                 <button className="btn" onClick={handleCodebookImport} disabled={!!codebookBusy}>
-                  {codebookBusy === "import" ? "Importing..." : "Import REFI-QDA Codebook"}
+                  {codebookBusy === "import" ? t("projectSettings.modal.importing") : t("projectSettings.modal.importRefiQdaCodebook")}
                 </button>
                 <button className="btn btn--primary" onClick={handleCodebookExport} disabled={!!codebookBusy}>
-                  {codebookBusy === "export" ? "Exporting..." : "Export REFI-QDA Codebook"}
+                  {codebookBusy === "export" ? t("projectSettings.modal.exporting") : t("projectSettings.modal.exportRefiQdaCodebook")}
                 </button>
               </div>
             </SettingsModalSection>
@@ -1789,10 +1859,10 @@ export function ProjectSettingsView() {
     return (
       <div className="view">
         <header className="view-header">
-          <h1>Project Settings</h1>
+          <h1>{t("projectSettings.shell.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>Open a project first.</p>
+          <p>{t("sidebar.nav.openProjectFirst")}</p>
         </div>
       </div>
     );
@@ -1802,13 +1872,13 @@ export function ProjectSettingsView() {
     return (
       <div className="view">
         <div className="workspace-back-row">
-          <button className="btn" onClick={() => setView("home")}>Back to Home</button>
+          <button className="btn" onClick={() => setView("home")}>{t("projectSettings.shell.backToHome")}</button>
         </div>
         <header className="view-header">
-          <h1>Project Settings</h1>
+          <h1>{t("projectSettings.shell.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>You do not have access to Project Settings for this project.</p>
+          <p>{t("projectSettings.shell.noAccess")}</p>
         </div>
       </div>
     );
@@ -1817,13 +1887,13 @@ export function ProjectSettingsView() {
   return (
     <div className="view project-settings-view">
       <div className="workspace-back-row">
-        <button className="btn" onClick={() => setView("home")}>Back to Home</button>
+        <button className="btn" onClick={() => setView("home")}>{t("projectSettings.shell.backToHome")}</button>
       </div>
       <header className="view-header">
         <div>
           <div className="view-title-with-help">
-            <h1>Project Settings</h1>
-            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open project settings help">
+            <h1>{t("projectSettings.shell.pageTitle")}</h1>
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("projectSettings.shell.openHelp")}>
               <HelpIcon className="users-help-icon" />
             </button>
           </div>
@@ -1874,13 +1944,13 @@ export function ProjectSettingsView() {
                 setBackupContextMenu(null);
               }}
             >
-              Delete Manual Backup
+              {t("projectSettings.shell.deleteManualBackup")}
             </button>
           ) : (
             <div className="context-menu-item context-menu-item--disabled">
               {backupContextMenu.backup.manual
-                ? "You do not have permission to delete manual backups."
-                : "Automatic backups are retained based on backup settings"}
+                ? t("projectSettings.shell.deleteManualBackupDenied")
+                : t("projectSettings.shell.automaticBackupsRetained")}
             </div>
           )}
         </div>
@@ -1889,9 +1959,9 @@ export function ProjectSettingsView() {
       {codebookImportResult && (
         <div className="modal-overlay">
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="codebook-import-title">
-            <h2 id="codebook-import-title">Codebook Imported</h2>
+            <h2 id="codebook-import-title">{t("projectSettings.shell.codebookImportedTitle")}</h2>
             <p className="import-project-copy">
-              Imported {codebookImportResult.importedCount} code{codebookImportResult.importedCount === 1 ? "" : "s"} into this project.
+              {t("projectSettings.shell.codebookImportedBody", { count: codebookImportResult.importedCount })}
             </p>
             <div className="form-actions">
               <button
@@ -1903,7 +1973,7 @@ export function ProjectSettingsView() {
                 }}
                 autoFocus
               >
-                View Codebook
+                {t("projectSettings.shell.viewCodebook")}
               </button>
             </div>
           </div>
@@ -1923,7 +1993,7 @@ export function ProjectSettingsView() {
                 <h2 className="settings-section-title">{activeProjectSettingsCard.title}</h2>
               </div>
               <button className="btn" type="button" onClick={() => setActiveProjectSettingsModal(null)}>
-                Close
+                {t("projectSettings.shell.close")}
               </button>
             </div>
             <div className="app-settings-modal-body">
@@ -1931,12 +2001,12 @@ export function ProjectSettingsView() {
             </div>
             <div className="app-settings-modal-footer">
               {shouldShowProjectAutoSaveNotice(activeProjectSettingsCard.id) ? (
-                <p className="app-settings-modal-footer-note">Changes save automatically for this project.</p>
+                <p className="app-settings-modal-footer-note">{t("projectSettings.shell.autoSaveNotice")}</p>
               ) : (
                 <span />
               )}
               <button className="btn btn--primary" type="button" onClick={() => setActiveProjectSettingsModal(null)}>
-                Done
+                {t("projectSettings.shell.done")}
               </button>
             </div>
           </div>
@@ -1946,16 +2016,16 @@ export function ProjectSettingsView() {
       {aiAssistRequirementOpen && (
         <div className="modal-overlay" onClick={() => setAiAssistRequirementOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="ai-assist-requirement-title">
-            <h2 id="ai-assist-requirement-title">Embedding Model Required</h2>
+            <h2 id="ai-assist-requirement-title">{t("projectSettings.shell.embeddingRequiredTitle")}</h2>
             <p className="import-project-copy">
-              AI Assist needs a local embedding model before it can be enabled for this project. Open App Settings and download the multilingual-e5 model to continue.
+              {t("projectSettings.shell.embeddingRequiredBody")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn" onClick={() => setAiAssistRequirementOpen(false)}>
-                Not Now
+                {t("projectSettings.shell.notNow")}
               </button>
               <button type="button" className="btn btn--primary" onClick={openLlmSettingsFromWarning}>
-                Open LLM Settings
+                {t("projectSettings.shell.openLlmSettings")}
               </button>
             </div>
           </div>
@@ -1967,16 +2037,16 @@ export function ProjectSettingsView() {
           <div className="modal modal--wide app-settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="ai-assist-build-title">
             <div className="settings-section-header">
               <div>
-                <h2 id="ai-assist-build-title" className="settings-section-title">Preparing AI Assist</h2>
+                <h2 id="ai-assist-build-title" className="settings-section-title">{t("projectSettings.shell.preparingAiAssist")}</h2>
               </div>
             </div>
             <div className="app-settings-modal-body">
               <div className="project-model-modal-copy">
                 <p>
-                  This is a first-run setup step. Once these local embeddings are created, AI Assist can reuse them for this project instead of rebuilding them every time.
+                  {t("projectSettings.shell.firstRunLine1")}
                 </p>
                 <p>
-                  Large projects can take a little while here, especially the first time the model is loaded into memory.
+                  {t("projectSettings.shell.firstRunLine2")}
                 </p>
                 {aiAssistBuildPreflight && (
                   <div className="users-permission-note" style={{ marginTop: 12 }}>
@@ -1987,15 +2057,15 @@ export function ProjectSettingsView() {
                       aiAssistBuildPreflight.estimatedSecondsHigh,
                     )} for {formatCount(aiAssistBuildPreflight.pendingItems)} new items
                     {aiAssistBuildPreflight.reusedItems > 0
-                      ? `, with ${formatCount(aiAssistBuildPreflight.reusedItems)} likely reused`
+                      ? t("projectSettings.shell.likelyReused", { count: formatCount(aiAssistBuildPreflight.reusedItems) })
                       : ""}
-                    . This is intentionally conservative.
+                    {t("projectSettings.shell.conservativeEstimate")}
                   </div>
                 )}
               </div>
               <div className="form-actions">
                 <button type="button" className="btn" onClick={() => setAiAssistBuildOpen(false)}>
-                  Cancel
+                  {t("projectSettings.shell.cancel")}
                 </button>
                 <button
                   type="button"
@@ -2003,7 +2073,7 @@ export function ProjectSettingsView() {
                   onClick={() => void handleAiAssistBuildRun()}
                   disabled={aiAssistBuildBusy}
                 >
-                  Run
+                  {t("projectSettings.shell.run")}
                 </button>
               </div>
             </div>
@@ -2014,10 +2084,12 @@ export function ProjectSettingsView() {
       {restoreBackup && (
         <div className="modal-overlay" onClick={() => backupBusy !== "restore" && setRestoreBackup(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Restore Backup</h2>
+            <h2>{t("projectSettings.shell.restoreBackupTitle")}</h2>
             <p className="import-project-copy">
-              This will create a new project from the {backupDisplayReason(restoreBackup.reason).toLowerCase()} backup made on{" "}
-              {formatBackupDate(restoreBackup.createdAt)}. The current project will not be overwritten.
+              {t("projectSettings.shell.restoreBackupBody", {
+                reason: backupReasonLabel(restoreBackup.reason, t),
+                date: formatBackupDate(restoreBackup.createdAt),
+              })}
             </p>
             {backupError && <p className="auth-error">{backupError}</p>}
             <div className="form-actions">
@@ -2027,7 +2099,7 @@ export function ProjectSettingsView() {
                 onClick={() => setRestoreBackup(null)}
                 disabled={backupBusy === "restore"}
               >
-                Cancel
+                {t("projectSettings.shell.cancel")}
               </button>
               <button
                 type="button"
@@ -2035,7 +2107,9 @@ export function ProjectSettingsView() {
                 onClick={handleRestoreBackup}
                 disabled={backupBusy === "restore"}
               >
-                {backupBusy === "restore" ? "Restoring..." : "Restore as New Project"}
+                {backupBusy === "restore"
+                  ? t("projectSettings.shell.restoring")
+                  : t("projectSettings.shell.restoreAsNewProject")}
               </button>
             </div>
           </div>
@@ -2045,9 +2119,9 @@ export function ProjectSettingsView() {
       {restoreCompleteProject && (
         <div className="modal-overlay">
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="project-restore-complete-title" onClick={(e) => e.stopPropagation()}>
-            <h2 id="project-restore-complete-title">Project Restore Complete</h2>
+            <h2 id="project-restore-complete-title">{t("projectSettings.shell.restoreCompleteTitle")}</h2>
             <p className="import-project-copy">
-              All users should have access to the project with their existing credentials.
+              {t("projectSettings.shell.restoreCompleteBody")}
             </p>
             <div className="form-actions">
               <button
@@ -2059,7 +2133,7 @@ export function ProjectSettingsView() {
                   openProject(project, activeProject);
                 }}
               >
-                Go to Project Home
+                {t("projectSettings.shell.goToProjectHome")}
               </button>
             </div>
           </div>
@@ -2069,7 +2143,7 @@ export function ProjectSettingsView() {
       {restoreResolutionIntro && (
         <div className="modal-overlay">
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="project-restore-resolution-title" onClick={(e) => e.stopPropagation()}>
-            <h2 id="project-restore-resolution-title">User Accounts Need Review</h2>
+            <h2 id="project-restore-resolution-title">{t("projectSettings.shell.userAccountsReviewTitle")}</h2>
             <div className="form">
               {restoreResolutionIntro.notes.map((note) => (
                 <p key={note} className="import-project-copy">{note}</p>
@@ -2092,7 +2166,7 @@ export function ProjectSettingsView() {
                   void openProjectToView(project, "users", activeProject);
                 }}
               >
-                Configure Users
+                {t("projectSettings.shell.configureUsers")}
               </button>
             </div>
           </div>
@@ -2102,9 +2176,11 @@ export function ProjectSettingsView() {
       {deleteBackup && (
         <div className="modal-overlay" onClick={() => backupBusy !== "delete" && setDeleteBackup(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Manual Backup</h2>
+            <h2>{t("projectSettings.shell.deleteManualBackup")}</h2>
             <p className="import-project-copy">
-              Delete the manual backup created on {formatBackupDate(deleteBackup.createdAt)}? This cannot be undone.
+              {t("projectSettings.shell.deleteManualBackupBody", {
+                date: formatBackupDate(deleteBackup.createdAt),
+              })}
             </p>
             {backupError && <p className="auth-error">{backupError}</p>}
             <div className="form-actions">
@@ -2114,7 +2190,7 @@ export function ProjectSettingsView() {
                 onClick={() => setDeleteBackup(null)}
                 disabled={backupBusy === "delete"}
               >
-                Cancel
+                {t("projectSettings.shell.cancel")}
               </button>
               <button
                 type="button"
@@ -2122,7 +2198,7 @@ export function ProjectSettingsView() {
                 onClick={handleDeleteManualBackup}
                 disabled={backupBusy === "delete"}
               >
-                {backupBusy === "delete" ? "Deleting..." : "Delete Backup"}
+                {backupBusy === "delete" ? t("projectSettings.shell.deleting") : t("projectSettings.shell.deleteBackup")}
               </button>
             </div>
           </div>
@@ -2132,10 +2208,10 @@ export function ProjectSettingsView() {
       {detailsOpen && (
         <div className="modal-overlay" onClick={() => !detailsSaving && setDetailsOpen(false)}>
           <div className="modal modal--project-details" onClick={(e) => e.stopPropagation()}>
-            <h2>Edit Project Details</h2>
+            <h2>{t("projectSettings.shell.editProjectDetails")}</h2>
             <form className="form" onSubmit={handleDetailsSave}>
               <label className="form-label">
-                Project name
+                {t("projectSettings.shell.projectName")}
                 <input
                   className="form-input"
                   value={detailsName}
@@ -2145,16 +2221,16 @@ export function ProjectSettingsView() {
                 />
               </label>
               <label className="form-label">
-                Description
+                {t("projectSettings.shell.description")}
                 <RichTextEditor initialHtml={detailsDescription} editorRef={detailsDescriptionRef} />
               </label>
               {detailsError && <p className="auth-error">{detailsError}</p>}
               <div className="form-actions">
                 <button type="button" className="btn" onClick={() => setDetailsOpen(false)} disabled={detailsSaving}>
-                  Cancel
+                  {t("projectSettings.shell.cancel")}
                 </button>
                 <button type="submit" className="btn btn--primary" disabled={!detailsName.trim() || detailsSaving}>
-                  {detailsSaving ? "Saving..." : "Save Details"}
+                  {detailsSaving ? t("projectSettings.shell.saving") : t("projectSettings.shell.saveDetails")}
                 </button>
               </div>
             </form>
@@ -2165,15 +2241,15 @@ export function ProjectSettingsView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Project Settings Help</h2>
+            <h2>{t("projectSettings.shell.projectSettingsHelp")}</h2>
             <div className="app-settings-modal-body">
                 <ul className="settings-help-list">
-                  <li>Use this page to manage settings and maintenance tasks that belong to the project as a whole. Open a card, complete the action in the modal, and close when finished.</li>
-                  <li>Many actions here are permission-gated, and some are sensitive or destructive. Backup, restore, and AI Assist operations may depend on host-side capabilities.</li>
+                  <li>{t("projectSettings.shell.helpLine1")}</li>
+                  <li>{t("projectSettings.shell.helpLine2")}</li>
                 </ul>
               <div className="form-actions">
                 <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                  Close
+                  {t("projectSettings.shell.close")}
                 </button>
               </div>
             </div>
@@ -2184,13 +2260,14 @@ export function ProjectSettingsView() {
       {uploadedFileDeleteTarget && (
         <div className="modal-overlay" onClick={() => !uploadedFileDeleteBusy && setUploadedFileDeleteTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Retained Source File</h2>
+            <h2>{t("projectSettings.shell.deleteSourceFileTitle")}</h2>
             <p className="import-project-copy">
-              This will delete the retained original uploaded file for{" "}
-              <strong>{uploadedFileDeleteTarget.originalFileName || uploadedFileDeleteTarget.uploadedFile}</strong>.
+              {t("projectSettings.shell.deleteSourceFileBody", {
+                fileName: uploadedFileDeleteTarget.originalFileName || uploadedFileDeleteTarget.uploadedFile,
+              })}
             </p>
             <div className="settings-warning settings-warning--danger">
-              Documents or cases created from this upload will remain in the project, but future backups and exports will no longer include this original source file.
+              {t("projectSettings.shell.deleteSourceFileWarning")}
             </div>
             <div className="form-actions">
               <button
@@ -2199,7 +2276,7 @@ export function ProjectSettingsView() {
                 onClick={() => setUploadedFileDeleteTarget(null)}
                 disabled={uploadedFileDeleteBusy}
               >
-                Cancel
+                {t("projectSettings.shell.cancel")}
               </button>
               <button
                 type="button"
@@ -2207,7 +2284,7 @@ export function ProjectSettingsView() {
                 onClick={() => void handleDeleteUploadedFile()}
                 disabled={uploadedFileDeleteBusy}
               >
-                {uploadedFileDeleteBusy ? "Deleting..." : "Delete Source File"}
+                {uploadedFileDeleteBusy ? t("projectSettings.shell.deleting") : t("projectSettings.shell.deleteSourceFile")}
               </button>
             </div>
           </div>

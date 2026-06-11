@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "../i18n/provider";
 
 export type SharedAttributeDataType = "text" | "number" | "datetime" | "categorical";
 
@@ -14,13 +15,6 @@ export type SharedAttributeModalRow = {
   id: string;
   name: string;
 };
-
-export const SHARED_ATTRIBUTE_TYPE_OPTIONS: Array<{ value: SharedAttributeDataType; label: string }> = [
-  { value: "text", label: "Text" },
-  { value: "number", label: "Numbers" },
-  { value: "datetime", label: "Date/time" },
-  { value: "categorical", label: "Categorical" },
-];
 
 function inputTypeForDataType(dataType: SharedAttributeDataType) {
   if (dataType === "number") return "number";
@@ -53,6 +47,7 @@ export function AttributeValuesModal({
   onSave: (draft: SharedAttributeDraft, valuesByOwner: Record<string, string>) => void;
   emptyStateLabel: string;
 }) {
+  const { t } = useI18n();
   const [name, setName] = useState(draft.name);
   const [dataType, setDataType] = useState<SharedAttributeDataType>(draft.dataType);
   const [description, setDescription] = useState(draft.description);
@@ -66,15 +61,21 @@ export function AttributeValuesModal({
   });
 
   const inputType = inputTypeForDataType(dataType);
+  const typeOptions: Array<{ value: SharedAttributeDataType; label: string }> = [
+    { value: "text", label: t("attributeModal.types.text") },
+    { value: "number", label: t("attributeModal.types.number") },
+    { value: "datetime", label: t("attributeModal.types.datetime") },
+    { value: "categorical", label: t("attributeModal.types.categorical") },
+  ];
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <h2>{draft.id ? "Edit Attribute" : "Attribute Values"}</h2>
+        <h2>{draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}</h2>
 
         <div className="attribute-values-details">
           <label className="form-group">
-            <span className="form-label">Attribute name</span>
+            <span className="form-label">{t("attributeModal.attributeName")}</span>
             <input
               className="form-input"
               value={name}
@@ -82,9 +83,9 @@ export function AttributeValuesModal({
             />
           </label>
           <div className="form-group attribute-details-span">
-            <span className="form-label">Data type</span>
+            <span className="form-label">{t("attributeModal.dataType")}</span>
             <div className="attribute-type-picker">
-              {SHARED_ATTRIBUTE_TYPE_OPTIONS.map((option) => (
+              {typeOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -97,7 +98,7 @@ export function AttributeValuesModal({
             </div>
           </div>
           <label className="form-group attribute-details-span">
-            <span className="form-label">Description</span>
+            <span className="form-label">{t("attributeModal.description")}</span>
             <textarea
               className="form-input attribute-description-input"
               value={description}
@@ -107,7 +108,7 @@ export function AttributeValuesModal({
           </label>
           {dataType === "categorical" && (
             <div className="form-group attribute-details-span">
-              <span className="form-label">Categories</span>
+              <span className="form-label">{t("attributeModal.categories")}</span>
               <div className="attribute-category-list">
                 {options.map((option, index) => (
                   <input
@@ -119,7 +120,7 @@ export function AttributeValuesModal({
                         current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)),
                       )
                     }
-                    placeholder={`Category ${index + 1}`}
+                    placeholder={t("attributeModal.categoryPlaceholder", { index: index + 1 })}
                   />
                 ))}
               </div>
@@ -128,7 +129,7 @@ export function AttributeValuesModal({
                 className="btn btn--small"
                 onClick={() => setOptions((current) => [...current, ""])}
               >
-                Add More
+                {t("attributeModal.addMore")}
               </button>
             </div>
           )}
@@ -176,8 +177,8 @@ export function AttributeValuesModal({
         {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
 
         <div className="form-actions" style={{ marginTop: 20 }}>
-          {onBack && <button className="btn" onClick={onBack} disabled={saving}>Back</button>}
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          {onBack && <button className="btn" onClick={onBack} disabled={saving}>{t("attributeModal.back")}</button>}
+          <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
           <button
             className="btn btn--primary"
             onClick={() =>
@@ -194,7 +195,7 @@ export function AttributeValuesModal({
             }
             disabled={saving || !name.trim() || (dataType === "categorical" && normalizeAttributeOptions(options).length < 2)}
           >
-            {saving ? "Saving..." : "Save Attribute"}
+            {saving ? t("attributeModal.saving") : t("attributeModal.save")}
           </button>
         </div>
       </div>

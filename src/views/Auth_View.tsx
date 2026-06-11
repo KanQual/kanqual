@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../i18n/provider";
 import startupLogo from "../assets/logo-outline.png";
 import { ComputerIcon, HelpIcon, NetworkIcon } from "../components/AppIcons";
 import {
@@ -10,18 +11,19 @@ import {
   saveRemoteSession,
 } from "../lib/authHistory";
 import { getRegisteredUserCount } from "../lib/pb";
+import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
 
 type Panel = "mode" | "local-accounts" | "remote-sessions" | "login" | "register" | "server";
 
-function fmtLastLogin(iso: string): string {
+function fmtLastLogin(iso: string, t: ReturnType<typeof useI18n>["t"]): string {
   const date = new Date(iso);
   const now = new Date();
   const days = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
-  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (days === 0) return `Today at ${time}`;
-  if (days === 1) return `Yesterday at ${time}`;
-  const shortDate = date.toLocaleDateString([], { month: "short", day: "numeric" });
-  return `${shortDate} at ${time}`;
+  const time = formatCurrentDateTime(date, { hour: "2-digit", minute: "2-digit" });
+  if (days === 0) return t("auth.relativeTime.todayAt", { time });
+  if (days === 1) return t("auth.relativeTime.yesterdayAt", { time });
+  const shortDate = formatCurrentDate(date, { month: "short", day: "numeric" });
+  return t("auth.relativeTime.shortDateAt", { date: shortDate, time });
 }
 
 function initials(name: string): string {
@@ -34,6 +36,7 @@ function initials(name: string): string {
 }
 
 export function AuthView() {
+  const { t } = useI18n();
   const { login, register, error, status, serverUrl, useLocalServer, useRemoteServer, testRemoteServer, returnToModeSelection, pb } = useAuth();
   const [panel, setPanel] = useState<Panel>("mode");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -53,23 +56,23 @@ export function AuthView() {
   const authMode: "login" | "register" = showRegisterOnly ? "register" : panel === "register" ? "register" : "login";
 
   const helpModal = helpOpen ? (
-    <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
+      <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
       <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-        <h2>Sign In Help</h2>
+        <h2>{t("auth.help.title")}</h2>
         <div className="app-settings-modal-body">
           <p className="settings-section-desc">
-            KanQual starts by asking whether you want to work locally on this device or connect to a project hosted by someone else.
+            {t("auth.help.intro")}
           </p>
           <ul className="settings-help-list">
-            <li>Work on your own device to start a local KanQual workspace on this machine.</li>
-            <li>Join a project on another device to connect to a host's shared KanQual server on your network.</li>
-            <li>Recent local accounts and remote connections are remembered on this device to make future sign-in faster.</li>
-            <li>The first local account created on a device becomes that device's KanQual administrator.</li>
-            <li>Returning to the mode chooser closes the current local workspace before switching modes.</li>
+            <li>{t("auth.help.localDevice")}</li>
+            <li>{t("auth.help.remoteProject")}</li>
+            <li>{t("auth.help.rememberedSessions")}</li>
+            <li>{t("auth.help.firstAdmin")}</li>
+            <li>{t("auth.help.modeChooser")}</li>
           </ul>
           <div className="form-actions">
             <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </div>
@@ -92,7 +95,7 @@ export function AuthView() {
         saveLocalAccount(email, name);
       }
     } catch (submitError) {
-      setLocalError(submitError instanceof Error ? submitError.message : "Something went wrong");
+      setLocalError(submitError instanceof Error ? submitError.message : t("auth.form.unknownError"));
     } finally {
       setSubmitting(false);
     }
@@ -108,7 +111,7 @@ export function AuthView() {
         setPanel("login");
       })
       .catch((serverError) => {
-        setLocalError(serverError instanceof Error ? serverError.message : "Could not connect to that server.");
+        setLocalError(serverError instanceof Error ? serverError.message : t("auth.server.connectError"));
       })
       .finally(() => {
         setSubmitting(false);
@@ -121,10 +124,10 @@ export function AuthView() {
     setTestingConnection(true);
     void testRemoteServer(tempUrl.trim())
       .then((normalizedUrl) => {
-        setServerNotice(`Reached ${normalizedUrl}. You can try connecting now.`);
+        setServerNotice(t("auth.server.reachedServer", { url: normalizedUrl }));
       })
       .catch((serverError) => {
-        setLocalError(serverError instanceof Error ? serverError.message : "Could not reach that server.");
+        setLocalError(serverError instanceof Error ? serverError.message : t("auth.server.reachError"));
       })
       .finally(() => {
         setTestingConnection(false);
@@ -141,7 +144,7 @@ export function AuthView() {
       setEmail("");
       setPassword("");
     } catch (modeError) {
-      setLocalError(modeError instanceof Error ? modeError.message : "Could not close the current workspace.");
+      setLocalError(modeError instanceof Error ? modeError.message : t("auth.server.closeWorkspaceError"));
     } finally {
       setSubmitting(false);
     }
@@ -153,7 +156,7 @@ export function AuthView() {
         <div className="auth-card auth-card--startup">
           <img src={startupLogo} alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
-          <p className="auth-starting">Starting up...</p>
+          <p className="auth-starting">{t("auth.startup.startingUp")}</p>
           {helpModal}
         </div>
       </div>
@@ -167,7 +170,7 @@ export function AuthView() {
           <div className="auth-mode-header">
             <img src="/logo.png" alt="KanQual" className="auth-logo auth-logo--mode" />
             <div className="auth-brand auth-brand--mode">KanQual</div>
-            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("auth.mode.openHelp")}>
               <HelpIcon className="users-help-icon" />
             </button>
           </div>
@@ -191,14 +194,14 @@ export function AuthView() {
                   const accounts = getLocalAccounts();
                   setPanel(accounts.length > 0 ? "local-accounts" : "login");
                 } catch (modeError) {
-                  setLocalError(modeError instanceof Error ? modeError.message : "Could not start local workspace.");
+                  setLocalError(modeError instanceof Error ? modeError.message : t("auth.mode.localStartError"));
                 }
               }}
             >
               <ComputerIcon className="mode-option-icon" />
-              <span className="mode-option-title">Work on my own device</span>
+              <span className="mode-option-title">{t("auth.mode.localTitle")}</span>
               <span className="mode-option-desc">
-                Store and analyse your data locally - nothing leaves this computer.
+                {t("auth.mode.localDescription")}
               </span>
             </button>
             <button
@@ -216,9 +219,9 @@ export function AuthView() {
               }}
             >
               <NetworkIcon className="mode-option-icon" />
-              <span className="mode-option-title">Join a project on another device</span>
+              <span className="mode-option-title">{t("auth.mode.remoteTitle")}</span>
               <span className="mode-option-desc">
-                Connect to a project hosted by someone else on your network.
+                {t("auth.mode.remoteDescription")}
               </span>
             </button>
           </div>
@@ -237,11 +240,11 @@ export function AuthView() {
           <img src="/logo.png" alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
           <div className="auth-help-row">
-            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("auth.mode.openHelp")}>
               <HelpIcon className="users-help-icon" />
             </button>
           </div>
-          <h2 className="auth-panel-title">Choose an account</h2>
+          <h2 className="auth-panel-title">{t("auth.localAccounts.title")}</h2>
           <ul className="account-list">
             {accounts.map((account) => (
               <li
@@ -258,7 +261,7 @@ export function AuthView() {
                   <div className="account-name">{account.name}</div>
                   <div className="account-email">{account.email}</div>
                 </div>
-                <div className="account-login-time">{fmtLastLogin(account.lastLogin)}</div>
+                <div className="account-login-time">{fmtLastLogin(account.lastLogin, t)}</div>
               </li>
             ))}
           </ul>
@@ -271,10 +274,10 @@ export function AuthView() {
                 setPanel("login");
               }}
             >
-              + Use a different account
+              {t("auth.localAccounts.useDifferent")}
             </button>
             <button className="btn btn--sm" onClick={() => void handleReturnToMode()} disabled={submitting}>
-              &larr; Back
+              &larr; {t("auth.localAccounts.back")}
             </button>
           </div>
         </div>
@@ -291,11 +294,11 @@ export function AuthView() {
           <img src="/logo.png" alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
           <div className="auth-help-row">
-            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("auth.mode.openHelp")}>
               <HelpIcon className="users-help-icon" />
             </button>
           </div>
-          <h2 className="auth-panel-title">Recent connections</h2>
+          <h2 className="auth-panel-title">{t("auth.remoteSessions.title")}</h2>
           <ul className="account-list">
             {sessions.map((session) => (
               <li
@@ -315,8 +318,8 @@ export function AuthView() {
                     setPassword("");
                     setLocalError(
                       sessionError instanceof Error
-                        ? `${sessionError.message} Review or test the saved address below.`
-                        : "Could not reach that saved server. Review or test the saved address below.",
+                        ? t("auth.remoteSessions.savedServerError", { message: sessionError.message })
+                        : t("auth.remoteSessions.savedServerFallback"),
                     );
                     setPanel("server");
                   }
@@ -328,7 +331,7 @@ export function AuthView() {
                   <div className="account-email">{session.email}</div>
                   <div className="account-server">{session.serverUrl}</div>
                 </div>
-                <div className="account-login-time">{fmtLastLogin(session.lastLogin)}</div>
+                <div className="account-login-time">{fmtLastLogin(session.lastLogin, t)}</div>
               </li>
             ))}
           </ul>
@@ -340,10 +343,10 @@ export function AuthView() {
                 setPanel("server");
               }}
             >
-              + Connect to a new server
+              {t("auth.remoteSessions.connectNew")}
             </button>
             <button className="btn btn--sm" onClick={() => void handleReturnToMode()} disabled={submitting}>
-              &larr; Back
+              &larr; {t("auth.remoteSessions.back")}
             </button>
           </div>
         </div>
@@ -359,27 +362,26 @@ export function AuthView() {
           <img src="/logo.png" alt="Kanqual" className="auth-logo" />
           <div className="auth-brand">Kanqual</div>
           <div className="auth-help-row">
-            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("auth.mode.openHelp")}>
               <HelpIcon className="users-help-icon" />
             </button>
           </div>
-          <p className="auth-tagline">Text annotation for qualitative research</p>
+          <p className="auth-tagline">{t("auth.server.tagline")}</p>
           <form onSubmit={handleServerSave} className="form">
-            <h2 className="auth-panel-title">Join a project on another device</h2>
+            <h2 className="auth-panel-title">{t("auth.server.title")}</h2>
             <p className="auth-hint">
-              Ask the project host for their IP address and port, then sign in
-              with your account on their server.
+              {t("auth.server.hostHint")}
             </p>
             <p className="auth-hint">
-              If this fails, ask the host to open Kanqual and switch to network sharing mode.
+              {t("auth.server.modeHint")}
             </p>
             <label className="form-label">
-              Host IP address
+              {t("auth.server.hostLabel")}
               <input
                 className="form-input"
                 value={tempUrl}
                 onChange={(e) => setTempUrl(e.target.value)}
-                placeholder="e.g. 192.168.1.5:8090"
+                placeholder={t("auth.server.hostPlaceholder")}
                 autoFocus
               />
             </label>
@@ -393,15 +395,15 @@ export function AuthView() {
                     setPanel("remote-sessions");
                   } else {
                     void handleReturnToMode();
-                  }
-                }}
-              >
-                Back
+                }
+              }}
+            >
+                {t("auth.server.back")}
               </button>
               <button type="button" className="btn" onClick={handleServerTest} disabled={testingConnection || submitting}>
-                {testingConnection ? "Testing..." : "Test Connection"}
+                {testingConnection ? t("auth.server.testing") : t("auth.server.testConnection")}
               </button>
-              <button type="submit" className="btn btn--primary">Connect</button>
+              <button type="submit" className="btn btn--primary">{t("auth.server.connect")}</button>
             </div>
             {serverNotice && <p className="settings-success">{serverNotice}</p>}
             {localError && <p className="auth-error">{localError}</p>}
@@ -417,11 +419,11 @@ export function AuthView() {
       <div className="auth-card">
         <div className="auth-brand">Kanqual</div>
         <div className="auth-help-row">
-          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open sign-in help">
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("auth.mode.openHelp")}>
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
-        <p className="auth-tagline">Text annotation for qualitative research</p>
+        <p className="auth-tagline">{t("auth.form.tagline")}</p>
 
         <form onSubmit={handleSubmit} className="form">
           {!showRegisterOnly && (
@@ -431,35 +433,35 @@ export function AuthView() {
                 className={`auth-tab ${panel === "login" ? "auth-tab--active" : ""}`}
                 onClick={() => setPanel("login")}
               >
-                Sign in
+                {t("auth.form.signIn")}
               </button>
               <button
                 type="button"
                 className={`auth-tab ${panel === "register" ? "auth-tab--active" : ""}`}
                 onClick={() => setPanel("register")}
               >
-                Create account
+                {t("auth.form.createAccount")}
               </button>
             </div>
           )}
 
           {showRegisterOnly && (
             <div className="auth-admin-notice">
-              <strong>This account will be the administrator on this device.</strong>
+              <strong>{t("auth.form.firstAdminTitle")}</strong>
               <span>
-                It will have access to all local KanQual information, including project and user administration, editing, deletion, and app-data clearing tools.
+                {t("auth.form.firstAdminBody")}
               </span>
             </div>
           )}
 
           {(panel === "register" || showRegisterOnly) && (
             <label className="form-label">
-              Name
+              {t("auth.form.name")}
               <input
                 className="form-input"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
+                placeholder={t("auth.form.namePlaceholder")}
                 required
                 autoFocus
               />
@@ -467,25 +469,25 @@ export function AuthView() {
           )}
 
           <label className="form-label">
-            Email
+            {t("auth.form.email")}
             <input
               className="form-input"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder={t("auth.form.emailPlaceholder")}
               required
             />
           </label>
 
           <label className="form-label">
-            Password
+            {t("auth.form.password")}
             <input
               className="form-input"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="........"
+              placeholder={t("auth.form.passwordPlaceholder")}
               required
               minLength={8}
               autoFocus={!!email}
@@ -500,8 +502,8 @@ export function AuthView() {
             {submitting
               ? "Please wait..."
               : authMode === "login"
-                ? "Sign in"
-                : "Create account"}
+                ? t("auth.form.signIn")
+                : t("auth.form.createAccount")}
           </button>
 
           <button
@@ -525,11 +527,11 @@ export function AuthView() {
               }
             }}
           >
-            &larr; Back
+            &larr; {t("auth.form.back")}
           </button>
 
           <p className="auth-server-info">
-            {isLocal ? "Working with local data" : `Connected to ${serverUrl}`}
+            {isLocal ? t("auth.form.localData") : t("auth.form.connectedTo", { serverUrl })}
           </p>
         </form>
       </div>

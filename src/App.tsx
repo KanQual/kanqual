@@ -1,7 +1,9 @@
-import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Component, type ComponentType, type ErrorInfo, type ReactNode, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { StoreProvider, useStore } from "./context/StoreContext";
-import { readAppSettings } from "./lib/appSettings";
+import { I18nProvider } from "./i18n";
+import { useI18n } from "./i18n/provider";
+import { APP_SETTINGS_KEY, readAppSettings } from "./lib/appSettings";
 import { getAppRuntimeInfo } from "./lib/dataRoot";
 import {
   loadProjectBackupBannerIssue,
@@ -28,6 +30,125 @@ function describeUnknownError(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+type AppErrorBoundaryState = {
+  errorMessage: string | null;
+  componentStack: string;
+};
+
+type AppErrorBoundaryCopy = {
+  title: string;
+  body: string;
+  stackTitle: string;
+  reload: string;
+  reset: string;
+};
+
+class AppErrorBoundary extends Component<{ children: ReactNode; copy: AppErrorBoundaryCopy }, AppErrorBoundaryState> {
+  state: AppErrorBoundaryState = {
+    errorMessage: null,
+    componentStack: "",
+  };
+
+  static getDerivedStateFromError(error: unknown): AppErrorBoundaryState {
+    return {
+      errorMessage: describeUnknownError(error),
+      componentStack: "",
+    };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error("App render failed:", error, info);
+    this.setState({
+      errorMessage: describeUnknownError(error),
+      componentStack: info.componentStack ?? "",
+    });
+  }
+
+  private resetUiState() {
+    if (typeof window === "undefined") return;
+
+    sessionStorage.removeItem("kanqual:open-app-settings-modal");
+    sessionStorage.removeItem("kanqual:open-project-settings-modal");
+    sessionStorage.removeItem("kanqual:open-project-users-tab");
+
+    try {
+      const raw = localStorage.getItem(APP_SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { ui?: { locale?: string } };
+        localStorage.setItem(
+          APP_SETTINGS_KEY,
+          JSON.stringify({
+            ...parsed,
+            ui: {
+              ...parsed.ui,
+              locale: "en",
+            },
+          }),
+        );
+      }
+    } catch (error) {
+      console.warn("Failed to reset app locale after render crash:", error);
+    }
+  }
+
+  render() {
+    if (!this.state.errorMessage) {
+      return this.props.children;
+    }
+
+    return (
+      <div className="auth-screen">
+        <div className="auth-card" style={{ maxWidth: 760 }}>
+          <div className="auth-brand">Kanqual</div>
+          <h2 className="auth-panel-title">{this.props.copy.title}</h2>
+          <p className="auth-hint">{this.props.copy.body}</p>
+          <p className="auth-error">{this.state.errorMessage}</p>
+          {this.state.componentStack ? (
+            <pre className="settings-code-line" style={{ whiteSpace: "pre-wrap" }}>
+              {this.props.copy.stackTitle}
+              {"\n"}
+              {this.state.componentStack.trim()}
+            </pre>
+          ) : null}
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={() => window.location.reload()}>
+              {this.props.copy.reload}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => {
+                this.resetUiState();
+                window.location.reload();
+              }}
+            >
+              {this.props.copy.reset}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
+function AppErrorBoundaryWithI18n({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
+
+  return (
+    <AppErrorBoundary
+      copy={{
+        title: t("app.errorBoundary.title"),
+        body: t("app.errorBoundary.body"),
+        stackTitle: t("app.errorBoundary.stackTitle"),
+        reload: t("app.errorBoundary.reload"),
+        reset: t("app.errorBoundary.reset"),
+      }}
+    >
+      {children}
+    </AppErrorBoundary>
+  );
 }
 
 const ProjectsViewLazy = lazyView(() => import("./views/Projects_View").then((m) => ({ default: m.ProjectsView })));
@@ -143,12 +264,14 @@ function UpdateAvailableBanner({
   releaseUrl: string;
   onDismiss: () => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="embedding-build-banner embedding-build-banner--completed">
       <div className="embedding-build-banner-copy">
-        <strong>Update available</strong>
-        <span>Kanqual {version} is available.</span>
-        <span>Download the latest release from GitHub when you’re ready to update.</span>
+        <strong>{t("app.updateBanner.title")}</strong>
+        <span>{t("app.updateBanner.versionBody", { version })}</span>
+        <span>{t("app.updateBanner.detail")}</span>
       </div>
       <div className="embedding-build-banner-actions">
         <a
@@ -157,10 +280,10 @@ function UpdateAvailableBanner({
           target="_blank"
           rel="noreferrer"
         >
-          View release
+          {t("app.updateBanner.viewRelease")}
         </a>
         <button type="button" className="btn" onClick={onDismiss}>
-          Dismiss
+          {t("common.dismiss")}
         </button>
       </div>
     </div>
@@ -168,6 +291,7 @@ function UpdateAvailableBanner({
 }
 
 function ProjectBackupBanner() {
+  const { t } = useI18n();
   const { activeProject, canCurrentUser, setView } = useStore();
   const [issue, setIssue] = useState<ProjectBackupBannerIssue | null>(null);
 
@@ -210,20 +334,20 @@ function ProjectBackupBanner() {
   const bannerCopy =
     issue.kind === "failed"
       ? {
-          title: "Automatic backup failed",
-          detail: "Review backup settings and create a fresh backup to restore protection for this project.",
-          actionLabel: "Open Backups",
+          title: t("app.backupBanner.failedTitle"),
+          detail: t("app.backupBanner.failedDetail"),
+          actionLabel: t("app.backupBanner.failedAction"),
         }
       : issue.kind === "interrupted"
         ? {
-            title: "Backup interrupted",
-            detail: "Review the backup list and create a new backup to confirm the project is protected.",
-            actionLabel: "Review Backups",
+            title: t("app.backupBanner.interruptedTitle"),
+            detail: t("app.backupBanner.interruptedDetail"),
+            actionLabel: t("app.backupBanner.interruptedAction"),
           }
         : {
-            title: "No backups yet",
-            detail: "Open Backups to create the first backup for this project and confirm retention settings.",
-            actionLabel: "Set Up Backups",
+            title: t("app.backupBanner.missingTitle"),
+            detail: t("app.backupBanner.missingDetail"),
+            actionLabel: t("app.backupBanner.missingAction"),
           };
 
   function openBackupSettings() {
@@ -249,6 +373,7 @@ function ProjectBackupBanner() {
 }
 
 function ForcePasswordChangeView() {
+  const { t } = useI18n();
   const { user, changePassword, logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -260,15 +385,15 @@ function ForcePasswordChangeView() {
     e.preventDefault();
     setError("");
     if (!currentPassword || !newPassword || !confirmPassword) {
-      setError("Enter the temporary password and the new password twice.");
+      setError(t("app.forcePassword.enterTemporary"));
       return;
     }
     if (newPassword.length < 8) {
-      setError("New password must be at least 8 characters.");
+      setError(t("app.forcePassword.passwordTooShort"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError("New passwords do not match.");
+      setError(t("app.forcePassword.passwordsDoNotMatch"));
       return;
     }
     setSaving(true);
@@ -278,7 +403,7 @@ function ForcePasswordChangeView() {
       setNewPassword("");
       setConfirmPassword("");
     } catch (changeError) {
-      setError(changeError instanceof Error ? changeError.message : "Password change failed.");
+      setError(changeError instanceof Error ? changeError.message : t("app.forcePassword.passwordChangeFailed"));
     } finally {
       setSaving(false);
     }
@@ -288,17 +413,17 @@ function ForcePasswordChangeView() {
     <div className="auth-screen">
       <div className="auth-card">
         <div className="auth-brand">Kanqual</div>
-        <p className="auth-tagline">Text annotation for qualitative research</p>
+        <p className="auth-tagline">{t("app.forcePassword.tagline")}</p>
         <form onSubmit={handleSubmit} className="form">
-          <h2 className="auth-panel-title">Create a New Password</h2>
+          <h2 className="auth-panel-title">{t("app.forcePassword.title")}</h2>
           <p className="auth-hint">
-            This account was created with a temporary password. You must choose a new password before continuing.
+            {t("app.forcePassword.temporaryNotice")}
           </p>
           <p className="auth-hint">
-            Signed in as <strong>{user?.email}</strong>
+            {t("app.forcePassword.signedInAs", { email: user?.email ?? "" })}
           </p>
           <label className="form-label">
-            Temporary password
+            {t("app.forcePassword.temporaryPassword")}
             <input
               className="form-input"
               type="password"
@@ -309,7 +434,7 @@ function ForcePasswordChangeView() {
             />
           </label>
           <label className="form-label">
-            New password
+            {t("app.forcePassword.newPassword")}
             <input
               className="form-input"
               type="password"
@@ -319,7 +444,7 @@ function ForcePasswordChangeView() {
             />
           </label>
           <label className="form-label">
-            Confirm new password
+            {t("app.forcePassword.confirmPassword")}
             <input
               className="form-input"
               type="password"
@@ -331,10 +456,10 @@ function ForcePasswordChangeView() {
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
             <button type="button" className="btn" onClick={logout} disabled={saving}>
-              Sign Out
+              {t("common.signOut")}
             </button>
             <button type="submit" className="btn btn--primary" disabled={saving}>
-              {saving ? "Updating..." : "Set New Password"}
+              {saving ? t("app.forcePassword.updating") : t("app.forcePassword.setPassword")}
             </button>
           </div>
         </form>
@@ -344,6 +469,7 @@ function ForcePasswordChangeView() {
 }
 
 function ProjectEmbeddingBuildBanner() {
+  const { t } = useI18n();
   const {
     projectEmbeddingBuildStatus,
     projectEmbeddingBuildBannerOpen,
@@ -383,27 +509,33 @@ function ProjectEmbeddingBuildBanner() {
     <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
       <div className="embedding-build-banner-copy">
         <strong>
-          {phase === "running" && "Building local embeddings"}
-          {phase === "cancelling" && "Cancelling embedding build"}
-          {phase === "completed" && "Embedding build complete"}
-          {phase === "cancelled" && "Embedding build cancelled"}
-          {phase === "error" && "Embedding build failed"}
+          {phase === "running" && t("app.embeddingBuild.runningTitle")}
+          {phase === "cancelling" && t("app.embeddingBuild.cancellingTitle")}
+          {phase === "completed" && t("app.embeddingBuild.completedTitle")}
+          {phase === "cancelled" && t("app.embeddingBuild.cancelledTitle")}
+          {phase === "error" && t("app.embeddingBuild.errorTitle")}
         </strong>
         <span>
           {projectEmbeddingBuildStatus.message ??
-            `${projectEmbeddingBuildStatus.completedItems} of ${projectEmbeddingBuildStatus.totalItems} items processed`}
+            t("app.embeddingBuild.itemsProcessed", {
+              completed: projectEmbeddingBuildStatus.completedItems,
+              total: projectEmbeddingBuildStatus.totalItems,
+            })}
         </span>
         {isActive && (
           <div className="embedding-build-banner-meta">
-            {bannerProjectName && <span>Project: {bannerProjectName}</span>}
-            <span>Progress: {formatPercent(projectEmbeddingBuildStatus.progressPercent)}</span>
-            <span>
-              Items: {projectEmbeddingBuildStatus.completedItems} / {projectEmbeddingBuildStatus.totalItems}
-            </span>
-            <span>ETA: {etaSeconds != null ? formatDurationEstimate(etaSeconds) : "Estimating..."}</span>
+            {bannerProjectName && <span>{t("app.embeddingBuild.project", { name: bannerProjectName })}</span>}
+            <span>{t("app.embeddingBuild.progress", { value: formatPercent(projectEmbeddingBuildStatus.progressPercent) })}</span>
+            <span>{t("app.embeddingBuild.items", {
+              completed: projectEmbeddingBuildStatus.completedItems,
+              total: projectEmbeddingBuildStatus.totalItems,
+            })}</span>
+            <span>{t("app.embeddingBuild.eta", {
+              value: etaSeconds != null ? formatDurationEstimate(etaSeconds) : t("app.embeddingBuild.estimating"),
+            })}</span>
             {projectEmbeddingBuildStatus.currentLabel && (
               <span title={projectEmbeddingBuildStatus.currentLabel}>
-                Current: {projectEmbeddingBuildStatus.currentLabel}
+                {t("app.embeddingBuild.current", { label: projectEmbeddingBuildStatus.currentLabel })}
               </span>
             )}
           </div>
@@ -427,11 +559,11 @@ function ProjectEmbeddingBuildBanner() {
       <div className="embedding-build-banner-actions">
         {isActive ? (
           <button type="button" className="btn" onClick={() => void cancelProjectEmbeddingBuild()}>
-            {phase === "cancelling" ? "Cancelling..." : "Cancel"}
+            {phase === "cancelling" ? t("app.embeddingBuild.cancellingAction") : t("app.embeddingBuild.cancelAction")}
           </button>
         ) : (
           <button type="button" className="btn" onClick={dismissProjectEmbeddingBanner}>
-            Dismiss
+            {t("common.dismiss")}
           </button>
         )}
       </div>
@@ -440,6 +572,7 @@ function ProjectEmbeddingBuildBanner() {
 }
 
 function DocumentProcessingBanner() {
+  const { t } = useI18n();
   const {
     documentProcessingStatus,
     documentProcessingBannerOpen,
@@ -459,21 +592,27 @@ function DocumentProcessingBanner() {
     <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
       <div className="embedding-build-banner-copy">
         <strong>
-          {phase === "running" && "Processing documents"}
-          {phase === "completed" && "Document processing complete"}
-          {phase === "error" && "Document processing failed"}
+          {phase === "running" && t("app.documentProcessing.runningTitle")}
+          {phase === "completed" && t("app.documentProcessing.completedTitle")}
+          {phase === "error" && t("app.documentProcessing.errorTitle")}
         </strong>
         <span>{documentProcessingStatus.message}</span>
         {isActive && documentProcessingStatus.currentChunkIndex && documentProcessingStatus.currentChunkTotal && (
           <span>
-            Chunk {documentProcessingStatus.currentChunkIndex} of {documentProcessingStatus.currentChunkTotal}.
+            {t("app.documentProcessing.chunkProgress", {
+              index: documentProcessingStatus.currentChunkIndex,
+              total: documentProcessingStatus.currentChunkTotal,
+            })}
           </span>
         )}
         {failures.length > 0 && (
           <div className="embedding-build-banner-meta embedding-build-banner-meta--stacked">
             {failures.map((failure, index) => (
               <span key={`${failure.documentName}-${index}`}>
-                Error in {failure.documentName}: {failure.message}
+                {t("app.documentProcessing.errorLine", {
+                  documentName: failure.documentName,
+                  message: failure.message,
+                })}
               </span>
             ))}
           </div>
@@ -492,7 +631,7 @@ function DocumentProcessingBanner() {
       <div className="embedding-build-banner-actions">
         {!isActive && (
           <button type="button" className="btn" onClick={dismissDocumentProcessingBanner}>
-            Dismiss
+            {t("common.dismiss")}
           </button>
         )}
       </div>
@@ -501,6 +640,7 @@ function DocumentProcessingBanner() {
 }
 
 function EmbeddingModelDownloadBanner() {
+  const { t, formatNumber } = useI18n();
   const {
     embeddingModelDownloadStatus,
     embeddingModelDownloadPreflight,
@@ -527,42 +667,42 @@ function EmbeddingModelDownloadBanner() {
     <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
       <div className="embedding-build-banner-copy">
         <strong>
-          {phase === "downloading" && "Downloading embedding model"}
-          {phase === "cancelling" && "Cancelling embedding model download"}
-          {phase === "completed" && "Embedding model download complete"}
-          {phase === "cancelled" && "Embedding model download cancelled"}
-          {phase === "error" && "Embedding model download failed"}
+          {phase === "downloading" && t("app.embeddingDownload.downloadingTitle")}
+          {phase === "cancelling" && t("app.embeddingDownload.cancellingTitle")}
+          {phase === "completed" && t("app.embeddingDownload.completedTitle")}
+          {phase === "cancelled" && t("app.embeddingDownload.cancelledTitle")}
+          {phase === "error" && t("app.embeddingDownload.errorTitle")}
         </strong>
         <span>
           {embeddingModelDownloadStatus.message ??
             (embeddingModelDownloadStatus.progressPercent != null
-              ? `${Math.round(embeddingModelDownloadStatus.progressPercent)}% downloaded`
-              : "Preparing download...")}
+              ? t("app.embeddingDownload.downloadedPercent", { percent: Math.round(embeddingModelDownloadStatus.progressPercent) })
+              : t("app.embeddingDownload.preparing"))}
         </span>
         {embeddingModelDownloadStatus.progressPercent != null && (
-          <span>Download progress: {Math.round(embeddingModelDownloadStatus.progressPercent)}%</span>
+          <span>{t("app.embeddingDownload.downloadProgress", { percent: Math.round(embeddingModelDownloadStatus.progressPercent) })}</span>
         )}
         {embeddingModelDownloadPreflight && (
           <>
             <span>
-              Total model size: {formatGigabytes(totalBytes)}
+              {t("app.embeddingDownload.totalSize", { size: formatGigabytes(totalBytes) })}
             </span>
             <span>
-              Already on device: {formatGigabytes(liveDownloadedBytes)}
+              {t("app.embeddingDownload.alreadyOnDevice", { size: formatGigabytes(liveDownloadedBytes) })}
             </span>
             <span>
-              Remaining to download: {formatGigabytes(liveRemainingBytes)}
+              {t("app.embeddingDownload.remainingToDownload", { size: formatGigabytes(liveRemainingBytes) })}
             </span>
             {(embeddingModelDownloadPreflight.manifestAvailable || isActive) &&
               liveRemainingFiles != null && (
                 <span>
-                  Remaining file count: {liveRemainingFiles}
+                  {t("app.embeddingDownload.remainingFileCount", { count: formatNumber(liveRemainingFiles) })}
                 </span>
               )}
           </>
         )}
         {embeddingModelDownloadStatus.currentFile && (
-          <span>Current file: {embeddingModelDownloadStatus.currentFile}</span>
+          <span>{t("app.embeddingDownload.currentFile", { name: embeddingModelDownloadStatus.currentFile })}</span>
         )}
         {isActive && (
           <div className="embedding-build-banner-progress">
@@ -583,11 +723,11 @@ function EmbeddingModelDownloadBanner() {
       <div className="embedding-build-banner-actions">
         {isActive ? (
           <button type="button" className="btn" onClick={() => void cancelEmbeddingModelDownload()}>
-            {phase === "cancelling" ? "Cancelling..." : "Cancel"}
+            {phase === "cancelling" ? t("app.embeddingDownload.cancellingAction") : t("app.embeddingDownload.cancelAction")}
           </button>
         ) : (
           <button type="button" className="btn" onClick={dismissEmbeddingModelDownloadBanner}>
-            Dismiss
+            {t("common.dismiss")}
           </button>
         )}
       </div>
@@ -596,11 +736,13 @@ function EmbeddingModelDownloadBanner() {
 }
 
 function ViewLoadingFallback() {
+  const { t } = useI18n();
+
   return (
     <div className="view-loading-state" role="status" aria-live="polite">
       <div className="view-loading-card">
-        <strong>Loading view...</strong>
-        <span>Preparing the tools and data for this section.</span>
+        <strong>{t("app.viewLoading.title")}</strong>
+        <span>{t("app.viewLoading.detail")}</span>
       </div>
     </div>
   );
@@ -920,7 +1062,11 @@ function AuthGate() {
 export default function App() {
   return (
     <AuthProvider>
-      <AuthGate />
+      <I18nProvider>
+        <AppErrorBoundaryWithI18n>
+          <AuthGate />
+        </AppErrorBoundaryWithI18n>
+      </I18nProvider>
     </AuthProvider>
   );
 }

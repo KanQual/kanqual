@@ -337,6 +337,9 @@ body {
   line-height: 1;
   -webkit-appearance: none;
   appearance: none;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .brand-network-badge {
@@ -4491,6 +4494,15 @@ body {
   font-size: clamp(2.25rem, 2vw + 1rem, 2.9rem);
   font-weight: 700;
   margin: 0;
+}
+
+.report-action-group {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .annotate-title {

@@ -4,10 +4,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { readFile, readTextFile } from "@tauri-apps/plugin-fs";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../i18n/provider";
 import { importProjectBackupIntoProject, importRefiQdaIntoProject, parseProjectBackupJson, parseRefiQdaProject } from "../lib/projectExport";
 import { htmlToPlainText } from "../lib/htmlText";
 import type { PendingImportedUser, Project } from "../types";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
 
 const LOCAL_PB_URL = "http://127.0.0.1:8090";
 type NewProjectMode = "choice" | "create" | "import" | "import-encrypted" | "import-refi" | null;
@@ -24,7 +26,7 @@ function importedProjectName(baseName: string, existingProjects: Project[]): str
   if (!hasCollision) return trimmed;
 
   const stamp = new Date()
-    .toLocaleString([], {
+    .toLocaleString("en-CA", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -65,6 +67,7 @@ function mismatchNotes(summary: {
 }
 
 export function ProjectsView() {
+  const { t } = useI18n();
   const {
     pb,
     projects,
@@ -185,7 +188,7 @@ export function ProjectsView() {
       setMode(null);
       openProject(project, activeProject);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create project");
+      setError(err instanceof Error ? err.message : t("projectsView.errors.createFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -213,7 +216,9 @@ export function ProjectsView() {
 
       const project = await createProject(importedName, importedDescription);
       const summary = await importProjectBackupIntoProject(pb, data, project.id);
-      await logAction(project.id, "project.import", "Imported project from Kanqual JSON backup");
+      await logAction(project.id, "project.import", t("projectLog.labels.projectImportJson"), undefined, {
+        importFormat: "json",
+      });
       setMode(null);
       if (summary.requiresUserResolution) {
         setResolutionIntro({
@@ -225,7 +230,7 @@ export function ProjectsView() {
         setImportCompleteProject(project);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to import project");
+      setError(err instanceof Error ? err.message : t("projectsView.errors.importFailed"));
     } finally {
       setImporting(false);
     }
@@ -233,7 +238,7 @@ export function ProjectsView() {
 
   async function handleImportEncryptedProject() {
     if (!encryptedImportPassword) {
-      setError("Enter the encrypted backup password first.");
+      setError(t("projectsView.errors.enterEncryptedPassword"));
       return;
     }
 
@@ -256,7 +261,7 @@ export function ProjectsView() {
       setEncryptedImportSource(raw);
       setEncryptedImportPreview(preview);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to read encrypted project backup");
+      setError(err instanceof Error ? err.message : t("projectsView.errors.readEncryptedFailed"));
     } finally {
       setImporting(false);
     }
@@ -264,7 +269,7 @@ export function ProjectsView() {
 
   async function handleConfirmEncryptedProjectImport() {
     if (!encryptedImportPassword || !encryptedImportSource) {
-      setError("Choose an encrypted backup and preview it before importing.");
+      setError(t("projectsView.errors.previewEncryptedFirst"));
       return;
     }
 
@@ -288,7 +293,7 @@ export function ProjectsView() {
 
       const project = await createProject(importedName, importedDescription);
       const summary = await importProjectBackupIntoProject(pb, data, project.id);
-      await logAction(project.id, "project.encrypted_backup.import", "Imported project from encrypted Kanqual backup", undefined, {
+      await logAction(project.id, "project.encrypted_backup.import", t("projectLog.labels.projectImportEncryptedBackup"), undefined, {
         entityType: "encrypted_project_backup",
         importFormat: "kqbe",
         passwordProtected: true,
@@ -313,7 +318,7 @@ export function ProjectsView() {
         setImportCompleteProject(project);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to import encrypted project backup");
+      setError(err instanceof Error ? err.message : t("projectsView.errors.importEncryptedFailed"));
     } finally {
       setImporting(false);
     }
@@ -334,11 +339,13 @@ export function ProjectsView() {
       const importedName = importedProjectName(data.name, projects);
       const project = await createProject(importedName, data.description);
       await importRefiQdaIntoProject(pb, data, project.id);
-      await logAction(project.id, "project.import", "Imported project from REFI-QDA project");
+      await logAction(project.id, "project.import", t("projectLog.labels.projectImportRefiQda"), undefined, {
+        importFormat: "qdpx",
+      });
       setMode(null);
       openProject(project, activeProject);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to import REFI-QDA project");
+      setError(err instanceof Error ? err.message : t("projectsView.errors.importRefiFailed"));
     } finally {
       setImporting(false);
     }
@@ -356,7 +363,7 @@ export function ProjectsView() {
       setConfirmDeleteProject(null);
       setDeleteConfirmationName("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete project");
+      setError(err instanceof Error ? err.message : t("projectsView.errors.deleteFailed"));
     } finally {
       setDeletingProjectId(null);
     }
@@ -367,13 +374,13 @@ export function ProjectsView() {
       <header className="view-header">
         <div className="view-title-with-help">
           <h1>Projects</h1>
-          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open projects help">
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("projectsView.help.openHelp")}>
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
         {isLocal && (
           <button className="btn btn--primary" onClick={() => goToMode("choice")}>
-            + New Project
+            {t("projectsView.actions.newProject")}
           </button>
         )}
       </header>
@@ -381,36 +388,36 @@ export function ProjectsView() {
       {mode === "choice" && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>New Project</h2>
+            <h2>{t("projectsView.newProject.title")}</h2>
             <p className="import-project-copy">
-              Start a blank project or bring an existing project into this workspace.
+              {t("projectsView.newProject.body")}
             </p>
             <div className="mode-options-shell">
               <button className="mode-option mode-option--primary" onClick={() => goToMode("create")}>
-                <span className="mode-option-title">Create Empty Project</span>
-                <span className="mode-option-desc">Start from scratch with a blank Kanqual project.</span>
+                <span className="mode-option-title">{t("projectsView.newProject.createTitle")}</span>
+                <span className="mode-option-desc">{t("projectsView.newProject.createDescription")}</span>
               </button>
               <div className="mode-options-group">
-                <div className="mode-options-group-label">Import Existing</div>
+                <div className="mode-options-group-label">{t("projectsView.newProject.importExisting")}</div>
                 <div className="mode-options">
                   <button className="mode-option" onClick={() => goToMode("import")}>
-                    <span className="mode-option-title">Import Project</span>
-                    <span className="mode-option-desc">Upload a Kanqual JSON backup exported from Project Settings.</span>
+                    <span className="mode-option-title">{t("projectsView.newProject.importTitle")}</span>
+                    <span className="mode-option-desc">{t("projectsView.newProject.importDescription")}</span>
                   </button>
                   <button className="mode-option" onClick={() => goToMode("import-encrypted")}>
-                    <span className="mode-option-title">Import Encrypted Backup</span>
-                    <span className="mode-option-desc">Upload a password-protected Kanqual encrypted backup for safe off-site storage.</span>
+                    <span className="mode-option-title">{t("projectsView.newProject.importEncryptedTitle")}</span>
+                    <span className="mode-option-desc">{t("projectsView.newProject.importEncryptedDescription")}</span>
                   </button>
                   <button className="mode-option" onClick={() => goToMode("import-refi")}>
-                    <span className="mode-option-title">Import REFI-QDA Project</span>
-                    <span className="mode-option-desc">Upload a standard .qdpx file from Kanqual, QualCoder, or another QDA tool.</span>
+                    <span className="mode-option-title">{t("projectsView.newProject.importRefiTitle")}</span>
+                    <span className="mode-option-desc">{t("projectsView.newProject.importRefiDescription")}</span>
                   </button>
                 </div>
               </div>
             </div>
             <div className="form-actions">
               <button type="button" className="btn" onClick={closeModal}>
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           </div>
@@ -516,7 +523,7 @@ export function ProjectsView() {
                     </div>
                     <div>
                       <strong>Created</strong>
-                      <span>{encryptedImportPreview.createdAt ? new Date(encryptedImportPreview.createdAt).toLocaleString() : "-"}</span>
+                      <span>{encryptedImportPreview.createdAt ? formatCurrentDateTime(encryptedImportPreview.createdAt) : "-"}</span>
                     </div>
                     <div>
                       <strong>Backup version</strong>
@@ -701,20 +708,20 @@ export function ProjectsView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Projects Help</h2>
+            <h2>{t("projectsView.help.title")}</h2>
             <div className="app-settings-modal-body">
               <p className="settings-section-desc">
-                The Projects page is where you open, create, import, and manage projects available in the current workspace.
+                {t("projectsView.help.intro")}
               </p>
               <ul className="settings-help-list">
-                <li>On a local workspace, use New Project to create an empty project or import an existing one.</li>
-                <li>KanQual can import plain JSON backups, encrypted backups, and REFI-QDA .qdpx projects.</li>
-                <li>Project deletion is limited to project owners and requires typing the project name to confirm.</li>
-                <li>When imports include users that do not match this workspace, KanQual will pause and ask you to resolve those accounts.</li>
+                <li>{t("projectsView.help.line1")}</li>
+                <li>{t("projectsView.help.line2")}</li>
+                <li>{t("projectsView.help.line3")}</li>
+                <li>{t("projectsView.help.line4")}</li>
               </ul>
               <div className="form-actions">
                 <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                  Close
+                  {t("common.close")}
                 </button>
               </div>
             </div>
@@ -724,11 +731,11 @@ export function ProjectsView() {
 
       {projectsLoading ? (
         <div className="empty-state">
-          <p>Loading projects...</p>
+          <p>{t("projectsView.loading")}</p>
         </div>
       ) : projects.length === 0 ? (
         <div className="empty-state">
-          <p>No projects yet. Create one to get started.</p>
+          <p>{t("projectsView.empty")}</p>
         </div>
       ) : (
         <>
@@ -745,14 +752,14 @@ export function ProjectsView() {
                     <button
                       type="button"
                       className="btn project-card-menu-button"
-                      aria-label={`Project actions for ${p.name}`}
+                      aria-label={t("projectsView.card.actionsFor", { name: p.name })}
                       aria-expanded={menuProjectId === p.id}
                       onClick={(e) => {
                         e.stopPropagation();
                         setMenuProjectId((current) => current === p.id ? null : p.id);
                       }}
                     >
-                      Actions
+                      {t("projectsView.card.actions")}
                     </button>
                     {menuProjectId === p.id && (
                       <div
@@ -769,7 +776,7 @@ export function ProjectsView() {
                             openProject(p, activeProject);
                           }}
                         >
-                          Open Project
+                          {t("projectsView.card.openProject")}
                         </button>
                         {ownedProjectIds.has(p.id) && (
                           <button
@@ -783,7 +790,7 @@ export function ProjectsView() {
                               setDeleteConfirmationName("");
                             }}
                           >
-                            Delete Project
+                            {t("projectsView.card.deleteProject")}
                           </button>
                         )}
                       </div>
@@ -796,17 +803,17 @@ export function ProjectsView() {
                 <div className="project-card-meta">
                   {p.createdBy && (
                     <div className="project-card-meta-row">
-                      <span className="project-card-meta-label">Created by</span>
+                      <span className="project-card-meta-label">{t("projectsView.card.createdBy")}</span>
                       <span>{p.createdBy}</span>
                     </div>
                   )}
                   <div className="project-card-meta-row">
-                    <span className="project-card-meta-label">Created</span>
-                    <span>{new Date(p.createdAt).toLocaleDateString()}</span>
+                    <span className="project-card-meta-label">{t("projectsView.card.created")}</span>
+                    <span>{formatCurrentDate(p.createdAt)}</span>
                   </div>
                   <div className="project-card-meta-row">
-                    <span className="project-card-meta-label">Last updated</span>
-                    <span>{new Date(p.updatedAt).toLocaleDateString()}</span>
+                    <span className="project-card-meta-label">{t("projectsView.card.lastUpdated")}</span>
+                    <span>{formatCurrentDate(p.updatedAt)}</span>
                   </div>
                 </div>
               </li>

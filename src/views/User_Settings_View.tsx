@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
+import { useI18n } from "../i18n/provider";
 import { ThemeManagerModal } from "./App_Settings_View";
 import { HelpIcon } from "../components/AppIcons";
+import { formatCurrentDateTime } from "../i18n/formatters";
 import {
   applyDensity,
   applyFontSize,
@@ -65,7 +67,7 @@ function readRecentLimit(): number {
 function fmtRecentDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleString([], {
+  return formatCurrentDateTime(date, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -74,6 +76,7 @@ function fmtRecentDate(value: string): string {
 }
 
 export function UserSettingsView() {
+  const { t } = useI18n();
   const { user, updateProfile, changePassword } = useAuth();
   const { projects, openProject, activeProject } = useStore();
   const [name, setName] = useState(user?.name ?? "");
@@ -109,9 +112,9 @@ export function UserSettingsView() {
     setProfileError("");
     try {
       await updateProfile({ name: name.trim(), email: email.trim() });
-      setProfileMessage("Profile saved.");
+      setProfileMessage(t("userSettings.modal.saveProfile"));
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : "Profile update failed.");
+      setProfileError(error instanceof Error ? error.message : t("userSettings.modal.profileUpdateFailed"));
     } finally {
       setSavingProfile(false);
     }
@@ -123,15 +126,15 @@ export function UserSettingsView() {
     setPasswordError("");
 
     if (!currentPassword || !newPassword || !confirmPassword) {
-      setPasswordError("Enter your current password and the new password twice.");
+      setPasswordError(t("userSettings.modal.passwordEnterCurrentAndNewTwice"));
       return;
     }
     if (newPassword.length < 8) {
-      setPasswordError("New password must be at least 8 characters.");
+      setPasswordError(t("userSettings.modal.passwordTooShort"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordError("New passwords do not match.");
+      setPasswordError(t("userSettings.modal.passwordsDoNotMatch"));
       return;
     }
 
@@ -141,9 +144,11 @@ export function UserSettingsView() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setPasswordMessage("Password changed.");
+      setPasswordMessage(t("userSettings.modal.passwordChanged"));
     } catch (error) {
-      setPasswordError(error instanceof Error ? error.message : "Password change failed.");
+      setPasswordError(
+        error instanceof Error ? error.message : t("userSettings.modal.passwordChangeFailed"),
+      );
     } finally {
       setSavingPassword(false);
     }
@@ -183,26 +188,26 @@ export function UserSettingsView() {
   const settingsCards = [
     {
       id: "profile" as const,
-      title: "Profile",
-      description: "Update the name and email shown in logs, coding, and reports.",
+      title: t("userSettings.modal.profileTitle"),
+      description: t("userSettings.cards.profileDescription"),
       tone: "default" as const,
     },
     {
       id: "password" as const,
-      title: "Password",
-      description: "Change the password used to sign in to this account.",
+      title: t("userSettings.modal.passwordTitle"),
+      description: t("userSettings.cards.passwordDescription"),
       tone: "admin" as const,
     },
     {
       id: "appearance" as const,
-      title: "Appearance",
-      description: "Control theme, density, and text size on this device.",
+      title: t("userSettings.modal.appearanceTitle"),
+      description: t("userSettings.cards.appearanceDescription"),
       tone: "default" as const,
     },
     {
       id: "recent" as const,
-      title: "Recent Projects",
-      description: "Manage the locally remembered projects shown on this device.",
+      title: t("userSettings.sections.recentProjectsTitle"),
+      description: t("userSettings.sections.recentProjectsDescription"),
       tone: "default" as const,
     },
   ];
@@ -211,14 +216,14 @@ export function UserSettingsView() {
   const userSettingsSectionDefs = [
     {
       id: "account",
-      eyebrow: "Account",
-      title: "Manage the identity and security details that belong to you.",
+      eyebrow: t("userSettings.sections.accountEyebrow"),
+      title: t("userSettings.sections.accountTitle"),
       cardIds: ["profile", "password"],
     },
     {
       id: "preferences",
-      eyebrow: "Preferences",
-      title: "Adjust the way Kanqual looks and feels on this device.",
+      eyebrow: t("userSettings.sections.preferencesEyebrow"),
+      title: t("userSettings.sections.preferencesTitle"),
       cardIds: ["appearance", "recent"],
     },
   ] satisfies Array<{
@@ -240,8 +245,8 @@ export function UserSettingsView() {
     <div className="view user-settings-view">
       <header className="view-header">
         <div className="view-title-with-help">
-          <h1>User Settings</h1>
-          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open user settings help">
+          <h1>{t("userSettings.sections.pageTitle")}</h1>
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("userSettings.sections.openHelp")}>
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
@@ -281,32 +286,32 @@ export function UserSettingsView() {
           <div className="modal app-settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-section-header">
               <div>
-                <h2 className="settings-section-title">Profile</h2>
+                <h2 className="settings-section-title">{t("userSettings.modal.profileTitle")}</h2>
               </div>
               <button className="btn" type="button" onClick={() => setActiveModal(null)} disabled={savingProfile}>
-                Close
+                {t("userSettings.modal.close")}
               </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection
-                  title="Account Identity"
-                  description="Update the personal name and email that Kanqual uses for logs, coding attribution, and reports."
+                  title={t("userSettings.modal.profileSectionTitle")}
+                  description={t("userSettings.modal.profileSectionDescription")}
                 >
                   <form className="user-settings-form" onSubmit={handleProfileSave}>
                     <label className="form-label">
-                      Display name
+                      {t("userSettings.modal.displayName")}
                       <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} disabled={savingProfile} />
                     </label>
                     <label className="form-label">
-                      Email
+                      {t("auth.form.email")}
                       <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={savingProfile} />
                     </label>
                     {profileError && <p className="auth-error">{profileError}</p>}
                     {profileMessage && <p className="settings-success">{profileMessage}</p>}
                     <div className="form-actions">
                       <button className="btn btn--primary" type="submit" disabled={savingProfile || !name.trim() || !email.trim()}>
-                        {savingProfile ? "Saving..." : "Save Profile"}
+                        {savingProfile ? t("userSettings.modal.saving") : t("userSettings.modal.saveProfile")}
                       </button>
                     </div>
                   </form>
@@ -316,7 +321,7 @@ export function UserSettingsView() {
             <div className="app-settings-modal-footer">
               <span />
               <button className="btn btn--primary" type="button" onClick={() => setActiveModal(null)} disabled={savingProfile}>
-                Done
+                {t("userSettings.modal.done")}
               </button>
             </div>
           </div>
@@ -328,21 +333,21 @@ export function UserSettingsView() {
           <div className="modal app-settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-section-header">
               <div>
-                <h2 className="settings-section-title">Change Password</h2>
+                <h2 className="settings-section-title">{t("userSettings.modal.passwordTitle")}</h2>
               </div>
               <button className="btn" type="button" onClick={() => setActiveModal(null)} disabled={savingPassword}>
-                Close
+                {t("userSettings.modal.close")}
               </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection
-                  title="Password Security"
-                  description="Enter your current password, then set the new password you want this account to use going forward."
+                  title={t("userSettings.modal.passwordSectionTitle")}
+                  description={t("userSettings.modal.passwordSectionDescription")}
                 >
                   <form className="user-settings-form" onSubmit={handlePasswordSave}>
                     <label className="form-label">
-                      Current password
+                      {t("userSettings.modal.currentPassword")}
                       <input
                         className="form-input"
                         type="password"
@@ -353,7 +358,7 @@ export function UserSettingsView() {
                       />
                     </label>
                     <label className="form-label">
-                      New password
+                      {t("userSettings.modal.newPassword")}
                       <input
                         className="form-input"
                         type="password"
@@ -364,7 +369,7 @@ export function UserSettingsView() {
                       />
                     </label>
                     <label className="form-label">
-                      Confirm new password
+                      {t("userSettings.modal.confirmNewPassword")}
                       <input
                         className="form-input"
                         type="password"
@@ -382,7 +387,7 @@ export function UserSettingsView() {
                         type="submit"
                         disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword}
                       >
-                        {savingPassword ? "Changing..." : "Change Password"}
+                        {savingPassword ? t("userSettings.modal.changing") : t("userSettings.modal.changePassword")}
                       </button>
                     </div>
                   </form>
@@ -392,7 +397,7 @@ export function UserSettingsView() {
             <div className="app-settings-modal-footer">
               <span />
               <button className="btn btn--primary" type="button" onClick={() => setActiveModal(null)} disabled={savingPassword}>
-                Done
+                {t("userSettings.modal.done")}
               </button>
             </div>
           </div>
@@ -404,22 +409,22 @@ export function UserSettingsView() {
           <div className="modal app-settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-section-header">
               <div>
-                <h2 className="settings-section-title">Theme & Appearance</h2>
+                <h2 className="settings-section-title">{t("userSettings.modal.appearanceTitle")}</h2>
               </div>
               <button className="btn" type="button" onClick={() => setActiveModal(null)}>
-                Close
+                {t("userSettings.modal.close")}
               </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection
-                  title="Theme"
-                  description="Choose the overall light or dark interface you want this device to use."
+                  title={t("userSettings.modal.themeSectionTitle")}
+                  description={t("userSettings.modal.themeSectionDescription")}
                 >
                   <div className="settings-row">
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Theme</div>
-                      <div className="settings-row-desc">Switch between the light and dark interface.</div>
+                      <div className="settings-row-label">{t("userSettings.modal.themeLabel")}</div>
+                      <div className="settings-row-desc">{t("userSettings.modal.themeLabelDescription")}</div>
                     </div>
                     <div className="theme-options">
                       {(["light", "dark"] as Theme[]).map((option) => (
@@ -438,7 +443,7 @@ export function UserSettingsView() {
                               <div className="theme-preview-bar" style={{ width: "60%" }} />
                             </div>
                           </div>
-                          {option === "light" ? "Light" : "Dark"}
+                          {option === "light" ? t("userSettings.modal.light") : t("userSettings.modal.dark")}
                         </button>
                       ))}
                     </div>
@@ -446,23 +451,23 @@ export function UserSettingsView() {
 
                   <div className="settings-row">
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Custom Theme</div>
-                      <div className="settings-row-desc">Edit colors, corner radius, and border width, or choose a saved theme preset.</div>
+                      <div className="settings-row-label">{t("userSettings.modal.customTheme")}</div>
+                      <div className="settings-row-desc">{t("userSettings.modal.customThemeDescription")}</div>
                     </div>
                     <button className="btn" type="button" onClick={() => setShowThemeManager(true)}>
-                      Edit Theme...
+                      {t("userSettings.modal.editTheme")}
                     </button>
                   </div>
                 </SettingsModalSection>
 
                 <SettingsModalSection
-                  title="Workspace Layout"
-                  description="Adjust spacing and text size to make longer coding or reading sessions more comfortable on this device."
+                  title={t("userSettings.modal.layoutTitle")}
+                  description={t("userSettings.modal.layoutDescription")}
                 >
                   <div className="settings-row">
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Interface density</div>
-                      <div className="settings-row-desc">Choose roomier spacing or a more compact workspace.</div>
+                      <div className="settings-row-label">{t("userSettings.modal.interfaceDensity")}</div>
+                      <div className="settings-row-desc">{t("userSettings.modal.interfaceDensityDescription")}</div>
                     </div>
                     <div className="segmented-control">
                       {(["comfortable", "compact"] as Density[]).map((option) => (
@@ -472,7 +477,7 @@ export function UserSettingsView() {
                           onClick={() => handleDensity(option)}
                           type="button"
                         >
-                          {option === "comfortable" ? "Comfortable" : "Compact"}
+                          {option === "comfortable" ? t("userSettings.modal.comfortable") : t("userSettings.modal.compact")}
                         </button>
                       ))}
                     </div>
@@ -480,8 +485,8 @@ export function UserSettingsView() {
 
                   <div className="settings-row">
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Text size</div>
-                      <div className="settings-row-desc">Tune the overall reading size for long coding sessions.</div>
+                      <div className="settings-row-label">{t("userSettings.modal.textSize")}</div>
+                      <div className="settings-row-desc">{t("userSettings.modal.textSizeDescription")}</div>
                     </div>
                     <div className="segmented-control">
                       {(["small", "normal", "large"] as FontSize[]).map((option) => (
@@ -491,7 +496,11 @@ export function UserSettingsView() {
                           onClick={() => handleFontSize(option)}
                           type="button"
                         >
-                          {option[0].toUpperCase() + option.slice(1)}
+                          {option === "small"
+                            ? t("userSettings.modal.small")
+                            : option === "normal"
+                              ? t("userSettings.modal.normal")
+                              : t("userSettings.modal.large")}
                         </button>
                       ))}
                     </div>
@@ -502,7 +511,7 @@ export function UserSettingsView() {
             <div className="app-settings-modal-footer">
               <span />
               <button className="btn btn--primary" type="button" onClick={() => setActiveModal(null)}>
-                Done
+                {t("userSettings.modal.done")}
               </button>
             </div>
           </div>
@@ -514,22 +523,22 @@ export function UserSettingsView() {
           <div className="modal app-settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-section-header">
               <div>
-                <h2 className="settings-section-title">Recent Projects</h2>
+                <h2 className="settings-section-title">{t("userSettings.sections.recentProjectsTitle")}</h2>
               </div>
               <button className="btn" type="button" onClick={() => setActiveModal(null)}>
-                Close
+                {t("userSettings.modal.close")}
               </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection
-                  title="Recent Project List"
-                  description="Control how many recently opened projects Kanqual keeps visible on this device and reopen them from here when available."
+                  title={t("userSettings.modal.recentProjectsSectionTitle")}
+                  description={t("userSettings.modal.recentProjectsSectionDescription")}
                 >
                   <div className="settings-row">
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Projects to show</div>
-                      <div className="settings-row-desc">Limit how many recent projects appear in this list.</div>
+                      <div className="settings-row-label">{t("userSettings.modal.projectsToShow")}</div>
+                      <div className="settings-row-desc">{t("userSettings.modal.projectsToShowDescription")}</div>
                     </div>
                     <select className="form-input user-settings-select" value={recentLimit} onChange={(e) => updateRecentLimit(Number(e.target.value))}>
                       {[5, 10, 15, 25].map((limit) => <option key={limit} value={limit}>{limit}</option>)}
@@ -537,7 +546,7 @@ export function UserSettingsView() {
                   </div>
 
                   {displayedRecent.length === 0 ? (
-                    <div className="settings-empty">No recent projects yet.</div>
+                    <div className="settings-empty">{t("userSettings.modal.noRecentProjects")}</div>
                   ) : (
                     <div className="recent-projects-list">
                       {displayedRecent.map((recent) => {
@@ -552,9 +561,9 @@ export function UserSettingsView() {
                           >
                             <span>
                               <strong>{recent.name}</strong>
-                              <small>{project ? `Opened ${fmtRecentDate(recent.openedAt)}` : "Project unavailable"}</small>
+                              <small>{project ? t("userSettings.modal.openedAt", { value: fmtRecentDate(recent.openedAt) }) : t("userSettings.modal.projectUnavailable")}</small>
                             </span>
-                            {project && <span className="recent-project-open">Open</span>}
+                            {project && <span className="recent-project-open">{t("common.open")}</span>}
                           </button>
                         );
                       })}
@@ -563,7 +572,7 @@ export function UserSettingsView() {
 
                   <div className="form-actions">
                     <button className="btn" type="button" onClick={clearRecentProjects} disabled={recentProjects.length === 0}>
-                      Clear History
+                      {t("userSettings.modal.clearHistory")}
                     </button>
                   </div>
                 </SettingsModalSection>
@@ -572,7 +581,7 @@ export function UserSettingsView() {
             <div className="app-settings-modal-footer">
               <span />
               <button className="btn btn--primary" type="button" onClick={() => setActiveModal(null)}>
-                Done
+                {t("userSettings.modal.done")}
               </button>
             </div>
           </div>
@@ -589,15 +598,15 @@ export function UserSettingsView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>User Settings Help</h2>
+            <h2>{t("userSettings.help.title")}</h2>
             <div className="app-settings-modal-body">
                 <ul className="settings-help-list">
-                  <li>Use User Settings for personal account and preference changes that belong to the signed-in person rather than the shared project or host device.</li>
-                  <li>Changes here are personal unless they update your shared account identity, such as name or email.</li>
+                  <li>{t("userSettings.help.line1")}</li>
+                  <li>{t("userSettings.help.line2")}</li>
                 </ul>
               <div className="form-actions">
                 <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                  Close
+                  {t("userSettings.modal.close")}
                 </button>
               </div>
             </div>

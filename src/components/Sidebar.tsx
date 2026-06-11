@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
-import { ROLE_LABELS } from "../types";
+import { useI18n } from "../i18n/provider";
 import type { View } from "../types";
 import { LOCAL_PB_URL } from "../lib/authHistory";
 
@@ -16,65 +16,16 @@ import usersGroupIconRaw from "../assets/users-group-line.svg?raw";
 import closeProjectIconRaw from "../assets/x.svg?raw";
 import sidebarLogo from "../assets/logo-no-background.png";
 
-const NAV_SECTIONS: {
-  key: string;
-  label: string;
-  items: { view: View; label: string }[];
-}[] = [
-  {
-    key: "project",
-    label: "Project",
-    items: [
-      { view: "home", label: "Home" },
-      { view: "users", label: "Users" },
-      { view: "cases", label: "Cases" },
-      { view: "documents", label: "Documents" },
-      { view: "codebook", label: "Codebook" },
-      { view: "annotations", label: "Annotations" },
-    ],
-  },
-  {
-    key: "analysis",
-    label: "Analysis",
-    items: [
-      { view: "code-text", label: "Code" },
-      { view: "memos", label: "Memos" },
-    ],
-  },
-  {
-    key: "reports",
-    label: "Reports",
-    items: [
-      { view: "code-reports", label: "Annotations" },
-      { view: "codes", label: "Codes" },
-      { view: "coders", label: "Users" },
-    ],
-  },
-  {
-    key: "ai-assist",
-    label: "AI Assist",
-    items: [
-      { view: "ai-assist", label: "Home" },
-      { view: "ai-assist-process-documents", label: "Process" },
-      { view: "ai-assist-chat", label: "Chat" },
-      { view: "ai-assisted-coding", label: "Code" },
-      { view: "ai-assist-case-attributes", label: "Attributes" },
-      { view: "ai-analyze", label: "Analyze" },
-    ],
-  },
-  {
-    key: "settings",
-    label: "Settings",
-    items: [
-      { view: "app-settings", label: "App Settings" },
-      { view: "project-settings", label: "Project Settings" },
-      { view: "user-settings", label: "User Settings" },
-    ],
-  },
-];
+const NAV_SECTION_KEYS = [
+  "project",
+  "analysis",
+  "reports",
+  "ai-assist",
+  "settings",
+] as const;
 
 function createDefaultSidebarOpenState() {
-  return Object.fromEntries(NAV_SECTIONS.map((section) => [section.key, false])) as Record<string, boolean>;
+  return Object.fromEntries(NAV_SECTION_KEYS.map((sectionKey) => [sectionKey, false])) as Record<string, boolean>;
 }
 
 type SidebarTooltipState = {
@@ -88,6 +39,7 @@ type SidebarTooltipPlacement = {
 };
 
 export function Sidebar() {
+  const { t } = useI18n();
   const {
     view,
     setView,
@@ -133,12 +85,68 @@ export function Sidebar() {
   const [open, setOpen] = useState<Record<string, boolean>>(() => createDefaultSidebarOpenState());
 
   const isRemoteBackendSession = serverUrl !== LOCAL_PB_URL;
+  const navSections: {
+    key: string;
+    label: string;
+    items: { view: View; label: string }[];
+  }[] = [
+    {
+      key: "project",
+      label: t("sidebar.sections.project"),
+      items: [
+        { view: "home", label: t("sidebar.items.home") },
+        { view: "users", label: t("sidebar.items.users") },
+        { view: "cases", label: t("sidebar.items.cases") },
+        { view: "documents", label: t("sidebar.items.documents") },
+        { view: "codebook", label: t("sidebar.items.codebook") },
+        { view: "annotations", label: t("sidebar.items.annotations") },
+      ],
+    },
+    {
+      key: "analysis",
+      label: t("sidebar.sections.analysis"),
+      items: [
+        { view: "code-text", label: t("sidebar.items.codeText") },
+        { view: "memos", label: t("sidebar.items.memos") },
+      ],
+    },
+    {
+      key: "reports",
+      label: t("sidebar.sections.reports"),
+      items: [
+        { view: "code-reports", label: t("sidebar.items.annotations") },
+        { view: "codes", label: t("sidebar.items.codebook") },
+        { view: "coders", label: t("sidebar.items.users") },
+      ],
+    },
+    {
+      key: "ai-assist",
+      label: t("sidebar.sections.aiAssist"),
+      items: [
+        { view: "ai-assist", label: t("sidebar.items.home") },
+        { view: "ai-assist-process-documents", label: t("sidebar.items.process") },
+        { view: "ai-assist-chat", label: t("sidebar.items.chat") },
+        { view: "ai-assisted-coding", label: t("sidebar.items.code") },
+        { view: "ai-assist-case-attributes", label: t("sidebar.items.attributes") },
+        { view: "ai-analyze", label: t("sidebar.items.analyze") },
+      ],
+    },
+    {
+      key: "settings",
+      label: t("sidebar.sections.settings"),
+      items: [
+        { view: "app-settings", label: t("sidebar.items.appSettings") },
+        { view: "project-settings", label: t("sidebar.items.projectSettings") },
+        { view: "user-settings", label: t("sidebar.items.userSettings") },
+      ],
+    },
+  ];
   const networkBadgeState = isRemoteBackendSession ? "remote" : networkMode;
   const networkBadgeTitle = isRemoteBackendSession
-    ? `Remote workspace connected (${serverUrl}). Open network settings.`
+    ? t("sidebar.badges.networkRemote", { serverUrl })
     : networkMode === "lan"
-      ? "LAN workspace available to other devices. Open network settings."
-      : "Local workspace only. Open network settings.";
+      ? t("sidebar.badges.networkLan")
+      : t("sidebar.badges.networkLocal");
   const aiBackgroundJobRunning =
     embeddingModelDownloadStatus?.phase === "downloading"
     || embeddingModelDownloadStatus?.phase === "cancelling"
@@ -162,14 +170,14 @@ export function Sidebar() {
           : "unavailable";
   const aiBadgeTitle =
     aiBadgeState === "running"
-      ? "AI task running in background. Open AI Assist Home."
+      ? t("sidebar.badges.aiRunning")
       : !activeProject
-        ? "Open a project to view project AI status. Open AI Assist Home."
-      : aiBadgeState === "disabled"
-        ? "AI Assist disabled for this project. Open AI Assist Home."
-        : aiBadgeState === "ready"
-          ? "AI Assist ready for this project. Open AI Assist Home."
-          : "AI Assist setup incomplete. Open AI Assist Home.";
+        ? t("sidebar.badges.aiNoProject")
+        : aiBadgeState === "disabled"
+          ? t("sidebar.badges.aiDisabled")
+          : aiBadgeState === "ready"
+            ? t("sidebar.badges.aiReady")
+            : t("sidebar.badges.aiUnavailable");
   const otherActiveUsersCount = activeProject
     ? activeProjectPresenceUsers.filter((entry) => entry.userId !== user?.id).length
     : 0;
@@ -179,12 +187,12 @@ export function Sidebar() {
       ? "active"
       : "idle";
   const collaborationBadgeTitle = !activeProject
-    ? "No active project. Open a project to view user activity."
+    ? t("sidebar.badges.collaborationNoProject")
     : otherActiveUsersCount === 0
-      ? "No other users currently active. Open Project Users activity."
+      ? t("sidebar.badges.collaborationNone")
       : otherActiveUsersCount === 1
-        ? "1 other user active in this project. Open Project Users activity."
-        : `${otherActiveUsersCount} other users active in this project. Open Project Users activity.`;
+        ? t("sidebar.badges.collaborationOne")
+        : t("sidebar.badges.collaborationMany", { count: otherActiveUsersCount });
 
   function showTooltip(text: string, element: HTMLElement) {
     setActiveTooltip({
@@ -196,6 +204,13 @@ export function Sidebar() {
   function hideTooltip() {
     setActiveTooltip(null);
     setTooltipPlacement(null);
+  }
+
+  function isTooltipAnchorElement(element: EventTarget | null): element is HTMLElement {
+    return element instanceof HTMLElement
+      && !!element.closest(
+        ".brand-network-badge, .brand-ai-badge, .brand-collaboration-badge, .project-badge-close",
+      );
   }
 
   function bindTooltip(text: string | undefined) {
@@ -270,9 +285,17 @@ export function Sidebar() {
       }
     };
 
+    const dismissTooltipOnPointerMove = (event: PointerEvent) => {
+      if (!isTooltipAnchorElement(event.target)) {
+        hideTooltip();
+      }
+    };
+
+    document.addEventListener("pointermove", dismissTooltipOnPointerMove, true);
     window.addEventListener("resize", refreshTooltipAnchor);
     window.addEventListener("scroll", refreshTooltipAnchor, true);
     return () => {
+      document.removeEventListener("pointermove", dismissTooltipOnPointerMove, true);
       window.removeEventListener("resize", refreshTooltipAnchor);
       window.removeEventListener("scroll", refreshTooltipAnchor, true);
     };
@@ -425,7 +448,7 @@ export function Sidebar() {
 
       {activeProject ? (
         <div className="sidebar-project-badge">
-          <span className="project-badge-label">Project</span>
+          <span className="project-badge-label">{t("sidebar.projectBadge.label")}</span>
           <div className="project-badge-row">
             <span className="project-badge-name" style={{ fontSize: projectNameFontSize }}>
               {activeProject.name}
@@ -433,9 +456,11 @@ export function Sidebar() {
             <button
               type="button"
               className="sidebar-icon-button project-badge-close"
-              title="Close Project"
-              aria-label="Close Project"
+              title={t("sidebar.projectBadge.closeProject")}
+              aria-label={t("sidebar.projectBadge.closeProject")}
               onClick={() => void closeProject(activeProject)}
+              onPointerUp={() => void closeProject(activeProject)}
+              {...bindTooltip(t("sidebar.projectBadge.closeProject"))}
             >
               <span
                 aria-hidden="true"
@@ -451,15 +476,15 @@ export function Sidebar() {
           className="sidebar-project-badge sidebar-project-badge--empty"
           onClick={() => setView("projects")}
         >
-          <span className="project-badge-label">Project</span>
+          <span className="project-badge-label">{t("sidebar.projectBadge.label")}</span>
           <span className="project-badge-empty-text" style={{ fontSize: projectNameFontSize }}>
-            Open a Project
+            {t("sidebar.projectBadge.openProject")}
           </span>
         </button>
       )}
 
       <nav className="sidebar-nav">
-        {NAV_SECTIONS.map((section) => (
+        {navSections.map((section) => (
           <div key={section.key} className="sidebar-section">
             <button
               type="button"
@@ -494,13 +519,13 @@ export function Sidebar() {
                     || settingsItemDisabled;
                   const itemTitle =
                     settingsItemDisabled
-                      ? "Open a project first"
+                      ? t("sidebar.nav.openProjectFirst")
                       : section.key !== "settings" && !activeProject
-                        ? "Open a project first"
+                        ? t("sidebar.nav.openProjectFirst")
                         : aiAssistPermissionDenied
-                          ? "You do not have permission to use this AI Assist tool"
+                          ? t("sidebar.nav.aiPermissionDenied")
                           : aiAssistItemDisabled
-                            ? "Enable AI Assist in Project Settings"
+                            ? t("sidebar.nav.enableAi")
                             : undefined;
 
                   return (
@@ -529,11 +554,11 @@ export function Sidebar() {
           </div>
           {userRole && (
             <span className={`role-badge role-badge--${userRole}`}>
-              {ROLE_LABELS[userRole]}
+              {t(`sidebar.roles.${userRole}`)}
             </span>
           )}
         </div>
-        <button type="button" className="sidebar-logout" onClick={logout} title="Sign out">
+        <button type="button" className="sidebar-logout" onClick={logout} title={t("sidebar.user.signOutTitle")}>
           {"\u21A9"}
         </button>
       </div>

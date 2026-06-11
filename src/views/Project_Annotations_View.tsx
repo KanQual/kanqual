@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
+import { useI18n } from "../i18n/provider";
 
 interface AnnRow {
   id: string;
@@ -34,6 +35,7 @@ function truncateQuote(value: string): string {
 }
 
 export function AnnotationsView() {
+  const { t } = useI18n();
   const {
     activeProject,
     pb,
@@ -42,6 +44,12 @@ export function AnnotationsView() {
     setPendingAnnId,
     setView,
   } = useStore();
+  const localizedCols = [
+    { ...COLS[0], label: t("projectAnnotations.table.document") },
+    { ...COLS[1], label: t("projectAnnotations.table.code") },
+    { ...COLS[2], label: t("projectAnnotations.table.memos") },
+    { ...COLS[3], label: t("projectAnnotations.table.note") },
+  ];
 
   const [rows, setRows] = useState<AnnRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -87,7 +95,7 @@ export function AnnotationsView() {
         hasNote: !!record.note,
       })));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load annotations.");
+      setError(e instanceof Error ? e.message : t("projectAnnotations.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -128,13 +136,13 @@ export function AnnotationsView() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Annotations</h1>
+          <h1>{t("projectAnnotations.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Show Help"
-            aria-label="Show Help"
+            title={t("projectAnnotations.showHelp")}
+            aria-label={t("projectAnnotations.showHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -151,8 +159,10 @@ export function AnnotationsView() {
             <table className="users-table">
               <thead>
                 <tr>
-                  <th style={{ width: QUOTE_WIDTH }} className="users-th">Annotated Text</th>
-                  {COLS.map((col) => (
+                  <th style={{ width: QUOTE_WIDTH }} className="users-th">
+                    {t("projectAnnotations.table.annotatedText")}
+                  </th>
+                  {localizedCols.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
@@ -173,10 +183,10 @@ export function AnnotationsView() {
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={5} className="users-td-msg">Loading...</td></tr>
+                  <tr><td colSpan={5} className="users-td-msg">{t("projectAnnotations.loading")}</td></tr>
                 )}
                 {!loading && sorted.length === 0 && (
-                  <tr><td colSpan={5} className="users-td-msg">No annotations yet.</td></tr>
+                  <tr><td colSpan={5} className="users-td-msg">{t("projectAnnotations.empty")}</td></tr>
                 )}
                 {!loading && sorted.map((row) => (
                   <tr key={row.id} className="users-row annotations-list-row" onClick={() => jumpToAnnotation(row)}>
@@ -194,7 +204,7 @@ export function AnnotationsView() {
                       {row.memoCount > 0 ? row.memoCount : "-"}
                     </td>
                     <td className="users-td users-td--muted">
-                      {row.hasNote ? "Yes" : "-"}
+                      {row.hasNote ? t("projectAnnotations.values.yes") : "-"}
                     </td>
                   </tr>
                 ))}
@@ -206,22 +216,22 @@ export function AnnotationsView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Annotations Help</h2>
+            <h2>{t("projectAnnotations.help.title")}</h2>
             <p className="users-guide-copy">
-              Browse all annotations, inspect code, document, note, and memo state, select a row to jump to the source location, and review annotation status across the project.
+              {t("projectAnnotations.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use this page as a project-wide annotation index. Pick an annotation from the list to navigate directly back to its source context.
+              {t("projectAnnotations.help.line2")}
             </p>
             <p className="users-guide-copy">
-              This page is mainly for navigation and review; actual annotation edits usually happen in coding views.
+              {t("projectAnnotations.help.line3")}
             </p>
             <p className="users-guide-copy">
-              Project permissions for annotation editing in coding views, plus current code and document availability, affect what you can do after you jump out of this page.
+              {t("projectAnnotations.help.line4")}
             </p>
             <div className="form-actions" style={{ marginTop: 24 }}>
               <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>

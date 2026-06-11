@@ -3,18 +3,13 @@ import { useStore } from "../context/StoreContext";
 import { AIAnalyzeView as AIAnalyzeWorkspaceView, parseAiAnalysisRowRecord, type AiAnalysisRow } from "./AIAssist_Code_Annotate_View";
 import { HelpIcon } from "../components/AppIcons";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-
-const ANALYSIS_COLS: Array<{ key: "name" | "createdByName" | "createdAt" | "actions"; label: string; width: string }> = [
-  { key: "name", label: "Name", width: "42%" },
-  { key: "createdByName", label: "Created By", width: "22%" },
-  { key: "createdAt", label: "Created", width: "22%" },
-  { key: "actions", label: "", width: "14%" },
-];
+import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 function fmtDate(iso: string): string {
   if (!iso) return "";
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
@@ -24,6 +19,7 @@ function fmtDate(iso: string): string {
 }
 
 export function AIAnalyzeView() {
+  const { t } = useI18n();
   const { activeProject, pb, canCurrentUser, projectAiAssistSettings, deleteAiAnalysis } = useStore();
   const [openRow, setOpenRow] = useState<AiAnalysisRow | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
@@ -41,6 +37,12 @@ export function AIAnalyzeView() {
   const aiAssistEnabledForProject = activeProject ? projectAiAssistSettings.enabled : false;
   const canStartAnalysis = !!activeProject && canUseAiAnalyzeTools && aiAssistEnabledForProject;
   const canDeleteSavedAnalyses = canCurrentUser("deleteReports");
+  const analysisCols: Array<{ key: "name" | "createdByName" | "createdAt" | "actions"; label: string; width: string }> = [
+    { key: "name", label: t("aiAssist.analyze.table.name"), width: "42%" },
+    { key: "createdByName", label: t("aiAssist.analyze.table.createdBy"), width: "22%" },
+    { key: "createdAt", label: t("aiAssist.analyze.table.created"), width: "22%" },
+    { key: "actions", label: "", width: "14%" },
+  ];
 
   const loadAnalyses = useCallback(async () => {
     if (!activeProject) {
@@ -60,11 +62,11 @@ export function AIAnalyzeView() {
         .filter(Boolean) as AiAnalysisRow[];
       setRows(mappedRows);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load analyses.");
+      setError(loadError instanceof Error ? loadError.message : t("aiAssist.analyze.errors.failedToLoadAnalyses"));
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb]);
+  }, [activeProject, pb, t]);
 
   useEffect(() => {
     void loadAnalyses();
@@ -95,7 +97,7 @@ export function AIAnalyzeView() {
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete analysis.");
+      setError(deleteError instanceof Error ? deleteError.message : t("aiAssist.analyze.errors.failedToDeleteAnalysis"));
       setConfirmDelete(null);
     } finally {
       setDeleteBusy(false);
@@ -121,12 +123,12 @@ export function AIAnalyzeView() {
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Analyze Codes</h1>
+          <h1>{t("aiAssist.analyze.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show analyze help"
-            title="Show Help"
+            aria-label={t("aiAssist.analyze.openHelp")}
+            title={t("aiAssist.analyze.openHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -138,15 +140,15 @@ export function AIAnalyzeView() {
           disabled={!canStartAnalysis}
           title={
             !activeProject
-              ? "Open a project first"
+              ? t("aiAssist.analyze.empty.openProjectFirst")
               : !canUseAiAnalyzeTools
-                ? "You do not have permission to use AI Assist analyze tools for this project"
+                ? t("aiAssist.analyze.empty.noPermission")
                 : !aiAssistEnabledForProject
-                  ? "Enable AI Assist in Project Settings before using AI analysis tools"
+                  ? t("aiAssist.analyze.empty.enableInProjectSettings")
                   : undefined
           }
         >
-          + New Analysis
+          {t("aiAssist.analyze.actions.newAnalysis")}
         </button>
       </header>
 
@@ -158,7 +160,7 @@ export function AIAnalyzeView() {
             <table className="users-table">
               <thead>
                 <tr>
-                  {ANALYSIS_COLS.map((col) => (
+                  {analysisCols.map((col) => (
                     <th key={col.key} style={{ width: col.width }} className="users-th">
                       {col.label}
                     </th>
@@ -168,12 +170,12 @@ export function AIAnalyzeView() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={ANALYSIS_COLS.length} className="users-td-msg">Loading...</td>
+                    <td colSpan={analysisCols.length} className="users-td-msg">{t("aiAssist.analyze.statuses.loading")}</td>
                   </tr>
                 )}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={ANALYSIS_COLS.length} className="users-td-msg">No saved analyses yet.</td>
+                    <td colSpan={analysisCols.length} className="users-td-msg">{t("aiAssist.analyze.empty.noSavedAnalyses")}</td>
                   </tr>
                 )}
                 {!loading && rows.map((row) => (
@@ -189,7 +191,7 @@ export function AIAnalyzeView() {
                     <td className="users-td users-td--name">{row.name}</td>
                     <td className="users-td users-td--muted">{row.createdByName}</td>
                     <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
-                    <td className="users-td users-td--muted">Right-click</td>
+                    <td className="users-td users-td--muted">{t("aiAssist.analyze.labels.rightClick")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -201,19 +203,19 @@ export function AIAnalyzeView() {
       {helpOpen && (
         <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
           <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Analyze Help</h2>
+            <h2>{t("aiAssist.analyze.help.title")}</h2>
             <p className="users-guide-copy">
-              Start a new AI analysis from here or reopen a saved analysis from the table.
+              {t("aiAssist.analyze.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Saved analyses are stored in the project database and keep the selected code plus the generated analysis results.
+              {t("aiAssist.analyze.help.line2")}
             </p>
             <p className="users-guide-copy">
-              Access depends on your role and whether AI Assist is enabled for the active project.
+              {t("aiAssist.analyze.help.line3")}
             </p>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </div>
@@ -229,7 +231,7 @@ export function AIAnalyzeView() {
               setContextMenu(null);
             }}
           >
-            Open Analysis
+            {t("aiAssist.analyze.actions.openAnalysis")}
           </button>
           {canDeleteSavedAnalyses ? (
             <button
@@ -239,11 +241,11 @@ export function AIAnalyzeView() {
                 setContextMenu(null);
               }}
             >
-              Delete Analysis
+              {t("aiAssist.analyze.actions.deleteAnalysis")}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled" title="Only editors and owners can delete saved analyses">
-              Delete Analysis
+            <div className="context-menu-item context-menu-item--disabled" title={t("aiAssist.analyze.labels.onlyEditorsOwnersDelete")}>
+              {t("aiAssist.analyze.actions.deleteAnalysis")}
             </div>
           )}
         </div>
@@ -252,15 +254,15 @@ export function AIAnalyzeView() {
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => !deleteBusy && setConfirmDelete(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Analysis</h2>
+            <h2>{t("aiAssist.analyze.modals.deleteAnalysis.title")}</h2>
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Are you sure you want to permanently delete <strong>{confirmDelete.name}</strong>?
+              {t("aiAssist.analyze.modals.deleteAnalysis.body")} <strong>{confirmDelete.name}</strong>?
             </p>
-            <p className="modal-warning-text">This saved analysis will be removed from the project list and cannot be recovered.</p>
+            <p className="modal-warning-text">{t("aiAssist.analyze.modals.deleteAnalysis.warning")}</p>
             <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteBusy}>Cancel</button>
+              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteBusy}>{t("common.cancel")}</button>
               <button className="btn btn--danger" onClick={() => void handleDelete()} disabled={deleteBusy}>
-                {deleteBusy ? "Deleting..." : "Delete Analysis"}
+                {deleteBusy ? t("aiAssist.analyze.statuses.deleting") : t("aiAssist.analyze.actions.deleteAnalysis")}
               </button>
             </div>
           </div>
