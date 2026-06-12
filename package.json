@@ -13,7 +13,8 @@
     "check:locales": "node scripts/check-locales.mjs",
     "validate:roles": "node scripts/validate-role-matrix.mjs",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
-    "smoke:runtime": "node scripts/smoke-runtime.mjs"
+    "smoke:runtime": "node scripts/smoke-runtime.mjs",
+    "generate:third-party-notices": "node scripts/generate-third-party-notices.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

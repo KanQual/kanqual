@@ -979,6 +979,42 @@ function AppShell() {
   useAutomaticProjectBackups();
 
   useEffect(() => {
+    function allowNativeContextMenu(target: EventTarget | null): boolean {
+      if (!(target instanceof Element)) return false;
+
+      const editableAncestor = target.closest(
+        [
+          "input",
+          "textarea",
+          "select",
+          "[contenteditable=\"true\"]",
+          "[contenteditable=\"\"]",
+          "[role=\"textbox\"]",
+        ].join(","),
+      );
+
+      if (!editableAncestor) return false;
+      if (editableAncestor instanceof HTMLInputElement) {
+        return !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(
+          editableAncestor.type,
+        );
+      }
+
+      return true;
+    }
+
+    function handleContextMenu(event: MouseEvent) {
+      if (allowNativeContextMenu(event.target)) return;
+      event.preventDefault();
+    }
+
+    window.addEventListener("contextmenu", handleContextMenu);
+    return () => {
+      window.removeEventListener("contextmenu", handleContextMenu);
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function checkForAppUpdates() {

@@ -1,76 +1,58 @@
 # Third-Party Notices
 
-This file is the release inventory for the third-party software currently resolved by this repository.
-
-It covers:
-- the full resolved JavaScript and TypeScript dependency tree from `package-lock.json`
-- the full resolved Rust crate tree from `src-tauri/Cargo.lock`
-- the bundled PocketBase server executable distributed with the desktop app
-
-## Project License
+This file inventories the third-party software dependencies and bundled third-party components currently used by KanQual.
 
 KanQual itself is licensed under `Apache-2.0`. See [LICENSE](./LICENSE) and [LICENSES.md](./LICENSES.md).
 
-## Bundled Third-Party Binary
+This inventory is generated from:
+
+- `package-lock.json` for resolved JavaScript / TypeScript dependencies
+- `cargo metadata --locked` for resolved Rust crates
+
+Generation details:
+
+- Generated at: `2026-06-12T20:05:51.371Z`
+- JavaScript scope: `runtime dependencies only`
+- Rust scope: `runtime dependency graph only`
+
+## Bundled Third-Party Components
+
+PocketBase is redistributed as a bundled application sidecar. Its upstream project identifies itself as MIT-licensed.
+
+The corresponding license text files included with KanQual releases are kept in the [licenses](./licenses/) folder.
 
 | Component | Where Bundled | Upstream | License |
 | --- | --- | --- | --- |
 | `PocketBase server executable` | `src-tauri/binaries/local/pocketbase-x86_64-pc-windows-msvc.exe` | `https://github.com/pocketbase/pocketbase` | `MIT` |
 
-PocketBase is redistributed as a bundled application sidecar. Its upstream project identifies itself as MIT-licensed.
-
-The corresponding license text files included with KanQual releases are kept in
-the [licenses](./licenses/) folder.
-
 ## Resolved JavaScript / TypeScript Dependency Inventory
-
-Resolved packages: 365
 
 | Package | Version | License |
 | --- | --- | --- |
-| `@babel/code-frame` | `7.29.0` | `MIT` |
-| `@babel/compat-data` | `7.29.0` | `MIT` |
-| `@babel/core` | `7.29.0` | `MIT` |
-| `@babel/generator` | `7.29.1` | `MIT` |
-| `@babel/helper-compilation-targets` | `7.28.6` | `MIT` |
-| `@babel/helper-globals` | `7.28.0` | `MIT` |
-| `@babel/helper-module-imports` | `7.28.6` | `MIT` |
-| `@babel/helper-module-transforms` | `7.28.6` | `MIT` |
-| `@babel/helper-plugin-utils` | `7.28.6` | `MIT` |
-| `@babel/helper-string-parser` | `7.27.1` | `MIT` |
-| `@babel/helper-validator-identifier` | `7.28.5` | `MIT` |
-| `@babel/helper-validator-option` | `7.27.1` | `MIT` |
-| `@babel/helpers` | `7.29.2` | `MIT` |
-| `@babel/parser` | `7.29.2` | `MIT` |
-| `@babel/plugin-transform-react-jsx-self` | `7.27.1` | `MIT` |
-| `@babel/plugin-transform-react-jsx-source` | `7.27.1` | `MIT` |
 | `@babel/runtime` | `7.29.2` | `MIT` |
-| `@babel/template` | `7.28.6` | `MIT` |
-| `@babel/traverse` | `7.29.0` | `MIT` |
-| `@babel/types` | `7.29.0` | `MIT` |
-| `@esbuild/win32-x64` | `0.27.7` | `MIT` |
-| `@fast-csv/format` | `4.3.5` | `MIT` |
-| `@fast-csv/parse` | `4.3.6` | `MIT` |
 | `@floating-ui/core` | `1.7.5` | `MIT` |
 | `@floating-ui/dom` | `1.7.6` | `MIT` |
 | `@floating-ui/utils` | `0.2.11` | `MIT` |
 | `@fontsource/inter` | `5.2.8` | `OFL-1.1` |
+| `@fontsource/noto-sans` | `5.2.10` | `OFL-1.1` |
+| `@fontsource/noto-sans-mono` | `5.2.10` | `OFL-1.1` |
 | `@fontsource/ubuntu` | `5.2.8` | `UFL-1.0` |
-| `@jridgewell/gen-mapping` | `0.3.13` | `MIT` |
-| `@jridgewell/remapping` | `2.3.5` | `MIT` |
-| `@jridgewell/resolve-uri` | `3.1.2` | `MIT` |
-| `@jridgewell/sourcemap-codec` | `1.5.5` | `MIT` |
-| `@jridgewell/trace-mapping` | `0.3.31` | `MIT` |
+| `@formatjs/fast-memoize` | `3.1.6` | `MIT` |
+| `@formatjs/icu-messageformat-parser` | `3.5.11` | `MIT` |
+| `@formatjs/icu-skeleton-parser` | `2.1.10` | `MIT` |
 | `@napi-rs/canvas` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-android-arm64` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-darwin-arm64` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-darwin-x64` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-linux-arm-gnueabihf` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-linux-arm64-gnu` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-linux-arm64-musl` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-linux-riscv64-gnu` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-linux-x64-gnu` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-linux-x64-musl` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas-win32-arm64-msvc` | `0.1.98` | `MIT` |
 | `@napi-rs/canvas-win32-x64-msvc` | `0.1.98` | `MIT` |
-| `@rolldown/pluginutils` | `1.0.0-beta.27` | `MIT` |
-| `@rollup/plugin-inject` | `5.0.5` | `MIT` |
-| `@rollup/pluginutils` | `5.3.0` | `MIT` |
-| `@rollup/rollup-win32-x64-gnu` | `4.60.1` | `MIT` |
-| `@rollup/rollup-win32-x64-msvc` | `4.60.1` | `MIT` |
 | `@tauri-apps/api` | `2.10.1` | `Apache-2.0 OR MIT` |
-| `@tauri-apps/cli` | `2.10.1` | `Apache-2.0 OR MIT` |
-| `@tauri-apps/cli-win32-x64-msvc` | `2.10.1` | `Apache-2.0 OR MIT` |
 | `@tauri-apps/plugin-dialog` | `2.7.0` | `MIT OR Apache-2.0` |
 | `@tauri-apps/plugin-fs` | `2.5.0` | `MIT OR Apache-2.0` |
 | `@tauri-apps/plugin-opener` | `2.5.3` | `MIT OR Apache-2.0` |
@@ -102,208 +84,74 @@ Resolved packages: 365
 | `@tiptap/pm` | `3.22.4` | `MIT` |
 | `@tiptap/react` | `3.22.4` | `MIT` |
 | `@tiptap/starter-kit` | `3.22.4` | `MIT` |
-| `@types/babel__core` | `7.20.5` | `MIT` |
-| `@types/babel__generator` | `7.27.0` | `MIT` |
-| `@types/babel__template` | `7.4.4` | `MIT` |
-| `@types/babel__traverse` | `7.28.0` | `MIT` |
-| `@types/estree` | `1.0.8` | `MIT` |
-| `@types/node` | `14.18.63` | `MIT` |
 | `@types/node` | `25.6.0` | `MIT` |
 | `@types/pako` | `2.0.4` | `MIT` |
 | `@types/raf` | `3.4.3` | `MIT` |
-| `@types/react` | `19.2.14` | `MIT` |
-| `@types/react-dom` | `19.2.3` | `MIT` |
 | `@types/trusted-types` | `2.0.7` | `MIT` |
 | `@types/use-sync-external-store` | `0.0.6` | `MIT` |
-| `@vitejs/plugin-react` | `4.7.0` | `MIT` |
-| `archiver` | `5.3.2` | `MIT` |
-| `archiver-utils` | `2.1.0` | `MIT` |
-| `archiver-utils` | `3.0.4` | `MIT` |
-| `asn1.js` | `4.10.1` | `MIT` |
-| `assert` | `2.1.0` | `MIT` |
+| `@xmldom/xmldom` | `0.9.10` | `MIT` |
+| `abort-controller` | `3.0.0` | `MIT` |
+| `archiver-node` | `8.0.8` | `MIT` |
 | `async` | `3.2.6` | `MIT` |
-| `available-typed-arrays` | `1.0.7` | `MIT` |
-| `balanced-match` | `1.0.2` | `MIT` |
+| `b4a` | `1.8.1` | `Apache-2.0` |
+| `balanced-match` | `4.0.4` | `MIT` |
+| `bare-events` | `2.9.1` | `Apache-2.0` |
+| `bare-fs` | `4.7.2` | `Apache-2.0` |
+| `bare-os` | `3.9.1` | `Apache-2.0` |
+| `bare-path` | `3.0.1` | `Apache-2.0` |
+| `bare-stream` | `2.13.1` | `Apache-2.0` |
+| `bare-url` | `2.4.5` | `Apache-2.0` |
 | `base64-arraybuffer` | `1.0.2` | `MIT` |
 | `base64-js` | `1.5.1` | `MIT` |
-| `baseline-browser-mapping` | `2.10.19` | `Apache-2.0` |
-| `big-integer` | `1.6.52` | `Unlicense` |
-| `binary` | `0.3.0` | `MIT` |
-| `bl` | `4.1.0` | `MIT` |
-| `bluebird` | `3.4.7` | `MIT` |
-| `bn.js` | `4.12.3` | `MIT` |
-| `bn.js` | `5.2.3` | `MIT` |
-| `brace-expansion` | `1.1.14` | `MIT` |
-| `brace-expansion` | `2.1.0` | `MIT` |
-| `brorand` | `1.1.0` | `MIT` |
-| `browser-resolve` | `2.0.0` | `MIT` |
-| `browserify-aes` | `1.2.0` | `MIT` |
-| `browserify-cipher` | `1.0.1` | `MIT` |
-| `browserify-des` | `1.0.2` | `MIT` |
-| `browserify-rsa` | `4.1.1` | `MIT` |
-| `browserify-sign` | `4.2.5` | `ISC` |
-| `browserify-zlib` | `0.2.0` | `MIT` |
-| `browserslist` | `4.28.2` | `MIT` |
-| `buffer` | `5.7.1` | `MIT` |
-| `buffer-crc32` | `0.2.13` | `MIT` |
-| `buffer-indexof-polyfill` | `1.0.2` | `MIT` |
-| `buffer-xor` | `1.0.3` | `MIT` |
-| `buffers` | `0.1.1` | `MIT` |
-| `builtin-status-codes` | `3.0.0` | `MIT` |
-| `call-bind` | `1.0.9` | `MIT` |
-| `call-bind-apply-helpers` | `1.0.2` | `MIT` |
-| `call-bound` | `1.0.4` | `MIT` |
-| `caniuse-lite` | `1.0.30001788` | `CC-BY-4.0` |
+| `bluebird` | `3.7.2` | `MIT` |
+| `brace-expansion` | `5.0.6` | `MIT` |
+| `buffer` | `6.0.3` | `MIT` |
+| `buffer-crc32` | `1.0.0` | `MIT` |
 | `canvg` | `3.0.11` | `MIT` |
-| `chainsaw` | `0.1.0` | `MIT/X11` |
-| `cipher-base` | `1.0.7` | `MIT` |
-| `compress-commons` | `4.1.2` | `MIT` |
-| `concat-map` | `0.0.1` | `MIT` |
-| `console-browserify` | `1.2.0` | `[{"type":"MIT","url":"http://github.com/browserify/console-browserify/raw/master/LICENSE"}]` |
-| `constants-browserify` | `1.0.0` | `MIT` |
-| `convert-source-map` | `2.0.0` | `MIT` |
+| `compress-commons` | `7.0.1` | `MIT` |
 | `core-js` | `3.49.0` | `MIT` |
 | `core-util-is` | `1.0.3` | `MIT` |
 | `crc-32` | `1.2.2` | `Apache-2.0` |
-| `crc32-stream` | `4.0.3` | `MIT` |
-| `create-ecdh` | `4.0.4` | `MIT` |
-| `create-hash` | `1.2.0` | `MIT` |
-| `create-hmac` | `1.1.7` | `MIT` |
-| `create-require` | `1.1.1` | `MIT` |
-| `crypto-browserify` | `3.12.1` | `MIT` |
+| `crc32-stream` | `7.0.1` | `MIT` |
 | `css-line-break` | `2.1.0` | `MIT` |
-| `csstype` | `3.2.3` | `MIT` |
-| `dayjs` | `1.11.20` | `MIT` |
-| `debug` | `4.4.3` | `MIT` |
-| `define-data-property` | `1.1.4` | `MIT` |
-| `define-properties` | `1.2.1` | `MIT` |
-| `des.js` | `1.1.0` | `MIT` |
-| `diffie-hellman` | `5.0.3` | `MIT` |
 | `docx` | `9.6.1` | `MIT` |
-| `domain-browser` | `4.22.0` | `MIT` |
 | `dompurify` | `3.4.0` | `(MPL-2.0 OR Apache-2.0)` |
-| `dunder-proto` | `1.0.1` | `MIT` |
 | `duplexer2` | `0.1.4` | `BSD-3-Clause` |
-| `electron-to-chromium` | `1.5.337` | `ISC` |
-| `elliptic` | `6.6.1` | `MIT` |
-| `end-of-stream` | `1.4.5` | `MIT` |
-| `es-define-property` | `1.0.1` | `MIT` |
-| `es-errors` | `1.3.0` | `MIT` |
-| `es-object-atoms` | `1.1.1` | `MIT` |
-| `esbuild` | `0.27.7` | `MIT` |
-| `escalade` | `3.2.0` | `MIT` |
-| `estree-walker` | `2.0.2` | `MIT` |
+| `event-target-shim` | `5.0.1` | `MIT` |
 | `events` | `3.3.0` | `MIT` |
-| `evp_bytestokey` | `1.0.3` | `MIT` |
-| `fast-csv` | `4.3.6` | `MIT` |
+| `events-universal` | `1.0.1` | `Apache-2.0` |
 | `fast-equals` | `5.4.0` | `MIT` |
+| `fast-fifo` | `1.3.2` | `MIT` |
 | `fast-png` | `6.4.0` | `MIT` |
-| `fdir` | `6.5.0` | `MIT` |
 | `fflate` | `0.8.2` | `MIT` |
-| `find-up` | `5.0.0` | `MIT` |
-| `for-each` | `0.3.5` | `MIT` |
-| `fs-constants` | `1.0.0` | `MIT` |
-| `fs.realpath` | `1.0.0` | `ISC` |
-| `fstream` | `1.0.12` | `ISC` |
-| `function-bind` | `1.1.2` | `MIT` |
-| `generator-function` | `2.0.1` | `MIT` |
-| `gensync` | `1.0.0-beta.2` | `MIT` |
-| `get-intrinsic` | `1.3.0` | `MIT` |
-| `get-proto` | `1.0.1` | `MIT` |
-| `glob` | `7.2.3` | `ISC` |
-| `gopd` | `1.2.0` | `MIT` |
+| `fs-extra` | `11.3.5` | `MIT` |
 | `graceful-fs` | `4.2.11` | `ISC` |
-| `has-property-descriptors` | `1.0.2` | `MIT` |
-| `has-symbols` | `1.1.0` | `MIT` |
-| `has-tostringtag` | `1.0.2` | `MIT` |
-| `hash-base` | `3.0.5` | `MIT` |
-| `hash-base` | `3.1.2` | `MIT` |
 | `hash.js` | `1.1.7` | `MIT` |
-| `hasown` | `2.0.3` | `MIT` |
-| `hmac-drbg` | `1.0.1` | `MIT` |
 | `html2canvas` | `1.4.1` | `MIT` |
-| `https-browserify` | `1.0.0` | `MIT` |
 | `ieee754` | `1.2.1` | `BSD-3-Clause` |
 | `immediate` | `3.0.6` | `MIT` |
-| `inflight` | `1.0.6` | `ISC` |
 | `inherits` | `2.0.4` | `ISC` |
+| `intl-messageformat` | `11.2.8` | `BSD-3-Clause` |
 | `iobuffer` | `5.4.0` | `MIT` |
-| `is-arguments` | `1.2.0` | `MIT` |
-| `is-callable` | `1.2.7` | `MIT` |
-| `is-core-module` | `2.16.1` | `MIT` |
-| `is-generator-function` | `1.1.2` | `MIT` |
-| `is-nan` | `1.3.2` | `MIT` |
-| `is-regex` | `1.2.1` | `MIT` |
-| `is-typed-array` | `1.1.15` | `MIT` |
+| `is-stream` | `4.0.1` | `MIT` |
 | `isarray` | `1.0.0` | `MIT` |
-| `isarray` | `2.0.5` | `MIT` |
-| `isomorphic-timers-promises` | `1.0.1` | `MIT` |
-| `js-tokens` | `4.0.0` | `MIT` |
-| `jsesc` | `3.1.0` | `MIT` |
-| `json5` | `2.2.3` | `MIT` |
+| `jsonfile` | `6.2.1` | `MIT` |
 | `jspdf` | `4.2.1` | `MIT` |
 | `jszip` | `3.10.1` | `(MIT OR GPL-3.0-or-later)` |
-| `lazystream` | `1.0.1` | `MIT` |
 | `lie` | `3.3.0` | `MIT` |
 | `linkifyjs` | `4.3.2` | `MIT` |
-| `listenercount` | `1.0.1` | `ISC` |
-| `locate-path` | `6.0.0` | `MIT` |
-| `lodash.defaults` | `4.2.0` | `MIT` |
-| `lodash.difference` | `4.5.0` | `MIT` |
-| `lodash.escaperegexp` | `4.1.2` | `MIT` |
-| `lodash.flatten` | `4.4.0` | `MIT` |
-| `lodash.groupby` | `4.6.0` | `MIT` |
-| `lodash.isboolean` | `3.0.3` | `MIT` |
-| `lodash.isequal` | `4.5.0` | `MIT` |
-| `lodash.isfunction` | `3.0.9` | `MIT` |
-| `lodash.isnil` | `4.0.0` | `MIT` |
-| `lodash.isplainobject` | `4.0.6` | `MIT` |
-| `lodash.isundefined` | `3.0.1` | `MIT` |
-| `lodash.union` | `4.6.0` | `MIT` |
-| `lodash.uniq` | `4.5.0` | `MIT` |
-| `lru-cache` | `5.1.1` | `ISC` |
-| `magic-string` | `0.30.21` | `MIT` |
-| `math-intrinsics` | `1.1.0` | `MIT` |
-| `md5.js` | `1.3.5` | `MIT` |
-| `miller-rabin` | `4.0.1` | `MIT` |
 | `minimalistic-assert` | `1.0.1` | `ISC` |
-| `minimalistic-crypto-utils` | `1.0.1` | `MIT` |
-| `minimatch` | `3.1.5` | `ISC` |
-| `minimatch` | `5.1.9` | `ISC` |
-| `minimist` | `1.2.8` | `MIT` |
-| `mkdirp` | `0.5.6` | `MIT` |
-| `ms` | `2.1.3` | `MIT` |
-| `nanoid` | `3.3.11` | `MIT` |
+| `minimatch` | `10.2.5` | `BlueOak-1.0.0` |
 | `nanoid` | `5.1.9` | `MIT` |
+| `node-int64` | `0.4.0` | `MIT` |
 | `node-readable-to-web-readable-stream` | `0.4.2` | `MIT` |
-| `node-releases` | `2.0.37` | `MIT` |
-| `node-stdlib-browser` | `1.3.1` | `MIT` |
 | `normalize-path` | `3.0.0` | `MIT` |
-| `object-inspect` | `1.13.4` | `MIT` |
-| `object-is` | `1.1.6` | `MIT` |
-| `object-keys` | `1.1.1` | `MIT` |
-| `object.assign` | `4.1.7` | `MIT` |
-| `once` | `1.4.0` | `ISC` |
 | `orderedmap` | `2.1.1` | `MIT` |
-| `os-browserify` | `0.3.0` | `MIT` |
-| `p-limit` | `3.1.0` | `MIT` |
-| `p-locate` | `5.0.0` | `MIT` |
 | `pako` | `1.0.11` | `(MIT AND Zlib)` |
 | `pako` | `2.1.0` | `(MIT AND Zlib)` |
-| `parse-asn1` | `5.1.9` | `ISC` |
-| `path-browserify` | `1.0.1` | `MIT` |
-| `path-exists` | `4.0.0` | `MIT` |
-| `path-is-absolute` | `1.0.1` | `MIT` |
-| `path-parse` | `1.0.7` | `MIT` |
-| `pbkdf2` | `3.1.5` | `MIT` |
 | `pdfjs-dist` | `5.6.205` | `Apache-2.0` |
 | `performance-now` | `2.1.0` | `MIT` |
-| `picocolors` | `1.1.1` | `ISC` |
-| `picomatch` | `4.0.4` | `MIT` |
-| `pkg-dir` | `5.0.0` | `MIT` |
 | `pocketbase` | `0.26.8` | `MIT` |
-| `possible-typed-array-names` | `1.1.0` | `MIT` |
-| `postcss` | `8.5.10` | `MIT` |
 | `process` | `0.11.10` | `MIT` |
 | `process-nextick-args` | `2.0.1` | `MIT` |
 | `prosemirror-changeset` | `2.4.1` | `MIT` |
@@ -318,88 +166,50 @@ Resolved packages: 365
 | `prosemirror-tables` | `1.8.5` | `MIT` |
 | `prosemirror-transform` | `1.12.0` | `MIT` |
 | `prosemirror-view` | `1.41.8` | `MIT` |
-| `public-encrypt` | `4.0.3` | `MIT` |
-| `punycode` | `1.4.1` | `MIT` |
-| `qs` | `6.15.1` | `BSD-3-Clause` |
-| `querystring-es3` | `0.2.1` | `[{"type":"MIT","url":"https://github.com/Gozala/enchain/License.md"}]` |
 | `raf` | `3.4.1` | `MIT` |
-| `randombytes` | `2.1.0` | `MIT` |
-| `randomfill` | `1.0.4` | `MIT` |
 | `react` | `19.2.5` | `MIT` |
 | `react-dom` | `19.2.5` | `MIT` |
-| `react-refresh` | `0.17.0` | `MIT` |
+| `read-excel-file` | `9.0.10` | `MIT` |
 | `readable-stream` | `2.3.8` | `MIT` |
-| `readable-stream` | `3.6.2` | `MIT` |
-| `readdir-glob` | `1.1.3` | `Apache-2.0` |
+| `readable-stream` | `4.7.0` | `MIT` |
+| `readdir-glob` | `3.0.0` | `Apache-2.0` |
 | `regenerator-runtime` | `0.13.11` | `MIT` |
-| `resolve` | `1.22.12` | `MIT` |
 | `rgbcolor` | `1.0.1` | `MIT OR SEE LICENSE IN FEEL-FREE.md` |
-| `rimraf` | `2.7.1` | `ISC` |
-| `ripemd160` | `2.0.3` | `MIT` |
-| `rollup` | `4.60.1` | `MIT` |
 | `rope-sequence` | `1.3.4` | `MIT` |
 | `safe-buffer` | `5.1.2` | `MIT` |
 | `safe-buffer` | `5.2.1` | `MIT` |
-| `safe-regex-test` | `1.1.0` | `MIT` |
 | `sax` | `1.6.0` | `BlueOak-1.0.0` |
-| `saxes` | `5.0.1` | `ISC` |
 | `scheduler` | `0.27.0` | `MIT` |
-| `semver` | `6.3.1` | `ISC` |
-| `set-function-length` | `1.2.2` | `MIT` |
 | `setimmediate` | `1.0.5` | `MIT` |
-| `sha.js` | `2.4.12` | `(MIT AND BSD-3-Clause)` |
-| `side-channel` | `1.1.0` | `MIT` |
-| `side-channel-list` | `1.0.1` | `MIT` |
-| `side-channel-map` | `1.0.1` | `MIT` |
-| `side-channel-weakmap` | `1.0.2` | `MIT` |
-| `source-map-js` | `1.2.1` | `BSD-3-Clause` |
 | `stackblur-canvas` | `2.7.0` | `MIT` |
-| `stream-browserify` | `3.0.0` | `MIT` |
-| `stream-http` | `3.2.0` | `MIT` |
+| `streamx` | `2.26.0` | `MIT` |
 | `string_decoder` | `1.1.1` | `MIT` |
 | `string_decoder` | `1.3.0` | `MIT` |
-| `supports-preserve-symlinks-flag` | `1.0.0` | `MIT` |
 | `svg-pathdata` | `6.0.3` | `MIT` |
-| `tar-stream` | `2.2.0` | `MIT` |
+| `tar-stream` | `3.2.0` | `MIT` |
+| `teex` | `1.0.1` | `MIT` |
+| `text-decoder` | `1.2.7` | `Apache-2.0` |
 | `text-segmentation` | `1.0.3` | `MIT` |
-| `timers-browserify` | `2.0.12` | `MIT` |
-| `tinyglobby` | `0.2.16` | `MIT` |
-| `tmp` | `0.2.5` | `MIT` |
-| `to-buffer` | `1.2.2` | `MIT` |
-| `traverse` | `0.3.9` | `MIT/X11` |
-| `tty-browserify` | `0.0.1` | `MIT` |
-| `typed-array-buffer` | `1.0.3` | `MIT` |
-| `typescript` | `5.8.3` | `Apache-2.0` |
 | `undici-types` | `7.19.2` | `MIT` |
-| `unzipper` | `0.10.14` | `MIT` |
-| `update-browserslist-db` | `1.2.3` | `MIT` |
-| `url` | `0.11.4` | `MIT` |
+| `universalify` | `2.0.1` | `MIT` |
+| `unzipper` | `0.12.3` | `MIT` |
 | `use-sync-external-store` | `1.6.0` | `MIT` |
-| `util` | `0.12.5` | `MIT` |
 | `util-deprecate` | `1.0.2` | `MIT` |
 | `utrie` | `1.0.2` | `MIT` |
-| `uuid` | `8.3.2` | `MIT` |
-| `vite` | `7.3.2` | `MIT` |
-| `vite-plugin-node-polyfills` | `0.26.0` | `MIT` |
-| `vm-browserify` | `1.1.2` | `MIT` |
 | `w3c-keyname` | `2.2.8` | `MIT` |
-| `which-typed-array` | `1.1.20` | `MIT` |
-| `wrappy` | `1.0.2` | `ISC` |
+| `write-excel-file` | `4.0.7` | `MIT` |
 | `xml` | `1.0.1` | `MIT` |
 | `xml-js` | `1.6.11` | `MIT` |
-| `xmlchars` | `2.2.0` | `MIT` |
-| `xtend` | `4.0.2` | `MIT` |
-| `yallist` | `3.1.1` | `ISC` |
-| `yocto-queue` | `0.1.0` | `MIT` |
-| `zip-stream` | `4.1.1` | `MIT` |
+| `zip-stream` | `7.0.5` | `MIT` |
 
 ## Resolved Rust Crate Inventory
-
-Resolved crates: 625
 
 | Crate | Version | License | License File |
 | --- | --- | --- | --- |
 | `adler2` | `2.0.1` | `0BSD OR MIT OR Apache-2.0` | `` |
+| `aead` | `0.5.2` | `MIT OR Apache-2.0` | `` |
+| `aes` | `0.8.4` | `MIT OR Apache-2.0` | `` |
+| `aes-gcm` | `0.10.3` | `Apache-2.0 OR MIT` | `` |
 | `ahash` | `0.8.12` | `MIT OR Apache-2.0` | `` |
 | `aho-corasick` | `1.1.4` | `Unlicense OR MIT` | `` |
 | `alloc-no-stdlib` | `2.0.4` | `BSD-3-Clause` | `` |
@@ -407,6 +217,7 @@ Resolved crates: 625
 | `allocator-api2` | `0.2.21` | `MIT OR Apache-2.0` | `` |
 | `android_system_properties` | `0.1.5` | `MIT/Apache-2.0` | `` |
 | `anyhow` | `1.0.102` | `MIT OR Apache-2.0` | `` |
+| `argon2` | `0.5.3` | `MIT OR Apache-2.0` | `` |
 | `async-broadcast` | `0.7.2` | `MIT OR Apache-2.0` | `` |
 | `async-channel` | `2.5.0` | `Apache-2.0 OR MIT` | `` |
 | `async-executor` | `1.14.0` | `Apache-2.0 OR MIT` | `` |
@@ -420,14 +231,15 @@ Resolved crates: 625
 | `atk` | `0.18.2` | `MIT` | `` |
 | `atk-sys` | `0.18.2` | `MIT` | `` |
 | `atomic-waker` | `1.1.2` | `Apache-2.0 OR MIT` | `` |
-| `autocfg` | `1.5.0` | `Apache-2.0 OR MIT` | `` |
 | `base64` | `0.13.1` | `MIT/Apache-2.0` | `` |
 | `base64` | `0.21.7` | `MIT OR Apache-2.0` | `` |
 | `base64` | `0.22.1` | `MIT OR Apache-2.0` | `` |
+| `base64ct` | `1.8.3` | `Apache-2.0 OR MIT` | `` |
 | `bit-set` | `0.8.0` | `Apache-2.0 OR MIT` | `` |
 | `bit-vec` | `0.8.0` | `Apache-2.0 OR MIT` | `` |
 | `bitflags` | `1.3.2` | `MIT/Apache-2.0` | `` |
 | `bitflags` | `2.11.1` | `MIT OR Apache-2.0` | `` |
+| `blake2` | `0.10.6` | `MIT OR Apache-2.0` | `` |
 | `block-buffer` | `0.10.4` | `MIT OR Apache-2.0` | `` |
 | `block2` | `0.6.2` | `MIT` | `` |
 | `blocking` | `1.6.2` | `Apache-2.0 OR MIT` | `` |
@@ -445,16 +257,13 @@ Resolved crates: 625
 | `candle-nn` | `0.10.2` | `MIT OR Apache-2.0` | `` |
 | `candle-transformers` | `0.10.2` | `MIT OR Apache-2.0` | `` |
 | `cargo_metadata` | `0.19.2` | `MIT` | `` |
-| `cargo_toml` | `0.22.3` | `Apache-2.0 OR MIT` | `` |
 | `cargo-platform` | `0.1.9` | `MIT OR Apache-2.0` | `` |
 | `castaway` | `0.2.4` | `MIT` | `` |
-| `cc` | `1.2.60` | `MIT OR Apache-2.0` | `` |
 | `cesu8` | `1.1.0` | `Apache-2.0/MIT` | `` |
 | `cfb` | `0.7.3` | `MIT` | `` |
-| `cfg_aliases` | `0.2.1` | `MIT` | `` |
-| `cfg-expr` | `0.15.8` | `MIT OR Apache-2.0` | `` |
 | `cfg-if` | `1.0.4` | `MIT OR Apache-2.0` | `` |
 | `chrono` | `0.4.44` | `MIT OR Apache-2.0` | `` |
+| `cipher` | `0.4.4` | `MIT OR Apache-2.0` | `` |
 | `combine` | `4.6.7` | `MIT` | `` |
 | `compact_str` | `0.9.0` | `MIT` | `` |
 | `concurrent-queue` | `2.5.0` | `Apache-2.0 OR MIT` | `` |
@@ -471,12 +280,13 @@ Resolved crates: 625
 | `crossbeam-deque` | `0.8.6` | `MIT OR Apache-2.0` | `` |
 | `crossbeam-epoch` | `0.9.18` | `MIT OR Apache-2.0` | `` |
 | `crossbeam-utils` | `0.8.21` | `MIT OR Apache-2.0` | `` |
-| `crunchy` | `0.2.4` | `MIT` | `LICENSE` |
+| `crunchy` | `0.2.4` | `MIT` | `` |
 | `crypto-common` | `0.1.7` | `MIT OR Apache-2.0` | `` |
 | `cssparser` | `0.29.6` | `MPL-2.0` | `` |
 | `cssparser` | `0.36.0` | `MPL-2.0` | `` |
 | `cssparser-macros` | `0.6.1` | `MPL-2.0` | `` |
 | `ctor` | `0.2.9` | `Apache-2.0 OR MIT` | `` |
+| `ctr` | `0.9.2` | `MIT OR Apache-2.0` | `` |
 | `darling` | `0.20.11` | `MIT` | `` |
 | `darling` | `0.23.0` | `MIT` | `` |
 | `darling_core` | `0.20.11` | `MIT` | `` |
@@ -508,11 +318,10 @@ Resolved crates: 625
 | `dyn-stack-macros` | `0.1.3` | `MIT` | `` |
 | `either` | `1.15.0` | `MIT OR Apache-2.0` | `` |
 | `embed_plist` | `1.2.2` | `MIT OR Apache-2.0` | `` |
-| `embed-resource` | `3.0.8` | `MIT` | `` |
 | `encode_unicode` | `1.0.0` | `Apache-2.0 OR MIT` | `` |
 | `encoding_rs` | `0.8.35` | `(Apache-2.0 OR MIT) AND BSD-3-Clause` | `` |
 | `endi` | `1.1.1` | `MIT` | `` |
-| `enum-as-inner` | `0.6.1` | `MIT OR Apache-2.0` | `` |
+| `enum-as-inner` | `0.6.1` | `MIT/Apache-2.0` | `` |
 | `enumflags2` | `0.7.12` | `MIT OR Apache-2.0` | `` |
 | `enumflags2_derive` | `0.7.12` | `MIT OR Apache-2.0` | `` |
 | `equivalent` | `1.0.2` | `Apache-2.0 OR MIT` | `` |
@@ -525,7 +334,6 @@ Resolved crates: 625
 | `fastrand` | `2.4.1` | `Apache-2.0 OR MIT` | `` |
 | `fdeflate` | `0.3.7` | `MIT OR Apache-2.0` | `` |
 | `field-offset` | `0.3.6` | `MIT OR Apache-2.0` | `` |
-| `find-msvc-tools` | `0.1.9` | `MIT OR Apache-2.0` | `` |
 | `flate2` | `1.1.9` | `MIT OR Apache-2.0` | `` |
 | `float8` | `0.7.0` | `MIT` | `` |
 | `fnv` | `1.0.7` | `Apache-2.0 / MIT` | `` |
@@ -561,10 +369,10 @@ Resolved crates: 625
 | `gemm-f32` | `0.19.0` | `MIT` | `` |
 | `gemm-f64` | `0.19.0` | `MIT` | `` |
 | `generic-array` | `0.14.7` | `MIT` | `` |
-| `getrandom` | `0.1.16` | `MIT OR Apache-2.0` | `` |
 | `getrandom` | `0.2.17` | `MIT OR Apache-2.0` | `` |
 | `getrandom` | `0.3.4` | `MIT OR Apache-2.0` | `` |
 | `getrandom` | `0.4.2` | `MIT OR Apache-2.0` | `` |
+| `ghash` | `0.5.1` | `Apache-2.0 OR MIT` | `` |
 | `gio` | `0.18.4` | `MIT` | `` |
 | `gio-sys` | `0.18.1` | `MIT` | `` |
 | `glib` | `0.18.5` | `MIT` | `` |
@@ -611,6 +419,7 @@ Resolved crates: 625
 | `indexmap` | `2.14.0` | `Apache-2.0 OR MIT` | `` |
 | `indicatif` | `0.17.11` | `MIT` | `` |
 | `infer` | `0.19.0` | `MIT` | `` |
+| `inout` | `0.1.4` | `MIT OR Apache-2.0` | `` |
 | `ipnet` | `2.12.0` | `MIT OR Apache-2.0` | `` |
 | `iri-string` | `0.7.12` | `MIT OR Apache-2.0` | `` |
 | `is-docker` | `0.2.0` | `MIT` | `` |
@@ -684,6 +493,7 @@ Resolved crates: 625
 | `once_cell` | `1.21.4` | `MIT OR Apache-2.0` | `` |
 | `onig` | `6.5.3` | `MIT` | `` |
 | `onig_sys` | `69.9.3` | `MIT` | `` |
+| `opaque-debug` | `0.3.1` | `MIT OR Apache-2.0` | `` |
 | `open` | `5.3.3` | `MIT` | `` |
 | `option-ext` | `0.2.0` | `MPL-2.0` | `` |
 | `ordered-stream` | `0.2.0` | `MIT OR Apache-2.0` | `` |
@@ -693,6 +503,7 @@ Resolved crates: 625
 | `parking` | `2.2.1` | `Apache-2.0 OR MIT` | `` |
 | `parking_lot` | `0.12.5` | `MIT OR Apache-2.0` | `` |
 | `parking_lot_core` | `0.9.12` | `MIT OR Apache-2.0` | `` |
+| `password-hash` | `0.5.0` | `MIT OR Apache-2.0` | `` |
 | `paste` | `1.0.15` | `MIT OR Apache-2.0` | `` |
 | `pathdiff` | `0.2.3` | `MIT/Apache-2.0` | `` |
 | `percent-encoding` | `2.3.2` | `MIT OR Apache-2.0` | `` |
@@ -700,13 +511,9 @@ Resolved crates: 625
 | `phf` | `0.11.3` | `MIT` | `` |
 | `phf` | `0.13.1` | `MIT` | `` |
 | `phf` | `0.8.0` | `MIT` | `` |
-| `phf_codegen` | `0.11.3` | `MIT` | `` |
-| `phf_codegen` | `0.13.1` | `MIT` | `` |
-| `phf_codegen` | `0.8.0` | `MIT` | `` |
 | `phf_generator` | `0.10.0` | `MIT` | `` |
 | `phf_generator` | `0.11.3` | `MIT` | `` |
 | `phf_generator` | `0.13.1` | `MIT` | `` |
-| `phf_generator` | `0.8.0` | `MIT` | `` |
 | `phf_macros` | `0.10.0` | `MIT` | `` |
 | `phf_macros` | `0.11.3` | `MIT` | `` |
 | `phf_macros` | `0.13.1` | `MIT` | `` |
@@ -716,10 +523,10 @@ Resolved crates: 625
 | `phf_shared` | `0.8.0` | `MIT` | `` |
 | `pin-project-lite` | `0.2.17` | `Apache-2.0 OR MIT` | `` |
 | `piper` | `0.2.5` | `MIT OR Apache-2.0` | `` |
-| `pkg-config` | `0.3.33` | `MIT OR Apache-2.0` | `` |
 | `plist` | `1.8.0` | `MIT` | `` |
 | `png` | `0.17.16` | `MIT OR Apache-2.0` | `` |
 | `polling` | `3.11.0` | `Apache-2.0 OR MIT` | `` |
+| `polyval` | `0.6.2` | `Apache-2.0 OR MIT` | `` |
 | `portable-atomic` | `1.13.1` | `Apache-2.0 OR MIT` | `` |
 | `potential_utf` | `0.1.5` | `Unicode-3.0` | `` |
 | `powerfmt` | `0.2.0` | `MIT OR Apache-2.0` | `` |
@@ -742,18 +549,13 @@ Resolved crates: 625
 | `quote` | `1.0.45` | `MIT OR Apache-2.0` | `` |
 | `r-efi` | `5.3.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | `` |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | `` |
-| `rand` | `0.7.3` | `MIT OR Apache-2.0` | `` |
 | `rand` | `0.8.5` | `MIT OR Apache-2.0` | `` |
 | `rand` | `0.9.4` | `MIT OR Apache-2.0` | `` |
-| `rand_chacha` | `0.2.2` | `MIT OR Apache-2.0` | `` |
 | `rand_chacha` | `0.3.1` | `MIT OR Apache-2.0` | `` |
 | `rand_chacha` | `0.9.0` | `MIT OR Apache-2.0` | `` |
-| `rand_core` | `0.5.1` | `MIT OR Apache-2.0` | `` |
 | `rand_core` | `0.6.4` | `MIT OR Apache-2.0` | `` |
 | `rand_core` | `0.9.5` | `MIT OR Apache-2.0` | `` |
 | `rand_distr` | `0.5.1` | `MIT OR Apache-2.0` | `` |
-| `rand_hc` | `0.2.0` | `MIT/Apache-2.0` | `` |
-| `rand_pcg` | `0.2.1` | `MIT OR Apache-2.0` | `` |
 | `raw-cpuid` | `11.6.0` | `MIT` | `` |
 | `raw-window-handle` | `0.6.2` | `MIT OR Apache-2.0 OR Zlib` | `` |
 | `rayon` | `1.12.0` | `MIT OR Apache-2.0` | `` |
@@ -771,7 +573,6 @@ Resolved crates: 625
 | `reqwest` | `0.13.2` | `MIT OR Apache-2.0` | `` |
 | `rfd` | `0.16.0` | `MIT` | `` |
 | `ring` | `0.17.14` | `Apache-2.0 AND ISC` | `` |
-| `rustc_version` | `0.4.1` | `MIT OR Apache-2.0` | `` |
 | `rustc-hash` | `2.1.2` | `Apache-2.0 OR MIT` | `` |
 | `rustix` | `1.1.4` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `rustls` | `0.23.40` | `Apache-2.0 OR ISC OR MIT` | `` |
@@ -809,7 +610,6 @@ Resolved crates: 625
 | `servo_arc` | `0.4.3` | `MIT OR Apache-2.0` | `` |
 | `sha2` | `0.10.9` | `MIT OR Apache-2.0` | `` |
 | `shared_child` | `1.1.1` | `MIT` | `` |
-| `shlex` | `1.3.0` | `MIT OR Apache-2.0` | `` |
 | `sigchld` | `0.2.4` | `MIT` | `` |
 | `signal-hook` | `0.3.18` | `Apache-2.0/MIT` | `` |
 | `signal-hook-registry` | `1.4.8` | `MIT OR Apache-2.0` | `` |
@@ -827,8 +627,6 @@ Resolved crates: 625
 | `static_assertions` | `1.1.0` | `MIT OR Apache-2.0` | `` |
 | `string_cache` | `0.8.9` | `MIT OR Apache-2.0` | `` |
 | `string_cache` | `0.9.0` | `MIT OR Apache-2.0` | `` |
-| `string_cache_codegen` | `0.5.4` | `MIT OR Apache-2.0` | `` |
-| `string_cache_codegen` | `0.6.1` | `MIT OR Apache-2.0` | `` |
 | `strsim` | `0.11.1` | `MIT` | `` |
 | `subtle` | `2.6.1` | `BSD-3-Clause` | `` |
 | `swift-rs` | `1.0.7` | `MIT OR Apache-2.0` | `` |
@@ -837,15 +635,11 @@ Resolved crates: 625
 | `sync_wrapper` | `1.0.2` | `Apache-2.0` | `` |
 | `synstructure` | `0.13.2` | `MIT` | `` |
 | `sysctl` | `0.6.0` | `MIT` | `` |
-| `system-deps` | `6.2.2` | `MIT OR Apache-2.0` | `` |
 | `tao` | `0.34.8` | `Apache-2.0` | `` |
 | `tao-macros` | `0.1.3` | `MIT OR Apache-2.0` | `` |
-| `target-lexicon` | `0.12.16` | `Apache-2.0 WITH LLVM-exception` | `` |
 | `tauri` | `2.10.3` | `Apache-2.0 OR MIT` | `` |
-| `tauri-build` | `2.5.6` | `Apache-2.0 OR MIT` | `` |
 | `tauri-codegen` | `2.5.5` | `Apache-2.0 OR MIT` | `` |
 | `tauri-macros` | `2.5.5` | `Apache-2.0 OR MIT` | `` |
-| `tauri-plugin` | `2.5.4` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-dialog` | `2.7.0` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-fs` | `2.5.0` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-opener` | `2.5.3` | `Apache-2.0 OR MIT` | `` |
@@ -853,7 +647,6 @@ Resolved crates: 625
 | `tauri-runtime` | `2.10.1` | `Apache-2.0 OR MIT` | `` |
 | `tauri-runtime-wry` | `2.10.1` | `Apache-2.0 OR MIT` | `` |
 | `tauri-utils` | `2.8.3` | `Apache-2.0 OR MIT` | `` |
-| `tauri-winres` | `0.3.5` | `MIT` | `` |
 | `tempfile` | `3.27.0` | `MIT OR Apache-2.0` | `` |
 | `tendril` | `0.4.3` | `MIT/Apache-2.0` | `` |
 | `tendril` | `0.5.0` | `MIT OR Apache-2.0` | `` |
@@ -872,7 +665,6 @@ Resolved crates: 625
 | `tokio` | `1.52.0` | `MIT` | `` |
 | `tokio-rustls` | `0.26.4` | `MIT OR Apache-2.0` | `` |
 | `tokio-util` | `0.7.18` | `MIT` | `` |
-| `toml` | `0.8.2` | `MIT OR Apache-2.0` | `` |
 | `toml` | `0.9.12+spec-1.1.0` | `MIT OR Apache-2.0` | `` |
 | `toml_datetime` | `0.6.3` | `MIT OR Apache-2.0` | `` |
 | `toml_datetime` | `0.7.5+spec-1.1.0` | `MIT OR Apache-2.0` | `` |
@@ -906,20 +698,16 @@ Resolved crates: 625
 | `unicode-segmentation` | `1.13.2` | `MIT OR Apache-2.0` | `` |
 | `unicode-width` | `0.2.2` | `MIT OR Apache-2.0` | `` |
 | `unicode-xid` | `0.2.6` | `MIT OR Apache-2.0` | `` |
+| `universal-hash` | `0.5.1` | `MIT OR Apache-2.0` | `` |
 | `untrusted` | `0.9.0` | `ISC` | `` |
 | `url` | `2.5.8` | `MIT OR Apache-2.0` | `` |
 | `urlpattern` | `0.3.0` | `MIT` | `` |
 | `utf-8` | `0.7.6` | `MIT OR Apache-2.0` | `` |
 | `utf8_iter` | `1.0.4` | `Apache-2.0 OR MIT` | `` |
 | `uuid` | `1.23.0` | `Apache-2.0 OR MIT` | `` |
-| `version_check` | `0.9.5` | `MIT/Apache-2.0` | `` |
-| `version-compare` | `0.2.1` | `MIT` | `` |
-| `vswhom` | `0.1.0` | `MIT` | `` |
-| `vswhom-sys` | `0.1.3` | `MIT` | `` |
 | `walkdir` | `2.5.0` | `Unlicense/MIT` | `` |
 | `want` | `0.3.1` | `MIT` | `` |
 | `wasi` | `0.11.1+wasi-snapshot-preview1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
-| `wasi` | `0.9.0+wasi-snapshot-preview1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `wasip2` | `1.0.2+wasi-0.2.9` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `wasip3` | `0.4.0+wasi-0.3.0-rc-2026-01-06` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `wasm-bindgen` | `0.2.118` | `MIT OR Apache-2.0` | `` |
@@ -933,7 +721,7 @@ Resolved crates: 625
 | `wasmparser` | `0.244.0` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `web_atoms` | `0.2.3` | `MIT OR Apache-2.0` | `` |
 | `web-sys` | `0.3.95` | `MIT OR Apache-2.0` | `` |
-| `web-time` | `1.1.0` | `MIT OR Apache-2.0` | `LICENSE-MIT, LICENSE-APACHE` |
+| `web-time` | `1.1.0` | `MIT OR Apache-2.0` | `` |
 | `webkit2gtk` | `2.0.2` | `MIT` | `` |
 | `webkit2gtk-sys` | `2.0.2` | `MIT` | `` |
 | `webpki-roots` | `1.0.7` | `CDLA-Permissive-2.0` | `` |
@@ -983,7 +771,7 @@ Resolved crates: 625
 | `windows-strings` | `0.4.2` | `MIT OR Apache-2.0` | `` |
 | `windows-strings` | `0.5.1` | `MIT OR Apache-2.0` | `` |
 | `windows-sys` | `0.45.0` | `MIT OR Apache-2.0` | `` |
-| `windows-sys` | `0.52.0` | `MIT OR Apache-2.0` | `license-mit, license-apache-2.0` |
+| `windows-sys` | `0.52.0` | `MIT OR Apache-2.0` | `` |
 | `windows-sys` | `0.59.0` | `MIT OR Apache-2.0` | `` |
 | `windows-sys` | `0.60.2` | `MIT OR Apache-2.0` | `` |
 | `windows-sys` | `0.61.2` | `MIT OR Apache-2.0` | `` |
@@ -995,7 +783,6 @@ Resolved crates: 625
 | `winnow` | `0.5.40` | `MIT` | `` |
 | `winnow` | `0.7.15` | `MIT` | `` |
 | `winnow` | `1.0.1` | `MIT` | `` |
-| `winreg` | `0.55.0` | `MIT` | `` |
 | `wit-bindgen` | `0.51.0` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `wit-bindgen-core` | `0.51.0` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `wit-bindgen-rust` | `0.51.0` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
@@ -1025,10 +812,7 @@ Resolved crates: 625
 | `zvariant_derive` | `5.10.0` | `MIT` | `` |
 | `zvariant_utils` | `3.3.0` | `MIT` | `` |
 
-## Notes
+## Included License Texts
 
-- This inventory is based on the dependency versions currently locked in the repository at release time.
-- The JavaScript inventory was resolved from installed package manifests under `node_modules`.
-- The Rust inventory was resolved from `Cargo.lock` and locally cached crate manifests in the Cargo registry.
-- A small number of packages did not expose SPDX metadata directly in their installed manifests; those entries were normalized from upstream package metadata or published source pages before this file was written.
 - Full license text files for the primary license families and bundled assets are included in [licenses](./licenses/).
+- PocketBase redistribution notice and MIT license text are included in [licenses/POCKETBASE-MIT.txt](./licenses/POCKETBASE-MIT.txt).
