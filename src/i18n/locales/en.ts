@@ -2769,7 +2769,7 @@ export const en = {
       emptyTitle: "Project Chat",
       openProjectFirst: "Open a project first.",
       noPermission: "You do not have permission to use AI Assist chat for this project.",
-      enableInProjectSettings: "Enable AI Assist in Project Settings before using project chat.",
+      enableInProjectSettings: "Enable AI Assist in AI Assist Home before using project chat.",
       openHelp: "Show AI Assist chat help",
       showHelp: "Show Help",
       help: {
@@ -2881,7 +2881,7 @@ export const en = {
         empty: {
           openProjectFirst: "Open a project first.",
           noPermission: "You do not have permission to use AI Assist attribute tools for this project.",
-          enableInProjectSettings: "Enable AI Assist in Project Settings before using AI attribute tools.",
+          enableInProjectSettings: "Enable AI Assist in AI Assist Home before using AI attribute tools.",
           openFromSpecificAttribute: "Open this view from a specific attribute to generate suggestions.",
           loadingCurrentValues: "Loading current values...",
           noCasesYet: "No cases yet.",
@@ -2988,7 +2988,7 @@ export const en = {
       empty: {
         noDocumentsYet: "No documents yet. Add documents from the Documents page first.",
         noPermission: "You do not have permission to use AI Assist coding tools for this project.",
-        enableInProjectSettings: "Enable AI Assist in Project Settings before using AI coding tools.",
+        enableInProjectSettings: "Enable AI Assist in AI Assist Home before using AI coding tools.",
       },
       lock: {
         available: "Available",
@@ -3045,7 +3045,7 @@ export const en = {
       empty: {
         openProjectFirst: "Open a project first",
         noPermission: "You do not have permission to use AI Assist analyze tools for this project",
-        enableInProjectSettings: "Enable AI Assist in Project Settings before using AI analysis tools",
+        enableInProjectSettings: "Enable AI Assist in AI Assist Home before using AI analysis tools",
         noSavedAnalyses: "No saved analyses yet.",
       },
       errors: {
@@ -3105,7 +3105,7 @@ export const en = {
       empty: {
         openProjectFirst: "Open a project first.",
         noPermission: "You do not have permission to process or review AI-processed documents for this project.",
-        enableInProjectSettings: "Enable AI Assist in Project Settings before processing or reviewing documents.",
+        enableInProjectSettings: "Enable AI Assist in AI Assist Home before processing or reviewing documents.",
         noPermissionToProcess: "You do not have permission to process documents for this project.",
         noPermissionToReview: "You do not have permission to review processed documents for this project.",
         noMatchingDocuments: "No matching documents.",
@@ -3468,7 +3468,7 @@ export const en = {
     nav: {
       openProjectFirst: "Open a project first",
       aiPermissionDenied: "You do not have permission to use this AI Assist tool",
-      enableAi: "Enable AI Assist in Project Settings",
+      enableAi: "Enable AI Assist in AI Assist Home",
     },
     user: {
       signOutTitle: "Sign out",

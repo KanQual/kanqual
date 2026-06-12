@@ -149,7 +149,7 @@ const aboutRustLicenses = parseMarkdownLicenseTable(
   "Resolved Rust Crate Inventory",
 );
 
-const RELEASE_DATE = "May 9, 2026";
+const RELEASE_DATE = "June 12, 2026";
 const GITHUB_RELEASES_URL = "https://github.com/KanQual/kanqual/releases";
 
 type SettingsModalSectionProps = {
