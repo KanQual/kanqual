@@ -2613,7 +2613,7 @@ function ReportPage({
                     fontSize: 10, fontWeight: 600, background: "var(--color-surface-alt)",
                     border: "1px solid var(--color-border)", borderRadius: 4,
                     padding: "1px 6px", color: "var(--color-text-muted)",
-                    textTransform: "uppercase", letterSpacing: "0.05em",
+                    letterSpacing: "0.05em",
                   }}>
                     Frozen
                   </span>
@@ -2622,7 +2622,7 @@ function ReportPage({
               </div>
               {(caseFilterDetails.length > 0 || documentFilterDetails.length > 0) && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--color-border)", paddingTop: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-muted)", letterSpacing: "0.04em" }}>
                     {t("reportsAnnotations.appliedFilters")}
                   </div>
                   {caseFilterDetails.length > 0 && (
@@ -3020,7 +3020,6 @@ function ReportPage({
                           fontSize: 12,
                           fontWeight: 700,
                           color: "var(--color-text-muted)",
-                          textTransform: "uppercase",
                           letterSpacing: "0.04em",
                           margin: "0 0 8px",
                         }}

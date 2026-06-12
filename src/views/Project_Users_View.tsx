@@ -65,13 +65,13 @@ function fmtDate(iso: string): string {
   }
 }
 
-function initials(name: string): string {
+function initials(name: string, locale: string): string {
   return name
     .split(" ")
     .filter(Boolean)
     .map((w) => w[0])
     .join("")
-    .toUpperCase()
+    .toLocaleUpperCase(locale)
     .slice(0, 2) || "?";
 }
 
@@ -219,7 +219,7 @@ function UserDetail({
   onRequestEdit: (row: MemberRow) => void;
   onRequestRemove: (row: MemberRow) => void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [row, setRow] = useState(initialRow);
   const [annotCount, setAnnotCount] = useState<number | null>(null);
   const [memoCount, setMemoCount] = useState<number | null>(null);
@@ -319,7 +319,7 @@ function UserDetail({
       </div>
 
       <div className="user-detail-card">
-        <div className="user-detail-avatar">{initials(row.name)}</div>
+        <div className="user-detail-avatar">{initials(row.name, locale)}</div>
         <div className="user-detail-info">
           <h2 className="user-detail-name">{row.name}</h2>
           <p className="user-detail-email">{row.email}</p>

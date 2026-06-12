@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/provider";
@@ -28,16 +28,6 @@ function createDefaultSidebarOpenState() {
   return Object.fromEntries(NAV_SECTION_KEYS.map((sectionKey) => [sectionKey, false])) as Record<string, boolean>;
 }
 
-type SidebarTooltipState = {
-  text: string;
-  anchorRect: DOMRect;
-};
-
-type SidebarTooltipPlacement = {
-  left: number;
-  top: number;
-};
-
 export function Sidebar() {
   const { t } = useI18n();
   const {
@@ -56,9 +46,6 @@ export function Sidebar() {
   } = useStore();
   const { user, logout, serverUrl } = useAuth();
   const aiAssistEnabledForProject = projectAiAssistSettings.enabled;
-  const tooltipRef = useRef<HTMLDivElement | null>(null);
-  const [activeTooltip, setActiveTooltip] = useState<SidebarTooltipState | null>(null);
-  const [tooltipPlacement, setTooltipPlacement] = useState<SidebarTooltipPlacement | null>(null);
 
   const projectNameFontSize = useMemo(() => {
     if (!activeProject) return 22;
@@ -194,35 +181,6 @@ export function Sidebar() {
         ? t("sidebar.badges.collaborationOne")
         : t("sidebar.badges.collaborationMany", { count: otherActiveUsersCount });
 
-  function showTooltip(text: string, element: HTMLElement) {
-    setActiveTooltip({
-      text,
-      anchorRect: element.getBoundingClientRect(),
-    });
-  }
-
-  function hideTooltip() {
-    setActiveTooltip(null);
-    setTooltipPlacement(null);
-  }
-
-  function isTooltipAnchorElement(element: EventTarget | null): element is HTMLElement {
-    return element instanceof HTMLElement
-      && !!element.closest(
-        ".brand-network-badge, .brand-ai-badge, .brand-collaboration-badge, .project-badge-close",
-      );
-  }
-
-  function bindTooltip(text: string | undefined) {
-    if (!text) return {};
-    return {
-      onMouseEnter: (event: React.MouseEvent<HTMLElement>) => showTooltip(text, event.currentTarget),
-      onMouseLeave: hideTooltip,
-      onFocus: (event: React.FocusEvent<HTMLElement>) => showTooltip(text, event.currentTarget),
-      onBlur: hideTooltip,
-    };
-  }
-
   function openAppSettingsModal(modalId: "network" | "llm") {
     sessionStorage.setItem("kanqual:open-app-settings-modal", modalId);
     window.dispatchEvent(new CustomEvent("kanqual:open-app-settings-modal"));
@@ -263,84 +221,6 @@ export function Sidebar() {
     });
   }, []);
 
-  useEffect(() => {
-    if (!activeTooltip) return;
-
-    const refreshTooltipAnchor = () => {
-      const activeElement = document.activeElement as HTMLElement | null;
-      if (
-        activeElement &&
-        (activeElement.classList.contains("brand-network-badge")
-          || activeElement.classList.contains("brand-ai-badge")
-          || activeElement.classList.contains("brand-collaboration-badge"))
-      ) {
-        setActiveTooltip((prev) =>
-          prev
-            ? {
-                ...prev,
-                anchorRect: activeElement.getBoundingClientRect(),
-              }
-            : prev,
-        );
-      }
-    };
-
-    const dismissTooltipOnPointerMove = (event: PointerEvent) => {
-      if (!isTooltipAnchorElement(event.target)) {
-        hideTooltip();
-      }
-    };
-
-    document.addEventListener("pointermove", dismissTooltipOnPointerMove, true);
-    window.addEventListener("resize", refreshTooltipAnchor);
-    window.addEventListener("scroll", refreshTooltipAnchor, true);
-    return () => {
-      document.removeEventListener("pointermove", dismissTooltipOnPointerMove, true);
-      window.removeEventListener("resize", refreshTooltipAnchor);
-      window.removeEventListener("scroll", refreshTooltipAnchor, true);
-    };
-  }, [activeTooltip]);
-
-  useLayoutEffect(() => {
-    if (!activeTooltip || !tooltipRef.current) return;
-
-    const tooltipRect = tooltipRef.current.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const offset = 10;
-    const margin = 12;
-
-    const fitsLeft = activeTooltip.anchorRect.left - offset - tooltipRect.width >= margin;
-    const fitsRight = activeTooltip.anchorRect.right + offset + tooltipRect.width <= viewportWidth - margin;
-
-    const left = fitsLeft
-      ? activeTooltip.anchorRect.left - offset - tooltipRect.width
-      : fitsRight
-        ? activeTooltip.anchorRect.right + offset
-        : Math.max(
-            margin,
-            Math.min(
-              activeTooltip.anchorRect.left + (activeTooltip.anchorRect.width - tooltipRect.width) / 2,
-              viewportWidth - tooltipRect.width - margin,
-            ),
-          );
-
-    const centeredTop = activeTooltip.anchorRect.top + (activeTooltip.anchorRect.height - tooltipRect.height) / 2;
-    const fitsCentered = centeredTop >= margin && centeredTop + tooltipRect.height <= viewportHeight - margin;
-    const fitsBelow = activeTooltip.anchorRect.bottom + offset + tooltipRect.height <= viewportHeight - margin;
-    const fitsAbove = activeTooltip.anchorRect.top - offset - tooltipRect.height >= margin;
-
-    const top = fitsCentered
-      ? centeredTop
-      : fitsBelow
-        ? activeTooltip.anchorRect.bottom + offset
-        : fitsAbove
-          ? activeTooltip.anchorRect.top - offset - tooltipRect.height
-          : Math.max(margin, Math.min(centeredTop, viewportHeight - tooltipRect.height - margin));
-
-    setTooltipPlacement({ left, top });
-  }, [activeTooltip]);
-
   function isNavItemActive(targetView: View): boolean {
     return view === targetView;
   }
@@ -357,7 +237,7 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand" title="KanQual">
+      <div className="sidebar-brand">
         <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
         <button
           type="button"
@@ -366,7 +246,6 @@ export function Sidebar() {
           aria-label={networkBadgeTitle}
           onClick={handleNetworkBadgeActivate}
           onPointerUp={handleNetworkBadgeActivate}
-          {...bindTooltip(networkBadgeTitle)}
         >
           <span
             aria-hidden="true"
@@ -387,7 +266,6 @@ export function Sidebar() {
           aria-label={aiBadgeTitle}
           onClick={handleAiBadgeActivate}
           onPointerUp={handleAiBadgeActivate}
-          {...bindTooltip(aiBadgeTitle)}
         >
           <span
             aria-hidden="true"
@@ -416,7 +294,6 @@ export function Sidebar() {
             }
           }}
           aria-disabled={!activeProject}
-          {...bindTooltip(collaborationBadgeTitle)}
         >
           <span
             aria-hidden="true"
@@ -424,26 +301,6 @@ export function Sidebar() {
             dangerouslySetInnerHTML={{ __html: usersGroupIconRaw }}
           />
         </button>
-        {activeTooltip && (
-          <div
-            ref={tooltipRef}
-            className="brand-status-tooltip"
-            style={
-              tooltipPlacement
-                ? {
-                    left: tooltipPlacement.left,
-                    top: tooltipPlacement.top,
-                  }
-                : {
-                    left: -9999,
-                    top: -9999,
-                  }
-            }
-            role="tooltip"
-          >
-            {activeTooltip.text}
-          </div>
-        )}
       </div>
 
       {activeProject ? (
@@ -460,7 +317,6 @@ export function Sidebar() {
               aria-label={t("sidebar.projectBadge.closeProject")}
               onClick={() => void closeProject(activeProject)}
               onPointerUp={() => void closeProject(activeProject)}
-              {...bindTooltip(t("sidebar.projectBadge.closeProject"))}
             >
               <span
                 aria-hidden="true"

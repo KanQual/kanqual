@@ -33,9 +33,9 @@
   --radius-lg: calc(var(--radius) * 1.5);
   --radius-xl: calc(var(--radius) * 2);
   --border-width: 1px;
-  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-brand: "Ubuntu", sans-serif;
-  --font-mono: "Consolas", "Courier New", monospace;
+  --font-body: "Inter", "Noto Sans", "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-brand: "Ubuntu", "Noto Sans", "Segoe UI", sans-serif;
+  --font-mono: "Consolas", "Cascadia Code", "Noto Sans Mono", "Courier New", monospace;
   --text-2xs: 0.625rem;
   --text-xs: 0.6875rem;
   --text-sm: 0.75rem;
@@ -359,23 +359,6 @@ body {
   z-index: 2;
 }
 
-.brand-status-tooltip {
-  position: fixed;
-  min-width: max-content;
-  max-width: 220px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(15, 23, 42, 0.96);
-  color: #fff;
-  font-size: 11px;
-  line-height: 1.25;
-  white-space: normal;
-  text-align: left;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  pointer-events: none;
-  z-index: 1000;
-}
-
 .brand-network-badge--local {
   color: rgba(255,255,255,0.35);
 }
@@ -392,8 +375,9 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  pointer-events: none;
 }
-.brand-network-icon svg { width: 100%; height: 100%; fill: currentColor; }
+.brand-network-icon svg { width: 100%; height: 100%; fill: currentColor; pointer-events: none; }
 
 .brand-ai-badge {
   position: absolute;
@@ -412,8 +396,9 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  pointer-events: none;
 }
-.brand-ai-icon svg { width: 100%; height: 100%; fill: currentColor; }
+.brand-ai-icon svg { width: 100%; height: 100%; fill: currentColor; pointer-events: none; }
 
 .brand-ai-badge--running .brand-ai-icon {
   animation: brand-icon-spin 1.1s linear infinite;
@@ -440,12 +425,14 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  pointer-events: none;
 }
 
 .brand-collaboration-icon svg {
   width: 100%;
   height: 100%;
   fill: currentColor;
+  pointer-events: none;
 }
 
 .brand-network-badge--local { color: rgba(255,255,255,0.35); }
@@ -492,7 +479,6 @@ body {
 
 .project-badge-label {
   font-size: var(--text-2xs);
-  text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--color-sidebar-muted);
 }
@@ -531,11 +517,13 @@ body {
   display: inline-flex;
   width: 14px;
   height: 14px;
+  pointer-events: none;
 }
 
 .project-badge-close-icon svg {
   width: 100%;
   height: 100%;
+  pointer-events: none;
 }
 
 .project-badge-name {
@@ -568,7 +556,6 @@ body {
   font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: #fff;
   background: #555;
 }
@@ -656,7 +643,6 @@ body {
   font-size: var(--text-sm);
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   width: 100%;
   text-align: left;
   margin-top: 8px;
@@ -996,7 +982,6 @@ body {
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
@@ -1350,7 +1335,6 @@ body {
 .home-project-card-header h2 {
   font-size: var(--text-md);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--color-text-muted);
 }
@@ -1591,7 +1575,6 @@ body {
 .ai-assist-home-group-header h2 {
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--color-text-muted);
 }
@@ -1621,7 +1604,6 @@ body {
 .home-restricted-label {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
 }
@@ -1662,7 +1644,6 @@ body {
 .home-stat-title {
   font-size: var(--text-sm);
   font-weight: 600;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
   margin-bottom: 4px;
@@ -2159,7 +2140,6 @@ body {
 
 .project-card-meta-label {
   font-size: var(--text-2xs);
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   opacity: 0.7;
 }
@@ -2279,7 +2259,6 @@ body {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
   padding: 2px 2px 0;
 }
@@ -2423,7 +2402,6 @@ body {
   font-size: var(--text-2xs);
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -2463,7 +2441,6 @@ body {
   font-size: var(--text-2xs);
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -2639,7 +2616,6 @@ body {
 .annotate-card-title {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
 }
@@ -2670,7 +2646,6 @@ body {
   height: 37px;
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
@@ -2928,7 +2903,6 @@ body {
 
 .ai-segments-summary-label {
   font-size: var(--text-2xs);
-  text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--color-text-muted);
 }
@@ -3110,7 +3084,6 @@ body {
 .doc-name {
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
   display: flex;
@@ -3244,7 +3217,6 @@ body {
   display: inline-block;
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 0;
   margin-right: 0;
@@ -3358,7 +3330,6 @@ body {
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
@@ -3482,7 +3453,6 @@ body {
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   line-height: 1.2;
   white-space: normal;
   word-break: break-word;
@@ -3629,7 +3599,6 @@ body {
   gap: 7px;
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
   margin-bottom: 6px;
@@ -3680,7 +3649,6 @@ body {
   gap: 8px;
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
   margin-bottom: 6px;
@@ -4352,7 +4320,6 @@ body {
   margin-top: 2px;
   font-size: var(--text-2xs);
   font-weight: 500;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
 }
@@ -4528,7 +4495,6 @@ body {
   display: block;
   font-size: var(--text-2xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
   margin-bottom: 3px;
@@ -4616,7 +4582,6 @@ body {
 .case-card-title {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--color-text-muted);
   margin-bottom: 12px;
@@ -5091,7 +5056,6 @@ body {
 .code-ann-doc {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-primary);
 }
@@ -5229,7 +5193,6 @@ body {
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
@@ -5467,7 +5430,6 @@ body {
   display: block;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-top: 4px;
 }
@@ -5590,7 +5552,6 @@ body {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   margin-top: 4px;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
@@ -5727,7 +5688,6 @@ body {
 .settings-section-title {
   font-size: var(--text-md);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--color-text-muted);
   margin-bottom: 16px;
@@ -5926,25 +5886,22 @@ body {
   gap: 4px;
 }
 
-.app-settings-overview-section-eyebrow {
-  font-size: var(--text-xs);
+.app-settings-overview-section-heading {
+  font-size: calc(var(--text-base) + 4pt);
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--color-primary);
 }
 
-.app-settings-overview-section-header h2 {
-  font-size: var(--text-base);
-  font-weight: 400;
-  font-style: italic;
+.app-settings-overview-section-description {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  font-style: normal;
   line-height: 1.25;
 }
 
-.app-settings-overview-section-header p:last-child {
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  color: var(--color-text-muted);
+.app-settings-overview-section-description:last-child {
+  color: var(--color-text);
 }
 
 .app-settings-overview-grid {
@@ -6350,7 +6307,6 @@ body {
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
@@ -6563,7 +6519,6 @@ body {
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
@@ -6956,7 +6911,6 @@ body {
 .ai-attribute-list-item span {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  text-transform: capitalize;
 }
 
 .ai-attribute-placeholder {
@@ -7205,7 +7159,6 @@ body {
 .ai-analyze-result-subheading {
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
 }
@@ -7247,7 +7200,6 @@ body {
 .ai-analyze-typical-doc {
   font-size: var(--text-xs);
   font-weight: 600;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
   margin: 0;
@@ -7345,7 +7297,6 @@ body {
 .process-doc-seg-type-select {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 2px 6px;
   border: var(--border-width) solid var(--color-border);
@@ -7386,7 +7337,6 @@ body {
 .process-doc-chunk-divider-badge {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 2px 10px;
   border-radius: var(--radius);
@@ -7555,7 +7505,6 @@ body {
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-muted);
-  text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
@@ -7611,7 +7560,6 @@ body {
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .ai-attribute-selected-summary-type {
@@ -7625,7 +7573,6 @@ body {
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .ai-attribute-selected-summary-description {
@@ -9004,7 +8951,6 @@ body {
 
 .app-settings-stat-card strong {
   font-size: var(--text-sm);
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
 }
@@ -9131,7 +9077,6 @@ body {
   color: var(--color-primary);
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
@@ -9144,7 +9089,6 @@ body {
 .color-group-title {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--color-text-muted);
   margin-bottom: 10px;
@@ -9381,7 +9325,6 @@ body {
 .theme-preset-badge {
   font-size: var(--text-2xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 2px 7px;
   border-radius: 10px;
@@ -9430,7 +9373,6 @@ body {
   padding: 4px 0;
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
 }
@@ -9457,7 +9399,6 @@ body {
   padding: 10px 14px 8px;
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
@@ -9835,7 +9776,6 @@ body {
 .log-details-key {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
   margin-bottom: 0.25rem;
@@ -9885,7 +9825,6 @@ body {
 .surface-card-title {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--color-text-muted);
 }
@@ -9905,3 +9844,4 @@ body {
   box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
   transform: translateY(-1px);
 }
+

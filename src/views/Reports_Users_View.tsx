@@ -6,6 +6,12 @@ import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } f
 import { HelpIcon } from "../components/AppIcons";
 import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
+import {
+  parseProjectLogDetails,
+  projectLogActionCategory,
+  projectLogActionLabel,
+  projectLogDescriptionLabel,
+} from "./Project_Log_View";
 
 type CoderReportKind = "activity" | "comparison" | "agreement";
 type CoderReportSortCol = "name" | "kind" | "createdByName" | "createdAt";
@@ -130,80 +136,6 @@ function getReportColumns(t: ReturnType<typeof useI18n>["t"]): { key: CoderRepor
     { key: "createdByName", label: t("reportsUsers.tableColumns.createdBy"), width: "22%" },
     { key: "createdAt", label: t("reportsUsers.tableColumns.created"), width: "22%" },
   ];
-}
-
-const ACTION_LABEL_KEYS = {
-  "project.create": "projectCreate",
-  "project.open": "projectOpen",
-  "project.close": "projectClose",
-  "project.update": "projectUpdate",
-  "project.export": "projectExport",
-  "project.encrypted_backup.export": "projectEncryptedBackupExport",
-  "project.log.export": "projectLogExport",
-  "project.import": "projectImport",
-  "project.encrypted_backup.import": "projectEncryptedBackupImport",
-  "project.restore_backup": "projectRestoreBackup",
-  "project.backup.create": "projectBackupCreate",
-  "project.backup.settings": "projectBackupSettings",
-  "project.backup.delete": "projectBackupDelete",
-  "project.network_mode.update": "projectNetworkModeUpdate",
-  "project.ai_assist.update": "projectAiAssistUpdate",
-  "project.ai_chat.message": "projectAiChatMessage",
-  "project.ai_chat.response": "projectAiChatResponse",
-  "project.ai_assist.embeddings.delete": "projectAiAssistEmbeddingsDelete",
-  "codebook.export": "codebookExport",
-  "codebook.import": "codebookImport",
-  "ai_assist.index": "aiAssistIndex",
-  "ai_assist.reindex": "aiAssistReindex",
-  "document.create": "documentCreate",
-  "document.update": "documentUpdate",
-  "document.delete": "documentDelete",
-  "document.restore": "documentRestore",
-  "document.associations": "documentAssociations",
-  "code.create": "codeCreate",
-  "code.update": "codeUpdate",
-  "code.delete": "codeDelete",
-  "code.restore": "codeRestore",
-  "annotation.create": "annotationCreate",
-  "annotation.update": "annotationUpdate",
-  "annotation.delete": "annotationDelete",
-  "annotation.restore": "annotationRestore",
-  "case.create": "caseCreate",
-  "case.update": "caseUpdate",
-  "case.delete": "caseDelete",
-  "case.restore": "caseRestore",
-  "case.associations": "caseAssociations",
-  "case_attribute.create": "caseAttributeCreate",
-  "case_attribute.update": "caseAttributeUpdate",
-  "case_attribute.delete": "caseAttributeDelete",
-  "document_attribute.create": "documentAttributeCreate",
-  "document_attribute.update": "documentAttributeUpdate",
-  "document_attribute.delete": "documentAttributeDelete",
-  "memo.create": "memoCreate",
-  "memo.update": "memoUpdate",
-  "memo.delete": "memoDelete",
-  "memo.restore": "memoRestore",
-  "code_report.create": "codeReportCreate",
-  "code_report.update": "codeReportUpdate",
-  "code_report.delete": "codeReportDelete",
-  "code_report.restore": "codeReportRestore",
-  "coder_report.create": "coderReportCreate",
-  "coder_report.update": "coderReportUpdate",
-  "coder_report.delete": "coderReportDelete",
-  "coder_report.restore": "coderReportRestore",
-  "member.add": "memberAdd",
-  "member.update": "memberUpdate",
-  "member.remove": "memberRemove",
-  "member.reassociate": "memberReassociate",
-  "member.remove_unresolved": "memberRemoveUnresolved",
-} as const satisfies Record<string, string>;
-
-function projectLogActionLabel(
-  t: ReturnType<typeof useI18n>["t"],
-  action: string,
-): string {
-  const key = ACTION_LABEL_KEYS[action as keyof typeof ACTION_LABEL_KEYS];
-  return key ? t(`projectLog.actions.${key}` as Parameters<typeof t>[0]) : action;
 }
 
 function fmtDate(iso?: string): string {
@@ -503,14 +435,7 @@ function logCategoryLabel(
 }
 
 function getLogCategory(action: string): LogCategory {
-  if (action.startsWith("project.") || action.startsWith("member.") || action.startsWith("ai_assist.")) return "project";
-  if (action.startsWith("case.") || action.startsWith("case_attribute.")) return "case";
-  if (action.startsWith("document.") || action.startsWith("document_attribute.")) return "document";
-  if (action.startsWith("code.") || action.startsWith("codebook.")) return "code";
-  if (action.startsWith("annotation.")) return "annotation";
-  if (action.startsWith("memo.")) return "memo";
-  if (action.includes("_report.") || action.endsWith("_report")) return "report";
-  return "other";
+  return projectLogActionCategory(action) as LogCategory;
 }
 
 function startOfWeek(date: Date): Date {
@@ -653,7 +578,7 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
               key={option}
               type="button"
               className={`btn${granularity === option ? " btn--primary" : ""}`}
-              style={{ fontSize: 11, padding: "2px 10px", textTransform: "capitalize" }}
+              style={{ fontSize: 11, padding: "2px 10px" }}
               onClick={() => setGranularity(option)}
             >
               {t(`reportsUsers.activity.granularity.${option}` as const)}
@@ -812,17 +737,17 @@ function CoderProjectLogCard({ rows }: { rows: ProjectLogEntry[] }) {
             </tr>
           </thead>
           <tbody>
-            {visibleRows.length === 0 ? (
-              <tr><td colSpan={5} className="users-td-msg">{t("reportsUsers.empty.noProjectLogEntries")}</td></tr>
-            ) : visibleRows.map((entry) => (
-              <tr key={entry.id} className="users-row">
-                <td className="users-td users-td--muted">{fmtDate(entry.occurredAt)}</td>
-                <td className="users-td users-td--name">{entry.userName || "-"}</td>
-                <td className="users-td users-td--muted">{accessModeLabel(entry.accessMode)}</td>
-                <td className="users-td users-td--muted">{projectLogActionLabel(t, entry.action)}</td>
-                <td className="users-td">{entry.label}</td>
-              </tr>
-            ))}
+          {visibleRows.length === 0 ? (
+            <tr><td colSpan={5} className="users-td-msg">{t("reportsUsers.empty.noProjectLogEntries")}</td></tr>
+          ) : visibleRows.map((entry) => (
+            <tr key={entry.id} className={`users-row log-row--${getLogCategory(entry.action)}`}>
+              <td className="users-td users-td--muted">{fmtDate(entry.occurredAt)}</td>
+              <td className="users-td users-td--name">{entry.userName || "-"}</td>
+              <td className="users-td users-td--muted">{accessModeLabel(entry.accessMode)}</td>
+              <td className="users-td users-td--muted">{projectLogActionLabel(entry.action, t)}</td>
+              <td className="users-td">{projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t)}</td>
+            </tr>
+          ))}
           </tbody>
         </table>
       </div>

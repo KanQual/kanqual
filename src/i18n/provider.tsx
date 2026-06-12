@@ -111,6 +111,11 @@ export function I18nProvider({ children, initialLocale }: I18nProviderProps) {
     void ensureLocaleLoaded(locale);
   }, [ensureLocaleLoaded, locale]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   function setLocale(localeCode: LocaleCode) {
     setLocaleState(localeCode);
     const settings = readAppSettings();

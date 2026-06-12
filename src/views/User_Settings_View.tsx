@@ -216,20 +216,17 @@ export function UserSettingsView() {
   const userSettingsSectionDefs = [
     {
       id: "account",
-      eyebrow: t("userSettings.sections.accountEyebrow"),
-      title: t("userSettings.sections.accountTitle"),
+      sectionHeading: t("userSettings.sections.accountEyebrow"),
       cardIds: ["profile", "password"],
     },
     {
       id: "preferences",
-      eyebrow: t("userSettings.sections.preferencesEyebrow"),
-      title: t("userSettings.sections.preferencesTitle"),
+      sectionHeading: t("userSettings.sections.preferencesEyebrow"),
       cardIds: ["appearance", "recent"],
     },
   ] satisfies Array<{
     id: string;
-    eyebrow: string;
-    title: string;
+    sectionHeading: string;
     cardIds: Array<NonNullable<UserSettingsModal>>;
   }>;
 
@@ -258,8 +255,7 @@ export function UserSettingsView() {
             {userSettingsSections.map((section) => (
               <section key={section.id} className="app-settings-overview-section">
                 <div className="app-settings-overview-section-header">
-                  <p className="app-settings-overview-section-eyebrow">{section.eyebrow}</p>
-                  <h2>{section.title}</h2>
+                  <p className="app-settings-overview-section-heading">{section.sectionHeading}</p>
                 </div>
 
                 <div className="app-settings-overview-grid">
@@ -288,9 +284,6 @@ export function UserSettingsView() {
               <div>
                 <h2 className="settings-section-title">{t("userSettings.modal.profileTitle")}</h2>
               </div>
-              <button className="btn" type="button" onClick={() => setActiveModal(null)} disabled={savingProfile}>
-                {t("userSettings.modal.close")}
-              </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
@@ -335,9 +328,6 @@ export function UserSettingsView() {
               <div>
                 <h2 className="settings-section-title">{t("userSettings.modal.passwordTitle")}</h2>
               </div>
-              <button className="btn" type="button" onClick={() => setActiveModal(null)} disabled={savingPassword}>
-                {t("userSettings.modal.close")}
-              </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
@@ -411,9 +401,6 @@ export function UserSettingsView() {
               <div>
                 <h2 className="settings-section-title">{t("userSettings.modal.appearanceTitle")}</h2>
               </div>
-              <button className="btn" type="button" onClick={() => setActiveModal(null)}>
-                {t("userSettings.modal.close")}
-              </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
@@ -525,9 +512,6 @@ export function UserSettingsView() {
               <div>
                 <h2 className="settings-section-title">{t("userSettings.sections.recentProjectsTitle")}</h2>
               </div>
-              <button className="btn" type="button" onClick={() => setActiveModal(null)}>
-                {t("userSettings.modal.close")}
-              </button>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">

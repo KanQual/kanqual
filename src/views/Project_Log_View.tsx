@@ -201,7 +201,7 @@ export function projectLogAccessModeLabel(
   return "-";
 }
 
-function parseProjectLogDetails(detailsJson?: string): ProjectLogDetails | null {
+export function parseProjectLogDetails(detailsJson?: string): ProjectLogDetails | null {
   if (!detailsJson?.trim()) return null;
   try {
     const parsed = JSON.parse(detailsJson);
@@ -243,8 +243,7 @@ function formatDetailKey(key: string, t: ReturnType<typeof useI18n>["t"]): strin
   if (labelKey) return t(labelKey);
   return key
     .replace(/_/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/^./, (char) => char.toUpperCase());
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 }
 
 function isIsoDateTimeString(value: string): boolean {
@@ -296,7 +295,7 @@ function summarizeProjectLogDetails(action: string, details: ProjectLogDetails, 
 
   if (typeof details.backupKind === "string") {
     push(t("projectLog.details.backupKind", {
-      kind: `${details.backupKind[0].toUpperCase()}${details.backupKind.slice(1)}`,
+      kind: details.backupKind,
     }));
   }
 
@@ -383,7 +382,7 @@ function summarizeProjectLogDetails(action: string, details: ProjectLogDetails, 
   return t("projectLog.details.available");
 }
 
-function projectLogDescriptionLabel(
+export function projectLogDescriptionLabel(
   entry: ProjectLogEntry,
   details: ProjectLogDetails | null,
   t: ReturnType<typeof useI18n>["t"],

@@ -59,6 +59,12 @@ import {
 import type { PendingImportedUser, Project, ProjectLogEntry, ProjectUploadedFile } from "../types";
 import { PROJECT_UPLOADED_FILES_COLLECTION } from "../lib/projectUploadedFiles";
 import { HelpIcon } from "../components/AppIcons";
+
+const PROJECT_EXPORT_FORMAT_LABELS: Record<"json" | "xlsx" | "qdpx", string> = {
+  json: "JSON",
+  xlsx: "XLSX",
+  qdpx: "QDPX",
+};
 import { formatCurrentDate, formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 
@@ -675,9 +681,9 @@ export function ProjectSettingsView() {
       await logAction(
         activeProject.id,
         "project.export",
-        t("projectLog.labels.projectExport", { format: format.toUpperCase() }),
+        t("projectLog.labels.projectExport", { format: PROJECT_EXPORT_FORMAT_LABELS[format] }),
         undefined,
-        { exportFormat: format.toUpperCase() },
+        { exportFormat: PROJECT_EXPORT_FORMAT_LABELS[format] },
       );
       setActiveProjectSettingsModal(null);
     } catch (error) {
@@ -1278,26 +1284,22 @@ export function ProjectSettingsView() {
   const projectSettingsSectionDefs = [
     {
       id: "setup",
-      eyebrow: t("projectSettings.overview.sections.setupEyebrow"),
-      title: t("projectSettings.overview.sections.setupTitle"),
+      sectionHeading: t("projectSettings.overview.sections.setupEyebrow"),
       cardIds: ["details", "document-import"],
     },
     {
       id: "project-data",
-      eyebrow: t("projectSettings.overview.sections.projectDataEyebrow"),
-      title: t("projectSettings.overview.sections.projectDataTitle"),
+      sectionHeading: t("projectSettings.overview.sections.projectDataEyebrow"),
       cardIds: ["uploaded-files", "backups", "log"],
     },
     {
       id: "exchange",
-      eyebrow: t("projectSettings.overview.sections.exchangeEyebrow"),
-      title: t("projectSettings.overview.sections.exchangeTitle"),
+      sectionHeading: t("projectSettings.overview.sections.exchangeEyebrow"),
       cardIds: ["export", "codebook"],
     },
   ] satisfies Array<{
     id: string;
-    eyebrow: string;
-    title: string;
+    sectionHeading: string;
     cardIds: Array<(typeof projectSettingsCards)[number]["id"]>;
   }>;
 
@@ -1358,7 +1360,6 @@ export function ProjectSettingsView() {
               <label className="settings-toggle-row">
                 <span>
                   <strong>{t("projectSettings.modal.enableAiAssistance")}</strong>
-                  <small>{t("projectSettings.modal.enableAiAssistanceDescription")}</small>
                 </span>
                 <input
                   type="checkbox"
@@ -1480,7 +1481,6 @@ export function ProjectSettingsView() {
               <label className="settings-toggle-row">
                 <span>
                   <strong>{t("projectSettings.modal.storeOriginalFilename")}</strong>
-                  <small>{t("projectSettings.modal.storeOriginalFilenameDescription")}</small>
                 </span>
                 <input
                   type="checkbox"
@@ -1906,8 +1906,7 @@ export function ProjectSettingsView() {
             {projectSettingsSections.map((section) => (
               <section key={section.id} className="app-settings-overview-section">
                 <div className="app-settings-overview-section-header">
-                  <p className="app-settings-overview-section-eyebrow">{section.eyebrow}</p>
-                  <h2>{section.title}</h2>
+                  <p className="app-settings-overview-section-heading">{section.sectionHeading}</p>
                 </div>
 
                 <div className="app-settings-overview-grid">
@@ -1992,9 +1991,6 @@ export function ProjectSettingsView() {
               <div>
                 <h2 className="settings-section-title">{activeProjectSettingsCard.title}</h2>
               </div>
-              <button className="btn" type="button" onClick={() => setActiveProjectSettingsModal(null)}>
-                {t("projectSettings.shell.close")}
-              </button>
             </div>
             <div className="app-settings-modal-body">
               {renderProjectSettingsModalBody(activeProjectSettingsCard.id)}

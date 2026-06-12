@@ -26,17 +26,17 @@ function fmtLastLogin(iso: string, t: ReturnType<typeof useI18n>["t"]): string {
   return t("auth.relativeTime.shortDateAt", { date: shortDate, time });
 }
 
-function initials(name: string): string {
+function initials(name: string, locale: string): string {
   return (name || "?")
     .split(/\s+/)
     .map((word) => word[0])
     .join("")
     .slice(0, 2)
-    .toUpperCase();
+    .toLocaleUpperCase(locale);
 }
 
 export function AuthView() {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { login, register, error, status, serverUrl, useLocalServer, useRemoteServer, testRemoteServer, returnToModeSelection, pb } = useAuth();
   const [panel, setPanel] = useState<Panel>("mode");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -256,7 +256,7 @@ export function AuthView() {
                   setPanel("login");
                 }}
               >
-                <div className="account-avatar">{initials(account.name)}</div>
+                <div className="account-avatar">{initials(account.name, locale)}</div>
                 <div className="account-info">
                   <div className="account-name">{account.name}</div>
                   <div className="account-email">{account.email}</div>
@@ -325,7 +325,7 @@ export function AuthView() {
                   }
                 }}
               >
-                <div className="account-avatar">{initials(session.name)}</div>
+                <div className="account-avatar">{initials(session.name, locale)}</div>
                 <div className="account-info">
                   <div className="account-name">{session.name}</div>
                   <div className="account-email">{session.email}</div>
