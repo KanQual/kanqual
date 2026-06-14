@@ -52,7 +52,16 @@ async function pathExists(targetPath) {
 async function readJsonIfExists(targetPath) {
   if (!await pathExists(targetPath)) return null;
   const raw = await fs.readFile(targetPath, "utf8");
-  return JSON.parse(raw);
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function walk(rootDir) {

@@ -268,7 +268,18 @@ fn write_smoke_test_state(_app: &tauri::AppHandle, payload: serde_json::Value) -
     }
 
     let serialized = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
-    fs::write(state_path, serialized).map_err(|e| e.to_string())?;
+    let temp_path = state_path.with_extension(format!(
+        "{}.tmp",
+        state_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("json")
+    ));
+    fs::write(&temp_path, serialized).map_err(|e| e.to_string())?;
+    if state_path.exists() {
+        fs::remove_file(&state_path).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&temp_path, &state_path).map_err(|e| e.to_string())?;
     Ok(())
 }
 
