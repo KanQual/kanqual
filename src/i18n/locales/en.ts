@@ -3432,6 +3432,7 @@ export const en = {
       home: "Home",
       users: "Users",
       cases: "Cases",
+      sources: "Sources",
       documents: "Documents",
       codebook: "Codebook",
       annotations: "Annotations",

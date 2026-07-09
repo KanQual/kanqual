@@ -20,8 +20,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 
 interface DocRow {
   id: string;
@@ -33,6 +32,7 @@ interface DocRow {
   filePath: string;
   cases: { id: string; name: string }[];   // associated cases (used by detail view)
   memoCount: number;
+  annotationCount: number;
   createdByName: string;
   createdAt: string;
 }
@@ -56,7 +56,7 @@ interface AttributeValue {
 type SortCol = "name" | "cases" | "memos" | "createdByName" | "createdAt";
 type SortDir = "asc" | "desc";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+//  Helpers 
 
 function fmtDate(iso: string): string {
   if (!iso) return "—";
@@ -71,7 +71,7 @@ function fmtDate(iso: string): string {
 }
 
 function maskedFileLabel(filePath: string): string {
-  if (!filePath) return "—";
+  if (!filePath) return "N/A";
   return readAppSettings().privacy.maskFilePaths ? "Hidden by app settings" : filePath;
 }
 
@@ -771,6 +771,167 @@ function DocumentDetail({
         />
       )}
 
+    </div>
+  );
+}
+
+function PostgresSourceDetail({
+  row,
+  onBack,
+}: {
+  row: DocRow;
+  onBack: () => void;
+}) {
+  const { t } = useI18n();
+  const { setPendingCaseId, setView } = useStore();
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [selectedOutlineSortOrder, setSelectedOutlineSortOrder] = useState<number | null>(null);
+  const transcriptViewerRef = useRef<HTMLDivElement | null>(null);
+
+  const fileExt = row.filePath
+    ? (row.filePath.split(".").pop()?.toLowerCase() ?? "")
+    : "";
+  const processedTranscriptSegments =
+    row.type === "Processed Transcript"
+      ? parseProcessedTranscriptSegments(row.structuredContentJson)
+      : [];
+  const questionOutline = getProcessedTranscriptQuestionOutline(processedTranscriptSegments);
+
+  useEffect(() => {
+    if (selectedOutlineSortOrder == null || !transcriptViewerRef.current) return;
+    const target = transcriptViewerRef.current.querySelector<HTMLElement>(
+      `[data-transcript-sort-order="${selectedOutlineSortOrder}"]`,
+    );
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedOutlineSortOrder]);
+
+  return (
+    <div className="view doc-detail-view">
+      <div className="workspace-back-row workspace-back-row--split">
+        <button className="btn" onClick={onBack}>{t("projectDocuments.detail.backToDocuments")}</button>
+        <p className="users-guide-copy" style={{ margin: 0 }}>
+          PostgreSQL read-only mode is active for this source.
+        </p>
+      </div>
+
+      <div className="doc-detail-layout">
+        <div className="doc-detail-left">
+          <div className="case-card">
+            <h3 className="case-card-title">Source</h3>
+            <p className="case-card-value">{row.name}</p>
+          </div>
+
+          <dl className="user-detail-meta case-detail-meta">
+            <dt>{t("projectDocuments.columns.type")}</dt> <dd>{row.type || "Source"}</dd>
+            <dt>{t("projectDocuments.columns.createdBy")}</dt> <dd>{row.createdByName}</dd>
+            <dt>{t("projectDocuments.columns.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
+            <dt>File Name</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
+            <dt>Extension</dt> <dd>{fileExt ? `.${fileExt}` : "—"}</dd>
+            <dt>{t("projectCodebook.detail.annotations")}</dt> <dd>{formatCurrentNumber(row.annotationCount)}</dd>
+          </dl>
+
+          <div className="case-card">
+            <h3 className="case-card-title">{t("projectDocuments.detail.description")}</h3>
+            {row.notes ? (
+              <div className="case-notes-body" dangerouslySetInnerHTML={{ __html: row.notes }} />
+            ) : (
+              <p className="case-card-empty">{t("projectDocuments.detail.noDescription")}</p>
+            )}
+          </div>
+
+          <div className="case-card">
+            <div className="case-card-header">
+              <h3 className="case-card-title">Cases</h3>
+            </div>
+            {row.cases.length > 0 ? (
+              <ul className="case-detail-doc-list">
+                {row.cases.map((projectCase) => (
+                  <li key={projectCase.id} className="case-detail-doc-item">
+                    <button
+                      className="detail-link-btn"
+                      onClick={() => {
+                        setPendingCaseId(projectCase.id);
+                        setView("cases");
+                      }}
+                    >
+                      {projectCase.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="case-card-empty">{t("projectDocuments.detail.noCases")}</p>
+            )}
+          </div>
+
+          <div className="case-card">
+            <h3 className="case-card-title">Memos</h3>
+            <p className="case-card-empty">Memo linking has not been ported to PostgreSQL yet.</p>
+          </div>
+        </div>
+
+        <div className="doc-detail-right">
+          <div className="case-card doc-content-card">
+            <div className="case-card-header">
+              <div className="doc-content-header-title">
+                <div className="processed-transcript-title-row">
+                  <h3 className="case-card-title">Contents</h3>
+                  {questionOutline.length > 0 && (
+                    <div className="processed-transcript-outline-wrap">
+                      <button
+                        type="button"
+                        className="processed-transcript-outline-btn"
+                        aria-label="Show transcript outline"
+                        aria-expanded={outlineOpen}
+                        onClick={() => setOutlineOpen((open) => !open)}
+                      >
+                        ≡
+                      </button>
+                      {outlineOpen && (
+                        <div className="processed-transcript-outline-menu">
+                          {questionOutline.map((item, index) => (
+                            <button
+                              key={`${item.sortOrder}-${index}`}
+                              type="button"
+                              className="processed-transcript-outline-item"
+                              onClick={() => {
+                                setSelectedOutlineSortOrder(item.sortOrder);
+                                setOutlineOpen(false);
+                              }}
+                              title={item.label}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            {row.content ? (
+              row.type === "Processed Transcript" && processedTranscriptSegments.length > 0 ? (
+                <div
+                  ref={transcriptViewerRef}
+                  className="doc-content-body doc-content-body--structured"
+                >
+                  <ProcessedTranscriptView
+                    segments={processedTranscriptSegments}
+                    renderSegmentText={(segment) => segment.text}
+                    selectedSortOrder={selectedOutlineSortOrder}
+                  />
+                </div>
+              ) : (
+                <pre className="doc-content-body">{row.content}</pre>
+              )
+            ) : (
+              <p className="case-card-empty">{t("projectDocuments.detail.noContent")}</p>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2275,6 +2436,7 @@ export function DocumentsView() {
     canBatchUploadDocuments ? "batch" : null,
     canImportSpreadsheetDocuments ? "csv" : null,
   ].filter((mode): mode is InputMode => mode !== null);
+  const postgresReadOnlyMode = !pb && !!activeProject;
 
   const [rows,    setRows]    = useState<DocRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2326,14 +2488,51 @@ export function DocumentsView() {
     }
   }, [activeProject, canManageDocumentAttributes]);
 
+  useEffect(() => {
+    if (postgresReadOnlyMode && showAttributesTable) {
+      setShowAttributesTable(false);
+    }
+  }, [postgresReadOnlyMode, showAttributesTable]);
+
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadDocuments = useCallback(async () => {
-    if (!activeProject || !pb) return;
+    if (!activeProject) return;
     setLoading(true);
     setError(null);
     try {
       const pid = activeProject.id;
+
+      if (!pb) {
+        const snapshot = await loadPostgresProjectWorkspaceSnapshot(pid);
+        const annotationCountBySourceId = new Map<string, number>();
+        for (const annotation of snapshot.annotations) {
+          annotationCountBySourceId.set(
+            annotation.sourceId,
+            (annotationCountBySourceId.get(annotation.sourceId) ?? 0) + 1,
+          );
+        }
+
+        setAttributeDefs([]);
+        setAttributeValues({});
+        setRows(
+          snapshot.sources.map((source) => ({
+            id: source.id,
+            name: source.title,
+            type: source.sourceKind || "source",
+            notes: source.notes ?? "",
+            content: source.textContent,
+            structuredContentJson: source.structuredContentJson,
+            filePath: source.storagePath,
+            cases: [],
+            memoCount: 0,
+            annotationCount: annotationCountBySourceId.get(source.id) ?? 0,
+            createdByName: "—",
+            createdAt: source.createdAt,
+          })),
+        );
+        return;
+      }
 
       // Fetch documents, memos, and project-level attribute definitions in parallel
       const [docRecords, memoRecords, attrDefRecords] = await Promise.all([
@@ -2420,6 +2619,7 @@ export function DocumentsView() {
             filePath:         r.file_path ?? "",
             cases:         casesByDoc[r.id] ?? [],
             memoCount:     memosByDoc[r.id] ?? 0,
+            annotationCount: 0,
             createdByName: cb?.name || cb?.email || "—",
             createdAt:     r.created,
           };
@@ -2717,6 +2917,18 @@ export function DocumentsView() {
     );
   }
 
+  if (detailRow && postgresReadOnlyMode) {
+    return (
+      <PostgresSourceDetail
+        row={detailRow}
+        onBack={() => {
+          setSelectedRow(null);
+          setEditStartRow(null);
+        }}
+      />
+    );
+  }
+
   if (detailRow && pb) {
     return (
       <>
@@ -2796,9 +3008,11 @@ export function DocumentsView() {
                     })
                 : () => setNewDocOpen(true)
             }
-            disabled={showAttributesTable ? !canCreateDocumentAttributes : !canOpenDocumentCreateModal}
+            disabled={postgresReadOnlyMode || (showAttributesTable ? !canCreateDocumentAttributes : !canOpenDocumentCreateModal)}
             title={
-              showAttributesTable
+              postgresReadOnlyMode
+                ? "PostgreSQL read-only mode is active for this screen."
+                : showAttributesTable
                 ? !canCreateDocumentAttributes
                   ? t("projectDocuments.addAttributeDenied")
                   : undefined
@@ -2813,6 +3027,11 @@ export function DocumentsView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
+      {postgresReadOnlyMode && (
+        <p className="users-guide-copy" style={{ marginBottom: 16 }}>
+          PostgreSQL read-only mode is active for this screen. Source listing and source detail are loaded from PostgreSQL, but editing, attributes, memos, and association changes still need to be ported.
+        </p>
+      )}
 
       <div className="users-content">
       <div className="ai-assist-home-tabbar" style={{ marginBottom: 16 }}>
@@ -2831,14 +3050,19 @@ export function DocumentsView() {
             className={showAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             role="tab"
             aria-selected={showAttributesTable}
-            onClick={() => setShowAttributesTable(true)}
+            onClick={() => {
+              if (postgresReadOnlyMode) return;
+              setShowAttributesTable(true);
+            }}
+            disabled={postgresReadOnlyMode}
+            title={postgresReadOnlyMode ? "Document attributes have not been ported to PostgreSQL yet." : undefined}
           >
             {t("projectDocuments.tabs.attributes")}
           </button>
         </div>
       </div>
 
-      {showAttributesTable && (
+      {showAttributesTable && !postgresReadOnlyMode && (
         <div className="users-table-wrap case-attributes-table-wrap">
           <table
             className="users-table case-attributes-table"
@@ -2977,8 +3201,11 @@ export function DocumentsView() {
               <tr
                 key={row.id}
                 className="users-row case-list-row"
-                onClick={() => setSelectedRow(row)}
+                onClick={() => {
+                  setSelectedRow(row);
+                }}
                 onContextMenu={(e) => {
+                  if (postgresReadOnlyMode) return;
                   e.preventDefault();
                   setContextMenu({ x: e.clientX, y: e.clientY, row });
                 }}
@@ -3038,7 +3265,7 @@ export function DocumentsView() {
         </div>
       )}
 
-      {attributeContextMenu && (
+      {attributeContextMenu && !postgresReadOnlyMode && (
         <div
           ref={attributeContextMenuRef}
           className="context-menu"
@@ -3077,7 +3304,7 @@ export function DocumentsView() {
       )}
 
       {/* Context menu */}
-      {contextMenu && (
+      {contextMenu && !postgresReadOnlyMode && (
         <div
           ref={contextMenuRef}
           className="context-menu"
@@ -3179,7 +3406,7 @@ export function DocumentsView() {
       )}
 
       {/* New Document modal */}
-      {newDocOpen && (
+      {newDocOpen && !postgresReadOnlyMode && (
         <NewDocumentModal
           allowedModes={allowedDocumentCreateModes}
           attributeDefs={attributeDefs}
@@ -3188,7 +3415,7 @@ export function DocumentsView() {
         />
       )}
 
-      {attributeValueDraft && (
+      {attributeValueDraft && !postgresReadOnlyMode && (
         <SharedAttributeValuesModal
           draft={attributeValueDraft}
           rows={sorted.map((row) => ({ id: row.id, name: row.name }))}

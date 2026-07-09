@@ -14,3 +14,7 @@ export function useStore(): AppStore {
   if (!ctx) throw new Error("useStore must be used inside StoreProvider");
   return ctx;
 }
+
+export function useOptionalStore(): AppStore | null {
+  return useContext(StoreContext);
+}

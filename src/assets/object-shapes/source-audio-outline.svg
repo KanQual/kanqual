@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Outline audio source">
+  <path d="M12 8 H64 L88 32 V88 H12 Z" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" />
+  <path d="M64 8 V32 H88" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M24 57 C29 49, 33 49, 38 57 S47 65, 52 57 S61 49, 66 57 S75 65, 80 57" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

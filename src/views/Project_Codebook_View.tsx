@@ -1,11 +1,19 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useStore } from "../context/StoreContext";
+import { useOptionalStore, useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { MemoEditorView } from "./Analysis_Memos_View";
 import { HelpIcon } from "../components/AppIcons";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
+import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
+import {
+  createPostgresExperimentCode,
+  deletePostgresExperimentCode,
+  type PostgresExperimentAnnotationSummary,
+  type PostgresExperimentSource,
+  updatePostgresExperimentCode,
+} from "../lib/postgresExperiment";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -548,7 +556,7 @@ function NewCodeModal({
   onDone: () => void;
   onClose: () => void;
 }) {
-  const { addCode } = useStore();
+  const store = useOptionalStore();
   const { t } = useI18n();
   const { user: currentUser } = useAuth();
   const resolvedTitle = title ?? t("projectCodebook.modal.newTitle");
@@ -598,7 +606,8 @@ function NewCodeModal({
           parentId: parentId || undefined,
         });
       } else {
-        await addCode(label.trim(), color, desc, undefined, parentId || undefined, currentUser?.id);
+        if (!store) throw new Error("Code creation requires the project store in PocketBase mode.");
+        await store.addCode(label.trim(), color, desc, undefined, parentId || undefined, currentUser?.id);
       }
       onDone();
     } catch (e) {
@@ -698,17 +707,50 @@ function NewCodeModal({
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-export function CodebookView() {
-  const { activeProject, pb, canCurrentUser, deleteCode, pendingCodeId, setPendingCodeId } = useStore();
+export type CodebookViewProps = {
+  postgresProjectId?: string | null;
+  postgresCanCreateCodes?: boolean;
+  postgresCanEditCodes?: boolean;
+  postgresCanDeleteCodes?: boolean;
+  postgresCanMemoAboutCodes?: boolean;
+  onOpenPostgresSourceAnnotation?: (payload: { sourceId: string; annotationId: string }) => void;
+  onOpenPostgresMemoForCode?: (payload: { codeId: string }) => void;
+};
+
+export function CodebookView({
+  postgresProjectId,
+  postgresCanCreateCodes,
+  postgresCanEditCodes,
+  postgresCanDeleteCodes,
+  postgresCanMemoAboutCodes,
+  onOpenPostgresSourceAnnotation,
+  onOpenPostgresMemoForCode,
+}: CodebookViewProps = {}) {
+  const store = useOptionalStore();
   const { t } = useI18n();
-  const canCreateCodes = canCurrentUser("createCode");
-  const canEditCodes = canCurrentUser("editCode");
-  const canDeleteCodes = canCurrentUser("deleteCode");
-  const canCreateMemos = canCurrentUser("createMemo");
-  const canAssociateMemoObjects = canCurrentUser("associateMemoObjects");
-  const canMemoAboutCodes = canCreateMemos && canAssociateMemoObjects;
+  const activeProject = store?.activeProject ?? (postgresProjectId ? { id: postgresProjectId } : null);
+  const activeProjectId = store?.activeProject?.id ?? postgresProjectId ?? null;
+  const pb = store?.pb ?? null;
+  const deleteCode = store?.deleteCode;
+  const pendingCodeId = store?.pendingCodeId ?? null;
+  const setPendingCodeId = store?.setPendingCodeId ?? (() => {});
+  const postgresMode = !store && !!postgresProjectId;
+  const canCreateCodes = store
+    ? store.canCurrentUser("createCode")
+    : !!postgresCanCreateCodes;
+  const canEditCodes = store
+    ? store.canCurrentUser("editCode")
+    : !!postgresCanEditCodes;
+  const canDeleteCodes = store
+    ? store.canCurrentUser("deleteCode")
+    : !!postgresCanDeleteCodes;
+  const canMemoAboutCodes = store
+    ? store.canCurrentUser("createMemo") && store.canCurrentUser("associateMemoObjects")
+    : !!postgresCanMemoAboutCodes;
 
   const [rows,    setRows]    = useState<CodeRow[]>([]);
+  const [postgresSources, setPostgresSources] = useState<PostgresExperimentSource[]>([]);
+  const [postgresAnnotations, setPostgresAnnotations] = useState<PostgresExperimentAnnotationSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
@@ -726,6 +768,9 @@ export function CodebookView() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [newCodeOpen,   setNewCodeOpen]   = useState(false);
   const [newCodeParentId, setNewCodeParentId] = useState("");
+  const [editingRow, setEditingRow] = useState<CodeRow | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [selectedRow,   setSelectedRow]   = useState<CodeRow | null>(null);
   const [editStartRow,  setEditStartRow]  = useState<CodeRow | null>(null);
@@ -741,12 +786,42 @@ export function CodebookView() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadCodes = useCallback(async () => {
-    if (!activeProject || !pb) return;
+    if (!activeProjectId) return;
     setLoading(true);
     setError(null);
     try {
+      if (!pb) {
+        const snapshot = await loadPostgresProjectWorkspaceSnapshot(activeProjectId);
+        setPostgresSources(snapshot.sources);
+        setPostgresAnnotations(snapshot.annotations);
+        const docsByCode: Record<string, Set<string>> = {};
+        for (const annotation of snapshot.annotations) {
+          for (const codeId of annotation.codeIds) {
+            if (!docsByCode[codeId]) docsByCode[codeId] = new Set();
+            docsByCode[codeId].add(annotation.sourceId);
+          }
+        }
+
+        const codeLabelById = Object.fromEntries(snapshot.codes.map((code) => [code.id, code.label]));
+        setRows(
+          snapshot.codes.map((code) => ({
+            id: code.id,
+            label: code.label,
+            color: code.color ?? "",
+            description: code.description ?? "",
+            parentId: code.parentCodeId ?? "",
+            parentLabel: code.parentCodeId ? codeLabelById[code.parentCodeId] ?? "" : "",
+            createdByName: "—",
+            createdAt: code.createdAt,
+            casesCount: 0,
+            docsCount: docsByCode[code.id]?.size ?? 0,
+          })),
+        );
+        return;
+      }
+
       const codeRecords = await pb.collection("codes").getFullList({
-        filter: `project="${activeProject.id}"&&deleted_at=""`,
+        filter: `project="${activeProjectId}"&&deleted_at=""`,
         expand: "created_by,parent",
         sort:   "label",
       });
@@ -811,7 +886,7 @@ export function CodebookView() {
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb]);
+  }, [activeProjectId, pb, t]);
 
   useEffect(() => { loadCodes(); }, [loadCodes]);
 
@@ -864,8 +939,15 @@ export function CodebookView() {
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      await deleteCode(confirmDelete.id);
-      setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
+      if (pb) {
+        if (!deleteCode) throw new Error("Code deletion requires the project store in PocketBase mode.");
+        await deleteCode(confirmDelete.id);
+      } else if (activeProjectId) {
+        await deletePostgresExperimentCode(activeProjectId, confirmDelete.id);
+      }
+      setRows((prev) => prev
+        .filter((r) => r.id !== confirmDelete.id)
+        .map((r) => (r.parentId === confirmDelete.id ? { ...r, parentId: "", parentLabel: "" } : r)));
       setConfirmDelete(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("projectCodebook.errors.deleteFailed"));
@@ -875,7 +957,69 @@ export function CodebookView() {
     }
   }
 
+  async function handlePostgresCodeSave(payload: {
+    label: string;
+    color: string;
+    description: string;
+    parentId?: string;
+  }) {
+    if (!activeProjectId) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      if (editingRow) {
+        await updatePostgresExperimentCode({
+          projectId: activeProjectId,
+          codeId: editingRow.id,
+          label: payload.label,
+          color: payload.color,
+          description: payload.description,
+          parentCodeId: payload.parentId ?? "",
+          shortcut: "",
+        });
+      } else {
+        await createPostgresExperimentCode({
+          projectId: activeProjectId,
+          label: payload.label,
+          color: payload.color,
+          description: payload.description,
+          parentCodeId: payload.parentId ?? "",
+          shortcut: "",
+        });
+      }
+      setEditingRow(null);
+      setNewCodeOpen(false);
+      setNewCodeParentId("");
+      await loadCodes();
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : t("projectCodebook.errors.createFailed"));
+      throw e;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   // ── Detail / edit ─────────────────────────────────────────────────────────
+
+  const postgresSourceNameById = useMemo(
+    () => Object.fromEntries(postgresSources.map((source) => [source.id, source.title])),
+    [postgresSources],
+  );
+
+  const postgresDetailAnnotations = useMemo(() => {
+    if (!selectedRow) return [];
+    return postgresAnnotations
+      .filter((annotation) => annotation.codeIds.includes(selectedRow.id))
+      .map((annotation) => ({
+        id: annotation.id,
+        quote: annotation.quote ?? "",
+        note: annotation.note ?? "",
+        documentName: postgresSourceNameById[annotation.sourceId] ?? "—",
+        documentId: annotation.sourceId,
+        createdByName: annotation.createdByName || "—",
+        createdAt: annotation.createdAt,
+      }));
+  }, [postgresAnnotations, postgresSourceNameById, selectedRow]);
 
   if (memoForCode) {
     return (
@@ -889,6 +1033,55 @@ export function CodebookView() {
   }
 
   const detailRow = selectedRow ?? editStartRow;
+  if (detailRow && postgresMode) {
+    return (
+      <>
+        <PostgresCodeDetail
+          row={detailRow}
+          allCodes={rows}
+          annotations={postgresDetailAnnotations}
+          startEditing={editStartRow !== null && canEditCodes}
+          canEditCode={canEditCodes}
+          canDeleteCode={canDeleteCodes}
+          onBack={() => {
+            setSelectedRow(null);
+            setEditStartRow(null);
+            void loadCodes();
+          }}
+          onRequestDelete={(row) => setConfirmDelete(row)}
+          onOpenAnnotation={(annotation) => {
+            if (!onOpenPostgresSourceAnnotation) return;
+            onOpenPostgresSourceAnnotation({
+              sourceId: annotation.documentId,
+              annotationId: annotation.id,
+            });
+          }}
+          onSave={handlePostgresCodeSave}
+        />
+        {confirmDelete && (
+          <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h2>{t("projectCodebook.deleteModal.title")}</h2>
+              <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
+              </p>
+              <p className="modal-warning-text">
+                {t("projectCodebook.deleteModal.warning")}
+              </p>
+              <div className="form-actions" style={{ marginTop: 24 }}>
+                <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
+                  {t("common.cancel")}
+                </button>
+                <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+                  {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
   if (detailRow && pb) {
     return (
       <>
@@ -948,17 +1141,21 @@ export function CodebookView() {
           className="btn btn--primary"
           onClick={() => {
             setNewCodeParentId("");
+            setSubmitError(null);
             setNewCodeOpen(true);
           }}
           disabled={!canCreateCodes}
-          title={!canCreateCodes ? t("projectCodebook.permissions.cannotCreateCodes") : undefined}
+          title={
+            !canCreateCodes
+              ? t("projectCodebook.permissions.cannotCreateCodes")
+              : undefined
+          }
         >
           {t("projectCodebook.actions.newCode")}
         </button>
       </header>
 
       {error && <p className="users-error">{error}</p>}
-
       <div className="users-content">
       <div
         className="users-table-wrap"
@@ -995,7 +1192,9 @@ export function CodebookView() {
               <tr
                 key={node.id}
                 className="users-row codebook-list-row"
-                onClick={() => setSelectedRow(node)}
+                onClick={() => {
+                  setSelectedRow(node);
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setContextMenu({ x: e.clientX, y: e.clientY, row: node });
@@ -1066,7 +1265,16 @@ export function CodebookView() {
           {canMemoAboutCodes ? (
             <button
               className="context-menu-item"
-              onClick={() => { setMemoForCode(contextMenu.row); setContextMenu(null); }}
+              onClick={() => {
+                if (postgresMode) {
+                  onOpenPostgresMemoForCode?.({
+                    codeId: contextMenu.row.id,
+                  });
+                } else {
+                  setMemoForCode(contextMenu.row);
+                }
+                setContextMenu(null);
+              }}
             >
               {t("projectCodebook.actions.memoAboutCode")}
             </button>
@@ -1078,7 +1286,15 @@ export function CodebookView() {
           {canEditCodes ? (
             <button
               className="context-menu-item"
-              onClick={() => { setEditStartRow(contextMenu.row); setContextMenu(null); }}
+              onClick={() => {
+                if (postgresMode) {
+                  setEditingRow(contextMenu.row);
+                  setSubmitError(null);
+                } else {
+                  setEditStartRow(contextMenu.row);
+                }
+                setContextMenu(null);
+              }}
             >
               {t("projectCodebook.actions.editCode")}
             </button>
@@ -1142,10 +1358,11 @@ export function CodebookView() {
       )}
 
       {/* New Code modal */}
-      {newCodeOpen && pb && activeProject && (
+      {newCodeOpen && activeProject && (
         <NewCodeModal
           allCodes={rows}
           initialParentId={newCodeParentId}
+          onSubmit={postgresMode ? handlePostgresCodeSave : undefined}
           onDone={() => {
             setNewCodeOpen(false);
             setNewCodeParentId("");
@@ -1154,6 +1371,259 @@ export function CodebookView() {
           onClose={() => {
             setNewCodeOpen(false);
             setNewCodeParentId("");
+          }}
+        />
+      )}
+      {editingRow && postgresMode && activeProject && (
+        <NewCodeModal
+          allCodes={rows}
+          title={t("projectCodebook.modal.editTitle")}
+          submitLabel={t("projectCodebook.modal.saveChanges")}
+          initialLabel={editingRow.label}
+          initialDescription={editingRow.description}
+          initialColor={editingRow.color || "#6366f1"}
+          initialParentId={editingRow.parentId}
+          excludeCodeId={editingRow.id}
+          onSubmit={handlePostgresCodeSave}
+          onDone={() => {
+            setEditingRow(null);
+            loadCodes();
+          }}
+          onClose={() => {
+            if (submitting) return;
+            setEditingRow(null);
+            setSubmitError(null);
+          }}
+        />
+      )}
+      {submitError && postgresMode && !editingRow && !newCodeOpen && (
+        <p className="users-error" style={{ marginTop: 12 }}>{submitError}</p>
+      )}
+    </div>
+  );
+}
+
+function PostgresCodeDetail({
+  row: initialRow,
+  allCodes,
+  annotations,
+  startEditing,
+  canEditCode,
+  canDeleteCode,
+  onBack,
+  onRequestDelete,
+  onOpenAnnotation,
+  onSave,
+}: {
+  row: CodeRow;
+  allCodes: CodeRow[];
+  annotations: AnnotationRow[];
+  startEditing: boolean;
+  canEditCode: boolean;
+  canDeleteCode: boolean;
+  onBack: () => void;
+  onRequestDelete: (row: CodeRow) => void;
+  onOpenAnnotation: (annotation: AnnotationRow) => void;
+  onSave: (payload: {
+    label: string;
+    color: string;
+    description: string;
+    parentId?: string;
+  }) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [row, setRow] = useState(initialRow);
+  const [showEditModal, setShowEditModal] = useState(startEditing);
+  const [saving, setSaving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setRow(initialRow);
+  }, [initialRow]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [menuOpen]);
+
+  async function handleSaveFromModal(payload: {
+    label: string;
+    color: string;
+    description: string;
+    parentId?: string;
+  }) {
+    setSaving(true);
+    try {
+      await onSave(payload);
+      const nextParentId = payload.parentId ?? "";
+      const newParentLabel = allCodes.find((c) => c.id === nextParentId)?.label ?? "";
+      setRow((prev) => ({
+        ...prev,
+        label: payload.label,
+        color: payload.color,
+        description: payload.description,
+        parentId: nextParentId,
+        parentLabel: newParentLabel,
+      }));
+      setShowEditModal(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="view doc-detail-view">
+      <div className="workspace-back-row workspace-back-row--split">
+        <button className="btn" onClick={onBack}>{t("projectCodebook.actions.backToCodebook")}</button>
+        {(canEditCode || canDeleteCode) && (
+          <div className="workspace-back-actions">
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setShowEditModal(true)}
+              disabled={!canEditCode}
+              title={!canEditCode ? t("projectCodebook.permissions.cannotEditCodes") : undefined}
+            >
+              {t("projectCodebook.actions.editCode")}
+            </button>
+            <div className="user-detail-menu-wrap" ref={menuRef}>
+              <button
+                type="button"
+                className="btn"
+                aria-label={t("projectCodebook.actions.codeActions")}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                {t("projectCodebook.actions.actions")}
+              </button>
+              {menuOpen && (
+                <div className="context-menu user-detail-menu" role="menu">
+                  {canDeleteCode ? (
+                    <button
+                      type="button"
+                      className="context-menu-item context-menu-item--danger"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onRequestDelete(row);
+                      }}
+                    >
+                      {t("projectCodebook.actions.deleteCode")}
+                    </button>
+                  ) : (
+                    <div className="context-menu-item context-menu-item--disabled" title={t("projectCodebook.permissions.cannotDeleteCodes")}>
+                      {t("projectCodebook.actions.deleteCode")}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="doc-detail-layout">
+        <div className="doc-detail-left">
+          <div className="case-card">
+            <h3 className="case-card-title">{t("projectCodebook.detail.code")}</h3>
+            <p className="case-card-value" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <ColorSwatch color={row.color} size={18} />
+              {row.label}
+            </p>
+          </div>
+
+          <dl className="user-detail-meta case-detail-meta">
+            <dt>{t("projectCodebook.table.createdBy")}</dt> <dd>{row.createdByName}</dd>
+            <dt>{t("projectCodebook.table.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
+            <dt>{t("projectCodebook.detail.parent")}</dt> <dd>{row.parentLabel || "—"}</dd>
+          </dl>
+
+          <div className="case-card">
+            <h3 className="case-card-title">{t("projectCodebook.detail.color")}</h3>
+            <div className="code-color-row">
+              <ColorSwatch color={row.color} size={18} />
+              <span className="code-color-hex">{row.color || "-"}</span>
+            </div>
+          </div>
+
+          <div className="case-card">
+            <h3 className="case-card-title">{t("projectCodebook.detail.description")}</h3>
+            {row.description ? (
+              <p style={{ fontSize: 14, lineHeight: 1.6 }}>{row.description}</p>
+            ) : (
+              <p className="case-card-empty">{t("projectCodebook.detail.noDescription")}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="doc-detail-right">
+          <div className="case-card doc-content-card">
+            <h3 className="case-card-title">
+              {t("projectCodebook.detail.annotations")}{annotations.length > 0 ? ` (${annotations.length})` : ""}
+            </h3>
+            {annotations.length === 0 ? (
+              <p className="case-card-empty">{t("projectCodebook.detail.noAnnotations")}</p>
+            ) : (
+              <ul className="code-ann-list">
+                {annotations.map((annotation) => (
+                  <li
+                    key={annotation.id}
+                    className="code-ann-item"
+                    onClick={() => onOpenAnnotation(annotation)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onOpenAnnotation(annotation);
+                      }
+                    }}
+                  >
+                    <div className="code-ann-doc">{annotation.documentName}</div>
+                    <blockquote className="code-ann-quote">"{annotation.quote}"</blockquote>
+                    {annotation.note && <p className="code-ann-note">{annotation.note}</p>}
+                    <div className="code-ann-meta">{fmtDate(annotation.createdAt)} · {annotation.createdByName}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {showEditModal && (
+        <NewCodeModal
+          allCodes={allCodes}
+          title={t("projectCodebook.modal.editTitle")}
+          submitLabel={t("projectCodebook.modal.saveChanges")}
+          initialLabel={row.label}
+          initialDescription={row.description}
+          initialColor={row.color || "#6366f1"}
+          initialParentId={row.parentId}
+          excludeCodeId={row.id}
+          onSubmit={handleSaveFromModal}
+          onDone={() => {}}
+          onClose={() => {
+            if (saving) return;
+            setShowEditModal(false);
           }}
         />
       )}

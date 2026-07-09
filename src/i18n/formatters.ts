@@ -49,11 +49,27 @@ export function formatDateTime(locale: LocaleCode, value: Date | number | string
     ),
   );
 
+  const shouldForceSeconds = Boolean(
+    options
+    && (
+      "hour" in options
+      || "minute" in options
+      || "dayPeriod" in options
+      || "timeStyle" in options
+    )
+    && !("second" in options)
+    && !("fractionalSecondDigits" in options),
+  );
+
   const resolvedOptions: Intl.DateTimeFormatOptions | undefined = hasExplicitDateOrTimeFields
-    ? options
+    ? {
+        ...options,
+        ...(shouldForceSeconds ? { second: "2-digit" as const } : {}),
+        ...(options?.timeStyle === "short" ? { timeStyle: "medium" as const } : {}),
+      }
     : {
         dateStyle: "medium",
-        timeStyle: "short",
+        timeStyle: "medium",
         ...options,
       };
 

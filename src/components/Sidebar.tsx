@@ -84,7 +84,7 @@ export function Sidebar() {
         { view: "home", label: t("sidebar.items.home") },
         { view: "users", label: t("sidebar.items.users") },
         { view: "cases", label: t("sidebar.items.cases") },
-        { view: "documents", label: t("sidebar.items.documents") },
+        { view: "documents", label: t("sidebar.items.sources") },
         { view: "codebook", label: t("sidebar.items.codebook") },
         { view: "annotations", label: t("sidebar.items.annotations") },
       ],

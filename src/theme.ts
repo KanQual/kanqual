@@ -19,7 +19,25 @@ export interface ThemePreset {
   borderWidth: number;
 }
 
+export interface ThemeState {
+  lightOverrides: Record<string, string>;
+  darkOverrides: Record<string, string>;
+  borderRadius: number;
+  borderWidth: number;
+  presets: ThemePreset[];
+  activePresetId: string | null;
+}
+
 const ACTIVE_THEME_PRESET_KEY = "mc_active_theme_preset";
+
+type RuntimeThemePreferences = {
+  theme: Theme;
+  density: Density;
+  fontSize: FontSize;
+  themeState: ThemeState;
+};
+
+let runtimeThemePreferences: RuntimeThemePreferences | null = null;
 
 export const COLOR_VARS: ColorVar[] = [
   { key: "--color-bg",             label: "Background",    group: "Interface" },
@@ -86,11 +104,62 @@ export function getDefaults(theme: Theme): Record<string, string> {
   return getAppDefaults(theme);
 }
 
+function cloneThemeState(themeState: ThemeState): ThemeState {
+  return {
+    lightOverrides: { ...themeState.lightOverrides },
+    darkOverrides: { ...themeState.darkOverrides },
+    borderRadius: themeState.borderRadius,
+    borderWidth: themeState.borderWidth,
+    presets: themeState.presets.map((preset) => ({
+      ...preset,
+      colors: { ...preset.colors },
+    })),
+    activePresetId: themeState.activePresetId,
+  };
+}
+
+function readThemePresetsFromLocalStorage(): ThemePreset[] {
+  try {
+    return JSON.parse(localStorage.getItem("mc_presets") ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+export function getStoredThemeState(): ThemeState {
+  if (runtimeThemePreferences) {
+    return cloneThemeState(runtimeThemePreferences.themeState);
+  }
+  try {
+    return {
+      lightOverrides: JSON.parse(localStorage.getItem("mc_colors_light") ?? "{}"),
+      darkOverrides: JSON.parse(localStorage.getItem("mc_colors_dark") ?? "{}"),
+      borderRadius: Number(localStorage.getItem("mc_radius") ?? "6"),
+      borderWidth: Number(localStorage.getItem("mc_border_width") ?? "1"),
+      presets: readThemePresetsFromLocalStorage(),
+      activePresetId: localStorage.getItem(ACTIVE_THEME_PRESET_KEY),
+    };
+  } catch {
+    return {
+      lightOverrides: {},
+      darkOverrides: {},
+      borderRadius: 6,
+      borderWidth: 1,
+      presets: [],
+      activePresetId: null,
+    };
+  }
+}
+
 export function getStoredTheme(): Theme {
+  if (runtimeThemePreferences) return runtimeThemePreferences.theme;
   return (localStorage.getItem("mc_theme") as Theme) ?? "light";
 }
 
 export function getStoredOverrides(theme: Theme): Record<string, string> {
+  if (runtimeThemePreferences) {
+    return { ...(theme === "dark" ? runtimeThemePreferences.themeState.darkOverrides : runtimeThemePreferences.themeState.lightOverrides) };
+  }
   try {
     return JSON.parse(localStorage.getItem(`mc_colors_${theme}`) ?? "{}");
   } catch {
@@ -99,32 +168,61 @@ export function getStoredOverrides(theme: Theme): Record<string, string> {
 }
 
 export function saveOverrides(theme: Theme, overrides: Record<string, string>): void {
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      themeState: {
+        ...runtimeThemePreferences.themeState,
+        lightOverrides: theme === "light" ? { ...overrides } : runtimeThemePreferences.themeState.lightOverrides,
+        darkOverrides: theme === "dark" ? { ...overrides } : runtimeThemePreferences.themeState.darkOverrides,
+      },
+    };
+    return;
+  }
   localStorage.setItem(`mc_colors_${theme}`, JSON.stringify(overrides));
 }
 
 export function getStoredRadius(): number {
+  if (runtimeThemePreferences) return runtimeThemePreferences.themeState.borderRadius;
   return Number(localStorage.getItem("mc_radius") ?? "6");
 }
 
 export function getStoredBorderWidth(): number {
+  if (runtimeThemePreferences) return runtimeThemePreferences.themeState.borderWidth;
   return Number(localStorage.getItem("mc_border_width") ?? "1");
 }
 
 export function getStoredDensity(): Density {
+  if (runtimeThemePreferences) return runtimeThemePreferences.density;
   return (localStorage.getItem("kq_density") as Density) || "comfortable";
 }
 
 export function getStoredFontSize(): FontSize {
+  if (runtimeThemePreferences) return runtimeThemePreferences.fontSize;
   return (localStorage.getItem("kq_font_size") as FontSize) || "normal";
 }
 
 export function applyDensity(density: Density): void {
-  localStorage.setItem("kq_density", density);
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      density,
+    };
+  } else {
+    localStorage.setItem("kq_density", density);
+  }
   document.documentElement.setAttribute("data-density", density);
 }
 
 export function applyFontSize(size: FontSize): void {
-  localStorage.setItem("kq_font_size", size);
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      fontSize: size,
+    };
+  } else {
+    localStorage.setItem("kq_font_size", size);
+  }
   document.documentElement.setAttribute("data-font-size", size);
 }
 
@@ -141,7 +239,14 @@ export function applyOverrides(theme: Theme): void {
 }
 
 export function applyTheme(theme: Theme): void {
-  localStorage.setItem("mc_theme", theme);
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      theme,
+    };
+  } else {
+    localStorage.setItem("mc_theme", theme);
+  }
   if (theme === "dark") {
     document.documentElement.setAttribute("data-theme", "dark");
   } else {
@@ -150,20 +255,55 @@ export function applyTheme(theme: Theme): void {
   applyOverrides(theme);
 }
 
+export function setRuntimeThemePreferences(preferences: RuntimeThemePreferences | null): void {
+  runtimeThemePreferences = preferences
+    ? {
+        ...preferences,
+        themeState: cloneThemeState(preferences.themeState),
+      }
+    : null;
+}
+
 export function getActivePresetId(): string | null {
+  if (runtimeThemePreferences) return runtimeThemePreferences.themeState.activePresetId;
   return localStorage.getItem(ACTIVE_THEME_PRESET_KEY);
 }
 
 export function setActivePresetId(id: string | null): void {
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      themeState: {
+        ...runtimeThemePreferences.themeState,
+        activePresetId: id,
+      },
+    };
+    return;
+  }
   if (id) localStorage.setItem(ACTIVE_THEME_PRESET_KEY, id);
   else localStorage.removeItem(ACTIVE_THEME_PRESET_KEY);
 }
 
 export function resetThemeToDefaults(theme: Theme = getStoredTheme()): void {
-  localStorage.setItem("mc_theme", theme);
-  localStorage.removeItem(`mc_colors_${theme}`);
-  localStorage.setItem("mc_radius", "6");
-  localStorage.setItem("mc_border_width", "1");
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      theme,
+      themeState: {
+        ...runtimeThemePreferences.themeState,
+        lightOverrides: theme === "light" ? {} : runtimeThemePreferences.themeState.lightOverrides,
+        darkOverrides: theme === "dark" ? {} : runtimeThemePreferences.themeState.darkOverrides,
+        borderRadius: 6,
+        borderWidth: 1,
+        activePresetId: null,
+      },
+    };
+  } else {
+    localStorage.setItem("mc_theme", theme);
+    localStorage.removeItem(`mc_colors_${theme}`);
+    localStorage.setItem("mc_radius", "6");
+    localStorage.setItem("mc_border_width", "1");
+  }
   setActivePresetId(null);
 
   if (theme === "dark") {
@@ -190,22 +330,48 @@ export function initTheme(): void {
 // ─── Theme presets ────────────────────────────────────────────────────────────
 
 export function getPresets(): ThemePreset[] {
-  try {
-    return JSON.parse(localStorage.getItem("mc_presets") ?? "[]");
-  } catch {
-    return [];
+  if (runtimeThemePreferences) {
+    return runtimeThemePreferences.themeState.presets.map((preset) => ({
+      ...preset,
+      colors: { ...preset.colors },
+    }));
   }
+  return readThemePresetsFromLocalStorage();
 }
 
 export function savePreset(preset: ThemePreset): void {
   const all = getPresets().filter((p) => p.id !== preset.id);
   all.push(preset);
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      themeState: {
+        ...runtimeThemePreferences.themeState,
+        presets: all.map((entry) => ({
+          ...entry,
+          colors: { ...entry.colors },
+        })),
+      },
+    };
+    return;
+  }
   localStorage.setItem("mc_presets", JSON.stringify(all));
 }
 
 export function deletePreset(id: string): void {
-  localStorage.setItem(
-    "mc_presets",
-    JSON.stringify(getPresets().filter((p) => p.id !== id)),
-  );
+  const next = getPresets().filter((p) => p.id !== id);
+  if (runtimeThemePreferences) {
+    runtimeThemePreferences = {
+      ...runtimeThemePreferences,
+      themeState: {
+        ...runtimeThemePreferences.themeState,
+        presets: next.map((preset) => ({
+          ...preset,
+          colors: { ...preset.colors },
+        })),
+      },
+    };
+    return;
+  }
+  localStorage.setItem("mc_presets", JSON.stringify(next));
 }

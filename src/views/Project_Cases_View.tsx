@@ -11,7 +11,6 @@ import {
   type SharedAttributeDataType as AttributeDataType,
   type SharedAttributeDraft as AttributeDraft,
 } from "../components/AttributeValuesModal";
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CaseRow {
@@ -906,6 +905,7 @@ export function CasesView() {
   const canCreateCaseAttributes = canCurrentUser("createCaseAttributes");
   const canEditCaseAttributes = canCurrentUser("editCaseAttributes");
   const canDeleteCaseAttributes = canCurrentUser("deleteCaseAttributes");
+  const postgresReadOnlyMode = !pb && !!activeProject;
   const canManageCaseAttributes =
     canCreateCaseAttributes
     || canEditCaseAttributes
@@ -948,6 +948,7 @@ export function CasesView() {
   const attributeContextMenuStyle = useViewportContextMenuStyle(attributeContextMenu, attributeContextMenuRef);
   useEffect(() => {
     if (!activeProject || !canManageCaseAttributes) return;
+    if (postgresReadOnlyMode) return;
     try {
       if (window.localStorage.getItem(AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY) !== "case") return;
       window.localStorage.removeItem(AI_ASSIST_ADD_ATTRIBUTE_TARGET_KEY);
@@ -961,16 +962,23 @@ export function CasesView() {
     } catch {
       // Best-effort handoff only.
     }
-  }, [activeProject, canManageCaseAttributes]);
+  }, [activeProject, canManageCaseAttributes, postgresReadOnlyMode]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadCases = useCallback(async () => {
-    if (!activeProject || !pb) return;
+    if (!activeProject) return;
     setLoading(true);
     setError(null);
     try {
       const pid = activeProject.id;
+
+      if (!pb) {
+        setAttributeDefs([]);
+        setAttributeValues({});
+        setRows([]);
+        return;
+      }
 
       // Fetch cases, memos, and project-level attribute definitions in parallel
       const [caseRecords, memoRecords, attrDefRecords] = await Promise.all([
@@ -1063,9 +1071,13 @@ export function CasesView() {
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb]);
+  }, [activeProject, pb, t]);
 
   useEffect(() => { loadCases(); }, [loadCases]);
+  useEffect(() => {
+    if (!postgresReadOnlyMode || !showAttributesTable) return;
+    setShowAttributesTable(false);
+  }, [postgresReadOnlyMode, showAttributesTable]);
 
   // Consume a pending case ID (navigated here from another view)
   useEffect(() => {
@@ -1479,16 +1491,18 @@ export function CasesView() {
                     })
                 : handleNewCase
             }
-            disabled={showAttributesTable ? !canCreateCaseAttributes : !canCreateCases}
             title={
-              showAttributesTable
-                ? !canCreateCaseAttributes
-                  ? t("projectCases.addAttributeDenied")
-                  : undefined
-                : !canCreateCases
-                  ? t("projectCases.addCaseDenied")
-                  : undefined
+              postgresReadOnlyMode
+                ? "PostgreSQL read-only mode is active for this screen."
+                : showAttributesTable
+                  ? !canCreateCaseAttributes
+                    ? t("projectCases.addAttributeDenied")
+                    : undefined
+                  : !canCreateCases
+                    ? t("projectCases.addCaseDenied")
+                    : undefined
             }
+            disabled={postgresReadOnlyMode || (showAttributesTable ? !canCreateCaseAttributes : !canCreateCases)}
           >
             {showAttributesTable ? t("projectCases.addAttribute") : t("projectCases.addCase")}
           </button>
@@ -1496,6 +1510,11 @@ export function CasesView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
+      {postgresReadOnlyMode && (
+        <p className="users-guide-copy" style={{ marginBottom: 16 }}>
+          PostgreSQL read-only mode is active for this screen. Case listings and source links are loaded from PostgreSQL, but detail view, attributes, editing, memos, and associations still need to be ported.
+        </p>
+      )}
 
       <div className="users-content">
           <div className="ai-assist-home-tabbar" style={{ marginBottom: 16 }}>
@@ -1514,14 +1533,19 @@ export function CasesView() {
                 className={showAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 role="tab"
                 aria-selected={showAttributesTable}
-                onClick={() => setShowAttributesTable(true)}
+                onClick={() => {
+                  if (postgresReadOnlyMode) return;
+                  setShowAttributesTable(true);
+                }}
+                disabled={postgresReadOnlyMode}
+                title={postgresReadOnlyMode ? "Case attributes have not been ported to PostgreSQL yet." : undefined}
               >
                 {t("projectCases.tabs.attributes")}
               </button>
             </div>
           </div>
 
-          {showAttributesTable && (
+          {showAttributesTable && !postgresReadOnlyMode && (
             <div className="users-table-wrap case-attributes-table-wrap">
               <table
                 className="users-table case-attributes-table"
@@ -1652,8 +1676,12 @@ export function CasesView() {
                   <tr
                     key={row.id}
                     className="users-row case-list-row"
-                    onClick={() => setSelectedRow(row)}
+                    onClick={() => {
+                      if (postgresReadOnlyMode) return;
+                      setSelectedRow(row);
+                    }}
                     onContextMenu={(e) => {
+                      if (postgresReadOnlyMode) return;
                       e.preventDefault();
                       setContextMenu({ x: e.clientX, y: e.clientY, row });
                     }}
@@ -1674,7 +1702,7 @@ export function CasesView() {
           </div>
       </div>
 
-      {showCreateModal && (
+      {showCreateModal && !postgresReadOnlyMode && (
         <CaseEditorModal
           title={t("projectCases.editor.createTitle")}
           initialName=""
@@ -1732,7 +1760,7 @@ export function CasesView() {
         </div>
       )}
 
-      {attributeContextMenu && (
+      {attributeContextMenu && !postgresReadOnlyMode && (
         <div
           ref={attributeContextMenuRef}
           className="context-menu"
@@ -1771,7 +1799,7 @@ export function CasesView() {
       )}
 
       {/* Context menu */}
-      {contextMenu && (
+      {contextMenu && !postgresReadOnlyMode && (
         <div
           ref={contextMenuRef}
           className="context-menu"
@@ -1829,7 +1857,7 @@ export function CasesView() {
       )}
 
       {/* Delete confirmation */}
-      {confirmDelete && (
+      {confirmDelete && !postgresReadOnlyMode && (
         <div
           className="modal-overlay"
           onClick={() => !deleteLoading && setConfirmDelete(null)}
@@ -1861,7 +1889,7 @@ export function CasesView() {
       )}
 
       {/* Associate Documents modal */}
-      {assocDocCase && pb && activeProject && (
+      {assocDocCase && !postgresReadOnlyMode && pb && activeProject && (
         <AssociateDocumentsModal
           caseRow={assocDocCase}
           pb={pb}
@@ -1872,7 +1900,7 @@ export function CasesView() {
         />
       )}
 
-      {attributeValueDraft && (
+      {attributeValueDraft && !postgresReadOnlyMode && (
         <SharedAttributeValuesModal
           draft={attributeValueDraft}
           rows={sorted.map((row) => ({ id: row.id, name: row.name }))}

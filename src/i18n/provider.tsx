@@ -9,6 +9,11 @@ import {
 } from "react";
 import { readAppSettings, saveAppSettings } from "../lib/appSettings";
 import {
+  getPostgresExperimentAuthStatus,
+  getPostgresExperimentUserPreferences,
+  savePostgresExperimentUserPreferences,
+} from "../lib/postgresExperiment";
+import {
   formatDate,
   formatDateTime,
   formatList,
@@ -93,6 +98,29 @@ export function I18nProvider({ children, initialLocale }: I18nProviderProps) {
   }, [initialLocale, locale]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadPostgresLocalePreference() {
+      try {
+        const authStatus = await getPostgresExperimentAuthStatus();
+        if (!authStatus.currentSession) return;
+        const preferences = await getPostgresExperimentUserPreferences();
+        const nextLocale = resolveSupportedLocale(preferences.locale);
+        if (!cancelled && nextLocale && nextLocale !== locale) {
+          setLocaleState(nextLocale);
+        }
+      } catch {
+        // Fall back to the legacy frontend setting when PostgreSQL experiment auth is unavailable.
+      }
+    }
+
+    void loadPostgresLocalePreference();
+    return () => {
+      cancelled = true;
+    };
+  }, [locale]);
+
+  useEffect(() => {
     function handleStorage(event: StorageEvent) {
       if (event.key == null) return;
       const nextLocale = resolveSupportedLocale(readAppSettings().ui.locale);
@@ -119,14 +147,29 @@ export function I18nProvider({ children, initialLocale }: I18nProviderProps) {
   function setLocale(localeCode: LocaleCode) {
     setLocaleState(localeCode);
     const settings = readAppSettings();
-    if (settings.ui.locale === localeCode) return;
-    saveAppSettings({
-      ...settings,
-      ui: {
-        ...settings.ui,
-        locale: localeCode,
-      },
-    });
+    if (settings.ui.locale !== localeCode) {
+      saveAppSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          locale: localeCode,
+        },
+      });
+    }
+    void (async () => {
+      try {
+        const authStatus = await getPostgresExperimentAuthStatus();
+        if (!authStatus.currentSession) return;
+        const preferences = await getPostgresExperimentUserPreferences();
+        if (preferences.locale === localeCode) return;
+        await savePostgresExperimentUserPreferences({
+          ...preferences,
+          locale: localeCode,
+        });
+      } catch {
+        // Keep locale switching resilient when PostgreSQL experiment auth is not active.
+      }
+    })();
   }
 
   const value = useMemo<I18nContextValue>(() => {

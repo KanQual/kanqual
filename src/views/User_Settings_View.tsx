@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
 import { useI18n } from "../i18n/provider";
-import { ThemeManagerModal } from "./App_Settings_View";
+import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { HelpIcon } from "../components/AppIcons";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import {

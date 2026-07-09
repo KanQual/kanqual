@@ -21,6 +21,7 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "project.backup.delete": "Project backup deleted",
   "project.network_mode.update": "Network mode updated",
   "project.ai_assist.update": "Project AI Assist updated",
+  "project.canvas.update": "Project canvas updated",
   "project.ai_chat.message": "AI chat message sent",
   "project.ai_chat.response": "AI chat response received",
   "project.ai_assist.embeddings.delete": "Project AI Assist embeddings deleted",
@@ -56,6 +57,21 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "document_attribute.create": "Document attribute added",
   "document_attribute.update": "Document attribute updated",
   "document_attribute.delete": "Document attribute deleted",
+  "object_type.create": "Object type added",
+  "object_type.update": "Object type updated",
+  "object_type.delete": "Object type deleted",
+  "object.create": "Object added",
+  "object.update": "Object updated",
+  "object.delete": "Object deleted",
+  "relationship_type.create": "Relationship type added",
+  "relationship_type.update": "Relationship type updated",
+  "relationship_type.delete": "Relationship type deleted",
+  "relationship.create": "Relationship added",
+  "relationship.update": "Relationship updated",
+  "relationship.delete": "Relationship deleted",
+  "saved_drawing.create": "Drawing saved",
+  "saved_drawing.update": "Drawing updated",
+  "saved_drawing.delete": "Drawing deleted",
   "memo.create":         "Memo created",
   "memo.update":         "Memo updated",
   "memo.delete":         "Memo deleted",
@@ -178,6 +194,11 @@ export function projectLogActionCategory(action: string): string {
     || action.startsWith("member.")
     || action.startsWith("ai_assist.")
     || action.startsWith("project_uploaded_file.")
+    || action.startsWith("saved_drawing.")
+    || action.startsWith("object.")
+    || action.startsWith("object_type.")
+    || action.startsWith("relationship.")
+    || action.startsWith("relationship_type.")
   ) return "project";
   if (action.startsWith("case.") || action.startsWith("case_attribute.")) return "case";
   if (action.startsWith("document.") || action.startsWith("document_attribute.")) return "document";
@@ -280,7 +301,7 @@ function formatDetailValue(
   return { text: JSON.stringify(value, null, 2), multiline: true };
 }
 
-function summarizeProjectLogDetails(action: string, details: ProjectLogDetails, t: ReturnType<typeof useI18n>["t"]): string {
+export function summarizeProjectLogDetails(action: string, details: ProjectLogDetails, t: ReturnType<typeof useI18n>["t"]): string {
   const pieces: string[] = [];
   const push = (text?: string | null) => {
     if (text && text.trim()) pieces.push(text.trim());
@@ -594,7 +615,7 @@ export function projectLogDescriptionLabel(
   }
 }
 
-function ProjectLogDetailsPanel({ details }: { details: ProjectLogDetails }) {
+export function ProjectLogDetailsPanel({ details }: { details: ProjectLogDetails }) {
   const { t } = useI18n();
   const entries = Object.entries(details);
 

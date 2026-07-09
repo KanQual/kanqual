@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { useStore } from "../context/StoreContext";
+import { useOptionalStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
 import { useI18n } from "../i18n/provider";
+import { listPostgresExperimentMemos } from "../lib/postgresExperiment";
+import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 
 interface AnnRow {
   id: string;
@@ -13,20 +15,53 @@ interface AnnRow {
   quote: string;
   memoCount: number;
   hasNote: boolean;
+  lockLabel?: string;
+  lockTitle?: string;
+  createdAt?: string;
 }
 
-type SortCol = "documentName" | "codeLabel" | "memoCount" | "hasNote";
+type SortCol = "documentName" | "codeLabel" | "lockLabel" | "memoCount" | "hasNote";
 type SortDir = "asc" | "desc";
 
 const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "documentName", label: "Document", width: "24%" },
-  { key: "codeLabel", label: "Code", width: "22%" },
+  { key: "documentName", label: "Document", width: "20%" },
+  { key: "codeLabel", label: "Code", width: "18%" },
+  { key: "lockLabel", label: "Lock", width: "12%" },
   { key: "memoCount", label: "Memos", width: "10%" },
   { key: "hasNote", label: "Note", width: "10%" },
 ];
 
-const QUOTE_WIDTH = "34%";
+const QUOTE_WIDTH = "30%";
 const QUOTE_MAX_CHARS = 80;
+
+export interface AnnotationsViewProps {
+  postgresProjectId?: string;
+  postgresCurrentUserId?: string;
+  onOpenPostgresSourceAnnotation?: (target: { sourceId: string; annotationId: string }) => void;
+}
+
+function describeSourceLock(
+  userId: string | undefined,
+  userName: string | undefined,
+  currentUserId: string | undefined,
+): { label: string; title: string } {
+  if (!userId) {
+    return {
+      label: "Available",
+      title: "This source is currently available for coding.",
+    };
+  }
+  if (currentUserId && userId === currentUserId) {
+    return {
+      label: "You",
+      title: "You are currently holding this source lock.",
+    };
+  }
+  return {
+    label: "Locked",
+    title: `${userName || "Another user"} is currently holding this source lock.`,
+  };
+}
 
 function truncateQuote(value: string): string {
   const trimmed = value.replace(/\s+/g, " ").trim();
@@ -34,16 +69,13 @@ function truncateQuote(value: string): string {
   return `${trimmed.slice(0, QUOTE_MAX_CHARS - 1).trimEnd()}...`;
 }
 
-export function AnnotationsView() {
+export function AnnotationsView(props: AnnotationsViewProps) {
+  const { postgresProjectId, postgresCurrentUserId, onOpenPostgresSourceAnnotation } = props;
   const { t } = useI18n();
-  const {
-    activeProject,
-    pb,
-    documents,
-    setActiveDocument,
-    setPendingAnnId,
-    setView,
-  } = useStore();
+  const store = useOptionalStore();
+  const activeProject = store?.activeProject ?? null;
+  const pb = store?.pb ?? null;
+  const documents = store?.documents ?? [];
   const localizedCols = [
     { ...COLS[0], label: t("projectAnnotations.table.document") },
     { ...COLS[1], label: t("projectAnnotations.table.code") },
@@ -57,12 +89,57 @@ export function AnnotationsView() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [sortCol, setSortCol] = useState<SortCol>("documentName");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const postgresMode = !!postgresProjectId;
 
   const load = useCallback(async () => {
-    if (!activeProject || !pb) return;
+    if (!activeProject && !postgresProjectId) return;
     setLoading(true);
     setError(null);
     try {
+      if (postgresProjectId) {
+        const [snapshot, memoRows] = await Promise.all([
+          loadPostgresProjectWorkspaceSnapshot(postgresProjectId),
+          listPostgresExperimentMemos(postgresProjectId),
+        ]);
+        const sourceNameById = Object.fromEntries(snapshot.sources.map((source) => [source.id, source.title]));
+        const primaryCodeById = Object.fromEntries(snapshot.codes.map((code) => [code.id, code]));
+        const sourceLockById = Object.fromEntries(
+          snapshot.sourceLocks.map((lock) => [lock.sourceId, lock]),
+        );
+        const memoCountByAnnotationId = new Map<string, number>();
+        for (const memo of memoRows) {
+          for (const annotationId of memo.annotationIds) {
+            memoCountByAnnotationId.set(annotationId, (memoCountByAnnotationId.get(annotationId) ?? 0) + 1);
+          }
+        }
+        setRows(snapshot.annotations.map((annotation) => {
+          const primaryCode = primaryCodeById[annotation.primaryCodeId];
+          const sourceLock = sourceLockById[annotation.sourceId];
+          const lockStatus = describeSourceLock(
+            sourceLock?.userId,
+            sourceLock?.userName,
+            postgresCurrentUserId,
+          );
+          return {
+            id: annotation.id,
+            documentId: annotation.sourceId,
+            documentName: sourceNameById[annotation.sourceId] ?? "-",
+            codeId: annotation.primaryCodeId,
+            codeLabel: annotation.primaryCodeLabel || primaryCode?.label || "-",
+            codeColor: primaryCode?.color ?? "#888888",
+            quote: annotation.quote ?? "",
+            memoCount: memoCountByAnnotationId.get(annotation.id) ?? 0,
+            hasNote: !!annotation.note,
+            lockLabel: lockStatus.label,
+            lockTitle: lockStatus.title,
+            createdAt: annotation.createdAt,
+          };
+        }));
+        return;
+      }
+
+      if (!activeProject || !pb) return;
+
       const [annRecs, memoRecs] = await Promise.all([
         pb.collection("annotations").getFullList({
           filter: `document.project="${activeProject.id}"&&deleted_at=""`,
@@ -99,7 +176,7 @@ export function AnnotationsView() {
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb]);
+  }, [activeProject, pb, postgresCurrentUserId, postgresProjectId]);
 
   useEffect(() => {
     void load();
@@ -114,17 +191,26 @@ export function AnnotationsView() {
   }
 
   function jumpToAnnotation(row: AnnRow) {
+    if (postgresProjectId) {
+      onOpenPostgresSourceAnnotation?.({
+        sourceId: row.documentId,
+        annotationId: row.id,
+      });
+      return;
+    }
+    if (!pb) return;
     const document = documents.find((item) => item.id === row.documentId);
     if (!document) return;
-    setActiveDocument(document);
-    setPendingAnnId(row.id);
-    setView("code-text");
+    store?.setActiveDocument(document);
+    store?.setPendingAnnId(row.id);
+    store?.setView("code-text");
   }
 
   const sorted = [...rows].sort((a, b) => {
     let cmp = 0;
     if (sortCol === "documentName") cmp = a.documentName.localeCompare(b.documentName);
     else if (sortCol === "codeLabel") cmp = a.codeLabel.localeCompare(b.codeLabel);
+    else if (sortCol === "lockLabel") cmp = (a.lockLabel ?? "").localeCompare(b.lockLabel ?? "");
     else if (sortCol === "memoCount") cmp = a.memoCount - b.memoCount;
     else if (sortCol === "hasNote") cmp = Number(a.hasNote) - Number(b.hasNote);
     return sortDir === "asc" ? cmp : -cmp;
@@ -150,6 +236,11 @@ export function AnnotationsView() {
       </header>
 
       {error && <p className="users-error">{error}</p>}
+      {postgresMode && (
+        <p className="users-guide-copy" style={{ marginBottom: 16 }}>
+          PostgreSQL annotations are loaded directly from the project workspace. Selecting an annotation opens its source detail and respects the current source lock.
+        </p>
+      )}
 
       <div className="users-content">
           <div
@@ -183,13 +274,18 @@ export function AnnotationsView() {
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={5} className="users-td-msg">{t("projectAnnotations.loading")}</td></tr>
+                  <tr><td colSpan={6} className="users-td-msg">{t("projectAnnotations.loading")}</td></tr>
                 )}
                 {!loading && sorted.length === 0 && (
-                  <tr><td colSpan={5} className="users-td-msg">{t("projectAnnotations.empty")}</td></tr>
+                  <tr><td colSpan={6} className="users-td-msg">{t("projectAnnotations.empty")}</td></tr>
                 )}
                 {!loading && sorted.map((row) => (
-                  <tr key={row.id} className="users-row annotations-list-row" onClick={() => jumpToAnnotation(row)}>
+                  <tr
+                    key={row.id}
+                    className="users-row annotations-list-row"
+                    onClick={() => jumpToAnnotation(row)}
+                    title={row.lockTitle}
+                  >
                     <td className="users-td users-td--muted" title={row.quote}>
                       {truncateQuote(row.quote)}
                     </td>
@@ -199,6 +295,9 @@ export function AnnotationsView() {
                         <span className="code-swatch" style={{ background: row.codeColor }} />
                         {row.codeLabel}
                       </span>
+                    </td>
+                    <td className="users-td users-td--muted">
+                      {row.lockLabel ?? "-"}
                     </td>
                     <td className="users-td users-td--muted">
                       {row.memoCount > 0 ? row.memoCount : "-"}

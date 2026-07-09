@@ -27,6 +27,7 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["time", "net"] }
+tokio-postgres = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 candle-core = "0.10.2"
 candle-nn = "0.10.2"

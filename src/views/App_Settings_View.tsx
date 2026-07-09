@@ -1,22 +1,4 @@
-import { useState, useCallback, useMemo, useRef, type ReactNode } from "react";
-import {
-  type Theme,
-  type ColorVar,
-  type ThemePreset,
-  COLOR_VARS,
-  getAppDefaults,
-  getStoredTheme,
-  getStoredOverrides,
-  saveOverrides,
-  getStoredRadius,
-  getStoredBorderWidth,
-  getPresets,
-  savePreset,
-  deletePreset,
-  getActivePresetId,
-  resetThemeToDefaults,
-  setActivePresetId,
-} from "../theme";
+import { useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { readDir, stat } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -24,7 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { useStore } from "../context/StoreContext";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
-import { formatCurrentNumber } from "../i18n/formatters";
+import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import {
   clearRecentProjects,
   formatBytes,
@@ -35,6 +17,17 @@ import {
 import { clearLocalAccounts, clearRemoteSessions } from "../lib/authHistory";
 import { getAppRuntimeInfo, joinFsPath, type AppRuntimeInfo } from "../lib/dataRoot";
 import {
+  bootstrapPostgresExperiment,
+  createPostgresExperimentProject,
+  ensurePostgresExperimentSchema,
+  getPostgresExperimentStatus,
+  listPostgresExperimentProjects,
+  type BootstrapPostgresExperimentResult,
+  type PostgresExperimentProject,
+  type PostgresExperimentStatus,
+  type PostgresSchemaMigrationResult,
+} from "../lib/postgresExperiment";
+import {
   clearAppDataRecords,
   deleteUserAccount,
   listRegisteredUserAccounts,
@@ -44,67 +37,6 @@ import { isLocalBackendUrl } from "../lib/aiJobs";
 import { buildPermissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
 import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
 import { HelpIcon } from "../components/AppIcons";
-
-function genId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
-
-function isValidHex(val: string): boolean {
-  return /^#[0-9a-fA-F]{6}$/.test(val) || /^#[0-9a-fA-F]{3}$/.test(val);
-}
-
-function normalizeHex(val: string): string {
-  if (/^#[0-9a-fA-F]{3}$/.test(val)) {
-    const r = val[1], g = val[2], b = val[3];
-    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
-  }
-  return val.toLowerCase();
-}
-
-function currentSnapshot() {
-  const base = getStoredTheme();
-  return {
-    base,
-    colors: { ...getAppDefaults(base), ...getStoredOverrides(base) },
-    radius: getStoredRadius(),
-    borderWidth: getStoredBorderWidth(),
-  };
-}
-
-function applyLive(
-  base: Theme,
-  colors: Record<string, string>,
-  radius: number,
-  borderWidth: number,
-) {
-  if (base === "dark") {
-    document.documentElement.setAttribute("data-theme", "dark");
-  } else {
-    document.documentElement.removeAttribute("data-theme");
-  }
-  for (const v of COLOR_VARS) {
-    document.documentElement.style.removeProperty(v.key);
-  }
-  for (const [k, v] of Object.entries(colors)) {
-    document.documentElement.style.setProperty(k, v);
-  }
-  document.documentElement.style.setProperty("--radius", `${radius}px`);
-  document.documentElement.style.setProperty("--border-width", `${borderWidth}px`);
-}
-
-function persistPreset(preset: ThemePreset) {
-  const defs = getAppDefaults(preset.base);
-  const overrides: Record<string, string> = {};
-  for (const [k, v] of Object.entries(preset.colors)) {
-    if (v.toLowerCase() !== (defs[k] ?? "").toLowerCase()) overrides[k] = v;
-  }
-  localStorage.setItem("mc_theme", preset.base);
-  saveOverrides(preset.base, overrides);
-  localStorage.setItem("mc_radius", String(preset.borderRadius));
-  localStorage.setItem("mc_border_width", String(preset.borderWidth));
-  setActivePresetId(preset.id);
-  applyLive(preset.base, preset.colors, preset.borderRadius, preset.borderWidth);
-}
 
 type LicenseRow = {
   name: string;
@@ -188,456 +120,6 @@ function formatStorageFileSummary(
     directory,
   });
 }
-
-import { useEffect } from "react";
-
-function ColorRow({
-  varDef,
-  value,
-  defaultValue,
-  onChange,
-  onReset,
-}: {
-  varDef: ColorVar;
-  value: string;
-  defaultValue: string;
-  onChange: (key: string, val: string) => void;
-  onReset: (key: string) => void;
-}) {
-  const [hexInput, setHexInput] = useState(value);
-  const isCustom = value.toLowerCase() !== defaultValue.toLowerCase();
-
-  useEffect(() => { setHexInput(value); }, [value]);
-
-  function handlePickerChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = e.target.value;
-    setHexInput(val);
-    onChange(varDef.key, val);
-  }
-
-  function handleHexChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const raw = e.target.value;
-    setHexInput(raw);
-    if (isValidHex(raw)) onChange(varDef.key, normalizeHex(raw));
-  }
-
-  function handleHexBlur() {
-    if (!isValidHex(hexInput)) setHexInput(value);
-    else setHexInput(normalizeHex(hexInput));
-  }
-
-  return (
-    <div className={`color-row${isCustom ? " color-row--custom" : ""}`}>
-      <div className="color-row-swatch" style={{ background: value }} />
-      <span className="color-row-label">{varDef.label}</span>
-      <input
-        type="color"
-        className="color-row-picker"
-        value={value}
-        onChange={handlePickerChange}
-        title="Open color picker"
-      />
-      <input
-        type="text"
-        className="form-input color-row-hex"
-        value={hexInput}
-        onChange={handleHexChange}
-        onBlur={handleHexBlur}
-        spellCheck={false}
-        maxLength={7}
-        placeholder="#000000"
-      />
-      {isCustom ? (
-        <button
-          type="button"
-          className="btn btn--sm color-row-reset"
-          onClick={() => onReset(varDef.key)}
-          title="Reset to default"
-        >
-          Reset
-        </button>
-      ) : (
-        <span className="color-row-reset-spacer" />
-      )}
-    </div>
-  );
-}
-
-function SliderRow({
-  label,
-  desc,
-  value,
-  min,
-  max,
-  unit,
-  onChange,
-}: {
-  label: string;
-  desc: string;
-  value: number;
-  min: number;
-  max: number;
-  unit: string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="slider-row">
-      <div className="slider-row-info">
-        <span className="slider-row-label">{label}</span>
-        <span className="slider-row-desc">{desc}</span>
-      </div>
-      <div className="slider-row-controls">
-        <input
-          type="range"
-          className="slider-input"
-          min={min}
-          max={max}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-        />
-        <span className="slider-value">
-          {value}
-          {unit}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function ThemeEditor({
-  initial,
-  onSave,
-  onCancel,
-}: {
-  initial: ThemePreset;
-  onSave: (preset: ThemePreset) => void;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState(initial.name);
-  const [base, setBase] = useState<Theme>(initial.base);
-  const [colors, setColors] = useState<Record<string, string>>(initial.colors);
-  const [borderRadius, setBorderRadius] = useState(initial.borderRadius);
-  const [borderWidth, setBorderWidth] = useState(initial.borderWidth);
-
-  // Live preview applies to the page instantly, nothing persisted
-  useEffect(() => {
-    applyLive(base, colors, borderRadius, borderWidth);
-  }, [base, colors, borderRadius, borderWidth]);
-
-  const defaults = getAppDefaults(base);
-  const groups = [...new Set(COLOR_VARS.map((v) => v.group))];
-
-  function handleBaseChange(t: Theme) {
-    setBase(t);
-    setColors({ ...getAppDefaults(t) });
-  }
-
-  function handleResetDefaults() {
-    setColors({ ...getAppDefaults(base) });
-    setBorderRadius(6);
-    setBorderWidth(1);
-  }
-
-  const handleColorChange = useCallback((key: string, val: string) => {
-    setColors((prev) => ({ ...prev, [key]: val }));
-  }, []);
-
-  const handleReset = useCallback(
-    (key: string) => {
-      setColors((prev) => ({ ...prev, [key]: getAppDefaults(base)[key] }));
-    },
-    [base],
-  );
-
-  function handleSave() {
-    onSave({
-      id: initial.id,
-      name: name.trim() || "Untitled Theme",
-      base,
-      colors,
-      borderRadius,
-      borderWidth,
-    });
-  }
-
-  return (
-    <>
-      {/* Name */}
-      <div className="theme-editor-field">
-        <label className="form-label">
-          Name
-          <input
-            className="form-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Theme"
-            autoFocus
-          />
-        </label>
-      </div>
-
-      {/* Base mode */}
-      <div className="theme-editor-field">
-        <div className="form-label" style={{ marginBottom: 8 }}>
-          Base Mode
-        </div>
-        <div className="theme-options" style={{ justifyContent: "flex-start" }}>
-          {(["light", "dark"] as Theme[]).map((t) => (
-            <button
-              key={t}
-              className={`theme-option${base === t ? " theme-option--active" : ""}`}
-              onClick={() => handleBaseChange(t)}
-              aria-pressed={base === t}
-            >
-              <div className={`theme-preview theme-preview--${t}`}>
-                <div className="theme-preview-sidebar" />
-                <div className="theme-preview-content">
-                  <div className="theme-preview-bar" style={{ width: "70%" }} />
-                  <div className="theme-preview-bar" style={{ width: "50%" }} />
-                  <div className="theme-preview-bar" style={{ width: "60%" }} />
-                </div>
-              </div>
-              {t === "light" ? "Light" : "Dark"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* UI style */}
-      <div className="theme-editor-field">
-        <div className="form-label" style={{ marginBottom: 8 }}>
-          UI Style
-        </div>
-        <SliderRow
-          label="Corner Radius"
-          desc="Roundness of corners on cards, buttons, and inputs"
-          value={borderRadius}
-          min={0}
-          max={20}
-          unit="px"
-          onChange={setBorderRadius}
-        />
-        <SliderRow
-          label="Border Width"
-          desc="Thickness of borders on cards, modals, and inputs"
-          value={borderWidth}
-          min={1}
-          max={4}
-          unit="px"
-          onChange={setBorderWidth}
-        />
-      </div>
-
-      {/* Colors */}
-      <div className="theme-editor-field">
-        <div className="form-label" style={{ marginBottom: 8 }}>
-          Colors
-        </div>
-        <div className="color-groups">
-          {groups.map((group) => (
-            <div key={group} className="color-group">
-              <h3 className="color-group-title">{group}</h3>
-              {COLOR_VARS.filter((v) => v.group === group).map((varDef) => (
-                <ColorRow
-                  key={varDef.key}
-                  varDef={varDef}
-                  value={colors[varDef.key] ?? defaults[varDef.key]}
-                  defaultValue={defaults[varDef.key]}
-                  onChange={handleColorChange}
-                  onReset={handleReset}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="form-actions">
-        <button className="btn" onClick={handleResetDefaults}>
-          Reset to Defaults
-        </button>
-        <button className="btn" onClick={onCancel}>
-          Cancel
-        </button>
-        <button className="btn btn--primary" onClick={handleSave}>
-          Save Theme
-        </button>
-      </div>
-    </>
-  );
-}
-
-export function ThemeManagerModal({
-  onClose,
-  onApplied,
-}: {
-  onClose: () => void;
-  onApplied: () => void;
-}) {
-  const [presets, setPresets] = useState<ThemePreset[]>(getPresets);
-  const [editing, setEditing] = useState<ThemePreset | null>(null);
-  const snapshotRef = useRef<ReturnType<typeof currentSnapshot> | null>(null);
-
-  function openNew() {
-    snapshotRef.current = currentSnapshot();
-    const snap = snapshotRef.current;
-    setEditing({
-      id: genId(),
-      name: "",
-      base: snap.base,
-      colors: { ...snap.colors },
-      borderRadius: snap.radius,
-      borderWidth: snap.borderWidth,
-    });
-  }
-
-  function openEdit(preset: ThemePreset) {
-    snapshotRef.current = currentSnapshot();
-    setEditing({ ...preset, colors: { ...preset.colors } });
-  }
-
-  function handleSave(preset: ThemePreset) {
-    savePreset(preset);
-    persistPreset(preset);
-    setPresets(getPresets());
-    setEditing(null);
-    snapshotRef.current = null;
-    onApplied();
-  }
-
-  function handleCancel() {
-    const s = snapshotRef.current;
-    if (s) {
-      applyLive(s.base, s.colors, s.radius, s.borderWidth);
-      snapshotRef.current = null;
-    }
-    setEditing(null);
-    onApplied();
-  }
-
-  function handleApply(preset: ThemePreset) {
-    persistPreset(preset);
-    onApplied();
-  }
-
-  function handleResetActiveDefaults() {
-    resetThemeToDefaults(getStoredTheme());
-    onApplied();
-  }
-
-  function handleDelete(id: string) {
-    const wasActive = getActivePresetId() === id;
-    const preset = presets.find((p) => p.id === id);
-    deletePreset(id);
-    setPresets(getPresets());
-    if (wasActive) {
-      resetThemeToDefaults(preset?.base ?? getStoredTheme());
-      onApplied();
-    }
-  }
-
-  return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !editing) onClose();
-      }}
-    >
-      <div className={`modal ${editing ? "modal--theme-editor" : "modal--wide"}`}>
-        {editing ? (
-          <>
-            <h2>{editing.name ? `Editing: ${editing.name}` : "New Theme"}</h2>
-            <div className="theme-editor-scroll">
-              <ThemeEditor
-                initial={editing}
-                onSave={handleSave}
-                onCancel={handleCancel}
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="theme-manager-header">
-              <h2 style={{ marginBottom: 0 }}>Theme Presets</h2>
-              <div className="theme-manager-actions">
-                <button className="btn btn--sm" onClick={handleResetActiveDefaults}>
-                  Reset to Defaults
-                </button>
-                <button className="btn btn--primary btn--sm" onClick={openNew}>
-                  + New Theme
-                </button>
-              </div>
-            </div>
-
-            {presets.length === 0 ? (
-              <div className="theme-manager-empty">
-                <p>No saved themes yet.</p>
-                <p>Create a theme to save your custom colors and UI style.</p>
-              </div>
-            ) : (
-              <div className="theme-preset-list">
-                {presets.map((p) => (
-                  <div key={p.id} className="theme-preset-row">
-                    <div className="theme-preset-swatches">
-                      {(
-                        ["--color-sidebar", "--color-primary", "--color-bg"] as const
-                      ).map((k) => (
-                        <span
-                          key={k}
-                          className="theme-preset-swatch"
-                          style={{ background: p.colors[k] ?? "#ccc" }}
-                        />
-                      ))}
-                    </div>
-                    <div className="theme-preset-info">
-                      <span className="theme-preset-name">
-                        {p.name || "Untitled"}
-                      </span>
-                      <span
-                        className={`theme-preset-badge theme-preset-badge--${p.base}`}
-                      >
-                        {p.base}
-                      </span>
-                      <span className="theme-preset-meta">
-                        radius {p.borderRadius}px border {p.borderWidth}px
-                      </span>
-                    </div>
-                    <div className="theme-preset-actions">
-                      <button
-                        className="btn btn--sm btn--primary"
-                        onClick={() => handleApply(p)}
-                      >
-                        Apply
-                      </button>
-                      <button
-                        className="btn btn--sm"
-                        onClick={() => openEdit(p)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="btn btn--sm btn--danger"
-                        onClick={() => handleDelete(p.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={onClose}>
-                Close
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-} 
 
 type PingStatus = "idle" | "loading" | "success" | "error";
 interface PingResult { status: PingStatus; ms?: number; error?: string; }
@@ -848,7 +330,7 @@ function formatDownloadDate(value: number | null | undefined): string {
   if (!value) return "Unknown";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleString([], {
+  return formatCurrentDateTime(date, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -933,6 +415,16 @@ export function AppSettingsView() {
   const [externalPing, setExternalPing] = useState<PingResult>({ status: "idle" });
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [dbHealth, setDbHealth] = useState<"checking" | "ok" | "error">("checking");
+  const [postgresExperimentStatus, setPostgresExperimentStatus] = useState<PostgresExperimentStatus | null>(null);
+  const [postgresExperimentBusy, setPostgresExperimentBusy] = useState(false);
+  const [postgresExperimentError, setPostgresExperimentError] = useState("");
+  const [postgresExperimentNotice, setPostgresExperimentNotice] = useState("");
+  const [postgresSuperuserPassword, setPostgresSuperuserPassword] = useState("");
+  const [postgresBootstrapResult, setPostgresBootstrapResult] = useState<BootstrapPostgresExperimentResult | null>(null);
+  const [postgresSchemaResult, setPostgresSchemaResult] = useState<PostgresSchemaMigrationResult | null>(null);
+  const [postgresProjects, setPostgresProjects] = useState<PostgresExperimentProject[]>([]);
+  const [postgresProjectName, setPostgresProjectName] = useState("");
+  const [postgresProjectDescription, setPostgresProjectDescription] = useState("");
   const [storageBusy, setStorageBusy] = useState(false);
   const [storageSummary, setStorageSummary] = useState({
     databaseBytes: 0,
@@ -1177,6 +669,87 @@ export function AppSettingsView() {
     setNotice(message);
   }
 
+  const refreshPostgresExperiment = useCallback(async () => {
+    try {
+      const status = await getPostgresExperimentStatus();
+      setPostgresExperimentStatus(status);
+      setPostgresExperimentError("");
+    } catch (error) {
+      console.error("Failed to load Postgres experiment status:", error);
+      setPostgresExperimentError("Could not load PostgreSQL experiment status.");
+    }
+  }, []);
+
+  const refreshPostgresExperimentProjects = useCallback(async () => {
+    try {
+      const projects = await listPostgresExperimentProjects();
+      setPostgresProjects(projects);
+    } catch (error) {
+      console.error("Failed to load Postgres experiment projects:", error);
+      setPostgresProjects([]);
+    }
+  }, []);
+
+  async function handleBootstrapPostgresExperiment() {
+    setPostgresExperimentBusy(true);
+    setPostgresExperimentError("");
+    setPostgresExperimentNotice("");
+    try {
+      const result = await bootstrapPostgresExperiment(postgresSuperuserPassword);
+      setPostgresBootstrapResult(result);
+      setPostgresSchemaResult(null);
+      setPostgresProjects([]);
+      setPostgresExperimentNotice(
+        result.appRoleReady
+          ? `Created or updated ${result.appRoleName} and verified access to ${result.appDatabase}.`
+          : `Created or updated ${result.appRoleName}, but the app-role verification step still needs review.`,
+      );
+      setPostgresSuperuserPassword("");
+      await refreshPostgresExperiment();
+    } catch (error) {
+      console.error("Postgres bootstrap experiment failed:", error);
+      setPostgresExperimentError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPostgresExperimentBusy(false);
+    }
+  }
+
+  async function handleEnsurePostgresExperimentSchema() {
+    setPostgresExperimentBusy(true);
+    setPostgresExperimentError("");
+    try {
+      const result = await ensurePostgresExperimentSchema();
+      setPostgresSchemaResult(result);
+      setPostgresExperimentNotice(`PostgreSQL experiment schema ready. Applied versions: ${result.appliedVersions.join(", ") || "none"}.`);
+      await refreshPostgresExperimentProjects();
+    } catch (error) {
+      console.error("Postgres schema experiment failed:", error);
+      setPostgresExperimentError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPostgresExperimentBusy(false);
+    }
+  }
+
+  async function handleCreatePostgresExperimentProject() {
+    setPostgresExperimentBusy(true);
+    setPostgresExperimentError("");
+    try {
+      const created = await createPostgresExperimentProject({
+        name: postgresProjectName,
+        description: postgresProjectDescription,
+      });
+      setPostgresProjectName("");
+      setPostgresProjectDescription("");
+      setPostgresExperimentNotice(`Created PostgreSQL experiment project "${created.name}".`);
+      await refreshPostgresExperimentProjects();
+    } catch (error) {
+      console.error("Postgres experiment project creation failed:", error);
+      setPostgresExperimentError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPostgresExperimentBusy(false);
+    }
+  }
+
   async function refreshDiagnostics() {
     setStorageBusy(true);
     setDbHealth("checking");
@@ -1199,6 +772,7 @@ export function AppSettingsView() {
 
     if (!pb) {
       setDbHealth("error");
+      await refreshPostgresExperiment();
       return;
     }
     try {
@@ -1207,6 +781,8 @@ export function AppSettingsView() {
     } catch {
       setDbHealth("error");
     }
+
+    await refreshPostgresExperiment();
   }
 
   useEffect(() => {
@@ -1923,40 +1499,215 @@ export function AppSettingsView() {
         );
       case "diagnostics":
         return (
-          <SettingsModalSection
-            title={t("appSettings.diagnostics.healthChecksTitle")}
-            description="Inspect the local runtime, storage connection, and core service endpoint for this installation."
-          >
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-label">{t("appSettings.diagnostics.appVersion")}</div>
-                <div className="settings-row-desc">{appInfo?.appVersion ?? "Loading..."}</div>
-              </div>
-            </div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-label">{t("appSettings.diagnostics.localDatabase")}</div>
-                <div className="settings-row-desc">
-                  {dbHealth === "checking"
-                    ? t("appSettings.diagnostics.databaseChecking")
-                    : dbHealth === "ok"
-                      ? t("appSettings.diagnostics.databaseHealthy")
-                      : t("appSettings.diagnostics.databaseUnavailable")}
+          <>
+            <SettingsModalSection
+              title={t("appSettings.diagnostics.healthChecksTitle")}
+              description="Inspect the local runtime, storage connection, and core service endpoint for this installation."
+            >
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">{t("appSettings.diagnostics.appVersion")}</div>
+                  <div className="settings-row-desc">{appInfo?.appVersion ?? "Loading..."}</div>
                 </div>
               </div>
-              <button className="btn" type="button" onClick={() => void refreshDiagnostics()} disabled={storageBusy}>
-                {t("appSettings.diagnostics.recheck")}
-              </button>
-            </div>
 
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-label">{t("appSettings.diagnostics.databaseEndpoint")}</div>
-                <div className="settings-row-desc settings-code-line">http://127.0.0.1:8090</div>
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">{t("appSettings.diagnostics.localDatabase")}</div>
+                  <div className="settings-row-desc">
+                    {dbHealth === "checking"
+                      ? t("appSettings.diagnostics.databaseChecking")
+                      : dbHealth === "ok"
+                        ? t("appSettings.diagnostics.databaseHealthy")
+                        : t("appSettings.diagnostics.databaseUnavailable")}
+                  </div>
+                </div>
+                <button className="btn" type="button" onClick={() => void refreshDiagnostics()} disabled={storageBusy}>
+                  {t("appSettings.diagnostics.recheck")}
+                </button>
               </div>
-            </div>
-          </SettingsModalSection>
+
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">{t("appSettings.diagnostics.databaseEndpoint")}</div>
+                  <div className="settings-row-desc settings-code-line">http://127.0.0.1:8090</div>
+                </div>
+              </div>
+            </SettingsModalSection>
+
+            <SettingsModalSection
+              title="PostgreSQL Experiment"
+              description="Bootstrap a local PostgreSQL app role and database without changing the current PocketBase runtime yet."
+            >
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Local PostgreSQL service</div>
+                  <div className="settings-row-desc">
+                    {postgresExperimentStatus
+                      ? (postgresExperimentStatus.serviceReachable
+                        ? `${postgresExperimentStatus.host}:${postgresExperimentStatus.port} reachable`
+                        : `${postgresExperimentStatus.host}:${postgresExperimentStatus.port} unreachable`)
+                      : "Checking..."}
+                  </div>
+                </div>
+                <button className="btn" type="button" onClick={() => void refreshPostgresExperiment()} disabled={postgresExperimentBusy}>
+                  Refresh
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Bootstrap identity</div>
+                  <div className="settings-row-desc settings-code-line">
+                    {postgresExperimentStatus?.bootstrapIdentityPath ?? "Loading..."}
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Planned app role</div>
+                  <div className="settings-row-desc settings-code-line">
+                    {postgresExperimentStatus
+                      ? `${postgresExperimentStatus.appRoleName} -> ${postgresExperimentStatus.appDatabase}`
+                      : "Loading..."}
+                  </div>
+                </div>
+              </div>
+
+              <label className="form-label">
+                Current PostgreSQL superuser password
+                <input
+                  className="form-input"
+                  type="password"
+                  value={postgresSuperuserPassword}
+                  onChange={(e) => setPostgresSuperuserPassword(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Enter the current postgres password"
+                />
+              </label>
+
+              <div className="settings-warning">
+                This bootstrap step uses the current PostgreSQL superuser credential once to create or rotate the restricted Kanqual app role and ensure the local `kanqual` database exists.
+              </div>
+
+              {postgresExperimentError ? <p className="auth-error">{postgresExperimentError}</p> : null}
+              {postgresExperimentNotice ? <div className="settings-success project-settings-success">{postgresExperimentNotice}</div> : null}
+
+              {postgresBootstrapResult ? (
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">Last bootstrap result</div>
+                    <div className="settings-row-desc settings-code-line">
+                      {postgresBootstrapResult.appRoleName}
+                      {" | "}
+                      {postgresBootstrapResult.appDatabase}
+                      {" | "}
+                      {postgresBootstrapResult.appRoleReady ? "verified" : "needs review"}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-label">Experiment schema</div>
+                  <div className="settings-row-desc">
+                    {postgresSchemaResult
+                      ? `Ready (${postgresSchemaResult.appliedVersions.join(", ") || "no recorded versions"})`
+                      : "Not applied yet"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void handleEnsurePostgresExperimentSchema()}
+                  disabled={postgresExperimentBusy || !postgresExperimentStatus?.bootstrapApplied}
+                >
+                  Apply schema
+                </button>
+              </div>
+
+              <label className="form-label">
+                Experiment project name
+                <input
+                  className="form-input"
+                  type="text"
+                  value={postgresProjectName}
+                  onChange={(e) => setPostgresProjectName(e.target.value)}
+                  placeholder="Postgres spike project"
+                />
+              </label>
+
+              <label className="form-label">
+                Experiment project description
+                <textarea
+                  className="form-input"
+                  value={postgresProjectDescription}
+                  onChange={(e) => setPostgresProjectDescription(e.target.value)}
+                  rows={3}
+                  placeholder="Optional description for the Postgres-backed project."
+                />
+              </label>
+
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void refreshPostgresExperimentProjects()}
+                  disabled={postgresExperimentBusy || !postgresSchemaResult?.ready}
+                >
+                  Refresh projects
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => void handleCreatePostgresExperimentProject()}
+                  disabled={postgresExperimentBusy || !postgresSchemaResult?.ready || !postgresProjectName.trim()}
+                >
+                  Create Postgres project
+                </button>
+              </div>
+
+              <div className="users-table-wrap app-settings-admin-users-table-wrap">
+                <table className="users-table app-settings-admin-users-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Description</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!postgresProjects.length ? (
+                      <tr>
+                        <td colSpan={3} className="users-td users-td--muted">No PostgreSQL experiment projects yet.</td>
+                      </tr>
+                    ) : (
+                      postgresProjects.map((project) => (
+                        <tr key={project.id}>
+                          <td>{project.name}</td>
+                          <td>{project.description || "—"}</td>
+                          <td>{project.createdAt}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => void handleBootstrapPostgresExperiment()}
+                  disabled={postgresExperimentBusy || !postgresSuperuserPassword.trim()}
+                >
+                  {postgresExperimentBusy ? "Bootstrapping..." : "Bootstrap PostgreSQL experiment"}
+                </button>
+              </div>
+            </SettingsModalSection>
+          </>
         );
       case "administration":
         if (!canAccessAdministration) {
