@@ -78,7 +78,6 @@ export type PostgresExperimentAuthStatus = {
 };
 
 export type PostgresExperimentInstallationSettings = {
-  startupAutoLoginLastUser: boolean;
   startupReopenLastProject: boolean;
   documentImportDefaultMode: "upload" | "paste";
   documentImportAutoNameFromFile: boolean;
@@ -715,8 +714,8 @@ export async function updatePostgresExperimentAppUserProfile(data: {
 export async function changePostgresExperimentAppUserPassword(data: {
   currentPassword: string;
   newPassword: string;
-}): Promise<PostgresExperimentAuthSession> {
-  return invoke<PostgresExperimentAuthSession>("change_postgres_experiment_app_user_password_command", {
+}): Promise<PostgresExperimentAuthStatus> {
+  return invoke<PostgresExperimentAuthStatus>("change_postgres_experiment_app_user_password_command", {
     request: data,
   });
 }

@@ -26,8 +26,7 @@ interface CodeRow {
   parentLabel: string;
   createdByName: string;
   createdAt: string;
-  casesCount: number;
-  docsCount: number;
+  sourcesCount: number;
 }
 
 interface CodeNode extends CodeRow {
@@ -45,7 +44,7 @@ interface AnnotationRow {
   createdAt: string;
 }
 
-type SortCol = "label" | "color" | "createdByName" | "createdAt" | "casesCount" | "docsCount";
+type SortCol = "label" | "color" | "createdByName" | "createdAt" | "sourcesCount";
 type SortDir = "asc" | "desc";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -209,11 +208,10 @@ function getVisibleNodes(tree: CodeNode[], collapsed: Set<string>): CodeNode[] {
 // ─── Column definitions ───────────────────────────────────────────────────────
 
 const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "label",         label: "Name",       width: "34%" },
-  { key: "createdByName", label: "Created By", width: "22%" },
-  { key: "createdAt",     label: "Created",    width: "22%" },
-  { key: "casesCount",    label: "Cases",      width: "11%" },
-  { key: "docsCount",     label: "Documents",  width: "11%" },
+  { key: "label",         label: "Name",       width: "40%" },
+  { key: "createdByName", label: "Created By", width: "24%" },
+  { key: "createdAt",     label: "Created",    width: "24%" },
+  { key: "sourcesCount",  label: "Sources",    width: "12%" },
 ];
 
 // ─── Color swatch ─────────────────────────────────────────────────────────────
@@ -779,8 +777,7 @@ export function CodebookView({
     { ...COLS[0], label: t("projectCodebook.table.name") },
     { ...COLS[1], label: t("projectCodebook.table.createdBy") },
     { ...COLS[2], label: t("projectCodebook.table.created") },
-    { ...COLS[3], label: t("projectCodebook.table.cases") },
-    { ...COLS[4], label: t("projectCodebook.table.documents") },
+    { ...COLS[3], label: "Sources" },
   ];
 
   // ── Load ──────────────────────────────────────────────────────────────────
@@ -813,8 +810,7 @@ export function CodebookView({
             parentLabel: code.parentCodeId ? codeLabelById[code.parentCodeId] ?? "" : "",
             createdByName: "—",
             createdAt: code.createdAt,
-            casesCount: 0,
-            docsCount: docsByCode[code.id]?.size ?? 0,
+            sourcesCount: docsByCode[code.id]?.size ?? 0,
           })),
         );
         return;
@@ -839,30 +835,6 @@ export function CodebookView({
         docsByCode[ann.code].add(ann.document);
       }
 
-      const allDocIds = [...new Set(allAnnotations.map((a) => a.document))];
-      const caseDocs = allDocIds.length > 0
-        ? await pb.collection("case_documents").getFullList({
-            filter: allDocIds.map((id) => `document="${id}"`).join(" || "),
-            fields: "case,document",
-          })
-        : [];
-
-      const casesByDoc: Record<string, Set<string>> = {};
-      for (const cd of caseDocs) {
-        if (!casesByDoc[cd.document]) casesByDoc[cd.document] = new Set();
-        casesByDoc[cd.document].add(cd.case);
-      }
-
-      const casesByCode: Record<string, Set<string>> = {};
-      for (const [codeId, docSet] of Object.entries(docsByCode)) {
-        const caseSet = new Set<string>();
-        for (const docId of docSet) {
-          const cs = casesByDoc[docId];
-          if (cs) for (const c of cs) caseSet.add(c);
-        }
-        casesByCode[codeId] = caseSet;
-      }
-
       setRows(
         codeRecords.map((r) => {
           const cb = r.expand?.created_by;
@@ -876,8 +848,7 @@ export function CodebookView({
             parentLabel:   r.expand?.parent?.label ?? "",
             createdByName: cb?.name || cb?.email || "—",
             createdAt:     r.created,
-            casesCount:    casesByCode[r.id]?.size ?? 0,
-            docsCount:     docsByCode[r.id]?.size  ?? 0,
+            sourcesCount:  docsByCode[r.id]?.size ?? 0,
           };
         }),
       );
@@ -1224,8 +1195,7 @@ export function CodebookView({
                 </td>
                 <td className="users-td users-td--muted">{node.createdByName}</td>
                 <td className="users-td users-td--muted">{fmtDate(node.createdAt)}</td>
-                <td className="users-td users-td--muted">{node.casesCount}</td>
-                <td className="users-td users-td--muted">{node.docsCount}</td>
+                <td className="users-td users-td--muted">{node.sourcesCount}</td>
               </tr>
             ))}
           </tbody>

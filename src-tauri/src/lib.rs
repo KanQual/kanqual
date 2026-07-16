@@ -33,7 +33,6 @@ const PB_URL: &str = "http://127.0.0.1:8090";
 const BACKEND_IDENTITY_FILE: &str = "backend_identity.json";
 const POSTGRES_BOOTSTRAP_IDENTITY_FILE: &str = "postgres_bootstrap_identity.json";
 const POSTGRES_RUNTIME_CONFIG_FILE: &str = "postgres_runtime_config.json";
-const POSTGRES_AUTH_SESSION_FILE: &str = "postgres_auth_session.json";
 const POSTGRES_DEFAULT_HOST: &str = "127.0.0.1";
 const POSTGRES_DEFAULT_PORT: u16 = 5432;
 const POSTGRES_DEFAULT_SUPERUSER: &str = "postgres";
@@ -395,10 +394,6 @@ fn postgres_runtime_config_path(app: &tauri::AppHandle) -> Result<PathBuf, Strin
     Ok(kanqual_data_dir(app)?.join(POSTGRES_RUNTIME_CONFIG_FILE))
 }
 
-fn postgres_auth_session_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(kanqual_data_dir(app)?.join(POSTGRES_AUTH_SESSION_FILE))
-}
-
 fn generate_backend_identity() -> BackendIdentity {
     let suffix = Alphanumeric.sample_string(&mut rand::rngs::OsRng, 24).to_lowercase();
     let password = Alphanumeric.sample_string(&mut rand::rngs::OsRng, 48);
@@ -755,7 +750,6 @@ async fn connect_postgres_database_with_config(
 
 fn default_postgres_experiment_installation_settings() -> PostgresExperimentInstallationSettings {
     PostgresExperimentInstallationSettings {
-        startup_auto_login_last_user: false,
         startup_reopen_last_project: false,
         document_import_default_mode: "upload".to_string(),
         document_import_auto_name_from_file: true,
@@ -966,7 +960,7 @@ fn normalize_postgres_experiment_document_import_default_mode(value: &str) -> St
 
 fn normalize_postgres_experiment_source_kind(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "text" | "document" => Some("text"),
+        "text" => Some("text"),
         "pdf" => Some("pdf"),
         "image" => Some("image"),
         "audio" => Some("audio"),
@@ -1142,9 +1136,9 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
         &client,
         &[
             "CREATE TABLE IF NOT EXISTS app_schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
-            "CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', database_name TEXT, storage_path TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+            "CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, database_name TEXT, storage_path TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'standard', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ)",
-            "CREATE TABLE IF NOT EXISTS installation_settings (id TEXT PRIMARY KEY, startup_auto_login_last_user BOOLEAN NOT NULL DEFAULT FALSE, startup_reopen_last_project BOOLEAN NOT NULL DEFAULT FALSE, document_import_default_mode TEXT NOT NULL DEFAULT 'upload', document_import_auto_name_from_file BOOLEAN NOT NULL DEFAULT TRUE, document_import_trim_imported_text BOOLEAN NOT NULL DEFAULT TRUE, document_import_warn_before_empty_import BOOLEAN NOT NULL DEFAULT TRUE, privacy_mask_file_paths BOOLEAN NOT NULL DEFAULT FALSE, privacy_clear_recent_projects_on_sign_out BOOLEAN NOT NULL DEFAULT FALSE, privacy_forget_login_identities_on_logout BOOLEAN NOT NULL DEFAULT FALSE, updates_auto_check BOOLEAN NOT NULL DEFAULT TRUE, llm_settings_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+            "CREATE TABLE IF NOT EXISTS installation_settings (id TEXT PRIMARY KEY, startup_reopen_last_project BOOLEAN NOT NULL DEFAULT FALSE, document_import_default_mode TEXT NOT NULL DEFAULT 'upload', document_import_auto_name_from_file BOOLEAN NOT NULL DEFAULT TRUE, document_import_trim_imported_text BOOLEAN NOT NULL DEFAULT TRUE, document_import_warn_before_empty_import BOOLEAN NOT NULL DEFAULT TRUE, privacy_mask_file_paths BOOLEAN NOT NULL DEFAULT FALSE, privacy_clear_recent_projects_on_sign_out BOOLEAN NOT NULL DEFAULT FALSE, privacy_forget_login_identities_on_logout BOOLEAN NOT NULL DEFAULT FALSE, updates_auto_check BOOLEAN NOT NULL DEFAULT TRUE, llm_settings_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS user_preferences (subject_key TEXT PRIMARY KEY, theme TEXT NOT NULL DEFAULT 'light', density TEXT NOT NULL DEFAULT 'comfortable', font_size TEXT NOT NULL DEFAULT 'normal', locale TEXT NOT NULL DEFAULT 'en', recent_project_limit INTEGER NOT NULL DEFAULT 10, theme_state_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS device_state (id TEXT PRIMARY KEY, dismissed_update_version TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS remembered_accounts (email TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
@@ -1167,9 +1161,37 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
     )
     .await?;
 
+    let projects_has_name_column = client
+        .query_opt(
+            "
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'projects'
+              AND column_name = 'name'
+            ",
+            &[],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment control project name column: {e}"))?
+        .is_some();
+    let projects_has_description_column = client
+        .query_opt(
+            "
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'projects'
+              AND column_name = 'description'
+            ",
+            &[],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment control project description column: {e}"))?
+        .is_some();
+
     execute_postgres_statements(
         &client,
         &[
+            "ALTER TABLE installation_settings DROP COLUMN IF EXISTS startup_auto_login_last_user",
             "ALTER TABLE user_preferences ALTER COLUMN locale SET DEFAULT 'en'",
             "UPDATE user_preferences SET locale = 'en' WHERE locale IS NULL OR TRIM(locale) = ''",
             "ALTER TABLE user_preferences ALTER COLUMN locale SET NOT NULL",
@@ -1235,6 +1257,42 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             .map_err(|e| format!("Could not backfill PostgreSQL experiment control project metadata: {e}"))?;
     }
 
+    if projects_has_name_column || projects_has_description_column {
+        let legacy_rows = client
+            .query(
+                "
+                SELECT id, database_name, COALESCE(name, ''), COALESCE(description, '')
+                FROM projects
+                ",
+                &[],
+            )
+            .await
+            .map_err(|e| format!("Could not load legacy PostgreSQL experiment project metadata: {e}"))?;
+
+        for row in legacy_rows {
+            let project_id: String = row.get(0);
+            let database_name: String = row.get(1);
+            let name: String = row.get(2);
+            let description: String = row.get(3);
+            ensure_postgres_experiment_project_schema(app, &database_name).await?;
+            let (project_client, project_connection_task) = connect_postgres_database(app, &database_name).await?;
+            project_client
+                .execute(
+                    "
+                    UPDATE project_settings
+                    SET project_name = $2,
+                        project_description = $3,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    ",
+                    &[&"default", &name, &description],
+                )
+                .await
+                .map_err(|e| format!("Could not backfill PostgreSQL experiment project metadata for project {project_id}: {e}"))?;
+            project_connection_task.abort();
+        }
+    }
+
     client
         .batch_execute(
             "
@@ -1244,6 +1302,19 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
         )
         .await
         .map_err(|e| format!("Could not finalize PostgreSQL experiment control schema: {e}"))?;
+
+    if projects_has_name_column {
+        client
+            .execute("ALTER TABLE projects DROP COLUMN IF EXISTS name", &[])
+            .await
+            .map_err(|e| format!("Could not remove legacy PostgreSQL experiment project name column: {e}"))?;
+    }
+    if projects_has_description_column {
+        client
+            .execute("ALTER TABLE projects DROP COLUMN IF EXISTS description", &[])
+            .await
+            .map_err(|e| format!("Could not remove legacy PostgreSQL experiment project description column: {e}"))?;
+    }
 
     client
         .execute(
@@ -1270,7 +1341,6 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             "
             INSERT INTO installation_settings (
                 id,
-                startup_auto_login_last_user,
                 startup_reopen_last_project,
                 document_import_default_mode,
                 document_import_auto_name_from_file,
@@ -1282,7 +1352,7 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
                 updates_auto_check,
                 llm_settings_json
             )
-            VALUES ('singleton', FALSE, FALSE, 'upload', TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, $1)
+            VALUES ('singleton', FALSE, 'upload', TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, $1)
             ON CONFLICT (id) DO NOTHING
             ",
             &[&serde_json::to_string(&default_postgres_experiment_llm_settings()).map_err(|e| e.to_string())?],
@@ -1457,6 +1527,8 @@ async fn ensure_postgres_experiment_project_schema(
                 );
                 CREATE TABLE IF NOT EXISTS project_settings (
                     id TEXT PRIMARY KEY,
+                    project_name TEXT NOT NULL DEFAULT '',
+                    project_description TEXT NOT NULL DEFAULT '',
                     ai_assist_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                     ai_semantic_search_allowed BOOLEAN NOT NULL DEFAULT TRUE,
                     ai_question_answering_allowed BOOLEAN NOT NULL DEFAULT TRUE,
@@ -1750,6 +1822,8 @@ async fn ensure_postgres_experiment_project_schema(
             .batch_execute(
                 "
                 ALTER TABLE project_users ADD COLUMN IF NOT EXISTS app_user_id TEXT;
+                ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS project_name TEXT NOT NULL DEFAULT '';
+                ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS project_description TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS system_key TEXT;
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'rounded';
@@ -2396,7 +2470,7 @@ async fn load_postgres_experiment_project_record(
     let row = client
         .query_opt(
             "
-            SELECT id, name, description, database_name, storage_path, created_at::text, updated_at::text
+            SELECT id, database_name, storage_path, created_at::text, updated_at::text
             FROM projects
             WHERE id = $1
             ",
@@ -2410,15 +2484,15 @@ async fn load_postgres_experiment_project_record(
         return Err("The PostgreSQL experiment project could not be found.".to_string());
     };
 
-    Ok(PostgresExperimentProject {
+    let registry = PostgresExperimentProjectRegistryRecord {
         id: row.get(0),
-        name: row.get(1),
-        description: row.get(2),
-        database_name: row.get(3),
-        storage_path: row.get(4),
-        created_at: row.get(5),
-        updated_at: row.get(6),
-    })
+        database_name: row.get(1),
+        storage_path: row.get(2),
+        created_at: row.get(3),
+        updated_at: row.get(4),
+    };
+
+    load_postgres_experiment_project_from_registry(app, registry).await
 }
 
 fn row_to_postgres_experiment_app_user_record(row: tokio_postgres::Row) -> PostgresExperimentAppUserRecord {
@@ -2489,37 +2563,31 @@ async fn resolve_postgres_experiment_auth_session(
     app: &tauri::AppHandle,
     runtime_auth_state: Option<&tauri::State<'_, PostgresExperimentAuthState>>,
 ) -> Result<Option<PostgresExperimentAuthSession>, String> {
-    let stored_session = if let Some(state) = runtime_auth_state {
-        get_postgres_runtime_auth_session(state).or(load_postgres_auth_session(app)?)
-    } else {
-        load_postgres_auth_session(app)?
-    };
-    let Some(stored_session) = stored_session else {
-        return Ok(None);
-    };
+    let runtime_session = runtime_auth_state.and_then(|state| get_postgres_runtime_auth_session(state));
+    if let Some(stored_session) = runtime_session {
+        if stored_session.auth_kind == "postgres_admin" {
+            let identity = load_or_create_postgres_bootstrap_identity(app)?;
+            return Ok(Some(PostgresExperimentAuthSession {
+                auth_kind: "postgres_admin".to_string(),
+                user: build_postgres_experiment_local_admin_user(&identity),
+                started_at_ms: stored_session.started_at_ms,
+            }));
+        }
 
-    if stored_session.auth_kind == "postgres_admin" {
-        let identity = load_or_create_postgres_bootstrap_identity(app)?;
+        let Some(user_record) = load_postgres_experiment_app_user_by_id(app, &stored_session.user_id).await? else {
+            if let Some(state) = runtime_auth_state {
+                set_postgres_runtime_auth_session(state, None);
+            }
+            return Ok(None);
+        };
+
         return Ok(Some(PostgresExperimentAuthSession {
-            auth_kind: "postgres_admin".to_string(),
-            user: build_postgres_experiment_local_admin_user(&identity),
+            auth_kind: "app_user".to_string(),
+            user: user_record.user,
             started_at_ms: stored_session.started_at_ms,
         }));
     }
-
-    let Some(user_record) = load_postgres_experiment_app_user_by_id(app, &stored_session.user_id).await? else {
-        if let Some(state) = runtime_auth_state {
-            set_postgres_runtime_auth_session(state, None);
-        }
-        clear_postgres_auth_session(app)?;
-        return Ok(None);
-    };
-
-    Ok(Some(PostgresExperimentAuthSession {
-        auth_kind: "app_user".to_string(),
-        user: user_record.user,
-        started_at_ms: stored_session.started_at_ms,
-    }))
+    Ok(None)
 }
 
 async fn require_postgres_experiment_auth_session(
@@ -2695,12 +2763,12 @@ fn postgres_experiment_project_ai_assist_settings_from_row(
     row: &tokio_postgres::Row,
 ) -> PostgresExperimentProjectAiAssistSettings {
     PostgresExperimentProjectAiAssistSettings {
-        enabled: row.get(0),
-        allow_semantic_search: row.get(1),
-        allow_question_answering: row.get(2),
-        allow_summaries: row.get(3),
-        allow_code_suggestions: row.get(4),
-        allow_draft_reports: row.get(5),
+        enabled: row.get(2),
+        allow_semantic_search: row.get(3),
+        allow_question_answering: row.get(4),
+        allow_summaries: row.get(5),
+        allow_code_suggestions: row.get(6),
+        allow_draft_reports: row.get(7),
     }
 }
 
@@ -2708,14 +2776,14 @@ fn postgres_experiment_project_document_import_settings_from_row(
     row: &tokio_postgres::Row,
 ) -> PostgresExperimentProjectDocumentImportSettings {
     PostgresExperimentProjectDocumentImportSettings {
-        store_original_file_name: row.get(6),
+        store_original_file_name: row.get(8),
     }
 }
 
 fn postgres_experiment_project_canvas_state_from_row(
     row: &tokio_postgres::Row,
 ) -> PostgresExperimentProjectCanvasState {
-    let raw: String = row.get(7);
+    let raw: String = row.get(9);
     serde_json::from_str::<PostgresExperimentProjectCanvasState>(&raw)
         .unwrap_or_else(|_| default_postgres_experiment_project_canvas_state())
 }
@@ -2735,6 +2803,8 @@ async fn load_postgres_experiment_project_settings_row(
         .query_one(
             "
             SELECT
+                project_name,
+                project_description,
                 ai_assist_enabled,
                 ai_semantic_search_allowed,
                 ai_question_answering_allowed,
@@ -2752,6 +2822,36 @@ async fn load_postgres_experiment_project_settings_row(
         .map_err(|e| format!("Could not load PostgreSQL experiment project settings: {e}"))?;
     connection_task.abort();
     Ok(row)
+}
+
+async fn load_postgres_experiment_project_from_registry(
+    app: &tauri::AppHandle,
+    registry: PostgresExperimentProjectRegistryRecord,
+) -> Result<PostgresExperimentProject, String> {
+    ensure_postgres_experiment_project_schema(app, &registry.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(app, &registry.database_name).await?;
+    let row = client
+        .query_one(
+            "
+            SELECT project_name, project_description
+            FROM project_settings
+            WHERE id = 'default'
+            ",
+            &[],
+        )
+        .await
+        .map_err(|e| format!("Could not load PostgreSQL experiment project metadata: {e}"))?;
+    connection_task.abort();
+
+    Ok(PostgresExperimentProject {
+        id: registry.id,
+        name: row.get(0),
+        description: row.get(1),
+        database_name: registry.database_name,
+        storage_path: registry.storage_path,
+        created_at: registry.created_at,
+        updated_at: registry.updated_at,
+    })
 }
 
 async fn create_postgres_database_if_missing(
@@ -2881,34 +2981,6 @@ fn verify_postgres_app_user_password(password: &str, password_hash: &str) -> Res
         Err(argon2::password_hash::Error::Password) => Ok(false),
         Err(e) => Err(format!("Could not verify password: {e}")),
     }
-}
-
-fn save_postgres_auth_session(
-    app: &tauri::AppHandle,
-    session: &StoredPostgresExperimentAuthSession,
-) -> Result<(), String> {
-    let path = postgres_auth_session_path(app)?;
-    let serialized = serde_json::to_string_pretty(session).map_err(|e| e.to_string())?;
-    fs::write(path, serialized).map_err(|e| e.to_string())
-}
-
-fn load_postgres_auth_session(app: &tauri::AppHandle) -> Result<Option<StoredPostgresExperimentAuthSession>, String> {
-    let path = postgres_auth_session_path(app)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let session = serde_json::from_str::<StoredPostgresExperimentAuthSession>(&text)
-        .map_err(|e| e.to_string())?;
-    Ok(Some(session))
-}
-
-fn clear_postgres_auth_session(app: &tauri::AppHandle) -> Result<(), String> {
-    let path = postgres_auth_session_path(app)?;
-    if path.exists() {
-        fs::remove_file(path).map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }
 
 fn set_postgres_runtime_auth_session(
@@ -3210,7 +3282,6 @@ struct PostgresExperimentAuthStatus {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct PostgresExperimentInstallationSettings {
-    startup_auto_login_last_user: bool,
     startup_reopen_last_project: bool,
     document_import_default_mode: String,
     document_import_auto_name_from_file: bool,
@@ -3335,6 +3406,14 @@ struct PostgresExperimentProject {
     id: String,
     name: String,
     description: String,
+    database_name: String,
+    storage_path: String,
+    created_at: String,
+    updated_at: String,
+}
+
+struct PostgresExperimentProjectRegistryRecord {
+    id: String,
     database_name: String,
     storage_path: String,
     created_at: String,
@@ -5742,6 +5821,7 @@ async fn bootstrap_postgres_experiment_command(
 #[tauri::command]
 async fn complete_postgres_admin_handoff_command(
     app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
     request: CompletePostgresAdminHandoffRequest,
 ) -> Result<PostgresExperimentStatus, String> {
     let new_superuser_name = request.new_superuser_name.trim().to_string();
@@ -5848,6 +5928,7 @@ async fn complete_postgres_admin_handoff_command(
     let serialized = serde_json::to_string_pretty(&identity).map_err(|e| e.to_string())?;
     fs::write(&bootstrap_identity_path, serialized).map_err(|e| e.to_string())?;
     save_postgres_runtime_config(&app, &postgres_runtime_config_from_identity(&identity))?;
+    set_postgres_runtime_auth_session(&runtime_auth_state, None);
 
     get_postgres_experiment_status_command(app).await
 }
@@ -5871,7 +5952,6 @@ async fn get_postgres_experiment_auth_status_command(
 
     if !ready {
         set_postgres_runtime_auth_session(&runtime_auth_state, None);
-        clear_postgres_auth_session(&app)?;
         return Ok(PostgresExperimentAuthStatus {
             bootstrap_applied,
             admin_handoff_completed,
@@ -5912,7 +5992,6 @@ async fn get_postgres_experiment_installation_settings_command(
         .query_opt(
             "
             SELECT
-                startup_auto_login_last_user,
                 startup_reopen_last_project,
                 document_import_default_mode,
                 document_import_auto_name_from_file,
@@ -5934,19 +6013,18 @@ async fn get_postgres_experiment_installation_settings_command(
 
     Ok(row
         .map(|row| PostgresExperimentInstallationSettings {
-            startup_auto_login_last_user: row.get(0),
-            startup_reopen_last_project: row.get(1),
+            startup_reopen_last_project: row.get(0),
             document_import_default_mode: normalize_postgres_experiment_document_import_default_mode(
-                row.get::<_, String>(2).as_str(),
+                row.get::<_, String>(1).as_str(),
             ),
-            document_import_auto_name_from_file: row.get(3),
-            document_import_trim_imported_text: row.get(4),
-            document_import_warn_before_empty_import: row.get(5),
-            privacy_mask_file_paths: row.get(6),
-            privacy_clear_recent_projects_on_sign_out: row.get(7),
-            privacy_forget_login_identities_on_logout: row.get(8),
-            updates_auto_check: row.get(9),
-            llm: deserialize_postgres_experiment_llm_settings(row.get::<_, String>(10).as_str()),
+            document_import_auto_name_from_file: row.get(2),
+            document_import_trim_imported_text: row.get(3),
+            document_import_warn_before_empty_import: row.get(4),
+            privacy_mask_file_paths: row.get(5),
+            privacy_clear_recent_projects_on_sign_out: row.get(6),
+            privacy_forget_login_identities_on_logout: row.get(7),
+            updates_auto_check: row.get(8),
+            llm: deserialize_postgres_experiment_llm_settings(row.get::<_, String>(9).as_str()),
         })
         .unwrap_or_else(default_postgres_experiment_installation_settings))
 }
@@ -5961,7 +6039,6 @@ async fn save_postgres_experiment_installation_settings_command(
     ensure_postgres_experiment_control_schema(&app).await?;
 
     let next = PostgresExperimentInstallationSettings {
-        startup_auto_login_last_user: settings.startup_auto_login_last_user,
         startup_reopen_last_project: settings.startup_reopen_last_project,
         document_import_default_mode: normalize_postgres_experiment_document_import_default_mode(
             &settings.document_import_default_mode,
@@ -5984,7 +6061,6 @@ async fn save_postgres_experiment_installation_settings_command(
             "
             INSERT INTO installation_settings (
                 id,
-                startup_auto_login_last_user,
                 startup_reopen_last_project,
                 document_import_default_mode,
                 document_import_auto_name_from_file,
@@ -5997,10 +6073,9 @@ async fn save_postgres_experiment_installation_settings_command(
                 llm_settings_json,
                 updated_at
             )
-            VALUES ('singleton', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+            VALUES ('singleton', DEFAULT, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
             ON CONFLICT (id) DO UPDATE
-            SET startup_auto_login_last_user = EXCLUDED.startup_auto_login_last_user,
-                startup_reopen_last_project = EXCLUDED.startup_reopen_last_project,
+            SET startup_reopen_last_project = EXCLUDED.startup_reopen_last_project,
                 document_import_default_mode = EXCLUDED.document_import_default_mode,
                 document_import_auto_name_from_file = EXCLUDED.document_import_auto_name_from_file,
                 document_import_trim_imported_text = EXCLUDED.document_import_trim_imported_text,
@@ -6013,7 +6088,6 @@ async fn save_postgres_experiment_installation_settings_command(
                 updated_at = NOW()
             ",
             &[
-                &next.startup_auto_login_last_user,
                 &next.startup_reopen_last_project,
                 &next.document_import_default_mode,
                 &next.document_import_auto_name_from_file,
@@ -6618,12 +6692,8 @@ async fn register_postgres_experiment_app_user_command(
         user_id: session.user.id.clone(),
         started_at_ms: session.started_at_ms,
     };
-    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session.clone()));
-    if request.remember_session {
-        save_postgres_auth_session(&app, &stored_session)?;
-    } else {
-        clear_postgres_auth_session(&app)?;
-    }
+    let _ = request.remember_session;
+    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session));
 
     Ok(session)
 }
@@ -6670,13 +6740,8 @@ async fn login_postgres_experiment_admin_command(
         user_id: session.user.id.clone(),
         started_at_ms: session.started_at_ms,
     };
-    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session.clone()));
-    if request.remember_session {
-        save_postgres_auth_session(&app, &stored_session)?;
-    } else {
-        clear_postgres_auth_session(&app)?;
-    }
-
+    let _ = request.remember_session;
+    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session));
     Ok(session)
 }
 
@@ -6736,12 +6801,8 @@ async fn login_postgres_experiment_app_user_command(
         user_id: session.user.id.clone(),
         started_at_ms: session.started_at_ms,
     };
-    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session.clone()));
-    if request.remember_session {
-        save_postgres_auth_session(&app, &stored_session)?;
-    } else {
-        clear_postgres_auth_session(&app)?;
-    }
+    let _ = request.remember_session;
+    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session));
 
     Ok(session)
 }
@@ -6752,7 +6813,6 @@ async fn logout_postgres_experiment_app_user_command(
     runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
 ) -> Result<PostgresExperimentAuthStatus, String> {
     set_postgres_runtime_auth_session(&runtime_auth_state, None);
-    clear_postgres_auth_session(&app)?;
     get_postgres_experiment_auth_status_command(app, runtime_auth_state).await
 }
 
@@ -6819,10 +6879,7 @@ async fn update_postgres_experiment_app_user_profile_command(
         user_id: next_session.user.id.clone(),
         started_at_ms: next_session.started_at_ms,
     };
-    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session.clone()));
-    if load_postgres_auth_session(&app)?.is_some() {
-        save_postgres_auth_session(&app, &stored_session)?;
-    }
+    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session));
 
     Ok(updated_user)
 }
@@ -6832,7 +6889,7 @@ async fn change_postgres_experiment_app_user_password_command(
     app: tauri::AppHandle,
     runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
     request: ChangePostgresExperimentAppUserPasswordRequest,
-) -> Result<PostgresExperimentAuthSession, String> {
+) -> Result<PostgresExperimentAuthStatus, String> {
     let session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
     if session.auth_kind != "app_user" {
         return Err("Only PostgreSQL app users can change their password here.".to_string());
@@ -6871,7 +6928,7 @@ async fn change_postgres_experiment_app_user_password_command(
         .map_err(|e| format!("Could not change PostgreSQL experiment user password: {e}"))?;
     connection_task.abort();
 
-    let updated_user = PostgresExperimentAppUser {
+    let _updated_user = PostgresExperimentAppUser {
         id: row.get(0),
         name: row.get(1),
         email: row.get(2),
@@ -6880,23 +6937,8 @@ async fn change_postgres_experiment_app_user_password_command(
         updated_at: row.get(5),
     };
 
-    let next_session = PostgresExperimentAuthSession {
-        auth_kind: session.auth_kind.clone(),
-        user: updated_user,
-        started_at_ms: session.started_at_ms,
-    };
-    let stored_session = StoredPostgresExperimentAuthSession {
-        version: 1,
-        auth_kind: next_session.auth_kind.clone(),
-        user_id: next_session.user.id.clone(),
-        started_at_ms: next_session.started_at_ms,
-    };
-    set_postgres_runtime_auth_session(&runtime_auth_state, Some(stored_session.clone()));
-    if load_postgres_auth_session(&app)?.is_some() {
-        save_postgres_auth_session(&app, &stored_session)?;
-    }
-
-    Ok(next_session)
+    set_postgres_runtime_auth_session(&runtime_auth_state, None);
+    get_postgres_experiment_auth_status_command(app, runtime_auth_state).await
 }
 
 #[tauri::command]
@@ -6941,7 +6983,7 @@ async fn list_postgres_experiment_projects_command(
     let rows = client
         .query(
             "
-            SELECT id, name, description, database_name, storage_path, created_at::text, updated_at::text
+            SELECT id, database_name, storage_path, created_at::text, updated_at::text
             FROM projects
             ORDER BY created_at DESC, id DESC
             ",
@@ -6950,18 +6992,17 @@ async fn list_postgres_experiment_projects_command(
         .await
         .map_err(|e| format!("Could not load PostgreSQL experiment projects: {e}"))?;
     connection_task.abort();
-    let projects = rows
-        .into_iter()
-        .map(|row| PostgresExperimentProject {
+    let mut projects = Vec::with_capacity(rows.len());
+    for row in rows {
+        let registry = PostgresExperimentProjectRegistryRecord {
             id: row.get(0),
-            name: row.get(1),
-            description: row.get(2),
-            database_name: row.get(3),
-            storage_path: row.get(4),
-            created_at: row.get(5),
-            updated_at: row.get(6),
-        })
-        .collect::<Vec<_>>();
+            database_name: row.get(1),
+            storage_path: row.get(2),
+            created_at: row.get(3),
+            updated_at: row.get(4),
+        };
+        projects.push(load_postgres_experiment_project_from_registry(&app, registry).await?);
+    }
 
     if postgres_experiment_session_is_admin(&session) {
         return Ok(projects);
@@ -7016,11 +7057,11 @@ async fn create_postgres_experiment_project_command(
     let row = client
         .query_one(
             "
-            INSERT INTO projects (id, name, description, database_name, storage_path)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, name, description, database_name, storage_path, created_at::text, updated_at::text
+            INSERT INTO projects (id, database_name, storage_path)
+            VALUES ($1, $2, $3)
+            RETURNING id, database_name, storage_path, created_at::text, updated_at::text
             ",
-            &[&project_id, &name, &description, &database_name, &storage_path.to_string_lossy().to_string()],
+            &[&project_id, &database_name, &storage_path.to_string_lossy().to_string()],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment project: {e}"))?;
@@ -7029,6 +7070,19 @@ async fn create_postgres_experiment_project_command(
     if let Err(error) = (async {
         ensure_postgres_experiment_project_schema(&app, &database_name).await?;
         let (project_client, project_connection_task) = connect_postgres_database(&app, &database_name).await?;
+        project_client
+            .execute(
+                "
+                UPDATE project_settings
+                SET project_name = $2,
+                    project_description = $3,
+                    updated_at = NOW()
+                WHERE id = $1
+                ",
+                &[&"default", &name, &description],
+            )
+            .await
+            .map_err(|e| format!("Could not save PostgreSQL experiment project metadata: {e}"))?;
         let creator_name = session.user.name.trim().to_string();
         let creator_email = session.user.email.trim().to_lowercase();
         let creator_role = "owner".to_string();
@@ -7062,12 +7116,12 @@ async fn create_postgres_experiment_project_command(
 
     let created = PostgresExperimentProject {
         id: row.get(0),
-        name: row.get(1),
-        description: row.get(2),
-        database_name: row.get(3),
-        storage_path: row.get(4),
-        created_at: row.get(5),
-        updated_at: row.get(6),
+        name,
+        description,
+        database_name: row.get(1),
+        storage_path: row.get(2),
+        created_at: row.get(3),
+        updated_at: row.get(4),
     };
     emit_postgres_experiment_project_change(&app, &created.id, "project", &created.id, "created");
     Ok(created)
@@ -7091,31 +7145,35 @@ async fn update_postgres_experiment_project_command(
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
     let _session = require_postgres_experiment_project_membership_management(&app, Some(&runtime_auth_state), &project).await?;
-    let (client, connection_task) = connect_postgres_runtime(&app).await?;
-    let row = client
-        .query_one(
+    let (project_client, project_connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    project_client
+        .execute(
             "
-            UPDATE projects
-            SET name = $2,
-                description = $3,
+            UPDATE project_settings
+            SET project_name = $2,
+                project_description = $3,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, name, description, database_name, storage_path, created_at::text, updated_at::text
             ",
-            &[&project_id, &name, &description],
+            &[&"default", &name, &description],
         )
         .await
-        .map_err(|e| format!("Could not update PostgreSQL experiment project: {e}"))?;
+        .map_err(|e| format!("Could not update PostgreSQL experiment project metadata: {e}"))?;
+    project_connection_task.abort();
+    let (client, connection_task) = connect_postgres_runtime(&app).await?;
+    client
+        .execute(
+            "
+            UPDATE projects
+            SET updated_at = NOW()
+            WHERE id = $1
+            ",
+            &[&project_id],
+        )
+        .await
+        .map_err(|e| format!("Could not update PostgreSQL experiment project registry timestamp: {e}"))?;
     connection_task.abort();
-    let updated = PostgresExperimentProject {
-        id: row.get(0),
-        name: row.get(1),
-        description: row.get(2),
-        database_name: row.get(3),
-        storage_path: row.get(4),
-        created_at: row.get(5),
-        updated_at: row.get(6),
-    };
+    let updated = load_postgres_experiment_project_record(&app, &project_id).await?;
     emit_postgres_experiment_project_change(&app, &project_id, "project", &project_id, "updated");
     Ok(updated)
 }

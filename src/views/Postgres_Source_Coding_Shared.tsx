@@ -46,6 +46,12 @@ export type AnnotationHover = {
   }>;
 };
 
+export type AnnotationContextMenuState = {
+  x: number;
+  y: number;
+  annotation: SourceAnnotationRow;
+};
+
 export type PostgresSourceCodingViewProps = {
   row: SourceRow;
   codes: PostgresExperimentCode[];
@@ -432,7 +438,7 @@ export function PostgresSourceAnnotationPanel({
   canDeleteAnnotations: boolean;
 }) {
   const selectedItemRef = useRef<HTMLLIElement | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; annotation: SourceAnnotationRow } | null>(null);
+  const [contextMenu, setContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
@@ -502,31 +508,64 @@ export function PostgresSourceAnnotationPanel({
           })
         )}
       </ul>
-      {contextMenu ? (
-        <div ref={contextMenuRef} className="context-menu" style={contextMenuStyle}>
-          {canManageMemos ? (
-            <button
-              className="context-menu-item"
-              onClick={() => {
-                onOpenMemoDraft({ annotationIds: [contextMenu.annotation.id] });
-                setContextMenu(null);
-              }}
-            >
-              Memo about annotation
-            </button>
-          ) : null}
-          {canDeleteAnnotations ? (
-            <button
-              className="context-menu-item context-menu-item--danger"
-              onClick={() => {
-                onDeleteAnnotation(contextMenu.annotation.id);
-                setContextMenu(null);
-              }}
-            >
-              Delete annotation
-            </button>
-          ) : null}
-        </div>
+      <PostgresSourceAnnotationContextMenu
+        contextMenu={contextMenu}
+        contextMenuRef={contextMenuRef}
+        contextMenuStyle={contextMenuStyle}
+        onClose={() => setContextMenu(null)}
+        onDeleteAnnotation={onDeleteAnnotation}
+        onOpenMemoDraft={onOpenMemoDraft}
+        canManageMemos={canManageMemos}
+        canDeleteAnnotations={canDeleteAnnotations}
+      />
+    </div>
+  );
+}
+
+export function PostgresSourceAnnotationContextMenu({
+  contextMenu,
+  contextMenuRef,
+  contextMenuStyle,
+  onClose,
+  onDeleteAnnotation,
+  onOpenMemoDraft,
+  canManageMemos,
+  canDeleteAnnotations,
+}: {
+  contextMenu: AnnotationContextMenuState | null;
+  contextMenuRef: React.RefObject<HTMLDivElement | null>;
+  contextMenuStyle: React.CSSProperties | undefined;
+  onClose: () => void;
+  onDeleteAnnotation: (annotationId: string) => void;
+  onOpenMemoDraft: (payload: { annotationIds?: string[]; codeIds?: string[] }) => void;
+  canManageMemos: boolean;
+  canDeleteAnnotations: boolean;
+}) {
+  if (!contextMenu) return null;
+
+  return (
+    <div ref={contextMenuRef} className="context-menu" style={contextMenuStyle}>
+      {canManageMemos ? (
+        <button
+          className="context-menu-item"
+          onClick={() => {
+            onOpenMemoDraft({ annotationIds: [contextMenu.annotation.id] });
+            onClose();
+          }}
+        >
+          Memo about annotation
+        </button>
+      ) : null}
+      {canDeleteAnnotations ? (
+        <button
+          className="context-menu-item context-menu-item--danger"
+          onClick={() => {
+            onDeleteAnnotation(contextMenu.annotation.id);
+            onClose();
+          }}
+        >
+          Delete annotation
+        </button>
       ) : null}
     </div>
   );

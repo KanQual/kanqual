@@ -12,6 +12,8 @@ import {
   AnnotationEditorModal,
   buildMultiAnnotationBackground,
   getFloatingTooltipStyle,
+  PostgresSourceAnnotationContextMenu,
+  type AnnotationContextMenuState,
   type PostgresSourceCodingViewProps,
   PostgresSourceAnnotationPanel,
   PostgresSourceCodingFiltersModal,
@@ -63,10 +65,13 @@ export function PostgresSourceTextCodingView({
   const [stripeBars, setStripeBars] = useState<StripeBar[]>([]);
   const [stripeHover, setStripeHover] = useState<StripeHover | null>(null);
   const [annotationHover, setAnnotationHover] = useState<AnnotationHover | null>(null);
+  const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: (typeof codes)[number] } | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const contentSelectionRef = useRef<HTMLDivElement | null>(null);
+  const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const annotationContextMenuStyle = useViewportContextMenuStyle(annotationContextMenu, annotationContextMenuRef);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
 
   const processedTranscriptSegments =
@@ -116,12 +121,18 @@ export function PostgresSourceTextCodingView({
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
+      if (annotationContextMenuRef.current && !annotationContextMenuRef.current.contains(event.target as Node)) {
+        setAnnotationContextMenu(null);
+      }
       if (codeContextMenuRef.current && !codeContextMenuRef.current.contains(event.target as Node)) {
         setCodeContextMenu(null);
       }
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setCodeContextMenu(null);
+      if (event.key === "Escape") {
+        setAnnotationContextMenu(null);
+        setCodeContextMenu(null);
+      }
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -302,17 +313,37 @@ export function PostgresSourceTextCodingView({
                 const annotation = filteredAnnotations.find((entry) => entry.id === firstId) ?? null;
                 if (annotation && canEditAnnotations) setEditingAnnotation(annotation);
               }}
-              onMouseEnter={(event) => setAnnotationHover({
-                x: event.clientX,
-                y: event.clientY,
-                items: covering.map((annotation) => ({
-                  annotationId: annotation.id,
-                  label: annotation.codeLabels.join(", ") || "Annotation",
-                  color: annotation.codeColors[0] || "#355070",
-                  quote: annotation.quote,
-                })),
-              })}
-              onMouseMove={(event) => setAnnotationHover((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current)}
+              onContextMenu={(event) => {
+                if (!canManageMemos && !canEditAnnotations) return;
+                const annotation = filteredAnnotations.find((entry) => entry.id === firstId) ?? null;
+                if (!annotation) return;
+                event.preventDefault();
+                setSelectedAnnotationId(annotation.id);
+                setScrollToAnnotationId(annotation.id);
+                setAnnotationHover(null);
+                setAnnotationContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  annotation,
+                });
+              }}
+              onMouseEnter={(event) => {
+                if (annotationContextMenu) return;
+                setAnnotationHover({
+                  x: event.clientX,
+                  y: event.clientY,
+                  items: covering.map((annotation) => ({
+                    annotationId: annotation.id,
+                    label: annotation.codeLabels.join(", ") || "Annotation",
+                    color: annotation.codeColors[0] || "#355070",
+                    quote: annotation.quote,
+                  })),
+                });
+              }}
+              onMouseMove={(event) => {
+                if (annotationContextMenu) return;
+                setAnnotationHover((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current);
+              }}
               onMouseLeave={() => setAnnotationHover(null)}
             >
               {text}
@@ -543,6 +574,19 @@ export function PostgresSourceTextCodingView({
         </div>
       ) : null}
 
+      <PostgresSourceAnnotationContextMenu
+        contextMenu={annotationContextMenu}
+        contextMenuRef={annotationContextMenuRef}
+        contextMenuStyle={annotationContextMenuStyle}
+        onClose={() => setAnnotationContextMenu(null)}
+        onDeleteAnnotation={(annotationId) => {
+          void onDeleteAnnotation(annotationId);
+        }}
+        onOpenMemoDraft={onOpenMemoDraft}
+        canManageMemos={canManageMemos}
+        canDeleteAnnotations={canEditAnnotations}
+      />
+
       {filtersOpen ? (
         <PostgresSourceCodingFiltersModal
           codes={codes}
@@ -610,7 +654,7 @@ export function PostgresSourceTextCodingView({
         </div>
       ) : null}
 
-      {annotationHover ? (
+      {annotationHover && !annotationContextMenu ? (
         <div
           className="annotation-hover-tooltip"
           style={getFloatingTooltipStyle(

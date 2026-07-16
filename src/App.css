@@ -4112,6 +4112,24 @@ body {
   margin-top: 12px;
 }
 
+.source-preview-busy-state {
+  min-height: 16rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.source-preview-busy-spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 3px solid rgba(53, 80, 112, 0.14);
+  border-top-color: var(--color-primary);
+  animation: brand-icon-spin 1.1s linear infinite;
+}
+
 .users-permission-note {
   margin-top: 8px;
   font-size: var(--text-sm);

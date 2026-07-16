@@ -201,7 +201,6 @@ async function loadPdfJs() {
 
 function normalizeSourceKindSelection(value: string | null | undefined): string {
   const normalized = (value ?? "").trim().toLowerCase();
-  if (normalized === "document") return "text";
   if (POSTGRES_SOURCE_KIND_OPTIONS.some((option) => option.value === normalized)) {
     return normalized;
   }
@@ -1687,9 +1686,6 @@ function PostgresSourceDetail({
       <div className="workspace-back-row workspace-back-row--split">
         <button className="btn" onClick={onBack}>{t("projectDocuments.detail.backToDocuments")}</button>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <p className="users-guide-copy" style={{ margin: 0 }}>
-            PostgreSQL source workspace
-          </p>
           {canManageSourceRecord ? (
             <>
               <button type="button" className="btn" onClick={onEditSource}>
@@ -1860,7 +1856,10 @@ function PostgresSourceDetail({
               )
             ) : isAudioSource ? (
               audioPreviewLoading ? (
-                <p className="users-guide-copy" style={{ margin: 0 }}>Loading audio preview...</p>
+                <div className="source-preview-busy-state" aria-live="polite">
+                  <span className="source-preview-busy-spinner" aria-hidden="true" />
+                  <p className="users-guide-copy" style={{ margin: 0 }}>Loading audio preview...</p>
+                </div>
               ) : audioPreviewError ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="auth-error" style={{ margin: 0 }}>{audioPreviewError}</p>
@@ -1881,7 +1880,10 @@ function PostgresSourceDetail({
               )
             ) : isVideoSource ? (
               videoPreviewLoading ? (
-                <p className="users-guide-copy" style={{ margin: 0 }}>Loading video preview...</p>
+                <div className="source-preview-busy-state" aria-live="polite">
+                  <span className="source-preview-busy-spinner" aria-hidden="true" />
+                  <p className="users-guide-copy" style={{ margin: 0 }}>Loading video preview...</p>
+                </div>
               ) : videoPreviewError ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="auth-error" style={{ margin: 0 }}>{videoPreviewError}</p>

@@ -10,6 +10,20 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.includes("vite/preload-helper")) {
+            return "preload-helper";
+          }
+
+          if (
+            id.includes("cytoscape")
+            || id.includes("elkjs")
+            || id.includes("src/lib/postgresExperimentCanvasGraph.ts")
+            || id.includes("src/views/Postgres_Explore_Canvas_View.tsx")
+            || id.includes("src/components/CanvasRichTextEditor.tsx")
+          ) {
+            return "canvas-graph";
+          }
+
           if (!id.includes("node_modules")) return;
 
           if (id.includes("@tiptap") || id.includes("prosemirror") || id.includes("/orderedmap/")) {
