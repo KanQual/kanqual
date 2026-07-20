@@ -12,6 +12,7 @@ import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
+import { createMediaWaveformCache, serializeMediaWaveformCache } from "../lib/mediaWaveform";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import {
   acquirePostgresExperimentSourceLock,
@@ -37,9 +38,11 @@ import {
   updatePostgresExperimentAnnotation,
   updatePostgresExperimentSource,
 } from "../lib/postgresExperiment";
+import { PostgresSourceAudioCodingView } from "./Postgres_Source_Audio_Coding_View";
 import { PostgresSourceImageCodingView } from "./Postgres_Source_Image_Coding_View";
 import { AnnotationEditorModal } from "./Postgres_Source_Coding_Shared";
 import { PostgresSourceTextCodingView } from "./Postgres_Source_Text_Coding_View";
+import { PostgresSourceVideoCodingView } from "./Postgres_Source_Video_Coding_View";
 
 type SortCol = "name" | "objects" | "annotations" | "createdAt";
 type SortDir = "asc" | "desc";
@@ -67,6 +70,7 @@ export type SourceRow = {
   notes: string;
   content: string;
   structuredContentJson: string;
+  waveformPeaksJson: string;
   filePath: string;
   annotationCount: number;
   objectCount: number;
@@ -81,6 +85,8 @@ export type SourceAnnotationRow = {
   quote: string;
   note: string;
   anchorKind: string;
+  timeStartMs: number | null;
+  timeEndMs: number | null;
   imageRegion: {
     x: number;
     y: number;
@@ -100,6 +106,8 @@ export type PendingSelection = {
   endOffset: number;
   quote: string;
   anchorKind?: string;
+  timeStartMs?: number | null;
+  timeEndMs?: number | null;
   imageRegion?: {
     x: number;
     y: number;
@@ -540,29 +548,6 @@ function formatAttributeDisplay(value: string, dataType: SharedAttributeDataType
   return value;
 }
 
-function withHexAlpha(color: string, alpha: string): string {
-  return /^#[0-9a-f]{6}$/i.test(color) ? `${color}${alpha}` : color;
-}
-
-function buildMultiAnnotationBackground(colors: string[], isSelected: boolean): string {
-  const uniqueColors = [...new Set(colors.filter(Boolean))];
-  if (uniqueColors.length === 0) {
-    return isSelected ? "rgba(53, 80, 112, 0.18)" : "rgba(53, 80, 112, 0.10)";
-  }
-  if (uniqueColors.length === 1) {
-    return withHexAlpha(uniqueColors[0], isSelected ? "55" : "33");
-  }
-  const alpha = isSelected ? "88" : "55";
-  const stripeWidth = 10;
-  const stops = uniqueColors.flatMap((color, index) => {
-    const start = index * stripeWidth;
-    const end = start + stripeWidth;
-    const tinted = withHexAlpha(color, alpha);
-    return [`${tinted} ${start}px`, `${tinted} ${end}px`];
-  });
-  return `repeating-linear-gradient(135deg, ${stops.join(", ")})`;
-}
-
 function buildCodeOptions(codes: PostgresExperimentCode[]): CodeOption[] {
   const childrenOf = new Map<string, PostgresExperimentCode[]>();
   const roots: PostgresExperimentCode[] = [];
@@ -597,66 +582,6 @@ function buildCodeOptions(codes: PostgresExperimentCode[]): CodeOption[] {
   };
   visit(roots, 0);
   return result;
-}
-
-function renderAnnotatedText(
-  content: string,
-  annotations: SourceAnnotationRow[],
-  selectedAnnotationId: string | null,
-  onAnnotationClick?: (annotationId: string) => void,
-) {
-  const rangedAnnotations = annotations
-    .filter((annotation) => annotation.startOffset != null && annotation.endOffset != null && annotation.endOffset > annotation.startOffset)
-    .map((annotation) => ({
-      ...annotation,
-      startOffset: annotation.startOffset as number,
-      endOffset: annotation.endOffset as number,
-    }))
-    .filter((annotation) => annotation.startOffset >= 0 && annotation.endOffset <= content.length)
-    .sort((left, right) => left.startOffset - right.startOffset || left.endOffset - right.endOffset);
-
-  if (rangedAnnotations.length === 0) {
-    return <pre className="doc-content-body">{content}</pre>;
-  }
-
-  const boundarySet = new Set<number>([0, content.length]);
-  for (const annotation of rangedAnnotations) {
-    boundarySet.add(annotation.startOffset);
-    boundarySet.add(annotation.endOffset);
-  }
-  const boundaries = [...boundarySet].sort((left, right) => left - right);
-
-  return (
-    <pre className="doc-content-body" style={{ whiteSpace: "pre-wrap" }}>
-      {boundaries.slice(0, -1).map((start, index) => {
-        const end = boundaries[index + 1];
-        const segmentText = content.slice(start, end);
-        const covering = rangedAnnotations.filter((annotation) => annotation.startOffset < end && annotation.endOffset > start);
-        if (covering.length === 0) {
-          return <span key={`${start}-${end}`}>{segmentText}</span>;
-        }
-        const isSelected = selectedAnnotationId != null && covering.some((annotation) => annotation.id === selectedAnnotationId);
-        const label = covering.flatMap((annotation) => annotation.codeLabels).join(", ");
-        const clickableAnnotation =
-          covering.find((annotation) => annotation.id === selectedAnnotationId) ?? covering[0];
-        return (
-          <span
-            key={`${start}-${end}`}
-            title={label}
-            onClick={onAnnotationClick ? () => onAnnotationClick(clickableAnnotation.id) : undefined}
-            style={{
-              background: buildMultiAnnotationBackground(covering.flatMap((annotation) => annotation.codeColors), isSelected),
-              borderRadius: 3,
-              boxShadow: isSelected ? "inset 0 0 0 1px rgba(53, 80, 112, 0.45)" : undefined,
-              cursor: onAnnotationClick ? "pointer" : undefined,
-            }}
-          >
-            {segmentText}
-          </span>
-        );
-      })}
-    </pre>
-  );
 }
 
 function RichTextEditor({
@@ -1376,7 +1301,6 @@ function SourceObjectsModal({
 function PostgresSourceDetail({
   row,
   codeOptions,
-  annotations,
   linkedObjects,
   attributeValues,
   availableObjects,
@@ -1387,7 +1311,6 @@ function PostgresSourceDetail({
   canManageSourceObjects,
   canKickSourceLocks,
   canManageAnnotations,
-  initialSelectedAnnotationId,
   saving,
   error,
   onCreateAnnotation,
@@ -1403,7 +1326,6 @@ function PostgresSourceDetail({
 }: {
   row: SourceRow;
   codeOptions: CodeOption[];
-  annotations: SourceAnnotationRow[];
   linkedObjects: SourceObjectRow[];
   attributeValues: Array<{ name: string; dataType: SharedAttributeDataType; value: string }>;
   availableObjects: SourceObjectRow[];
@@ -1414,7 +1336,6 @@ function PostgresSourceDetail({
   canManageSourceObjects: boolean;
   canKickSourceLocks: boolean;
   canManageAnnotations: boolean;
-  initialSelectedAnnotationId: string | null;
   saving: boolean;
   error: string | null;
   onCreateAnnotation: (sourceId: string, selection: PendingSelection, payload: { codeIds: string[]; note: string }) => Promise<void>;
@@ -1437,7 +1358,6 @@ function PostgresSourceDetail({
   const [editingAnnotation, setEditingAnnotation] = useState<SourceAnnotationRow | null>(null);
   const [removingAnnotation, setRemovingAnnotation] = useState<SourceAnnotationRow | null>(null);
   const [editingSourceObjects, setEditingSourceObjects] = useState(false);
-  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
@@ -1474,18 +1394,6 @@ function PostgresSourceDetail({
     if (!target) return;
     target.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [selectedOutlineSortOrder]);
-
-  useEffect(() => {
-    if (selectedAnnotationId && !annotations.some((annotation) => annotation.id === selectedAnnotationId)) {
-      setSelectedAnnotationId(null);
-    }
-  }, [annotations, selectedAnnotationId]);
-
-  useEffect(() => {
-    if (!initialSelectedAnnotationId) return;
-    if (!annotations.some((annotation) => annotation.id === initialSelectedAnnotationId)) return;
-    setSelectedAnnotationId(initialSelectedAnnotationId);
-  }, [annotations, initialSelectedAnnotationId]);
 
   useEffect(() => {
     if (!isPdfSource || !resolvedFilePath) {
@@ -1920,7 +1828,12 @@ function PostgresSourceDetail({
                   className="doc-content-scroll-shell"
                   onMouseUp={handleMouseUp}
                 >
-                  {renderAnnotatedText(row.content, annotations, selectedAnnotationId)}
+                  <pre
+                    className="doc-content-body"
+                    style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                  >
+                    {row.content}
+                  </pre>
                 </div>
               )
             ) : (
@@ -2176,6 +2089,7 @@ export function PostgresSourcesView({
             notes: source.notes ?? "",
             content: source.textContent,
             structuredContentJson: source.structuredContentJson,
+            waveformPeaksJson: source.waveformPeaksJson ?? "",
             filePath: source.storagePath,
             annotationCount: annotationCountBySourceId.get(source.id) ?? 0,
             objectCount: objectCountBySourceId.get(source.id) ?? 0,
@@ -2460,6 +2374,7 @@ export function PostgresSourcesView({
           textContent: payload.content,
           notes: payload.notes,
           structuredContentJson: editingRow.structuredContentJson,
+          waveformPeaksJson: editingRow.waveformPeaksJson,
           originalFileName: editingRow.filePath,
           storagePath: editingRow.filePath,
         });
@@ -2471,6 +2386,7 @@ export function PostgresSourcesView({
           textContent: payload.content,
           notes: payload.notes,
           structuredContentJson: "",
+          waveformPeaksJson: "",
           originalFileName: "",
           storagePath: "",
         });
@@ -2514,12 +2430,16 @@ export function PostgresSourcesView({
           textContent: payload.content,
           notes: payload.notes,
           structuredContentJson: "",
+          waveformPeaksJson: "",
           originalFileName: "",
           storagePath: "",
         });
       } else {
         for (const item of payload.items) {
           const bytes = new Uint8Array(await item.file.arrayBuffer());
+          const waveformPeaksJson = item.sourceKind === "audio" || item.sourceKind === "video"
+            ? serializeMediaWaveformCache(await createMediaWaveformCache(bytes))
+            : "";
           await importPostgresExperimentSourceFile({
             projectId,
             sourceKind: item.sourceKind,
@@ -2529,6 +2449,7 @@ export function PostgresSourcesView({
             fileBytesBase64: bytesToBase64(bytes),
             textContent: item.extractedText,
             structuredContentJson: "",
+            waveformPeaksJson,
             notes: "",
           });
         }
@@ -2575,6 +2496,8 @@ export function PostgresSourcesView({
         codeIds: payload.codeIds,
         startOffset: selection.startOffset,
         endOffset: selection.endOffset,
+        timeStartMs: selection.timeStartMs ?? null,
+        timeEndMs: selection.timeEndMs ?? null,
         quote: selection.quote,
         note: payload.note,
         anchorKind: selection.anchorKind ?? "text_span",
@@ -2596,6 +2519,8 @@ export function PostgresSourcesView({
       note: string;
       startOffset?: number | null;
       endOffset?: number | null;
+      timeStartMs?: number | null;
+      timeEndMs?: number | null;
       quote?: string;
       anchorKind?: string;
       imageRegion?: PendingSelection["imageRegion"];
@@ -2613,6 +2538,8 @@ export function PostgresSourcesView({
         codeIds: payload.codeIds,
         startOffset: payload.startOffset ?? annotation.startOffset,
         endOffset: payload.endOffset ?? annotation.endOffset,
+        timeStartMs: payload.timeStartMs ?? annotation.timeStartMs,
+        timeEndMs: payload.timeEndMs ?? annotation.timeEndMs,
         quote: payload.quote ?? annotation.quote,
         note: payload.note,
         anchorKind: payload.anchorKind ?? annotation.anchorKind ?? "text_span",
@@ -2730,6 +2657,35 @@ export function PostgresSourcesView({
     }
   }
 
+  async function handleUpdateSourceWaveform(sourceId: string, waveformPeaksJson: string) {
+    const sourceRow = rows.find((entry) => entry.id === sourceId);
+    if (!sourceRow) return;
+
+    await updatePostgresExperimentSource({
+      projectId,
+      sourceId: sourceRow.id,
+      sourceKind: sourceRow.type.trim(),
+      title: sourceRow.name,
+      textContent: sourceRow.content,
+      notes: sourceRow.notes,
+      structuredContentJson: sourceRow.structuredContentJson,
+      waveformPeaksJson,
+      originalFileName: sourceRow.filePath,
+      storagePath: sourceRow.filePath,
+    });
+
+    setRows((current) => current.map((entry) => (
+      entry.id === sourceId
+        ? { ...entry, waveformPeaksJson }
+        : entry
+    )));
+    setSelectedRow((current) => (
+      current?.id === sourceId
+        ? { ...current, waveformPeaksJson }
+        : current
+    ));
+  }
+
   const codeOptions = useMemo(() => buildCodeOptions(codes), [codes]);
   const attributeDefs = useMemo<SourceAttributeDefinitionRow[]>(
     () => [...sourceAttributeDefinitions]
@@ -2783,6 +2739,8 @@ export function PostgresSourcesView({
         quote: annotation.quote,
         note: annotation.note,
         anchorKind: annotation.anchorKind,
+        timeStartMs: annotation.timeStartMs,
+        timeEndMs: annotation.timeEndMs,
         imageRegion: annotation.imageRegion,
         startOffset: annotation.startOffset,
         endOffset: annotation.endOffset,
@@ -2852,6 +2810,8 @@ export function PostgresSourcesView({
     const normalizedSourceType = selectedRow.type.trim().toLowerCase();
     const selectedFileExt = selectedRow.filePath ? fileExtensionFromPath(selectedRow.filePath) : "";
     const isImageCodingSource = SOURCE_IMPORT_IMAGE_EXTS.has(selectedFileExt) || normalizedSourceType === "image";
+    const isAudioCodingSource = SOURCE_IMPORT_AUDIO_EXTS.has(selectedFileExt) || normalizedSourceType === "audio";
+    const isVideoCodingSource = SOURCE_IMPORT_VIDEO_EXTS.has(selectedFileExt) || normalizedSourceType === "video";
 
     return (
       isImageCodingSource ? (
@@ -2876,6 +2836,63 @@ export function PostgresSourcesView({
           onDeleteAnnotation={handleDeleteAnnotation}
           onKickSourceLock={handleKickSourceLock}
           onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onBack={() => {
+            setSelectedRow(null);
+            setSubmitError(null);
+          }}
+        />
+      ) : isAudioCodingSource ? (
+        <PostgresSourceAudioCodingView
+          row={selectedRow}
+          codes={codes}
+          annotations={selectedSourceAnnotations}
+          codeOptions={codeOptions}
+          currentUserId={currentUserId}
+          sourceLock={selectedSourceLock}
+          sourceLockConflict={sourceLockConflict}
+          lockSyncing={sourceLockSyncing}
+          canKickSourceLocks={canKickSourceLocks}
+          canManageAnnotations={canManageAnnotations && codingEnabled}
+          canManageMemos={canManageMemos}
+          initialSelectedAnnotationId={initialAnnotationId ?? null}
+          projectStoragePath={projectStoragePath}
+          saving={submitting}
+          error={submitError}
+          onCreateAnnotation={handleCreateAnnotation}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onKickSourceLock={handleKickSourceLock}
+          onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onBack={() => {
+            setSelectedRow(null);
+            setSubmitError(null);
+          }}
+        />
+      ) : isVideoCodingSource ? (
+        <PostgresSourceVideoCodingView
+          row={selectedRow}
+          codes={codes}
+          annotations={selectedSourceAnnotations}
+          codeOptions={codeOptions}
+          currentUserId={currentUserId}
+          sourceLock={selectedSourceLock}
+          sourceLockConflict={sourceLockConflict}
+          lockSyncing={sourceLockSyncing}
+          canKickSourceLocks={canKickSourceLocks}
+          canManageAnnotations={canManageAnnotations && codingEnabled}
+          canManageMemos={canManageMemos}
+          initialSelectedAnnotationId={initialAnnotationId ?? null}
+          projectStoragePath={projectStoragePath}
+          saving={submitting}
+          error={submitError}
+          onCreateAnnotation={handleCreateAnnotation}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onKickSourceLock={handleKickSourceLock}
+          onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
           onBack={() => {
             setSelectedRow(null);
             setSubmitError(null);
@@ -2902,6 +2919,7 @@ export function PostgresSourcesView({
           onDeleteAnnotation={handleDeleteAnnotation}
           onKickSourceLock={handleKickSourceLock}
           onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
           onBack={() => {
             setSelectedRow(null);
             setSubmitError(null);
@@ -2917,7 +2935,6 @@ export function PostgresSourcesView({
         <PostgresSourceDetail
           row={selectedRow}
           codeOptions={codeOptions}
-          annotations={selectedSourceAnnotations}
           linkedObjects={selectedSourceObjects}
           attributeValues={selectedSourceAttributeValues}
           availableObjects={availableObjectsForSelectedSource}
@@ -2928,7 +2945,6 @@ export function PostgresSourcesView({
           canManageSourceObjects={canManageSources}
           canKickSourceLocks={canKickSourceLocks}
           canManageAnnotations={false}
-          initialSelectedAnnotationId={initialAnnotationId ?? null}
           saving={submitting}
           error={submitError}
           onCreateAnnotation={handleCreateAnnotation}
@@ -3277,7 +3293,6 @@ export function PostgresSourcesView({
               <PostgresSourceDetail
                 row={selectedRow}
                 codeOptions={codeOptions}
-                annotations={selectedSourceAnnotations}
                 linkedObjects={selectedSourceObjects}
                 attributeValues={selectedSourceAttributeValues}
                 availableObjects={availableObjectsForSelectedSource}
@@ -3288,7 +3303,6 @@ export function PostgresSourcesView({
                 canManageSourceObjects={canManageSources}
                 canKickSourceLocks={canKickSourceLocks}
                 canManageAnnotations={canManageAnnotations && codingEnabled}
-                initialSelectedAnnotationId={initialAnnotationId ?? null}
                 saving={submitting}
                 error={submitError}
                 onCreateAnnotation={handleCreateAnnotation}

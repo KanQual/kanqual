@@ -25,6 +25,9 @@ import {
   visibleCodeNodes,
 } from "./Postgres_Source_Coding_Shared";
 
+const STRIPE_LANE_WIDTH = 8;
+const STRIPE_GUTTER_BASE = 24;
+
 export function PostgresSourceTextCodingView({
   row,
   codes,
@@ -101,10 +104,36 @@ export function PostgresSourceTextCodingView({
     }
     return counts;
   }, [filteredAnnotations]);
-  const codeColumnMap = useMemo(
-    () => new Map(visibleCodes.map(({ code }, index) => [code.id, index])),
-    [visibleCodes],
+  const rangedAnnotations = useMemo(
+    () => filteredAnnotations
+      .filter((annotation) => annotation.startOffset != null && annotation.endOffset != null && (annotation.endOffset ?? 0) > (annotation.startOffset ?? 0))
+      .map((annotation) => ({
+        ...annotation,
+        startOffset: annotation.startOffset as number,
+        endOffset: annotation.endOffset as number,
+      }))
+      .filter((annotation) => annotation.startOffset >= 0 && annotation.endOffset <= row.content.length)
+      .sort((left, right) => left.startOffset - right.startOffset || left.endOffset - right.endOffset),
+    [filteredAnnotations, row.content.length],
   );
+  const { annotationLaneById, annotationLaneCount } = useMemo(() => {
+    const laneEnds: number[] = [];
+    const laneById = new Map<string, number>();
+    for (const annotation of rangedAnnotations) {
+      let laneIndex = laneEnds.findIndex((endOffset) => annotation.startOffset >= endOffset);
+      if (laneIndex === -1) {
+        laneIndex = laneEnds.length;
+        laneEnds.push(annotation.endOffset);
+      } else {
+        laneEnds[laneIndex] = annotation.endOffset;
+      }
+      laneById.set(annotation.id, laneIndex);
+    }
+    return {
+      annotationLaneById: laneById,
+      annotationLaneCount: laneEnds.length,
+    };
+  }, [rangedAnnotations]);
 
   useEffect(() => {
     if (!initialSelectedAnnotationId) return;
@@ -162,14 +191,14 @@ export function PostgresSourceTextCodingView({
 
   useEffect(() => {
     const container = viewerRef.current;
-    if (!container || filteredAnnotations.length === 0) {
+    if (!container || rangedAnnotations.length === 0) {
       setStripeBars([]);
       return;
     }
     const measure = () => {
       const containerRect = container.getBoundingClientRect();
       const nextBars: StripeBar[] = [];
-      for (const annotation of filteredAnnotations) {
+      for (const annotation of rangedAnnotations) {
         const spans = container.querySelectorAll<HTMLElement>(`[data-anns~="${annotation.id}"]`);
         let minTop = Number.POSITIVE_INFINITY;
         let maxBottom = Number.NEGATIVE_INFINITY;
@@ -183,11 +212,10 @@ export function PostgresSourceTextCodingView({
           });
         });
         if (!Number.isFinite(minTop) || !Number.isFinite(maxBottom)) continue;
-        const primaryCodeId = annotation.codeIds[0] ?? "";
         nextBars.push({
           annotationId: annotation.id,
           color: annotation.codeColors[0] || "#355070",
-          column: codeColumnMap.get(primaryCodeId) ?? 0,
+          column: annotationLaneById.get(annotation.id) ?? 0,
           top: minTop,
           height: Math.max(6, maxBottom - minTop),
           label: annotation.codeLabels.join(", ") || "Annotation",
@@ -204,16 +232,45 @@ export function PostgresSourceTextCodingView({
       resizeObserver.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [codeColumnMap, filteredAnnotations]);
+  }, [annotationLaneById, rangedAnnotations]);
+
+  useEffect(() => {
+    function handleSelectionChange() {
+      if (!pendingSelection || !contentSelectionRef.current) return;
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setPendingSelection(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      if (!contentSelectionRef.current.contains(range.commonAncestorContainer)) {
+        setPendingSelection(null);
+      }
+    }
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [pendingSelection]);
 
   function handleMouseUp() {
     if (!canEditAnnotations || !contentSelectionRef.current) return;
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      setPendingSelection(null);
+      return;
+    }
     const range = selection.getRangeAt(0);
-    if (!contentSelectionRef.current.contains(range.commonAncestorContainer)) return;
+    if (!contentSelectionRef.current.contains(range.commonAncestorContainer)) {
+      setPendingSelection(null);
+      return;
+    }
     const quote = selection.toString();
-    if (!quote.trim()) return;
+    if (!quote.trim()) {
+      setPendingSelection(null);
+      return;
+    }
     const preRange = document.createRange();
     preRange.selectNodeContents(contentSelectionRef.current);
     preRange.setEnd(range.startContainer, range.startOffset);
@@ -248,15 +305,6 @@ export function PostgresSourceTextCodingView({
       );
     }
 
-    const rangedAnnotations = filteredAnnotations
-      .filter((annotation) => annotation.startOffset != null && annotation.endOffset != null && (annotation.endOffset ?? 0) > (annotation.startOffset ?? 0))
-      .map((annotation) => ({
-        ...annotation,
-        startOffset: annotation.startOffset as number,
-        endOffset: annotation.endOffset as number,
-      }))
-      .filter((annotation) => annotation.startOffset >= 0 && annotation.endOffset <= row.content.length)
-      .sort((left, right) => left.startOffset - right.startOffset || left.endOffset - right.endOffset);
     const selectedAnnotation = selectedAnnotationId
       ? rangedAnnotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null
       : null;
@@ -319,7 +367,6 @@ export function PostgresSourceTextCodingView({
                 if (!annotation) return;
                 event.preventDefault();
                 setSelectedAnnotationId(annotation.id);
-                setScrollToAnnotationId(annotation.id);
                 setAnnotationHover(null);
                 setAnnotationContextMenu({
                   x: event.clientX,
@@ -519,7 +566,7 @@ export function PostgresSourceTextCodingView({
                 flex: 1,
                 minHeight: 0,
                 overflow: "auto",
-                paddingLeft: visibleCodes.length > 0 ? Math.max(48, visibleCodes.length * 5 + 24) : 48,
+                paddingLeft: annotationLaneCount > 0 ? Math.max(48, annotationLaneCount * STRIPE_LANE_WIDTH + STRIPE_GUTTER_BASE) : 48,
               }}
             >
               {row.content ? (
@@ -536,8 +583,8 @@ export function PostgresSourceTextCodingView({
                   style={{
                     top: bar.top,
                     height: bar.height,
-                    left: 4 + bar.column * 5,
-                    width: 3,
+                    left: 4 + bar.column * STRIPE_LANE_WIDTH,
+                    width: 4,
                     background: bar.color,
                   }}
                   onClick={() => {

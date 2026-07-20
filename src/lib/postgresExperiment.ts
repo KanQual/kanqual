@@ -312,6 +312,7 @@ export type PostgresExperimentSource = {
   storagePath: string;
   textContent: string;
   structuredContentJson: string;
+  waveformPeaksJson: string;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -382,6 +383,7 @@ export type PostgresExperimentCode = {
 
 export type PostgresExperimentAnnotationSummary = {
   id: string;
+  displayId: number;
   projectId: string;
   sourceId: string;
   codeIds: string[];
@@ -389,6 +391,8 @@ export type PostgresExperimentAnnotationSummary = {
   primaryCodeLabel: string;
   startOffset: number | null;
   endOffset: number | null;
+  timeStartMs: number | null;
+  timeEndMs: number | null;
   quote: string;
   note: string;
   anchorKind: string;
@@ -920,6 +924,7 @@ export async function createPostgresExperimentSource(data: {
   storagePath?: string | null;
   textContent: string;
   structuredContentJson?: string | null;
+  waveformPeaksJson?: string | null;
   notes?: string | null;
 }): Promise<PostgresExperimentSource> {
   return invoke<PostgresExperimentSource>("create_postgres_experiment_source_command", {
@@ -936,6 +941,7 @@ export async function importPostgresExperimentSourceFile(data: {
   fileBytesBase64: string;
   textContent: string;
   structuredContentJson?: string | null;
+  waveformPeaksJson?: string | null;
   notes?: string | null;
 }): Promise<PostgresExperimentSource> {
   return invoke<PostgresExperimentSource>("import_postgres_experiment_source_file_command", {
@@ -952,6 +958,7 @@ export async function updatePostgresExperimentSource(data: {
   storagePath?: string | null;
   textContent: string;
   structuredContentJson?: string | null;
+  waveformPeaksJson?: string | null;
   notes?: string | null;
 }): Promise<PostgresExperimentSource> {
   return invoke<PostgresExperimentSource>("update_postgres_experiment_source_command", {
@@ -1118,6 +1125,8 @@ export async function createPostgresExperimentAnnotation(data: {
   codeIds: string[];
   startOffset?: number | null;
   endOffset?: number | null;
+  timeStartMs?: number | null;
+  timeEndMs?: number | null;
   quote?: string | null;
   note?: string | null;
   anchorKind?: string | null;
@@ -1141,6 +1150,8 @@ export async function updatePostgresExperimentAnnotation(data: {
   codeIds: string[];
   startOffset?: number | null;
   endOffset?: number | null;
+  timeStartMs?: number | null;
+  timeEndMs?: number | null;
   quote?: string | null;
   note?: string | null;
   anchorKind?: string | null;

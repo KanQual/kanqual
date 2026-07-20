@@ -75,6 +75,8 @@ export type PostgresSourceCodingViewProps = {
       note: string;
       startOffset?: number | null;
       endOffset?: number | null;
+      timeStartMs?: number | null;
+      timeEndMs?: number | null;
       quote?: string;
       anchorKind?: string;
       imageRegion?: PendingSelection["imageRegion"];
@@ -83,6 +85,7 @@ export type PostgresSourceCodingViewProps = {
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
   onKickSourceLock: (lock: PostgresExperimentSourceLock) => Promise<void>;
   onOpenMemoDraft: (payload: { sourceIds?: string[]; annotationIds?: string[]; codeIds?: string[] }) => void;
+  onUpdateSourceWaveform: (sourceId: string, waveformPeaksJson: string) => Promise<void>;
   onBack: () => void;
 };
 

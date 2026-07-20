@@ -1040,8 +1040,9 @@ export const en = {
       annotatedText: "Annotated Text",
       document: "Document",
       code: "Code",
-      memos: "Memos",
-      note: "Note",
+      lock: "Lock",
+      created: "Created",
+      createdBy: "Created By",
     },
     values: {
       yes: "Yes",

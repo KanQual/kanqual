@@ -1663,10 +1663,12 @@ async fn ensure_postgres_experiment_project_schema(
                     storage_path TEXT NOT NULL DEFAULT '',
                     text_content TEXT NOT NULL DEFAULT '',
                     structured_content_json TEXT NOT NULL DEFAULT '{}',
+                    waveform_peaks_json TEXT NOT NULL DEFAULT '',
                     notes TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS waveform_peaks_json TEXT NOT NULL DEFAULT '';
                 CREATE TABLE IF NOT EXISTS source_files (
                     id TEXT PRIMARY KEY,
                     source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
@@ -1689,8 +1691,10 @@ async fn ensure_postgres_experiment_project_schema(
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                CREATE SEQUENCE IF NOT EXISTS annotation_display_id_seq;
                 CREATE TABLE IF NOT EXISTS annotations (
                     id TEXT PRIMARY KEY,
+                    display_id BIGINT NOT NULL DEFAULT nextval('annotation_display_id_seq'),
                     source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
                     anchor_kind TEXT NOT NULL DEFAULT 'text_span',
                     start_offset INTEGER,
@@ -1863,10 +1867,32 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE saved_drawings ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
                 ALTER TABLE saved_drawings ADD COLUMN IF NOT EXISTS canvas_kind TEXT NOT NULL DEFAULT 'free_draw';
                 ALTER TABLE saved_drawings ADD COLUMN IF NOT EXISTS canvas_state_json TEXT NOT NULL DEFAULT '{}';
+                ALTER TABLE annotations ADD COLUMN IF NOT EXISTS display_id BIGINT;
+                ALTER TABLE annotations ALTER COLUMN display_id SET DEFAULT nextval('annotation_display_id_seq');
                 ",
             )
             .await
             .map_err(|e| format!("Could not update PostgreSQL experiment project user schema: {e}"))?;
+
+        client
+            .batch_execute(
+                "
+                WITH numbered AS (
+                    SELECT id, nextval('annotation_display_id_seq') AS display_id
+                    FROM annotations
+                    WHERE display_id IS NULL
+                    ORDER BY created_at ASC, id ASC
+                )
+                UPDATE annotations AS a
+                SET display_id = numbered.display_id
+                FROM numbered
+                WHERE a.id = numbered.id;
+
+                ALTER TABLE annotations ALTER COLUMN display_id SET NOT NULL;
+                ",
+            )
+            .await
+            .map_err(|e| format!("Could not backfill PostgreSQL experiment annotation display IDs: {e}"))?;
 
         ensure_postgres_experiment_text_array_column(
             &client,
@@ -2163,6 +2189,7 @@ async fn ensure_postgres_experiment_project_schema(
             CREATE INDEX IF NOT EXISTS codes_parent_code_idx ON codes (parent_code_id);
             CREATE INDEX IF NOT EXISTS codes_label_lower_idx ON codes (LOWER(label));
             CREATE INDEX IF NOT EXISTS annotations_source_idx ON annotations (source_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS annotations_display_id_key ON annotations (display_id);
             CREATE INDEX IF NOT EXISTS annotation_codes_code_idx ON annotation_codes (code_id);
             CREATE INDEX IF NOT EXISTS source_objects_object_idx ON source_objects (object_id);
             CREATE INDEX IF NOT EXISTS source_attribute_values_source_idx ON source_attribute_values (source_id);
@@ -2359,9 +2386,10 @@ fn map_postgres_experiment_source_row(project_id: &str, row: tokio_postgres::Row
         storage_path: row.get(4),
         text_content: row.get(5),
         structured_content_json: row.get(6),
-        notes: row.get(7),
-        created_at: row.get(8),
-        updated_at: row.get(9),
+        waveform_peaks_json: row.get(7),
+        notes: row.get(8),
+        created_at: row.get(9),
+        updated_at: row.get(10),
     }
 }
 
@@ -3583,6 +3611,7 @@ struct PostgresExperimentSource {
     storage_path: String,
     text_content: String,
     structured_content_json: String,
+    waveform_peaks_json: String,
     notes: String,
     created_at: String,
     updated_at: String,
@@ -3665,6 +3694,7 @@ struct PostgresExperimentImageRegionSelector {
 #[serde(rename_all = "camelCase")]
 struct PostgresExperimentAnnotationSummary {
     id: String,
+    display_id: i64,
     project_id: String,
     source_id: String,
     code_ids: Vec<String>,
@@ -3672,6 +3702,8 @@ struct PostgresExperimentAnnotationSummary {
     primary_code_label: String,
     start_offset: Option<i32>,
     end_offset: Option<i32>,
+    time_start_ms: Option<i64>,
+    time_end_ms: Option<i64>,
     quote: String,
     note: String,
     anchor_kind: String,
@@ -3912,6 +3944,7 @@ struct CreatePostgresExperimentSourceRequest {
     storage_path: Option<String>,
     text_content: String,
     structured_content_json: Option<String>,
+    waveform_peaks_json: Option<String>,
     notes: Option<String>,
 }
 
@@ -3926,6 +3959,7 @@ struct UpdatePostgresExperimentSourceRequest {
     storage_path: Option<String>,
     text_content: String,
     structured_content_json: Option<String>,
+    waveform_peaks_json: Option<String>,
     notes: Option<String>,
 }
 
@@ -3940,6 +3974,7 @@ struct ImportPostgresExperimentSourceFileRequest {
     file_bytes_base64: String,
     text_content: String,
     structured_content_json: Option<String>,
+    waveform_peaks_json: Option<String>,
     notes: Option<String>,
 }
 
@@ -4034,6 +4069,8 @@ struct CreatePostgresExperimentAnnotationRequest {
     code_ids: Vec<String>,
     start_offset: Option<i32>,
     end_offset: Option<i32>,
+    time_start_ms: Option<i64>,
+    time_end_ms: Option<i64>,
     quote: Option<String>,
     note: Option<String>,
     anchor_kind: Option<String>,
@@ -4048,6 +4085,8 @@ struct UpdatePostgresExperimentAnnotationRequest {
     code_ids: Vec<String>,
     start_offset: Option<i32>,
     end_offset: Option<i32>,
+    time_start_ms: Option<i64>,
+    time_end_ms: Option<i64>,
     quote: Option<String>,
     note: Option<String>,
     anchor_kind: Option<String>,
@@ -4070,6 +4109,28 @@ fn validate_postgres_experiment_annotation_image_region(
     let bottom = region.y + region.height;
     if right > region.image_width + 0.5 || bottom > region.image_height + 0.5 {
         return Err("Image annotation regions must stay within the image bounds.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_postgres_experiment_annotation_time_range(
+    time_start_ms: Option<i64>,
+    time_end_ms: Option<i64>,
+) -> Result<(), String> {
+    if let Some(start_ms) = time_start_ms {
+        if start_ms < 0 {
+            return Err("Annotation start time cannot be negative.".to_string());
+        }
+    }
+    if let Some(end_ms) = time_end_ms {
+        if end_ms < 0 {
+            return Err("Annotation end time cannot be negative.".to_string());
+        }
+    }
+    if let (Some(start_ms), Some(end_ms)) = (time_start_ms, time_end_ms) {
+        if end_ms < start_ms {
+            return Err("Annotation end time must be greater than or equal to the start time.".to_string());
+        }
     }
     Ok(())
 }
@@ -8121,7 +8182,7 @@ async fn load_postgres_experiment_sources_for_client(
     let rows = client
         .query(
             "
-            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, notes, created_at::text, updated_at::text
+            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, notes, created_at::text, updated_at::text
             FROM sources
             ORDER BY created_at ASC, id ASC
             ",
@@ -8201,7 +8262,7 @@ async fn load_postgres_experiment_source_for_client(
     let row = client
         .query_opt(
             "
-            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, notes, created_at::text, updated_at::text
+            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, notes, created_at::text, updated_at::text
             FROM sources
             WHERE id = $1
             ",
@@ -8533,11 +8594,14 @@ async fn load_postgres_experiment_annotation_summaries_for_client(
             SELECT
                 a.id,
                 a.source_id,
+                a.display_id,
                 COALESCE(ac.code_ids, ARRAY[]::TEXT[]) AS code_ids,
                 COALESCE(ac.primary_code_id, '') AS primary_code_id,
                 COALESCE(pc.label, '') AS primary_code_label,
                 a.start_offset,
                 a.end_offset,
+                a.time_start_ms,
+                a.time_end_ms,
                 a.quote,
                 a.note,
                 a.anchor_kind,
@@ -8569,21 +8633,24 @@ async fn load_postgres_experiment_annotation_summaries_for_client(
         .into_iter()
         .map(|row| PostgresExperimentAnnotationSummary {
             id: row.get(0),
+            display_id: row.get(2),
             project_id: project_id.to_string(),
             source_id: row.get(1),
-            code_ids: row.get(2),
-            primary_code_id: row.get(3),
-            primary_code_label: row.get(4),
-            start_offset: row.get(5),
-            end_offset: row.get(6),
-            quote: row.get(7),
-            note: row.get(8),
-            anchor_kind: row.get(9),
-            image_region: parse_postgres_experiment_annotation_image_region(row.get::<_, String>(10).as_str()),
-            created_by_project_user_id: row.get(11),
-            created_by_name: row.get(12),
-            created_at: row.get(13),
-            updated_at: row.get(14),
+            code_ids: row.get(3),
+            primary_code_id: row.get(4),
+            primary_code_label: row.get(5),
+            start_offset: row.get(6),
+            end_offset: row.get(7),
+            time_start_ms: row.get(8),
+            time_end_ms: row.get(9),
+            quote: row.get(10),
+            note: row.get(11),
+            anchor_kind: row.get(12),
+            image_region: parse_postgres_experiment_annotation_image_region(row.get::<_, String>(13).as_str()),
+            created_by_project_user_id: row.get(14),
+            created_by_name: row.get(15),
+            created_at: row.get(16),
+            updated_at: row.get(17),
         })
         .collect())
 }
@@ -9588,6 +9655,7 @@ async fn create_postgres_experiment_source_command(
     let original_file_name = request.original_file_name.unwrap_or_default().trim().to_string();
     let storage_path = request.storage_path.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
+    let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
     let notes = request.notes.unwrap_or_default();
     client
         .execute(
@@ -9600,9 +9668,10 @@ async fn create_postgres_experiment_source_command(
                 storage_path,
                 text_content,
                 structured_content_json,
+                waveform_peaks_json,
                 notes
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ",
             &[
                 &source_id,
@@ -9612,6 +9681,7 @@ async fn create_postgres_experiment_source_command(
                 &storage_path,
                 &request.text_content,
                 &structured_content_json,
+                &waveform_peaks_json,
                 &notes,
             ],
         )
@@ -9674,6 +9744,7 @@ async fn import_postgres_experiment_source_file_command(
     let source_file_id = generate_identifier();
     let media_type = request.media_type.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
+    let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
     let notes = request.notes.unwrap_or_default();
     let sanitized_file_name = sanitize_postgres_experiment_file_name(&original_file_name);
     let relative_storage_path = format!("sources/{source_id}/{sanitized_file_name}");
@@ -9696,9 +9767,10 @@ async fn import_postgres_experiment_source_file_command(
                 storage_path,
                 text_content,
                 structured_content_json,
+                waveform_peaks_json,
                 notes
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ",
             &[
                 &source_id,
@@ -9708,6 +9780,7 @@ async fn import_postgres_experiment_source_file_command(
                 &relative_storage_path,
                 &request.text_content,
                 &structured_content_json,
+                &waveform_peaks_json,
                 &notes,
             ],
         )
@@ -9794,6 +9867,7 @@ async fn update_postgres_experiment_source_command(
     let original_file_name = request.original_file_name.unwrap_or_default().trim().to_string();
     let storage_path = request.storage_path.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
+    let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
     let notes = request.notes.unwrap_or_default();
     let updated_count = client
         .execute(
@@ -9805,7 +9879,8 @@ async fn update_postgres_experiment_source_command(
                 storage_path = $5,
                 text_content = $6,
                 structured_content_json = $7,
-                notes = $8,
+                waveform_peaks_json = $8,
+                notes = $9,
                 updated_at = NOW()
             WHERE id = $1
             ",
@@ -9817,6 +9892,7 @@ async fn update_postgres_experiment_source_command(
                 &storage_path,
                 &request.text_content,
                 &structured_content_json,
+                &waveform_peaks_json,
                 &notes,
             ],
         )
@@ -9839,7 +9915,7 @@ async fn update_postgres_experiment_source_command(
         Some(&source.id),
         Some(serde_json::json!({
             "name": source.title,
-            "changedFields": ["source_kind", "title", "original_file_name", "storage_path", "text_content", "structured_content_json", "notes"],
+            "changedFields": ["source_kind", "title", "original_file_name", "storage_path", "text_content", "structured_content_json", "waveform_peaks_json", "notes"],
         })),
     ).await?;
     emit_postgres_experiment_project_change(&app, &project_id, "source", &source_id, "updated");
@@ -10960,6 +11036,7 @@ async fn create_postgres_experiment_annotation_command(
     let created_by_project_user_id = resolve_postgres_experiment_project_user_id_for_email(&client, &session.user.email).await?;
     let annotation_id = generate_identifier();
     let anchor_kind = request.anchor_kind.unwrap_or_else(|| "text_span".to_string()).trim().to_string();
+    validate_postgres_experiment_annotation_time_range(request.time_start_ms, request.time_end_ms)?;
     let quote = request.quote.unwrap_or_default();
     let note = request.note.unwrap_or_default();
     let image_region = request.image_region.clone();
@@ -10990,12 +11067,14 @@ async fn create_postgres_experiment_annotation_command(
                 anchor_kind,
                 start_offset,
                 end_offset,
+                time_start_ms,
+                time_end_ms,
                 quote,
                 note,
                 region_selector_json,
                 created_by_project_user_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ",
             &[
                 &annotation_id,
@@ -11003,6 +11082,8 @@ async fn create_postgres_experiment_annotation_command(
                 &anchor_kind,
                 &request.start_offset,
                 &request.end_offset,
+                &request.time_start_ms,
+                &request.time_end_ms,
                 &quote,
                 &note,
                 &region_selector_json,
@@ -11036,6 +11117,8 @@ async fn create_postgres_experiment_annotation_command(
         Some(serde_json::json!({
             "quote": annotation.quote,
             "codeCount": annotation.code_ids.len(),
+            "timeStartMs": annotation.time_start_ms,
+            "timeEndMs": annotation.time_end_ms,
         })),
     ).await?;
     emit_postgres_experiment_project_change(&app, &project_id, "annotation", &annotation_id, "created");
@@ -11073,6 +11156,7 @@ async fn update_postgres_experiment_annotation_command(
     let code_ids = normalize_postgres_experiment_identifier_list(request.code_ids);
     validate_postgres_experiment_annotation_code_ids_for_client(&client, &code_ids).await?;
     let anchor_kind = request.anchor_kind.unwrap_or_else(|| "text_span".to_string()).trim().to_string();
+    validate_postgres_experiment_annotation_time_range(request.time_start_ms, request.time_end_ms)?;
     let quote = request.quote.unwrap_or_default();
     let note = request.note.unwrap_or_default();
     let image_region = request.image_region.clone();
@@ -11101,9 +11185,11 @@ async fn update_postgres_experiment_annotation_command(
             SET anchor_kind = $2,
                 start_offset = $3,
                 end_offset = $4,
-                quote = $5,
-                note = $6,
-                region_selector_json = $7,
+                time_start_ms = $5,
+                time_end_ms = $6,
+                quote = $7,
+                note = $8,
+                region_selector_json = $9,
                 updated_at = NOW()
             WHERE id = $1
             ",
@@ -11112,6 +11198,8 @@ async fn update_postgres_experiment_annotation_command(
                 &anchor_kind,
                 &request.start_offset,
                 &request.end_offset,
+                &request.time_start_ms,
+                &request.time_end_ms,
                 &quote,
                 &note,
                 &region_selector_json,
@@ -11151,7 +11239,9 @@ async fn update_postgres_experiment_annotation_command(
         Some(&annotation.id),
         Some(serde_json::json!({
             "quote": annotation.quote,
-            "changedFields": ["anchor_kind", "start_offset", "end_offset", "quote", "note", "code_ids"],
+            "timeStartMs": annotation.time_start_ms,
+            "timeEndMs": annotation.time_end_ms,
+            "changedFields": ["anchor_kind", "start_offset", "end_offset", "time_start_ms", "time_end_ms", "quote", "note", "code_ids"],
         })),
     ).await?;
     emit_postgres_experiment_project_change(&app, &project_id, "annotation", &annotation_id, "updated");
