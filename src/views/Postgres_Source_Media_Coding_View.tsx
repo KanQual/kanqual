@@ -3,14 +3,10 @@ import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import {
   MediaController,
   MediaControlBar,
-  MediaDurationDisplay,
-  MediaFullscreenButton,
   MediaMuteButton,
-  MediaPlaybackRateButton,
   MediaPlayButton,
   MediaSeekBackwardButton,
   MediaSeekForwardButton,
-  MediaTimeDisplay,
   MediaVolumeRange,
 } from "media-chrome/react";
 import type { PostgresExperimentCode } from "../lib/postgresExperiment";
@@ -76,6 +72,28 @@ type PendingClipSelection = PendingSelection & {
   anchorKind: "time_range";
 };
 
+type SelectedClipDraft = {
+  annotationId: string;
+  startMs: number;
+  endMs: number;
+  codeIds: string[];
+};
+
+const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
+function nearestPlaybackSpeedIndex(rate: number) {
+  let nearestIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  PLAYBACK_SPEED_OPTIONS.forEach((option, index) => {
+    const distance = Math.abs(option - rate);
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  });
+  return nearestIndex;
+}
+
 function clipSelectionFromRange(startMs: number, endMs: number): PendingClipSelection {
   const safeStart = Math.max(0, Math.round(Math.min(startMs, endMs)));
   const safeEnd = Math.max(safeStart + 1, Math.round(Math.max(startMs, endMs)));
@@ -103,62 +121,90 @@ function rangeContainsTime(range: { startMs: number; endMs: number }, timeMs: nu
   return timeMs >= range.startMs && timeMs < range.endMs;
 }
 
-function formatEditableSeconds(timeMs: number) {
-  return (timeMs / 1000).toFixed(2).replace(/\.?0+$/, "");
+function formatEditableTimestamp(timeMs: number) {
+  const totalTenths = Math.max(0, Math.round(timeMs / 100));
+  const tenths = totalTenths % 10;
+  const totalSeconds = Math.floor(totalTenths / 10);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours < 1) {
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
+  }
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
 }
 
-function ZoomOutIcon() {
+function parseEditableTimestamp(value: string): number | null {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) return null;
+
+  if (!trimmedValue.includes(":")) {
+    const seconds = Number(trimmedValue);
+    return Number.isFinite(seconds) ? seconds : null;
+  }
+
+  const parts = trimmedValue.split(":");
+  if (parts.length === 2) {
+    const minutes = Number(parts[0]);
+    const seconds = Number(parts[1]);
+    if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+    if (minutes < 0 || seconds < 0 || seconds >= 60) return null;
+
+    return minutes * 60 + seconds;
+  }
+
+  if (parts.length !== 3) return null;
+
+  const hours = Number(parts[0]);
+  const minutes = Number(parts[1]);
+  const seconds = Number(parts[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+  if (hours < 0 || minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60) return null;
+
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function TimestampStepUpIcon() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="7" cy="7" r="4.25" />
-      <path d="M10.5 10.5L13.5 13.5" />
-      <path d="M5 7H9" />
+    <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+      <path d="M6 3L10 8H2L6 3Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TimestampStepDownIcon() {
+  return (
+    <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+      <path d="M6 9L2 4H10L6 9Z" fill="currentColor" />
     </svg>
   );
 }
 
 function ZoomFitIcon() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5.25 2.5H2.5v2.75" />
-      <path d="M10.75 2.5h2.75v2.75" />
-      <path d="M5.25 13.5H2.5v-2.75" />
-      <path d="M10.75 13.5h2.75v-2.75" />
-      <path d="M6 6l-3.5-3.5" />
-      <path d="M10 6l3.5-3.5" />
-      <path d="M6 10l-3.5 3.5" />
-      <path d="M10 10l3.5 3.5" />
-    </svg>
-  );
-}
-
-function ZoomInIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="7" cy="7" r="4.25" />
-      <path d="M10.5 10.5L13.5 13.5" />
-      <path d="M7 5V9" />
-      <path d="M5 7H9" />
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6.8" cy="6.8" r="4.7" />
+      <path d="M10.15 10.15L14 14" />
+      <path d="M5.55 5.55L4.55 4.55" />
+      <path d="M8.05 5.55L9.05 4.55" />
+      <path d="M5.55 8.05L4.55 9.05" />
+      <path d="M8.05 8.05L9.05 9.05" />
+      <path d="M5.3 4.55H4.55V5.3" />
+      <path d="M8.3 4.55H9.05V5.3" />
+      <path d="M5.3 9.05H4.55V8.3" />
+      <path d="M8.3 9.05H9.05V8.3" />
     </svg>
   );
 }
 
 function NewClipIcon() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4.5 3.5h-2v9h2" />
       <path d="M11.5 3.5h2v9h-2" />
       <path d="M8 5.5v5" />
       <path d="M5.5 8h5" />
-    </svg>
-  );
-}
-
-function EditClipIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 13l2.75-.5L13 5.25 10.75 3 3.5 10.25 3 13Z" />
-      <path d="M9.75 4L12 6.25" />
     </svg>
   );
 }
@@ -170,6 +216,21 @@ function ClearClipIcon() {
       <path d="M12.5 3.5l-9 9" />
     </svg>
   );
+}
+
+function AcceptClipIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 8.25l3.25 3.25L13 4.5" />
+    </svg>
+  );
+}
+
+function formatOpenTimingDetails(details?: Record<string, number | string | boolean | null | undefined>) {
+  if (!details) return "";
+  const entries = Object.entries(details).filter(([, value]) => value != null);
+  if (entries.length === 0) return "";
+  return ` ${entries.map(([key, value]) => `${key}=${String(value)}`).join(" ")}`;
 }
 
 export function PostgresSourceMediaCodingView({
@@ -203,6 +264,8 @@ export function PostgresSourceMediaCodingView({
   const { t } = useI18n();
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<PendingClipSelection | null>(null);
+  const [pendingClipCodeIds, setPendingClipCodeIds] = useState<string[]>([]);
+  const [selectedClipDraft, setSelectedClipDraft] = useState<SelectedClipDraft | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<SourceAnnotationRow | null>(null);
   const [previewBytes, setPreviewBytes] = useState<Uint8Array | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -214,23 +277,30 @@ export function PostgresSourceMediaCodingView({
   const [durationMs, setDurationMs] = useState(0);
   const [clipPlaybackAnnotationId, setClipPlaybackAnnotationId] = useState<string | null>(null);
   const [mediaElement, setMediaElement] = useState<HTMLMediaElement | null>(null);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [zoomUiState, setZoomUiState] = useState<PostgresSourceMediaTimelineZoomUiState>({
     canZoomIn: false,
     canZoomOut: false,
     canFit: false,
+    zoomPercent: 100,
   });
-  const [clipSelectionEditorOpen, setClipSelectionEditorOpen] = useState(false);
   const [clipSelectionDraftStart, setClipSelectionDraftStart] = useState("");
   const [clipSelectionDraftEnd, setClipSelectionDraftEnd] = useState("");
+  const [volumeControlOpen, setVolumeControlOpen] = useState(false);
+  const [zoomControlOpen, setZoomControlOpen] = useState(false);
+  const [speedControlOpen, setSpeedControlOpen] = useState(false);
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
-  const clipSelectionEditorRef = useRef<HTMLDivElement | null>(null);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
   const mediaElementRef = useRef<HTMLMediaElement | null>(null);
   const mediaTimelineRef = useRef<PostgresSourceMediaTimelineHandle | null>(null);
   const playbackRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const playbackMonitorFrameRef = useRef<number | null>(null);
   const waveformRecoveryAttemptedRef = useRef<string | null>(null);
+  const openTimingStartRef = useRef<number>(performance.now());
+  const volumeControlCloseTimeoutRef = useRef<number | null>(null);
+  const zoomControlCloseTimeoutRef = useRef<number | null>(null);
+  const speedControlCloseTimeoutRef = useRef<number | null>(null);
 
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
@@ -261,14 +331,49 @@ export function PostgresSourceMediaCodingView({
   const selectedRange = selectedAnnotationRange(selectedAnnotation);
   const activeClipRange = pendingSelection
     ? { startMs: pendingSelection.timeStartMs, endMs: pendingSelection.timeEndMs }
+    : selectedClipDraft && selectedClipDraft.annotationId === selectedAnnotationId
+      ? { startMs: selectedClipDraft.startMs, endMs: selectedClipDraft.endMs }
     : selectedRange;
   const activePlaybackRange = pendingSelection
     ? { startMs: pendingSelection.timeStartMs, endMs: pendingSelection.timeEndMs }
+    : selectedClipDraft && selectedClipDraft.annotationId === selectedAnnotationId
+      ? { startMs: selectedClipDraft.startMs, endMs: selectedClipDraft.endMs }
     : selectedRange;
+  const activeClipCodeIds = pendingSelection
+    ? pendingClipCodeIds
+    : selectedClipDraft && selectedClipDraft.annotationId === selectedAnnotationId
+      ? selectedClipDraft.codeIds
+      : selectedAnnotation?.codeIds ?? [];
+  const activeClipHasCodes = activeClipCodeIds.length > 0;
+  const activeClipCodes = activeClipCodeIds.map((codeId) => codesById.get(codeId)).filter((code): code is PostgresExperimentCode => !!code);
+  const pendingClipCodeColors = useMemo(
+    () => pendingClipCodeIds.map((codeId) => codesById.get(codeId)?.color ?? "#888888"),
+    [codesById, pendingClipCodeIds],
+  );
+  const zoomSliderMax = Math.max(800, zoomUiState.zoomPercent);
+  const zoomSliderValue = zoomSliderMax + 100 - Math.max(100, zoomUiState.zoomPercent);
+  const zoomSliderFillPercent = Math.min(100, ((zoomSliderValue - 100) / (zoomSliderMax - 100)) * 100);
+  const playbackRateLabel = `${Number.isInteger(playbackRate) ? playbackRate.toFixed(0) : playbackRate.toFixed(2).replace(/0$/, "")}x`;
+  const playbackSpeedIndex = nearestPlaybackSpeedIndex(playbackRate);
+  const playbackSpeedSliderValue = PLAYBACK_SPEED_OPTIONS.length - 1 - playbackSpeedIndex;
+  const playbackSpeedFillPercent = (playbackSpeedSliderValue / (PLAYBACK_SPEED_OPTIONS.length - 1)) * 100;
+
+  function logOpenTiming(phase: string, details?: Record<string, number | string | boolean | null | undefined>) {
+    const elapsedMs = Math.round(performance.now() - openTimingStartRef.current);
+    console.info(`[media-open:${row.id}] +${elapsedMs}ms ${phase}${formatOpenTimingDetails(details)}`);
+  }
 
   useEffect(() => {
     playbackRangeRef.current = activePlaybackRange;
   }, [activePlaybackRange]);
+
+  useEffect(() => {
+    openTimingStartRef.current = performance.now();
+    logOpenTiming("open-start", {
+      mediaKind,
+      hasCachedWaveform: Boolean(row.waveformPeaksJson),
+    });
+  }, [mediaKind, row.id, row.waveformPeaksJson]);
 
   useEffect(() => {
     return () => {
@@ -288,23 +393,36 @@ export function PostgresSourceMediaCodingView({
   useEffect(() => {
     if (selectedAnnotationId && !mediaAnnotations.some((annotation) => annotation.id === selectedAnnotationId)) {
       setSelectedAnnotationId(null);
+      setSelectedClipDraft(null);
     }
   }, [mediaAnnotations, selectedAnnotationId]);
+
+  useEffect(() => {
+    if (pendingSelection || !selectedAnnotation || !selectedRange) {
+      setSelectedClipDraft(null);
+      return;
+    }
+    setSelectedClipDraft({
+      annotationId: selectedAnnotation.id,
+      startMs: selectedRange.startMs,
+      endMs: selectedRange.endMs,
+      codeIds: selectedAnnotation.codeIds,
+    });
+  }, [pendingSelection, selectedAnnotation?.id]);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
       if (codeContextMenuRef.current && !codeContextMenuRef.current.contains(event.target as Node)) {
         setCodeContextMenu(null);
       }
-      if (clipSelectionEditorRef.current && !clipSelectionEditorRef.current.contains(event.target as Node)) {
-        setClipSelectionEditorOpen(false);
-      }
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setCodeContextMenu(null);
-        setClipSelectionEditorOpen(false);
-        if (!saving) setPendingSelection(null);
+        if (!saving) {
+          setPendingSelection(null);
+          setPendingClipCodeIds([]);
+        }
       }
     }
     document.addEventListener("pointerdown", onPointerDown);
@@ -337,20 +455,26 @@ export function PostgresSourceMediaCodingView({
 
     setPreviewLoading(true);
     setPreviewError(null);
+    logOpenTiming("file-read-start", { path: resolvedFilePath });
 
     void readTauriFile(resolvedFilePath)
       .then((bytes) => {
         if (cancelled) return;
         setPreviewBytes(bytes);
+        logOpenTiming("file-read-complete", { bytes: bytes.byteLength });
         objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaTypeFromFileExtension(fileExt) ?? undefined }));
         setPreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
           return objectUrl;
         });
+        logOpenTiming("preview-url-ready");
       })
       .catch((loadError) => {
         if (cancelled) return;
         setPreviewBytes(null);
+        logOpenTiming("file-read-error", {
+          message: loadError instanceof Error ? loadError.message : "unknown",
+        });
         setPreviewError(loadError instanceof Error ? loadError.message : `Failed to load ${mediaKind} preview.`);
         setPreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
@@ -388,7 +512,16 @@ export function PostgresSourceMediaCodingView({
   useEffect(() => {
     setMediaElement(null);
     mediaElementRef.current = null;
+    setPlaybackRate(1);
   }, [previewUrl, mediaKind]);
+
+  useEffect(() => {
+    if (!mediaElement) return;
+    if (mediaElement.playbackRate !== 1) {
+      mediaElement.playbackRate = 1;
+    }
+    setPlaybackRate(1);
+  }, [mediaElement, previewUrl, mediaKind]);
 
   useEffect(() => {
     const mediaElement = mediaElementRef.current;
@@ -439,9 +572,17 @@ export function PostgresSourceMediaCodingView({
     const handleLoadedMetadata = () => {
       setDurationMs(Number.isFinite(mediaElement.duration) ? mediaElement.duration * 1000 : 0);
       setCurrentTimeMs(mediaElement.currentTime * 1000);
+      setPlaybackRate(mediaElement.playbackRate || 1);
+      logOpenTiming("media-loaded-metadata", {
+        durationMs: Number.isFinite(mediaElement.duration) ? Math.round(mediaElement.duration * 1000) : 0,
+      });
+    };
+    const handleCanPlay = () => {
+      logOpenTiming("media-can-play");
     };
 
     const handleEnded = () => setClipPlaybackAnnotationId(null);
+    const handleRateChange = () => setPlaybackRate(mediaElement.playbackRate || 1);
     const handlePlay = () => {
       const playbackRange = playbackRangeRef.current;
       if (playbackRange) {
@@ -460,7 +601,9 @@ export function PostgresSourceMediaCodingView({
 
     mediaElement.addEventListener("timeupdate", handleTimeUpdate);
     mediaElement.addEventListener("loadedmetadata", handleLoadedMetadata);
+    mediaElement.addEventListener("canplay", handleCanPlay);
     mediaElement.addEventListener("ended", handleEnded);
+    mediaElement.addEventListener("ratechange", handleRateChange);
     mediaElement.addEventListener("play", handlePlay);
     mediaElement.addEventListener("pause", handlePause);
     handleLoadedMetadata();
@@ -469,16 +612,101 @@ export function PostgresSourceMediaCodingView({
       cancelPlaybackMonitor();
       mediaElement.removeEventListener("timeupdate", handleTimeUpdate);
       mediaElement.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      mediaElement.removeEventListener("canplay", handleCanPlay);
       mediaElement.removeEventListener("ended", handleEnded);
+      mediaElement.removeEventListener("ratechange", handleRateChange);
       mediaElement.removeEventListener("play", handlePlay);
       mediaElement.removeEventListener("pause", handlePause);
     };
   }, [clipPlaybackAnnotationId, mediaAnnotations]);
 
-  async function handleQuickCode(codeId: string) {
-    if (!pendingSelection || !canEditAnnotations || saving) return;
-    await onCreateAnnotation(row.id, pendingSelection, { codeIds: [codeId], note: "" });
-    setPendingSelection(null);
+  function togglePendingClipCode(codeId: string) {
+    setPendingClipCodeIds((current) => (
+      current.includes(codeId)
+        ? current.filter((entry) => entry !== codeId)
+        : [...current, codeId]
+    ));
+  }
+
+  function toggleSelectedAnnotationCode(codeId: string) {
+    if (!selectedAnnotation || !canEditAnnotations || saving) return;
+    setSelectedClipDraft((current) => {
+      const draft = current && current.annotationId === selectedAnnotation.id
+        ? current
+        : {
+          annotationId: selectedAnnotation.id,
+          startMs: selectedAnnotation.timeStartMs ?? 0,
+          endMs: selectedAnnotation.timeEndMs ?? (selectedAnnotation.timeStartMs ?? 0) + 1,
+          codeIds: selectedAnnotation.codeIds,
+        };
+      const nextCodeIds = draft.codeIds.includes(codeId)
+        ? draft.codeIds.filter((entry) => entry !== codeId)
+        : [...draft.codeIds, codeId];
+      return { ...draft, codeIds: nextCodeIds };
+    });
+  }
+
+  function handleCodebookCodeClick(codeId: string) {
+    if (!canEditAnnotations || saving) return;
+    if (pendingSelection) {
+      togglePendingClipCode(codeId);
+      return;
+    }
+    if (selectedAnnotation) {
+      toggleSelectedAnnotationCode(codeId);
+    }
+  }
+
+  function getDraftRangeFromInputs(fallbackRange: { startMs: number; endMs: number }) {
+    const parsedStartSeconds = parseEditableTimestamp(clipSelectionDraftStart);
+    const parsedEndSeconds = parseEditableTimestamp(clipSelectionDraftEnd);
+    if (parsedStartSeconds == null || parsedEndSeconds == null) return fallbackRange;
+
+    const durationLimitMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
+    const nextStartMs = Math.max(0, Math.round(parsedStartSeconds * 1000));
+    const nextEndMs = Math.min(durationLimitMs, Math.round(parsedEndSeconds * 1000));
+    return {
+      startMs: nextStartMs,
+      endMs: Math.max(nextStartMs + 1, nextEndMs),
+    };
+  }
+
+  async function acceptActiveClipChanges() {
+    if (!activeClipRange || !canEditAnnotations || saving) return;
+    if (!activeClipHasCodes) return;
+    const nextRange = getDraftRangeFromInputs(activeClipRange);
+
+    if (pendingSelection) {
+      await onCreateAnnotation(row.id, clipSelectionFromRange(nextRange.startMs, nextRange.endMs), { codeIds: pendingClipCodeIds, note: "" });
+      setPendingSelection(null);
+      setPendingClipCodeIds([]);
+      setClipPlaybackAnnotationId(null);
+      return;
+    }
+
+    if (!selectedAnnotation) return;
+    const draft = selectedClipDraft && selectedClipDraft.annotationId === selectedAnnotation.id
+      ? selectedClipDraft
+      : {
+        annotationId: selectedAnnotation.id,
+        startMs: nextRange.startMs,
+        endMs: nextRange.endMs,
+        codeIds: selectedAnnotation.codeIds,
+      };
+    const clipQuote = buildMediaClipQuote(nextRange.startMs, nextRange.endMs);
+    await onUpdateAnnotation(selectedAnnotation, {
+      codeIds: draft.codeIds,
+      note: selectedAnnotation.note,
+      startOffset: null,
+      endOffset: null,
+      quote: selectedAnnotation.quote.startsWith("Clip ") ? clipQuote : selectedAnnotation.quote,
+      anchorKind: "time_range",
+      timeStartMs: nextRange.startMs,
+      timeEndMs: nextRange.endMs,
+    });
+    setSelectedClipDraft(null);
+    setSelectedAnnotationId(null);
+    setClipPlaybackAnnotationId(null);
   }
 
   function toggleCollapsedCode(codeId: string) {
@@ -501,6 +729,8 @@ export function PostgresSourceMediaCodingView({
     const mediaElement = mediaElementRef.current;
     if (!annotation || annotation.timeStartMs == null || annotation.timeEndMs == null || !mediaElement) return;
     playRange(annotation.timeStartMs, annotation.timeEndMs, annotation.id);
+    setPendingSelection(null);
+    setPendingClipCodeIds([]);
     setSelectedAnnotationId(annotation.id);
   }
 
@@ -527,6 +757,7 @@ export function PostgresSourceMediaCodingView({
       ? Math.max(currentStartMs + 1, Math.min(targetEndMs, knownDurationMs))
       : targetEndMs;
     setPendingSelection(clipSelectionFromRange(currentStartMs, nextEndMs));
+    setPendingClipCodeIds([]);
     setSelectedAnnotationId(null);
     setClipPlaybackAnnotationId(null);
   }
@@ -534,6 +765,15 @@ export function PostgresSourceMediaCodingView({
   async function handleUpdateAnnotationRange(annotationId: string, startMs: number, endMs: number) {
     const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
     if (!annotation) return;
+    if (annotationId === selectedAnnotationId) {
+      setSelectedClipDraft((current) => ({
+        annotationId,
+        startMs,
+        endMs,
+        codeIds: current && current.annotationId === annotationId ? current.codeIds : annotation.codeIds,
+      }));
+      return;
+    }
     const clipQuote = buildMediaClipQuote(startMs, endMs);
     await onUpdateAnnotation(annotation, {
       codeIds: annotation.codeIds,
@@ -564,11 +804,6 @@ export function PostgresSourceMediaCodingView({
   const clipActionEnabledStyle = canEditAnnotations
     ? { opacity: 1, cursor: "pointer" as const }
     : { opacity: 0.45, cursor: "not-allowed" as const };
-  const disabledPlayerActionStyle = {
-    opacity: 0.42,
-    cursor: "not-allowed" as const,
-    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-  };
   const mediaChromeThemeStyle = {
     "--media-primary-color": "#233142",
     "--media-secondary-color": "rgba(232, 238, 244, 0.98)",
@@ -597,36 +832,147 @@ export function PostgresSourceMediaCodingView({
     "--media-focus-box-shadow": "0 0 0 2px rgba(75, 85, 99, 0.18)",
   } as const;
 
-  function openClipSelectionEditor() {
+  useEffect(() => {
+    return () => {
+      if (volumeControlCloseTimeoutRef.current != null) {
+        window.clearTimeout(volumeControlCloseTimeoutRef.current);
+      }
+      if (zoomControlCloseTimeoutRef.current != null) {
+        window.clearTimeout(zoomControlCloseTimeoutRef.current);
+      }
+      if (speedControlCloseTimeoutRef.current != null) {
+        window.clearTimeout(speedControlCloseTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!activeClipRange) return;
-    setClipSelectionDraftStart(formatEditableSeconds(activeClipRange.startMs));
-    setClipSelectionDraftEnd(formatEditableSeconds(activeClipRange.endMs));
-    setClipSelectionEditorOpen(true);
-  }
+    setClipSelectionDraftStart(formatEditableTimestamp(activeClipRange.startMs));
+    setClipSelectionDraftEnd(formatEditableTimestamp(activeClipRange.endMs));
+  }, [activeClipRange?.startMs, activeClipRange?.endMs]);
 
   function clearActiveClipSelection() {
     setPendingSelection(null);
+    setPendingClipCodeIds([]);
     setSelectedAnnotationId(null);
     setClipPlaybackAnnotationId(null);
-    setClipSelectionEditorOpen(false);
   }
 
-  async function applyClipSelectionEdits() {
-    if (!activeClipRange || !canEditAnnotations) return;
-    const parsedStartSeconds = Number(clipSelectionDraftStart);
-    const parsedEndSeconds = Number(clipSelectionDraftEnd);
-    if (!Number.isFinite(parsedStartSeconds) || !Number.isFinite(parsedEndSeconds)) return;
+  function resetClipSelectionDraftsToActiveRange() {
+    if (!activeClipRange) return;
+    setClipSelectionDraftStart(formatEditableTimestamp(activeClipRange.startMs));
+    setClipSelectionDraftEnd(formatEditableTimestamp(activeClipRange.endMs));
+  }
+
+  function handleClipSelectionDraftChange(field: "start" | "end", value: string) {
+    if (field === "start") {
+      setClipSelectionDraftStart(value);
+    } else {
+      setClipSelectionDraftEnd(value);
+    }
+
+    if (!canEditAnnotations || saving || !activeClipRange) return;
+
+    const nextStartDraft = field === "start" ? value : clipSelectionDraftStart;
+    const nextEndDraft = field === "end" ? value : clipSelectionDraftEnd;
+    const parsedStartSeconds = parseEditableTimestamp(nextStartDraft);
+    const parsedEndSeconds = parseEditableTimestamp(nextEndDraft);
+    if (parsedStartSeconds == null || parsedEndSeconds == null) return;
+
     const durationLimitMs = durationMs > 0 ? durationMs : Number.POSITIVE_INFINITY;
     const nextStartMs = Math.max(0, Math.round(parsedStartSeconds * 1000));
     const nextEndMs = Math.min(durationLimitMs, Math.round(parsedEndSeconds * 1000));
     const safeEndMs = Math.max(nextStartMs + 1, nextEndMs);
+
     if (pendingSelection) {
       setPendingSelection(clipSelectionFromRange(nextStartMs, safeEndMs));
     } else if (selectedAnnotation) {
-      await handleUpdateAnnotationRange(selectedAnnotation.id, nextStartMs, safeEndMs);
+      setSelectedClipDraft((current) => ({
+        annotationId: selectedAnnotation.id,
+        startMs: nextStartMs,
+        endMs: safeEndMs,
+        codeIds: current && current.annotationId === selectedAnnotation.id ? current.codeIds : selectedAnnotation.codeIds,
+      }));
     }
-    setClipSelectionEditorOpen(false);
   }
+
+  function stepClipSelectionDraft(field: "start" | "end", direction: 1 | -1) {
+    if (!activeClipRange || !canEditAnnotations || saving) return;
+
+    const currentDraft = field === "start" ? clipSelectionDraftStart : clipSelectionDraftEnd;
+    const fallbackSeconds = (field === "start" ? activeClipRange.startMs : activeClipRange.endMs) / 1000;
+    const currentSeconds = parseEditableTimestamp(currentDraft) ?? fallbackSeconds;
+    const nextSeconds = Math.max(0, currentSeconds + direction * 0.1);
+
+    handleClipSelectionDraftChange(field, formatEditableTimestamp(nextSeconds * 1000));
+  }
+
+  function openVolumeControl() {
+    if (volumeControlCloseTimeoutRef.current != null) {
+      window.clearTimeout(volumeControlCloseTimeoutRef.current);
+      volumeControlCloseTimeoutRef.current = null;
+    }
+    setVolumeControlOpen(true);
+  }
+
+  function scheduleVolumeControlClose() {
+    if (volumeControlCloseTimeoutRef.current != null) {
+      window.clearTimeout(volumeControlCloseTimeoutRef.current);
+    }
+    volumeControlCloseTimeoutRef.current = window.setTimeout(() => {
+      volumeControlCloseTimeoutRef.current = null;
+      setVolumeControlOpen(false);
+    }, 1000);
+  }
+
+  function openZoomControl() {
+    if (zoomControlCloseTimeoutRef.current != null) {
+      window.clearTimeout(zoomControlCloseTimeoutRef.current);
+      zoomControlCloseTimeoutRef.current = null;
+    }
+    setZoomControlOpen(true);
+  }
+
+  function scheduleZoomControlClose() {
+    if (zoomControlCloseTimeoutRef.current != null) {
+      window.clearTimeout(zoomControlCloseTimeoutRef.current);
+    }
+    zoomControlCloseTimeoutRef.current = window.setTimeout(() => {
+      zoomControlCloseTimeoutRef.current = null;
+      setZoomControlOpen(false);
+    }, 1000);
+  }
+
+  function openSpeedControl() {
+    if (speedControlCloseTimeoutRef.current != null) {
+      window.clearTimeout(speedControlCloseTimeoutRef.current);
+      speedControlCloseTimeoutRef.current = null;
+    }
+    setSpeedControlOpen(true);
+  }
+
+  function scheduleSpeedControlClose() {
+    if (speedControlCloseTimeoutRef.current != null) {
+      window.clearTimeout(speedControlCloseTimeoutRef.current);
+    }
+    speedControlCloseTimeoutRef.current = window.setTimeout(() => {
+      speedControlCloseTimeoutRef.current = null;
+      setSpeedControlOpen(false);
+    }, 1000);
+  }
+
+  function setMediaPlaybackRate(rate: number) {
+    const mediaElement = mediaElementRef.current;
+    if (mediaElement) {
+      mediaElement.playbackRate = rate;
+    }
+    setPlaybackRate(rate);
+  }
+
+  const showSourceAccessNotice = sourceLockConflict?.reason === "kicked"
+    || sourceLockConflict?.reason === "locked"
+    || !canEditAnnotations;
 
   return (
     <div className="view doc-detail-view">
@@ -645,7 +991,17 @@ export function PostgresSourceMediaCodingView({
             </div>
             {pendingSelection ? (
               <div className="codebook-selection-hint">
-                A pending clip selection is active. Drag its edges on the waveform to adjust it, or select a code to apply it.
+                <span>
+                  Select one or more codes for this clip, then apply it.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--small btn--primary"
+                  onClick={() => void acceptActiveClipChanges()}
+                  disabled={!canEditAnnotations || saving}
+                >
+                  {saving ? "Applying..." : "Apply clip"}
+                </button>
               </div>
             ) : null}
             <ul className="code-list">
@@ -655,12 +1011,12 @@ export function PostgresSourceMediaCodingView({
                 visibleCodes.map(({ code, depth, hasChildren }) => (
                   <li
                     key={code.id}
-                    className={`code-item${pendingSelection && canEditAnnotations ? " code-item--annotatable" : ""}`}
+                    className={`code-item${activeClipRange && canEditAnnotations ? " code-item--annotatable" : ""}${activeClipCodeIds.includes(code.id) ? " code-item--selected" : ""}`}
                     style={{ paddingLeft: 6 + depth * 16 }}
                     onMouseDown={(event) => {
-                      if (pendingSelection) event.preventDefault();
+                      if (activeClipRange) event.preventDefault();
                     }}
-                    onClick={() => void handleQuickCode(code.id)}
+                    onClick={() => handleCodebookCodeClick(code.id)}
                     onContextMenu={(event) => {
                       if (!canManageMemos) return;
                       event.preventDefault();
@@ -696,6 +1052,8 @@ export function PostgresSourceMediaCodingView({
             selectedAnnotationId={selectedAnnotationId}
             codesById={codesById}
             onSelectAnnotation={(annotationId) => {
+              setPendingSelection(null);
+              setPendingClipCodeIds([]);
               setSelectedAnnotationId(annotationId);
               const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
               if (annotation) seekToAnnotation(annotation);
@@ -710,38 +1068,36 @@ export function PostgresSourceMediaCodingView({
         </div>
 
         <div className="annotate-main">
-          <div className="annotate-card annotate-card--grow">
-            <div className="doc-viewer-toolbar">
-              <span className="doc-name">{row.name}</span>
-            </div>
-
-            <div style={{ marginTop: 12, marginBottom: 12 }}>
-              {sourceLockConflict?.reason === "kicked" ? (
-                <p className="users-guide-copy" style={{ margin: 0 }}>
-                  {sourceLockConflict.userName || "A project editor"} removed your source lock. Return to the source list or reacquire access before annotating again.
-                </p>
-              ) : sourceLockConflict?.reason === "locked" ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <div className="annotate-card annotate-card--grow media-source-card">
+            {showSourceAccessNotice ? (
+              <div style={{ marginTop: 12, marginBottom: 12 }}>
+                {sourceLockConflict?.reason === "kicked" ? (
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    {sourceLockConflict.userName || "Another user"} is currently annotating this source.
+                    {sourceLockConflict.userName || "A project editor"} removed your source lock. Return to the source list or reacquire access before annotating again.
                   </p>
-                  {canKickSourceLocks ? (
-                    <button
-                      type="button"
-                      className="btn btn--small"
-                      onClick={() => void onKickSourceLock(sourceLockConflict)}
-                      disabled={saving || lockSyncing}
-                    >
-                      {lockSyncing ? "Updating..." : "Take Lock"}
-                    </button>
-                  ) : null}
-                </div>
-              ) : !canEditAnnotations ? (
-                <p className="users-guide-copy" style={{ margin: 0 }}>
-                  {lockSyncing ? "Claiming the source lock for annotation..." : `This ${mediaKind} source is currently read-only in the coding workspace.`}
-                </p>
-              ) : null}
-            </div>
+                ) : sourceLockConflict?.reason === "locked" ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                    <p className="users-guide-copy" style={{ margin: 0 }}>
+                      {sourceLockConflict.userName || "Another user"} is currently annotating this source.
+                    </p>
+                    {canKickSourceLocks ? (
+                      <button
+                        type="button"
+                        className="btn btn--small"
+                        onClick={() => void onKickSourceLock(sourceLockConflict)}
+                        disabled={saving || lockSyncing}
+                      >
+                        {lockSyncing ? "Updating..." : "Take Lock"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="users-guide-copy" style={{ margin: 0 }}>
+                    {lockSyncing ? "Claiming the source lock for annotation..." : `This ${mediaKind} source is currently read-only in the coding workspace.`}
+                  </p>
+                )}
+              </div>
+            ) : null}
 
             {previewLoading ? (
               <p className="users-guide-copy" style={{ margin: 0 }}>Loading {mediaKind} preview...</p>
@@ -783,43 +1139,63 @@ export function PostgresSourceMediaCodingView({
                   />
                 )}
 
-                <PostgresSourceMediaTimeline
-                  ref={mediaTimelineRef}
-                  mediaElement={mediaElement}
-                  waveformCache={waveformCache}
-                  annotations={mediaAnnotations}
-                  selectedAnnotationId={selectedAnnotationId}
-                  canEditAnnotations={canEditAnnotations}
-                  pendingSelection={pendingSelection ? {
-                    startMs: pendingSelection.timeStartMs,
-                    endMs: pendingSelection.timeEndMs,
-                  } : null}
-                  onCreateSelection={(startMs, endMs) => {
-                    setPendingSelection(clipSelectionFromRange(startMs, endMs));
-                    setSelectedAnnotationId(null);
-                  }}
-                  onSelectAnnotation={(annotationId) => {
-                    setSelectedAnnotationId(annotationId);
-                    const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
-                    if (annotation) seekToAnnotation(annotation);
-                  }}
-                  onUpdateAnnotationRange={(annotationId, startMs, endMs) => {
-                    void handleUpdateAnnotationRange(annotationId, startMs, endMs);
-                  }}
-                  onPlayClip={playClip}
-                  onZoomUiStateChange={setZoomUiState}
-                />
+                <div className="media-player-console-frame">
+                  <svg
+                    className="media-player-console-outline"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <path
+                      d="M 2 8 Q 2 2 8 2 H 92 Q 98 2 98 8 V 58 Q 98 62 94 62 H 70 Q 67.3 62 67.1 65 L 65 90 Q 64.5 96 58.5 96 H 41.5 Q 35.5 96 35 90 L 32.9 65 Q 32.7 62 30 62 H 6 Q 2 62 2 58 Z"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                  <div className="media-player-console-title">
+                    <span className="doc-name">{row.name}</span>
+                  </div>
+                  <PostgresSourceMediaTimeline
+                    ref={mediaTimelineRef}
+                    mediaElement={mediaElement}
+                    waveformCache={waveformCache}
+                    annotations={mediaAnnotations}
+                    selectedAnnotationId={selectedAnnotationId}
+                    canEditAnnotations={canEditAnnotations}
+                    pendingSelection={pendingSelection ? {
+                      startMs: pendingSelection.timeStartMs,
+                      endMs: pendingSelection.timeEndMs,
+                    } : null}
+                    pendingSelectionCodeColors={pendingClipCodeColors}
+                    onCreateSelection={(startMs, endMs) => {
+                      setPendingSelection(clipSelectionFromRange(startMs, endMs));
+                      setPendingClipCodeIds([]);
+                      setSelectedAnnotationId(null);
+                    }}
+                    onSelectAnnotation={(annotationId) => {
+                      setPendingSelection(null);
+                      setPendingClipCodeIds([]);
+                      setSelectedAnnotationId(annotationId);
+                      const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
+                      if (annotation) seekToAnnotation(annotation);
+                    }}
+                    onUpdateAnnotationRange={(annotationId, startMs, endMs) => {
+                      void handleUpdateAnnotationRange(annotationId, startMs, endMs);
+                    }}
+                    onPlayClip={playClip}
+                    onZoomUiStateChange={setZoomUiState}
+                  />
 
-                <MediaController
-                  audio={mediaKind === "audio" ? true : undefined}
-                  className="media-player-controller"
-                  style={{
-                    display: "grid",
-                    gap: 10,
-                    width: "100%",
-                    ...mediaChromeThemeStyle,
-                  }}
-                >
+                  <MediaController
+                    audio={mediaKind === "audio" ? true : undefined}
+                    className="media-player-controller"
+                    style={{
+                      display: "grid",
+                      gap: 10,
+                      width: "100%",
+                      ...mediaChromeThemeStyle,
+                    }}
+                  >
                   {mediaKind === "video" ? (
                     <video
                       slot="media"
@@ -854,148 +1230,141 @@ export function PostgresSourceMediaCodingView({
                       }}
                     />
                   )}
-                  <MediaControlBar
-                    className="media-player-control-bar"
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 8,
-                      padding: "10px 12px",
-                      borderRadius: 14,
-                      background: "rgba(255, 255, 255, 0.94)",
-                      border: "1px solid rgba(53, 80, 112, 0.12)",
-                      boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
-                      color: "#233142",
-                    }}
-                  >
-                      <div className="media-player-control-row">
-                        <div className="media-player-control-cluster">
-                          <button
-                            type="button"
-                            className="media-player-clip-action"
-                            disabled={!zoomUiState.canZoomOut}
-                            onClick={() => mediaTimelineRef.current?.zoomOut()}
-                            aria-label="Zoom out"
-                            title="Zoom out"
-                            style={{
-                              ...playerActionButtonStyle,
-                              ...(!zoomUiState.canZoomOut ? disabledPlayerActionStyle : null),
-                            }}
-                          >
-                            <ZoomOutIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className="media-player-clip-action"
-                            disabled={!zoomUiState.canFit}
-                            onClick={() => mediaTimelineRef.current?.fitToWaveform()}
-                            aria-label="Fit waveform"
-                            title="Fit waveform"
-                            style={{
-                              ...playerActionButtonStyle,
-                              ...(!zoomUiState.canFit ? disabledPlayerActionStyle : null),
-                            }}
-                          >
-                            <ZoomFitIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className="media-player-clip-action"
-                            disabled={!zoomUiState.canZoomIn}
-                            onClick={() => mediaTimelineRef.current?.zoomIn()}
-                            aria-label="Zoom in"
-                            title="Zoom in"
-                            style={{
-                              ...playerActionButtonStyle,
-                              ...(!zoomUiState.canZoomIn ? disabledPlayerActionStyle : null),
-                            }}
-                          >
-                            <ZoomInIcon />
-                          </button>
-                        </div>
-                        <div ref={clipSelectionEditorRef} className="media-player-control-cluster media-player-clip-cluster">
+                    <MediaControlBar
+                      className="media-player-control-bar"
+                      style={{
+                        width: "100%",
+                        color: "#233142",
+                      }}
+                    >
+                      <div className="media-player-layout-grid">
+                        <div
+                          className={`media-player-control-cluster media-player-clip-cluster media-player-grid-clip${activeClipRange ? " media-player-clip-cluster--active" : ""}`}
+                        >
                           {activeClipRange ? (
-                            <>
+                            <div className="media-player-clip-group">
+                              <svg
+                                className="media-player-clip-shape"
+                                viewBox="0 0 312 164"
+                                preserveAspectRatio="none"
+                                aria-hidden="true"
+                                focusable="false"
+                              >
+                                <defs>
+                                  <linearGradient id="media-player-clip-shape-gradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="rgba(237, 242, 247, 0.98)" />
+                                    <stop offset="100%" stopColor="rgba(226, 232, 240, 0.98)" />
+                                  </linearGradient>
+                                </defs>
+                                <path
+                                  d="M288 0H24Q0 0 0 24V40Q0 64 24 64H40Q64 64 64 88V140Q64 164 88 164H288Q312 164 312 140V24Q312 0 288 0Z"
+                                  className="media-player-clip-shape-fill"
+                                />
+                              </svg>
                               <button
                                 type="button"
-                                onClick={openClipSelectionEditor}
-                                disabled={!canEditAnnotations}
-                                className="media-player-clip-action"
-                                aria-label="Edit selection"
-                                title="Edit selection"
-                                style={{
-                                  ...playerActionButtonStyle,
-                                  ...clipActionEnabledStyle,
-                                }}
+                                onClick={activeClipHasCodes ? () => void acceptActiveClipChanges() : clearActiveClipSelection}
+                                disabled={activeClipHasCodes && (!canEditAnnotations || saving)}
+                                className="media-player-clip-action media-player-clip-anchor"
+                                aria-label={activeClipHasCodes ? "Accept clip changes" : "Cancel clip changes"}
+                                title={activeClipHasCodes ? "Accept changes" : "Cancel changes"}
+                                style={playerActionButtonStyle}
                               >
-                                <EditClipIcon />
+                                {activeClipHasCodes ? <AcceptClipIcon /> : <ClearClipIcon />}
                               </button>
                               <button
                                 type="button"
                                 onClick={clearActiveClipSelection}
-                                className="media-player-clip-action"
-                                aria-label="Clear selection"
-                                title="Clear selection"
-                                style={playerActionButtonStyle}
+                                className="media-player-clip-cancel-button"
+                                aria-label="Cancel clip changes"
+                                title="Cancel changes"
                               >
                                 <ClearClipIcon />
                               </button>
-                              {clipSelectionEditorOpen ? (
-                                <div className="media-player-clip-editor">
-                                  <label className="media-player-clip-editor-field">
+                              <div className="media-player-clip-popout">
+                                <div className="media-player-clip-inline-editor">
+                                  <div className="media-player-clip-code-badges" aria-label="Selected clip codes">
+                                    {activeClipCodes.length > 0 ? (
+                                      activeClipCodes.map((code) => (
+                                        <span key={code.id} className="annotation-code-badge" style={{ background: code.color }}>
+                                          {code.label}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span className="annotation-code-badge media-player-clip-code-badge--empty">
+                                        No codes
+                                      </span>
+                                    )}
+                                  </div>
+                                  <label className="media-player-clip-inline-field">
                                     <span>Start</span>
                                     <input
-                                      type="number"
-                                      min={0}
-                                      max={durationMs > 0 ? durationMs / 1000 : undefined}
-                                      step={0.1}
+                                      type="text"
+                                      inputMode="decimal"
                                       value={clipSelectionDraftStart}
-                                      onChange={(event) => setClipSelectionDraftStart(event.target.value)}
+                                      onChange={(event) => handleClipSelectionDraftChange("start", event.target.value)}
+                                      onBlur={resetClipSelectionDraftsToActiveRange}
+                                      disabled={!canEditAnnotations || saving}
                                     />
+                                    <span className="media-player-clip-stepper" aria-hidden={false}>
+                                      <button
+                                        type="button"
+                                        className="media-player-clip-stepper-button"
+                                        onClick={() => stepClipSelectionDraft("start", 1)}
+                                        disabled={!canEditAnnotations || saving}
+                                        aria-label="Increase start timestamp"
+                                        title="Increase start timestamp"
+                                      >
+                                        <TimestampStepUpIcon />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="media-player-clip-stepper-button"
+                                        onClick={() => stepClipSelectionDraft("start", -1)}
+                                        disabled={!canEditAnnotations || saving}
+                                        aria-label="Decrease start timestamp"
+                                        title="Decrease start timestamp"
+                                      >
+                                        <TimestampStepDownIcon />
+                                      </button>
+                                    </span>
                                   </label>
-                                  <label className="media-player-clip-editor-field">
+                                  <label className="media-player-clip-inline-field">
                                     <span>End</span>
                                     <input
-                                      type="number"
-                                      min={0}
-                                      max={durationMs > 0 ? durationMs / 1000 : undefined}
-                                      step={0.1}
+                                      type="text"
+                                      inputMode="decimal"
                                       value={clipSelectionDraftEnd}
-                                      onChange={(event) => setClipSelectionDraftEnd(event.target.value)}
-                                    />
-                                  </label>
-                                  <div className="media-player-clip-editor-actions">
-                                    <button
-                                      type="button"
-                                      className="media-player-clip-action"
-                                      onClick={() => setClipSelectionEditorOpen(false)}
-                                      style={playerActionButtonStyle}
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="media-player-clip-action media-player-clip-action--primary"
-                                      onClick={() => void applyClipSelectionEdits()}
+                                      onChange={(event) => handleClipSelectionDraftChange("end", event.target.value)}
+                                      onBlur={resetClipSelectionDraftsToActiveRange}
                                       disabled={!canEditAnnotations || saving}
-                                      style={{
-                                        ...playerActionButtonStyle,
-                                        background: "linear-gradient(180deg, rgba(75, 85, 99, 0.98), rgba(55, 65, 81, 0.98))",
-                                        color: "#f8fafc",
-                                        border: "1px solid rgba(31, 41, 55, 0.5)",
-                                        opacity: !canEditAnnotations || saving ? 0.5 : 1,
-                                        cursor: !canEditAnnotations || saving ? "not-allowed" : "pointer",
-                                      }}
-                                    >
-                                      Apply
-                                    </button>
-                                  </div>
+                                    />
+                                    <span className="media-player-clip-stepper" aria-hidden={false}>
+                                      <button
+                                        type="button"
+                                        className="media-player-clip-stepper-button"
+                                        onClick={() => stepClipSelectionDraft("end", 1)}
+                                        disabled={!canEditAnnotations || saving}
+                                        aria-label="Increase end timestamp"
+                                        title="Increase end timestamp"
+                                      >
+                                        <TimestampStepUpIcon />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="media-player-clip-stepper-button"
+                                        onClick={() => stepClipSelectionDraft("end", -1)}
+                                        disabled={!canEditAnnotations || saving}
+                                        aria-label="Decrease end timestamp"
+                                        title="Decrease end timestamp"
+                                      >
+                                        <TimestampStepDownIcon />
+                                      </button>
+                                    </span>
+                                  </label>
                                 </div>
-                              ) : null}
-                            </>
+                              </div>
+                            </div>
                           ) : (
                             <button
                               type="button"
@@ -1013,25 +1382,110 @@ export function PostgresSourceMediaCodingView({
                             </button>
                           )}
                         </div>
-                      </div>
-                      <div className="media-player-control-row">
-                        <div className="media-player-control-cluster">
-                          <MediaPlayButton className="media-player-native-control" />
-                          <MediaSeekBackwardButton className="media-player-native-control" seekOffset={5} />
-                          <MediaSeekForwardButton className="media-player-native-control" seekOffset={5} />
-                          <MediaPlaybackRateButton className="media-player-native-control media-player-native-control--label" />
-                          <div className="media-player-volume-cluster">
-                            <MediaMuteButton className="media-player-native-control" />
-                            <MediaVolumeRange className="media-player-volume-range" />
+                        <div
+                          className={`media-player-zoom-cluster media-player-grid-zoom${zoomControlOpen ? " is-zoom-open" : ""}`}
+                          onPointerEnter={openZoomControl}
+                          onPointerLeave={scheduleZoomControlClose}
+                          onFocus={openZoomControl}
+                          onBlur={scheduleZoomControlClose}
+                        >
+                          <button
+                            type="button"
+                            className="media-player-native-control media-player-zoom-fit-button"
+                            disabled={!zoomUiState.canFit}
+                            onClick={() => mediaTimelineRef.current?.fitToWaveform()}
+                            aria-label="Fit waveform"
+                            title="Fit waveform"
+                          >
+                            <ZoomFitIcon />
+                          </button>
+                          <div className="media-player-zoom-popout" aria-label="Waveform zoom">
+                            <div className="media-player-zoom-meter" aria-label={`Zoom ${zoomUiState.zoomPercent}%`}>
+                              <input
+                                type="range"
+                                min="100"
+                                max={zoomSliderMax}
+                                step="1"
+                                value={zoomSliderValue}
+                                onChange={(event) => mediaTimelineRef.current?.setZoomPercent(zoomSliderMax + 100 - Number(event.target.value))}
+                                className="media-player-zoom-range"
+                                aria-label={`Waveform zoom level, ${zoomUiState.zoomPercent}%`}
+                                style={{
+                                  background: `linear-gradient(90deg, rgba(53, 80, 112, 0.14) 0%, rgba(53, 80, 112, 0.14) ${zoomSliderFillPercent}%, #4b5563 ${zoomSliderFillPercent}%, #4b5563 100%)`,
+                                }}
+                              />
+                            </div>
                           </div>
-                          {mediaKind === "video" ? <MediaFullscreenButton className="media-player-native-control" /> : null}
-                          <MediaTimeDisplay className="media-player-time-display" />
-                          <span className="users-guide-copy media-player-time-separator">/</span>
-                          <MediaDurationDisplay className="media-player-time-display" />
+                        </div>
+                        <div className="media-player-grid-seek-back">
+                          <MediaSeekBackwardButton className="media-player-native-control" seekOffset={5} />
+                        </div>
+                        <div className="media-player-grid-play">
+                          <MediaPlayButton className="media-player-native-control media-player-native-control--play" />
+                        </div>
+                        <div className="media-player-grid-seek-forward">
+                          <MediaSeekForwardButton className="media-player-native-control" seekOffset={5} />
+                        </div>
+                        <div className="media-player-grid-speed">
+                          <div
+                            className={`media-player-speed-cluster${speedControlOpen ? " is-speed-open" : ""}`}
+                            onPointerEnter={openSpeedControl}
+                            onPointerLeave={scheduleSpeedControlClose}
+                            onFocus={openSpeedControl}
+                            onBlur={scheduleSpeedControlClose}
+                          >
+                            <button
+                              type="button"
+                              className="media-player-native-control media-player-speed-button"
+                              onClick={() => {
+                                const currentIndex = PLAYBACK_SPEED_OPTIONS.findIndex((rate) => Math.abs(rate - playbackRate) < 0.01);
+                                setMediaPlaybackRate(PLAYBACK_SPEED_OPTIONS[(currentIndex + 1) % PLAYBACK_SPEED_OPTIONS.length]);
+                              }}
+                              aria-label={`Playback speed ${playbackRateLabel}`}
+                              title="Playback speed"
+                            >
+                              {playbackRateLabel}
+                            </button>
+                            <div className="media-player-speed-popout" aria-label="Playback speed">
+                              <div className="media-player-speed-meter" aria-label={`Playback speed ${playbackRateLabel}`}>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max={PLAYBACK_SPEED_OPTIONS.length - 1}
+                                  step="1"
+                                  value={playbackSpeedSliderValue}
+                                  onChange={(event) => {
+                                    const nextRate = PLAYBACK_SPEED_OPTIONS[PLAYBACK_SPEED_OPTIONS.length - 1 - Number(event.target.value)];
+                                    if (nextRate != null) setMediaPlaybackRate(nextRate);
+                                  }}
+                                  className="media-player-speed-range"
+                                  aria-label={`Playback speed, ${playbackRateLabel}`}
+                                  style={{
+                                    background: `linear-gradient(90deg, rgba(53, 80, 112, 0.14) 0%, rgba(53, 80, 112, 0.14) ${playbackSpeedFillPercent}%, #4b5563 ${playbackSpeedFillPercent}%, #4b5563 100%)`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="media-player-grid-volume">
+                          <div
+                            className={`media-player-volume-cluster${volumeControlOpen ? " is-volume-open" : ""}`}
+                            onPointerEnter={openVolumeControl}
+                            onPointerLeave={scheduleVolumeControlClose}
+                            onFocus={openVolumeControl}
+                            onBlur={scheduleVolumeControlClose}
+                          >
+                            <MediaMuteButton className="media-player-native-control" />
+                            <div className="media-player-volume-popout" aria-label="Volume">
+                              <MediaVolumeRange className="media-player-volume-range" />
+                            </div>
+                          </div>
                         </div>
                       </div>
-                  </MediaControlBar>
-                </MediaController>
+                    </MediaControlBar>
+                  </MediaController>
+                </div>
               </div>
             ) : (
               <p className="case-card-empty">No {mediaKind} preview is available for this source.</p>

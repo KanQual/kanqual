@@ -21,7 +21,7 @@ const SEGMENT_STRIP_MIN_BAR_WIDTH_PX = 3;
 const SEGMENT_STRIP_PADDING_TOP_PX = 6;
 const SEGMENT_STRIP_PADDING_BOTTOM_PX = 2;
 const DIMMED_SEGMENT_OPACITY = 0.38;
-const SCROLLBAR_RESERVE_PX = 16;
+const SCROLLBAR_RESERVE_PX = 0;
 const MIN_LABEL_GAP_PX = 84;
 const LABEL_WIDTH_BIAS_PX = 18;
 
@@ -53,10 +53,18 @@ type ResponsiveTimelineConfig = {
   secondaryLabelSpacing?: number;
 };
 
+function formatOpenTimingDetails(details?: Record<string, number | string | boolean | null | undefined>) {
+  if (!details) return "";
+  const entries = Object.entries(details).filter(([, value]) => value != null);
+  if (entries.length === 0) return "";
+  return ` ${entries.map(([key, value]) => `${key}=${String(value)}`).join(" ")}`;
+}
+
 export type PostgresSourceMediaTimelineHandle = {
   zoomIn: () => void;
   zoomOut: () => void;
   fitToWaveform: () => void;
+  setZoomPercent: (percent: number) => void;
   isReady: () => boolean;
 };
 
@@ -64,6 +72,7 @@ export type PostgresSourceMediaTimelineZoomUiState = {
   canZoomIn: boolean;
   canZoomOut: boolean;
   canFit: boolean;
+  zoomPercent: number;
 };
 
 type PostgresSourceMediaTimelineProps = {
@@ -73,6 +82,7 @@ type PostgresSourceMediaTimelineProps = {
   selectedAnnotationId: string | null;
   canEditAnnotations: boolean;
   pendingSelection: PendingClipSelection | null;
+  pendingSelectionCodeColors?: string[];
   onCreateSelection: (startMs: number, endMs: number) => void;
   onSelectAnnotation: (annotationId: string) => void;
   onUpdateAnnotationRange: (annotationId: string, startMs: number, endMs: number) => void;
@@ -135,6 +145,19 @@ function buildSelectedRegionContent(annotation: SourceAnnotationRow) {
   return ` ${annotation.codeLabels.join(", ") || "Annotation"} `;
 }
 
+function buildMediaClipRegionBackground(colors: string[], isSelected: boolean) {
+  const uniqueColors = [...new Set(colors.filter(Boolean))];
+  return buildMultiAnnotationBackground(uniqueColors, isSelected);
+}
+
+function applyRegionBackground(region: Region, background: string) {
+  if (!region.element) return;
+  const isGradient = background.includes("gradient(");
+  region.element.style.removeProperty("background");
+  region.element.style.setProperty("background-image", isGradient ? background : "none");
+  region.element.style.setProperty("background-color", isGradient ? "transparent" : background);
+}
+
 function applyAnnotationRegionStyles(
   region: Region,
   annotation: SourceAnnotationRow,
@@ -145,19 +168,21 @@ function applyAnnotationRegionStyles(
   if (!range) return;
 
   const primaryColor = annotation.codeColors[0] || DEFAULT_REGION_COLOR;
+  const regionBackground = buildMediaClipRegionBackground(annotation.codeColors, isSelected);
   region.setOptions({
     start: range.startMs / 1000,
     end: range.endMs / 1000,
-    drag: canEditAnnotations,
+    drag: false,
     resize: canEditAnnotations,
-    color: buildMultiAnnotationBackground(annotation.codeColors, isSelected),
+    color: regionBackground,
     content: isSelected ? buildSelectedRegionContent(annotation) : "",
   });
 
   region.element?.setAttribute("data-annotation-id", annotation.id);
+  applyRegionBackground(region, regionBackground);
   region.element?.style.setProperty("border-top", `2px solid ${primaryColor}`);
   region.element?.style.setProperty("border-bottom", `2px solid ${primaryColor}`);
-  region.element?.style.setProperty("cursor", canEditAnnotations ? "grab" : "pointer");
+  region.element?.style.setProperty("cursor", "pointer");
   region.element?.style.setProperty("z-index", isSelected ? "4" : "2");
   region.element?.style.setProperty(
     "opacity",
@@ -226,6 +251,7 @@ function buildZoomUiState(currentZoomPxPerSec: number, fitZoomPxPerSec: number):
     canZoomIn: !isAtMax,
     canZoomOut: !isAtFit,
     canFit: !isAtFit,
+    zoomPercent: Math.max(1, Math.round((safeCurrentZoom / safeFitZoom) * 100)),
   };
 }
 
@@ -236,6 +262,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
   selectedAnnotationId,
   canEditAnnotations,
   pendingSelection,
+  pendingSelectionCodeColors = [],
   onCreateSelection,
   onSelectAnnotation,
   onUpdateAnnotationRange,
@@ -255,6 +282,9 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
   const mediaAnnotationIdsRef = useRef<Set<string>>(new Set());
   const mediaAnnotationsByIdRef = useRef<Map<string, SourceAnnotationRow>>(new Map());
   const isFitZoomRef = useRef(true);
+  const openTimingStartRef = useRef<number>(performance.now());
+  const waveCreateCountRef = useRef(0);
+  const initialRegionsLoggedRef = useRef(false);
   const onCreateSelectionRef = useRef(onCreateSelection);
   const onSelectAnnotationRef = useRef(onSelectAnnotation);
   const onUpdateAnnotationRangeRef = useRef(onUpdateAnnotationRange);
@@ -284,6 +314,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     const laneEndTimes: number[] = [];
     const bars: Array<{
       annotation: SourceAnnotationRow;
+      background: string;
       color: string;
       lane: number;
       startMs: number;
@@ -302,6 +333,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       }
       bars.push({
         annotation,
+        background: buildMultiAnnotationBackground(annotation.codeColors, false),
         color: annotation.codeColors[0] || DEFAULT_REGION_COLOR,
         lane,
         startMs: range.startMs,
@@ -320,6 +352,12 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       + annotationStripBars.laneCount * SEGMENT_STRIP_ROW_HEIGHT_PX
       + Math.max(0, annotationStripBars.laneCount - 1) * SEGMENT_STRIP_ROW_GAP_PX
     : 0;
+
+  function logOpenTiming(phase: string, details?: Record<string, number | string | boolean | null | undefined>) {
+    const elapsedMs = Math.round(performance.now() - openTimingStartRef.current);
+    console.info(`[wave-open] +${elapsedMs}ms ${phase}${formatOpenTimingDetails(details)}`);
+  }
+
   useEffect(() => {
     mediaAnnotationIdsRef.current = mediaAnnotationIds;
     mediaAnnotationsByIdRef.current = new Map(mediaAnnotations.map((annotation) => [annotation.id, annotation]));
@@ -354,10 +392,20 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
 
   function adjustZoom(direction: "in" | "out") {
     const baseZoom = zoomPxPerSec ?? getFitZoomPxPerSec();
+    const fitZoom = getFitZoomPxPerSec();
     const nextZoom = direction === "in"
       ? baseZoom * ZOOM_STEP_FACTOR
       : baseZoom / ZOOM_STEP_FACTOR;
+    if (direction === "out" && nextZoom <= fitZoom) {
+      applyZoom(fitZoom, true);
+      return;
+    }
     applyZoom(nextZoom, false);
+  }
+
+  function setZoomPercent(percent: number) {
+    const safePercent = Math.max(100, percent);
+    applyZoom(getFitZoomPxPerSec() * (safePercent / 100), safePercent <= 100);
   }
 
   function syncZoomUiState(nextZoomPxPerSec?: number) {
@@ -369,6 +417,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     zoomIn: () => adjustZoom("in"),
     zoomOut: () => adjustZoom("out"),
     fitToWaveform,
+    setZoomPercent,
     isReady: () => waveReady,
   }), [waveReady, zoomPxPerSec]);
 
@@ -376,8 +425,15 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     const container = waveformContainerRef.current;
     if (!container || !mediaElement) return;
 
+    openTimingStartRef.current = performance.now();
+    initialRegionsLoggedRef.current = false;
+    waveCreateCountRef.current += 1;
     setWaveReady(false);
     setTimelineError(null);
+    logOpenTiming("wavesurfer-create-start", {
+      instance: waveCreateCountRef.current,
+      hasCachedWaveform: Boolean(waveformCache?.peaks?.length),
+    });
 
     const waveSurfer = WaveSurfer.create({
       container,
@@ -434,10 +490,14 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
         setWaveReady(true);
         setTimelineError(null);
         setTimelineDurationMs(Math.max(0, Math.round(durationSeconds * 1000)));
+        logOpenTiming("wavesurfer-ready", {
+          durationMs: Math.max(0, Math.round(durationSeconds * 1000)),
+        });
         fitToWaveform();
         syncZoomUiState(getFitZoomPxPerSec());
       }),
       waveSurfer.on("error", (error) => {
+        logOpenTiming("wavesurfer-error", { message: error.message || "unknown" });
         setTimelineError(error.message || "The waveform could not be loaded.");
       }),
       waveSurfer.on("zoom", (minPxPerSec) => {
@@ -476,6 +536,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     ];
 
     return () => {
+      logOpenTiming("wavesurfer-destroy", { instance: waveCreateCountRef.current });
       disableDragSelectionRef.current?.();
       disableDragSelectionRef.current = null;
       unsubscribers.forEach((unsubscribe) => unsubscribe());
@@ -500,7 +561,15 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       if (!waveSurferRef.current) return;
       event.preventDefault();
       if (event.deltaY < 0) adjustZoom("in");
-      else if (event.deltaY > 0) adjustZoom("out");
+      else if (event.deltaY > 0) {
+        const currentZoom = zoomPxPerSec ?? getFitZoomPxPerSec();
+        const fitZoom = getFitZoomPxPerSec();
+        if (currentZoom <= fitZoom) {
+          fitToWaveform();
+          return;
+        }
+        adjustZoom("out");
+      }
     };
 
     container.addEventListener("wheel", handleWheel, { passive: false });
@@ -667,9 +736,9 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
           id: annotation.id,
           start: range.startMs / 1000,
           end: range.endMs / 1000,
-          drag: canEditAnnotations,
+          drag: false,
           resize: canEditAnnotations,
-          color: buildMultiAnnotationBackground(annotation.codeColors, annotation.id === selectedAnnotationId),
+          color: buildMediaClipRegionBackground(annotation.codeColors, annotation.id === selectedAnnotationId),
           content: annotation.id === selectedAnnotationId ? buildSelectedRegionContent(annotation) : "",
         });
 
@@ -711,6 +780,11 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     }
 
     isSyncingRegionsRef.current = false;
+
+    if (waveReady && !initialRegionsLoggedRef.current) {
+      initialRegionsLoggedRef.current = true;
+      logOpenTiming("regions-initial-sync", { annotations: mediaAnnotations.length });
+    }
   }, [canEditAnnotations, mediaAnnotations, selectedAnnotationId, waveReady]);
 
   useEffect(() => {
@@ -727,55 +801,65 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     }
 
     const range = clampMediaRange(pendingSelection.startMs, pendingSelection.endMs);
+    const pendingRegionColor = pendingSelectionCodeColors.length > 0
+      ? buildMediaClipRegionBackground(pendingSelectionCodeColors, true)
+      : "rgba(53, 80, 112, 0.18)";
+    const pendingRegionBorderColor = pendingSelectionCodeColors[0] || "#355070";
     const pendingRegion = pendingRegionRef.current?.id === "__pending__"
       ? pendingRegionRef.current
       : regions.addRegion({
         id: "__pending__",
         start: range.startMs / 1000,
         end: range.endMs / 1000,
-        drag: canEditAnnotations,
+        drag: false,
         resize: canEditAnnotations,
-        color: "rgba(53, 80, 112, 0.18)",
+        color: pendingRegionColor,
       });
 
     pendingRegion.setOptions({
       start: range.startMs / 1000,
       end: range.endMs / 1000,
-      drag: canEditAnnotations,
+      drag: false,
       resize: canEditAnnotations,
-      color: "rgba(53, 80, 112, 0.18)",
+      color: pendingRegionColor,
       content: "",
     });
-    pendingRegion.element?.style.setProperty("border-top", "2px dashed #355070");
-    pendingRegion.element?.style.setProperty("border-bottom", "2px dashed #355070");
-    applyRegionBoundaryMarkers(pendingRegion, "#355070");
+    pendingRegion.element?.style.setProperty("border-top", `2px dashed ${pendingRegionBorderColor}`);
+    pendingRegion.element?.style.setProperty("border-bottom", `2px dashed ${pendingRegionBorderColor}`);
+    applyRegionBackground(pendingRegion, pendingRegionColor);
+    applyRegionBoundaryMarkers(pendingRegion, pendingRegionBorderColor);
     pendingRegionRef.current = pendingRegion;
 
     isSyncingRegionsRef.current = false;
-  }, [canEditAnnotations, pendingSelection, waveReady]);
+  }, [canEditAnnotations, pendingSelection, pendingSelectionCodeColors, waveReady]);
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div
-        className="doc-content-scroll-shell"
+        className="doc-content-scroll-shell media-player-waveform-shell"
         style={{
-          padding: `16px 16px ${16 + SCROLLBAR_RESERVE_PX}px`,
-          border: "1px solid rgba(53, 80, 112, 0.16)",
-          background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(238,242,246,0.96))",
+          justifySelf: "center",
+          width: "calc(100% - 20px)",
+          boxSizing: "border-box",
+          padding: "16px 16px 0 24px",
+          border: 0,
+          borderBottom: 0,
+          borderBottomLeftRadius: 0,
+          borderBottomRightRadius: 0,
+          background: "transparent",
           overflowX: "auto",
           overflowY: "hidden",
           scrollbarGutter: "stable",
         }}
       >
-        <div ref={waveformContainerRef} />
         {segmentStripHeight > 0 && timelineViewport.scrollWidth > 0 ? (
           <div
             style={{
               position: "relative",
-              marginTop: 6,
+              marginBottom: 6,
               height: segmentStripHeight,
               overflow: "hidden",
-              borderTop: "1px solid rgba(53, 80, 112, 0.14)",
+              borderTop: 0,
               paddingTop: SEGMENT_STRIP_PADDING_TOP_PX,
             }}
           >
@@ -787,7 +871,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
                 transform: `translateX(-${timelineViewport.scrollLeft}px)`,
               }}
             >
-              {annotationStripBars.bars.map(({ annotation, color, lane, startMs, endMs }) => {
+              {annotationStripBars.bars.map(({ annotation, background, color, lane, startMs, endMs }) => {
                 const durationMs = Math.max(1, timelineDurationMs);
                 const fullWidth = timelineViewport.scrollWidth;
                 const left = (startMs / durationMs) * fullWidth;
@@ -796,6 +880,9 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
                   ((Math.max(endMs, startMs + 1) - startMs) / durationMs) * fullWidth,
                 );
                 const isSelected = annotation.id === selectedAnnotationId;
+                const barBackground = isSelected
+                  ? buildMultiAnnotationBackground(annotation.codeColors, true)
+                  : background;
                 return (
                   <button
                     key={annotation.id}
@@ -824,7 +911,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
                       height: SEGMENT_STRIP_ROW_HEIGHT_PX,
                       border: isSelected ? "1px solid rgba(31, 41, 51, 0.95)" : "1px solid rgba(31, 41, 51, 0.18)",
                       borderRadius: 999,
-                      background: color,
+                      background: barBackground,
                       boxShadow: isSelected ? "0 0 0 1px rgba(255, 255, 255, 0.9)" : "none",
                       cursor: "pointer",
                       padding: 0,
@@ -842,6 +929,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
             </div>
           </div>
         ) : null}
+        <div ref={waveformContainerRef} />
       </div>
       {timelineError ? (
         <p className="auth-error" style={{ margin: 0 }}>{timelineError}</p>
