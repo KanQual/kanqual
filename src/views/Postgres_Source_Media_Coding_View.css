@@ -47,6 +47,11 @@
   overflow: hidden;
 }
 
+.media-player-waveform-panel--video {
+  width: min(var(--media-player-video-panel-width, 788px), calc(100% - 20px));
+  max-width: calc(100% - 20px);
+}
+
 .media-player-waveform-shell,
 .media-player-waveform-shell wave {
   background: var(--color-surface) !important;
@@ -70,6 +75,25 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.media-player-video-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.media-player-video-preview-element {
+  display: block;
+  width: calc(100% - 28px);
+  height: auto;
+  max-width: 100%;
+  max-height: 35vh;
+  object-fit: contain;
+  background: transparent;
 }
 
 .media-player-console-frame > * {
@@ -111,6 +135,7 @@
   --media-control-hover-background: rgba(53, 80, 112, 0.1);
   position: relative;
   z-index: auto;
+  justify-items: center;
   max-width: min(var(--media-player-controls-pill-width), 100%);
   margin-top: 0;
   background: transparent !important;
@@ -137,7 +162,8 @@
 
 .media-player-layout-grid {
   display: grid;
-  width: 100%;
+  width: min(var(--media-player-controls-pill-width), 100%);
+  margin-inline: auto;
   grid-template-columns: minmax(0, 1fr) auto auto auto minmax(0, 1fr);
   grid-template-rows: 38px 38px 38px;
   align-items: center;

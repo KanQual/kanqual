@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react";
 import WaveSurfer from "wavesurfer.js";
 import HoverPlugin from "wavesurfer.js/dist/plugins/hover.js";
 import RegionsPlugin from "wavesurfer.js/dist/plugins/regions.js";
@@ -81,6 +81,8 @@ type PostgresSourceMediaTimelineProps = {
   annotations: SourceAnnotationRow[];
   selectedAnnotationId: string | null;
   canEditAnnotations: boolean;
+  waveformHeight?: number;
+  waveformShellStyle?: CSSProperties;
   pendingSelection: PendingClipSelection | null;
   pendingSelectionCodeColors?: string[];
   onCreateSelection: (startMs: number, endMs: number) => void;
@@ -197,9 +199,25 @@ function clampZoomPxPerSec(value: number): number {
   return Math.min(MAX_ZOOM_PX_PER_SEC, Math.max(MIN_ZOOM_PX_PER_SEC, value));
 }
 
-function applyWaveScrollContainerStyles(scrollContainer: HTMLElement | null) {
+function hasUsableHorizontalOverflow(element: HTMLElement) {
+  return element.scrollWidth > element.clientWidth + 4;
+}
+
+function shouldWaveSurferAutoScroll(scrollContainer: HTMLElement, isFitZoom: boolean) {
+  return !isFitZoom && hasUsableHorizontalOverflow(scrollContainer);
+}
+
+function shouldShowHorizontalScrollbar(scrollContainer: HTMLElement, isFitZoom: boolean) {
+  return !isFitZoom && hasUsableHorizontalOverflow(scrollContainer);
+}
+
+function applyWaveScrollContainerStyles(scrollContainer: HTMLElement | null, isFitZoom = false) {
   if (!scrollContainer) return;
-  scrollContainer.style.overflowX = "scroll";
+  const shouldShowScrollbar = shouldShowHorizontalScrollbar(scrollContainer, isFitZoom);
+  if (!shouldShowScrollbar) {
+    scrollContainer.scrollLeft = 0;
+  }
+  scrollContainer.style.overflowX = shouldShowScrollbar ? "auto" : "hidden";
   scrollContainer.style.overflowY = "hidden";
   scrollContainer.style.scrollbarGutter = "stable";
   scrollContainer.style.boxSizing = "border-box";
@@ -262,6 +280,8 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
   annotations,
   selectedAnnotationId,
   canEditAnnotations,
+  waveformHeight = 140,
+  waveformShellStyle,
   pendingSelection,
   pendingSelectionCodeColors = [],
   onCreateSelection,
@@ -386,6 +406,13 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     if (!waveSurfer) return;
     const clampedZoom = clampZoomPxPerSec(nextZoomPxPerSec);
     isFitZoomRef.current = fitMode;
+    const scrollContainer = waveSurfer.getWrapper().parentElement;
+    if (scrollContainer) {
+      waveSurfer.options.autoScroll = shouldWaveSurferAutoScroll(scrollContainer, fitMode);
+      if (fitMode) {
+        scrollContainer.scrollLeft = 0;
+      }
+    }
     waveSurfer.zoom(clampedZoom);
     setZoomPxPerSec(clampedZoom);
   }
@@ -449,10 +476,10 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       progressColor: BASE_PROGRESS_COLOR,
       cursorColor: "#1f2933",
       cursorWidth: 2,
-      height: 140,
+      height: waveformHeight,
       normalize: true,
-      autoScroll: true,
-      autoCenter: true,
+      autoScroll: false,
+      autoCenter: false,
       minPxPerSec: 90,
       dragToSeek: true,
       plugins: [
@@ -487,7 +514,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
 
     const wrapper = waveSurfer.getWrapper();
     const scrollContainer = wrapper.parentElement;
-    applyWaveScrollContainerStyles(scrollContainer);
+    applyWaveScrollContainerStyles(scrollContainer, isFitZoomRef.current);
 
     const unsubscribers = [
       waveSurfer.on("ready", (durationSeconds) => {
@@ -555,7 +582,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       resetWaveScrollContainerStyles(scrollContainer);
       waveSurfer.destroy();
     };
-  }, [mediaElement, waveformCache]);
+  }, [mediaElement, waveformCache, waveformHeight]);
 
   useEffect(() => {
     const container = waveformContainerRef.current;
@@ -676,15 +703,22 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
         window.cancelAnimationFrame(frameId);
       }
       frameId = window.requestAnimationFrame(() => {
-        applyWaveScrollContainerStyles(scrollContainer);
+        applyWaveScrollContainerStyles(scrollContainer, isFitZoomRef.current);
+        waveSurfer.options.autoScroll = shouldWaveSurferAutoScroll(scrollContainer, isFitZoomRef.current);
         syncViewport();
         frameId = null;
       });
     };
 
     const syncViewport = () => {
+      const shouldShowScrollbar = shouldShowHorizontalScrollbar(scrollContainer, isFitZoomRef.current);
+      waveSurfer.options.autoScroll = shouldWaveSurferAutoScroll(scrollContainer, isFitZoomRef.current);
+      scrollContainer.style.overflowX = shouldShowScrollbar ? "auto" : "hidden";
+      if (!shouldShowScrollbar && scrollContainer.scrollLeft !== 0) {
+        scrollContainer.scrollLeft = 0;
+      }
       setTimelineViewport({
-        scrollLeft: scrollContainer.scrollLeft,
+        scrollLeft: shouldShowScrollbar ? scrollContainer.scrollLeft : 0,
         scrollWidth: scrollContainer.scrollWidth,
         clientWidth: scrollContainer.clientWidth,
       });
@@ -841,6 +875,8 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     isSyncingRegionsRef.current = false;
   }, [canEditAnnotations, pendingSelection, pendingSelectionCodeColors, waveReady]);
 
+  const shouldShowTimelineScrollbar = !isFitZoomRef.current && timelineViewport.scrollWidth > timelineViewport.clientWidth + 4;
+
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div
@@ -855,9 +891,10 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
           borderBottomLeftRadius: 0,
           borderBottomRightRadius: 0,
           background: "transparent",
-          overflowX: "auto",
+          overflowX: shouldShowTimelineScrollbar ? "auto" : "hidden",
           overflowY: "hidden",
           scrollbarGutter: "stable",
+          ...waveformShellStyle,
         }}
       >
         {segmentStripHeight > 0 && timelineViewport.scrollWidth > 0 ? (
