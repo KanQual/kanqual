@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import {
   MediaController,
@@ -21,8 +21,10 @@ import { useI18n } from "../i18n/provider";
 import type { PendingSelection, SourceAnnotationRow } from "./Postgres_Sources_View";
 import {
   AnnotationEditorModal,
+  type AnnotationContextMenuState,
   orderedCodesWithDepth,
   type PostgresSourceCodingViewProps,
+  PostgresSourceAnnotationContextMenu,
   PostgresSourceAnnotationPanel,
   visibleCodeNodes,
 } from "./Postgres_Source_Coding_Shared";
@@ -33,6 +35,7 @@ import {
   type PostgresSourceMediaTimelineHandle,
   type PostgresSourceMediaTimelineZoomUiState,
 } from "./Postgres_Source_Media_Timeline";
+import "./Postgres_Source_Media_Coding_View.css";
 
 function fileExtensionFromPath(path: string): string {
   return path.split(".").pop()?.toLowerCase() ?? "";
@@ -290,8 +293,11 @@ export function PostgresSourceMediaCodingView({
   const [zoomControlOpen, setZoomControlOpen] = useState(false);
   const [speedControlOpen, setSpeedControlOpen] = useState(false);
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
+  const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
+  const annotationContextMenuStyle = useViewportContextMenuStyle(annotationContextMenu, annotationContextMenuRef);
   const mediaElementRef = useRef<HTMLMediaElement | null>(null);
   const mediaTimelineRef = useRef<PostgresSourceMediaTimelineHandle | null>(null);
   const playbackRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
@@ -301,6 +307,11 @@ export function PostgresSourceMediaCodingView({
   const volumeControlCloseTimeoutRef = useRef<number | null>(null);
   const zoomControlCloseTimeoutRef = useRef<number | null>(null);
   const speedControlCloseTimeoutRef = useRef<number | null>(null);
+  const mediaElementCallbackRef = useCallback((element: HTMLMediaElement | null) => {
+    if (mediaElementRef.current === element) return;
+    mediaElementRef.current = element;
+    setMediaElement(element);
+  }, []);
 
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
@@ -415,10 +426,14 @@ export function PostgresSourceMediaCodingView({
       if (codeContextMenuRef.current && !codeContextMenuRef.current.contains(event.target as Node)) {
         setCodeContextMenu(null);
       }
+      if (annotationContextMenuRef.current && !annotationContextMenuRef.current.contains(event.target as Node)) {
+        setAnnotationContextMenu(null);
+      }
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setCodeContextMenu(null);
+        setAnnotationContextMenu(null);
         if (!saving) {
           setPendingSelection(null);
           setPendingClipCodeIds([]);
@@ -970,9 +985,11 @@ export function PostgresSourceMediaCodingView({
     setPlaybackRate(rate);
   }
 
+  const hasOwnSourceLock = !!sourceLock && sourceLock.userId === currentUserId;
   const showSourceAccessNotice = sourceLockConflict?.reason === "kicked"
     || sourceLockConflict?.reason === "locked"
-    || !canEditAnnotations;
+    || !canManageAnnotations
+    || (!!sourceLock && !hasOwnSourceLock);
 
   return (
     <div className="view doc-detail-view">
@@ -1113,10 +1130,7 @@ export function PostgresSourceMediaCodingView({
                 {mediaKind === "video" ? (
                   <div className="doc-content-scroll-shell" style={{ padding: 0 }}>
                     <video
-                      ref={(element) => {
-                        mediaElementRef.current = element;
-                        setMediaElement(element);
-                      }}
+                      ref={mediaElementCallbackRef}
                       src={previewUrl}
                       playsInline
                       style={{ display: "block", width: "100%", maxHeight: "52vh", background: "#000000" }}
@@ -1124,10 +1138,7 @@ export function PostgresSourceMediaCodingView({
                   </div>
                 ) : (
                   <audio
-                    ref={(element) => {
-                      mediaElementRef.current = element;
-                      setMediaElement(element);
-                    }}
+                    ref={mediaElementCallbackRef}
                     src={previewUrl}
                     style={{
                       position: "absolute",
@@ -1152,57 +1163,64 @@ export function PostgresSourceMediaCodingView({
                       vectorEffect="non-scaling-stroke"
                     />
                   </svg>
-                  <div className="media-player-console-title">
-                    <span className="doc-name">{row.name}</span>
+                  <div className="media-player-waveform-panel">
+                    <div className="media-player-console-title">
+                      <span className="doc-name">{row.name}</span>
+                    </div>
+                    <PostgresSourceMediaTimeline
+                      ref={mediaTimelineRef}
+                      mediaElement={mediaElement}
+                      waveformCache={waveformCache}
+                      annotations={mediaAnnotations}
+                      selectedAnnotationId={selectedAnnotationId}
+                      canEditAnnotations={canEditAnnotations}
+                      pendingSelection={pendingSelection ? {
+                        startMs: pendingSelection.timeStartMs,
+                        endMs: pendingSelection.timeEndMs,
+                      } : null}
+                      pendingSelectionCodeColors={pendingClipCodeColors}
+                      onCreateSelection={(startMs, endMs) => {
+                        setPendingSelection(clipSelectionFromRange(startMs, endMs));
+                        setPendingClipCodeIds([]);
+                        setSelectedAnnotationId(null);
+                      }}
+                      onSelectAnnotation={(annotationId) => {
+                        setPendingSelection(null);
+                        setPendingClipCodeIds([]);
+                        setSelectedAnnotationId(annotationId);
+                        const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
+                        if (annotation) seekToAnnotation(annotation);
+                      }}
+                      onAnnotationContextMenu={(annotation, x, y) => {
+                        if (!canManageMemos && !canEditAnnotations) return;
+                        setPendingSelection(null);
+                        setPendingClipCodeIds([]);
+                        setSelectedAnnotationId(annotation.id);
+                        setAnnotationContextMenu({ x, y, annotation });
+                      }}
+                      onUpdateAnnotationRange={(annotationId, startMs, endMs) => {
+                        void handleUpdateAnnotationRange(annotationId, startMs, endMs);
+                      }}
+                      onPlayClip={playClip}
+                      onZoomUiStateChange={setZoomUiState}
+                    />
                   </div>
-                  <PostgresSourceMediaTimeline
-                    ref={mediaTimelineRef}
-                    mediaElement={mediaElement}
-                    waveformCache={waveformCache}
-                    annotations={mediaAnnotations}
-                    selectedAnnotationId={selectedAnnotationId}
-                    canEditAnnotations={canEditAnnotations}
-                    pendingSelection={pendingSelection ? {
-                      startMs: pendingSelection.timeStartMs,
-                      endMs: pendingSelection.timeEndMs,
-                    } : null}
-                    pendingSelectionCodeColors={pendingClipCodeColors}
-                    onCreateSelection={(startMs, endMs) => {
-                      setPendingSelection(clipSelectionFromRange(startMs, endMs));
-                      setPendingClipCodeIds([]);
-                      setSelectedAnnotationId(null);
-                    }}
-                    onSelectAnnotation={(annotationId) => {
-                      setPendingSelection(null);
-                      setPendingClipCodeIds([]);
-                      setSelectedAnnotationId(annotationId);
-                      const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
-                      if (annotation) seekToAnnotation(annotation);
-                    }}
-                    onUpdateAnnotationRange={(annotationId, startMs, endMs) => {
-                      void handleUpdateAnnotationRange(annotationId, startMs, endMs);
-                    }}
-                    onPlayClip={playClip}
-                    onZoomUiStateChange={setZoomUiState}
-                  />
 
-                  <MediaController
-                    audio={mediaKind === "audio" ? true : undefined}
-                    className="media-player-controller"
-                    style={{
-                      display: "grid",
-                      gap: 10,
-                      width: "100%",
-                      ...mediaChromeThemeStyle,
-                    }}
-                  >
+                  <div className="media-player-controls-panel">
+                    <MediaController
+                      audio={mediaKind === "audio" ? true : undefined}
+                      className="media-player-controller"
+                      style={{
+                        display: "grid",
+                        gap: 10,
+                        width: "100%",
+                        ...mediaChromeThemeStyle,
+                      }}
+                    >
                   {mediaKind === "video" ? (
                     <video
                       slot="media"
-                      ref={(element) => {
-                        mediaElementRef.current = element;
-                        setMediaElement(element);
-                      }}
+                      ref={mediaElementCallbackRef}
                       src={previewUrl}
                       playsInline
                       style={{
@@ -1216,10 +1234,7 @@ export function PostgresSourceMediaCodingView({
                   ) : (
                     <audio
                       slot="media"
-                      ref={(element) => {
-                        mediaElementRef.current = element;
-                        setMediaElement(element);
-                      }}
+                      ref={mediaElementCallbackRef}
                       src={previewUrl}
                       style={{
                         position: "absolute",
@@ -1238,6 +1253,21 @@ export function PostgresSourceMediaCodingView({
                       }}
                     >
                       <div className="media-player-layout-grid">
+                        {activeClipRange ? (
+                          <div className="media-player-clip-anchor-slot">
+                            <button
+                              type="button"
+                              onClick={activeClipHasCodes ? () => void acceptActiveClipChanges() : clearActiveClipSelection}
+                              disabled={activeClipHasCodes && (!canEditAnnotations || saving)}
+                              className="media-player-clip-action media-player-clip-anchor"
+                              aria-label={activeClipHasCodes ? "Accept clip changes" : "Cancel clip changes"}
+                              title={activeClipHasCodes ? "Accept changes" : "Cancel changes"}
+                              style={playerActionButtonStyle}
+                            >
+                              {activeClipHasCodes ? <AcceptClipIcon /> : <ClearClipIcon />}
+                            </button>
+                          </div>
+                        ) : null}
                         <div
                           className={`media-player-control-cluster media-player-clip-cluster media-player-grid-clip${activeClipRange ? " media-player-clip-cluster--active" : ""}`}
                         >
@@ -1261,26 +1291,6 @@ export function PostgresSourceMediaCodingView({
                                   className="media-player-clip-shape-fill"
                                 />
                               </svg>
-                              <button
-                                type="button"
-                                onClick={activeClipHasCodes ? () => void acceptActiveClipChanges() : clearActiveClipSelection}
-                                disabled={activeClipHasCodes && (!canEditAnnotations || saving)}
-                                className="media-player-clip-action media-player-clip-anchor"
-                                aria-label={activeClipHasCodes ? "Accept clip changes" : "Cancel clip changes"}
-                                title={activeClipHasCodes ? "Accept changes" : "Cancel changes"}
-                                style={playerActionButtonStyle}
-                              >
-                                {activeClipHasCodes ? <AcceptClipIcon /> : <ClearClipIcon />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={clearActiveClipSelection}
-                                className="media-player-clip-cancel-button"
-                                aria-label="Cancel clip changes"
-                                title="Cancel changes"
-                              >
-                                <ClearClipIcon />
-                              </button>
                               <div className="media-player-clip-popout">
                                 <div className="media-player-clip-inline-editor">
                                   <div className="media-player-clip-code-badges" aria-label="Selected clip codes">
@@ -1418,13 +1428,30 @@ export function PostgresSourceMediaCodingView({
                           </div>
                         </div>
                         <div className="media-player-grid-seek-back">
-                          <MediaSeekBackwardButton className="media-player-native-control" seekOffset={5} />
+                          <MediaSeekBackwardButton
+                            className="media-player-native-control"
+                            seekOffset={5}
+                            title="Back 5 seconds"
+                            aria-label="Back 5 seconds"
+                            noTooltip
+                          />
                         </div>
                         <div className="media-player-grid-play">
-                          <MediaPlayButton className="media-player-native-control media-player-native-control--play" />
+                          <MediaPlayButton
+                            className="media-player-native-control media-player-native-control--play"
+                            title="Play"
+                            aria-label="Play"
+                            noTooltip
+                          />
                         </div>
                         <div className="media-player-grid-seek-forward">
-                          <MediaSeekForwardButton className="media-player-native-control" seekOffset={5} />
+                          <MediaSeekForwardButton
+                            className="media-player-native-control"
+                            seekOffset={5}
+                            title="Forward 5 seconds"
+                            aria-label="Forward 5 seconds"
+                            noTooltip
+                          />
                         </div>
                         <div className="media-player-grid-speed">
                           <div
@@ -1476,7 +1503,12 @@ export function PostgresSourceMediaCodingView({
                             onFocus={openVolumeControl}
                             onBlur={scheduleVolumeControlClose}
                           >
-                            <MediaMuteButton className="media-player-native-control" />
+                            <MediaMuteButton
+                              className="media-player-native-control"
+                              title="Volume"
+                              aria-label="Volume"
+                              noTooltip
+                            />
                             <div className="media-player-volume-popout" aria-label="Volume">
                               <MediaVolumeRange className="media-player-volume-range" />
                             </div>
@@ -1484,7 +1516,8 @@ export function PostgresSourceMediaCodingView({
                         </div>
                       </div>
                     </MediaControlBar>
-                  </MediaController>
+                    </MediaController>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1507,6 +1540,19 @@ export function PostgresSourceMediaCodingView({
           </button>
         </div>
       ) : null}
+
+      <PostgresSourceAnnotationContextMenu
+        contextMenu={annotationContextMenu}
+        contextMenuRef={annotationContextMenuRef}
+        contextMenuStyle={annotationContextMenuStyle}
+        onClose={() => setAnnotationContextMenu(null)}
+        onDeleteAnnotation={(annotationId) => {
+          void onDeleteAnnotation(annotationId);
+        }}
+        onOpenMemoDraft={onOpenMemoDraft}
+        canManageMemos={canManageMemos}
+        canDeleteAnnotations={canEditAnnotations}
+      />
 
       {editingAnnotation && canEditAnnotations ? (
         <AnnotationEditorModal

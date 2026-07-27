@@ -85,6 +85,7 @@ type PostgresSourceMediaTimelineProps = {
   pendingSelectionCodeColors?: string[];
   onCreateSelection: (startMs: number, endMs: number) => void;
   onSelectAnnotation: (annotationId: string) => void;
+  onAnnotationContextMenu?: (annotation: SourceAnnotationRow, x: number, y: number) => void;
   onUpdateAnnotationRange: (annotationId: string, startMs: number, endMs: number) => void;
   onPlayClip: (annotationId: string) => void;
   onZoomUiStateChange?: (state: PostgresSourceMediaTimelineZoomUiState) => void;
@@ -265,6 +266,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
   pendingSelectionCodeColors = [],
   onCreateSelection,
   onSelectAnnotation,
+  onAnnotationContextMenu,
   onUpdateAnnotationRange,
   onPlayClip,
   onZoomUiStateChange,
@@ -287,6 +289,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
   const initialRegionsLoggedRef = useRef(false);
   const onCreateSelectionRef = useRef(onCreateSelection);
   const onSelectAnnotationRef = useRef(onSelectAnnotation);
+  const onAnnotationContextMenuRef = useRef(onAnnotationContextMenu);
   const onUpdateAnnotationRangeRef = useRef(onUpdateAnnotationRange);
   const onPlayClipRef = useRef(onPlayClip);
   const onZoomUiStateChangeRef = useRef(onZoomUiStateChange);
@@ -363,10 +366,11 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
     mediaAnnotationsByIdRef.current = new Map(mediaAnnotations.map((annotation) => [annotation.id, annotation]));
     onCreateSelectionRef.current = onCreateSelection;
     onSelectAnnotationRef.current = onSelectAnnotation;
+    onAnnotationContextMenuRef.current = onAnnotationContextMenu;
     onUpdateAnnotationRangeRef.current = onUpdateAnnotationRange;
     onPlayClipRef.current = onPlayClip;
     onZoomUiStateChangeRef.current = onZoomUiStateChange;
-  }, [mediaAnnotationIds, mediaAnnotations, onCreateSelection, onPlayClip, onSelectAnnotation, onUpdateAnnotationRange, onZoomUiStateChange]);
+  }, [mediaAnnotationIds, mediaAnnotations, onAnnotationContextMenu, onCreateSelection, onPlayClip, onSelectAnnotation, onUpdateAnnotationRange, onZoomUiStateChange]);
 
   function getFitZoomPxPerSec() {
     const waveSurfer = waveSurferRef.current;
@@ -745,7 +749,11 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
         const cleanupFns: Array<() => void> = [];
         const handleContextMenu = (event: Event) => {
           event.preventDefault();
-          onSelectAnnotationRef.current(annotation.id);
+          const mouseEvent = event as MouseEvent;
+          const latestAnnotation = mediaAnnotationsByIdRef.current.get(annotation.id);
+          if (!latestAnnotation) return;
+          onSelectAnnotationRef.current(latestAnnotation.id);
+          onAnnotationContextMenuRef.current?.(latestAnnotation, mouseEvent.clientX, mouseEvent.clientY);
         };
         region.element?.addEventListener("contextmenu", handleContextMenu);
         cleanupFns.push(() => region?.element?.removeEventListener("contextmenu", handleContextMenu));
@@ -889,6 +897,11 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
                     type="button"
                     title={`${annotation.codeLabels.join(", ") || "Annotation"} (${formatMediaTime(startMs)} - ${formatMediaTime(endMs)})`}
                     onClick={() => onSelectAnnotationRef.current(annotation.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onSelectAnnotationRef.current(annotation.id);
+                      onAnnotationContextMenuRef.current?.(annotation, event.clientX, event.clientY);
+                    }}
                     onMouseEnter={(event) => {
                       setTooltip({
                         x: event.clientX,

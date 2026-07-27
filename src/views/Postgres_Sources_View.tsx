@@ -2490,7 +2490,7 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await createPostgresExperimentAnnotation({
+      const createdAnnotation = await createPostgresExperimentAnnotation({
         projectId,
         sourceId,
         codeIds: payload.codeIds,
@@ -2503,7 +2503,12 @@ export function PostgresSourcesView({
         anchorKind: selection.anchorKind ?? "text_span",
         imageRegion: selection.imageRegion ?? null,
       });
-      await loadSources();
+      setAnnotations((current) => [...current, createdAnnotation]);
+      setRows((current) => current.map((row) => (
+        row.id === sourceId
+          ? { ...row, annotationCount: row.annotationCount + 1 }
+          : row
+      )));
     } catch (annotationError) {
       setSubmitError(annotationError instanceof Error ? annotationError.message : "Failed to create annotation.");
       throw annotationError;
@@ -2532,7 +2537,7 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await updatePostgresExperimentAnnotation({
+      const updatedAnnotation = await updatePostgresExperimentAnnotation({
         projectId,
         annotationId: annotation.id,
         codeIds: payload.codeIds,
@@ -2545,7 +2550,9 @@ export function PostgresSourcesView({
         anchorKind: payload.anchorKind ?? annotation.anchorKind ?? "text_span",
         imageRegion: payload.imageRegion ?? annotation.imageRegion ?? null,
       });
-      await loadSources();
+      setAnnotations((current) => current.map((entry) => (
+        entry.id === updatedAnnotation.id ? updatedAnnotation : entry
+      )));
     } catch (annotationError) {
       setSubmitError(annotationError instanceof Error ? annotationError.message : "Failed to update annotation.");
       throw annotationError;
