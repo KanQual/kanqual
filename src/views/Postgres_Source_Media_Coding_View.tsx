@@ -1206,10 +1206,10 @@ export function PostgresSourceMediaCodingView({
                     />
                   </div>
 
-                  <div className="media-player-controls-panel">
+                  <div className="media-player-controls-panel media-player-controls-panel--audio">
                     <MediaController
                       audio={mediaKind === "audio" ? true : undefined}
-                      className="media-player-controller"
+                      className="media-player-controller media-player-controller--audio"
                       style={{
                         display: "grid",
                         gap: 10,
@@ -1246,13 +1246,13 @@ export function PostgresSourceMediaCodingView({
                     />
                   )}
                     <MediaControlBar
-                      className="media-player-control-bar"
+                      className="media-player-control-bar media-player-control-bar--audio"
                       style={{
                         width: "100%",
                         color: "#233142",
                       }}
                     >
-                      <div className="media-player-layout-grid">
+                      <div className="media-player-layout-grid media-player-layout-grid--audio">
                         {activeClipRange ? (
                           <div className="media-player-clip-anchor-slot">
                             <button

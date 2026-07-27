@@ -86,6 +86,8 @@ export type PostgresSourceCodingViewProps = {
   onKickSourceLock: (lock: PostgresExperimentSourceLock) => Promise<void>;
   onOpenMemoDraft: (payload: { sourceIds?: string[]; annotationIds?: string[]; codeIds?: string[] }) => void;
   onUpdateSourceWaveform: (sourceId: string, waveformPeaksJson: string) => Promise<void>;
+  onUpdateSourceVideoFrameIndex?: (sourceId: string, videoFrameIndexJson: string) => Promise<void>;
+  onExtractVideoFrame?: (payload: { file: File; title: string; extractedFromVideoSourceId: string; extractedFromVideoTimeMs: number }) => Promise<void>;
   onBack: () => void;
 };
 

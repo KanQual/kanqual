@@ -1,7 +1,10 @@
 .media-player-console-frame {
   --media-player-controls-width: 760px;
   --media-player-controls-pill-width: 285px;
-  --media-player-controls-pill-height: 168px;
+  --media-player-controls-pill-height: 218px;
+  --media-player-clip-popout-height: var(--media-player-controls-pill-height);
+  --media-player-control-grid-row-size: 38px;
+  --media-player-control-grid-row-gap: 4px;
   --media-player-clip-popout-width: 360px;
   --media-player-clip-surface-start: rgba(237, 242, 247, 0.98);
   --media-player-clip-surface-end: rgba(226, 232, 240, 0.98);
@@ -131,12 +134,21 @@
   pointer-events: none;
 }
 
+.media-player-controls-panel--audio {
+  --media-player-controls-pill-height: calc(
+    var(--media-player-control-grid-row-size) * 3 + var(--media-player-control-grid-row-gap) * 2 + 42px
+  );
+  --media-player-clip-popout-height: var(--media-player-controls-pill-height);
+}
+
 .media-player-controller {
   --media-control-hover-background: rgba(53, 80, 112, 0.1);
   position: relative;
   z-index: auto;
+  align-items: center;
   justify-items: center;
   max-width: min(var(--media-player-controls-pill-width), 100%);
+  height: var(--media-player-controls-pill-height);
   margin-top: 0;
   background: transparent !important;
   background-color: transparent !important;
@@ -149,10 +161,12 @@
   position: relative;
   box-sizing: border-box;
   width: 100%;
+  height: 100%;
+  min-height: var(--media-player-controls-pill-height);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 14px 0;
+  padding: 0;
   border-radius: 22px;
   background: transparent !important;
   background-color: transparent !important;
@@ -165,9 +179,37 @@
   width: min(var(--media-player-controls-pill-width), 100%);
   margin-inline: auto;
   grid-template-columns: minmax(0, 1fr) auto auto auto minmax(0, 1fr);
-  grid-template-rows: 38px 38px 38px;
+  grid-template-rows:
+    var(--media-player-control-grid-row-size)
+    var(--media-player-control-grid-row-size)
+    var(--media-player-control-grid-row-size)
+    var(--media-player-control-grid-row-size);
   align-items: center;
-  gap: 12px 14px;
+  gap: var(--media-player-control-grid-row-gap) 8px;
+}
+
+.media-player-layout-grid--audio {
+  grid-template-rows:
+    var(--media-player-control-grid-row-size)
+    var(--media-player-control-grid-row-size)
+    var(--media-player-control-grid-row-size);
+  position: relative;
+  top: -6px;
+  z-index: 3;
+}
+
+.media-player-layout-grid--audio .media-player-grid-seek-back,
+.media-player-layout-grid--audio .media-player-grid-seek-forward {
+  grid-row: 2;
+}
+
+.media-player-layout-grid--audio .media-player-grid-speed,
+.media-player-layout-grid--audio .media-player-grid-volume {
+  grid-row: 3;
+}
+
+.media-player-layout-grid--audio .media-player-grid-play {
+  grid-row: 1 / 4;
 }
 
 .media-player-grid-clip {
@@ -214,6 +256,14 @@
 
 .media-player-grid-seek-back {
   grid-column: 2;
+  grid-row: 3;
+  justify-self: end;
+  position: relative;
+  z-index: 3;
+}
+
+.media-player-grid-frame-back {
+  grid-column: 2;
   grid-row: 2;
   justify-self: end;
   position: relative;
@@ -222,7 +272,7 @@
 
 .media-player-grid-play {
   grid-column: 3;
-  grid-row: 1 / 4;
+  grid-row: 1 / 5;
   justify-self: center;
   align-self: stretch;
   display: flex;
@@ -232,7 +282,57 @@
   z-index: 3;
 }
 
+.media-player-grid-extract-frame {
+  grid-column: 3;
+  grid-row: 1 / 5;
+  justify-self: center;
+  align-self: center;
+  position: relative;
+  z-index: 4;
+  transform: translateY(91px);
+}
+
 .media-player-grid-seek-forward {
+  grid-column: 4;
+  grid-row: 3;
+  justify-self: start;
+  position: relative;
+  z-index: 3;
+}
+
+.media-player-frame-extract-button {
+  color: #233142;
+}
+
+.media-player-frame-extract-error {
+  width: min(var(--media-player-controls-pill-width), 100%);
+  margin: 8px auto 0;
+  text-align: center;
+}
+
+.media-player-frame-source-modal {
+  display: grid;
+  gap: 14px;
+}
+
+.media-player-frame-source-preview {
+  display: flex;
+  justify-content: center;
+  max-height: min(46vh, 420px);
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.media-player-frame-source-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: min(46vh, 420px);
+  object-fit: contain;
+}
+
+.media-player-grid-frame-forward {
   grid-column: 4;
   grid-row: 2;
   justify-self: start;
@@ -242,7 +342,7 @@
 
 .media-player-grid-speed {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 4;
   justify-self: end;
   transform: translateX(18px);
   position: relative;
@@ -251,7 +351,7 @@
 
 .media-player-grid-volume {
   grid-column: 4;
-  grid-row: 3;
+  grid-row: 4;
   justify-self: start;
   transform: translateX(-18px);
   position: relative;
@@ -733,8 +833,10 @@
   align-items: stretch;
   justify-content: flex-end;
   gap: 3px;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   width: 100%;
+  overflow: hidden;
 }
 
 .media-player-clip-group {
@@ -743,10 +845,10 @@
   left: -28px;
   display: grid;
   grid-template-columns: 92px var(--media-player-clip-popout-width);
-  grid-template-rows: var(--media-player-controls-pill-height);
+  grid-template-rows: var(--media-player-clip-popout-height);
   align-items: center;
   width: calc(92px + var(--media-player-clip-popout-width));
-  min-height: var(--media-player-controls-pill-height);
+  min-height: var(--media-player-clip-popout-height);
   padding: 0;
   isolation: auto;
   z-index: 1;
@@ -837,16 +939,18 @@
   grid-column: 2;
   grid-row: 1;
   position: relative;
-  top: -20px;
-  left: -130px;
+  top: -30px;
+  left: -160px;
   display: inline-flex;
   align-items: flex-end;
   justify-content: flex-start;
   gap: 6px;
   width: var(--media-player-clip-popout-width);
-  min-height: var(--media-player-controls-pill-height);
+  height: var(--media-player-clip-popout-height);
+  min-height: 0;
+  max-height: var(--media-player-clip-popout-height);
   box-sizing: border-box;
-  padding: 38px 4px 14px 145px;
+  padding: 38px 15px 54px 180px;
   border-radius: 999px;
   border: 1px solid var(--media-player-clip-surface-border);
   background: linear-gradient(180deg, var(--media-player-clip-surface-start), var(--media-player-clip-surface-end));

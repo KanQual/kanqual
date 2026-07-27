@@ -17,6 +17,11 @@ import {
   serializeMediaWaveformCache,
   type MediaWaveformCache,
 } from "../lib/mediaWaveform";
+import {
+  createMediaVideoFrameIndexCache,
+  parseMediaVideoFrameIndexCache,
+  serializeMediaVideoFrameIndexCache,
+} from "../lib/mediaVideoFrameIndex";
 import { useI18n } from "../i18n/provider";
 import type { PendingSelection, SourceAnnotationRow } from "./Postgres_Sources_View";
 import {
@@ -83,6 +88,8 @@ type SelectedClipDraft = {
 };
 
 const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+const FRAME_STEP_SECONDS = 1 / 30;
+const FRAME_STEP_EPSILON_SECONDS = 0.0005;
 
 function nearestPlaybackSpeedIndex(rate: number) {
   let nearestIndex = 0;
@@ -229,6 +236,129 @@ function AcceptClipIcon() {
   );
 }
 
+function ExtractFrameIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.25 4.25L6.25 2.75H9.75L10.75 4.25H12.25C13.2 4.25 14 5.05 14 6V11.5C14 12.45 13.2 13.25 12.25 13.25H3.75C2.8 13.25 2 12.45 2 11.5V6C2 5.05 2.8 4.25 3.75 4.25H5.25Z" />
+      <circle cx="8" cy="8.75" r="2.35" />
+      <path d="M11.75 6.25H11.8" />
+    </svg>
+  );
+}
+
+function findAdjacentFrameTimestamp(
+  timestampsSeconds: number[],
+  currentTimeSeconds: number,
+  direction: -1 | 1,
+) {
+  if (timestampsSeconds.length === 0) return null;
+  if (direction > 0) {
+    let left = 0;
+    let right = timestampsSeconds.length;
+    const target = currentTimeSeconds + FRAME_STEP_EPSILON_SECONDS;
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2);
+      if (timestampsSeconds[mid] <= target) left = mid + 1;
+      else right = mid;
+    }
+    return timestampsSeconds[Math.min(left, timestampsSeconds.length - 1)] ?? null;
+  }
+
+  let left = 0;
+  let right = timestampsSeconds.length;
+  const target = currentTimeSeconds - FRAME_STEP_EPSILON_SECONDS;
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (timestampsSeconds[mid] < target) left = mid + 1;
+    else right = mid;
+  }
+  return timestampsSeconds[Math.max(0, left - 1)] ?? null;
+}
+
+function FrameBackIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 4v8" />
+      <path d="M12 4L6.5 8L12 12V4Z" />
+    </svg>
+  );
+}
+
+function FrameForwardIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 4v8" />
+      <path d="M4 4L9.5 8L4 12V4Z" />
+    </svg>
+  );
+}
+
+function sanitizeFrameFileNamePart(value: string) {
+  const sanitized = value
+    .trim()
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || "video-frame";
+}
+
+function waitForVideoReady(videoElement: HTMLVideoElement) {
+  if (videoElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      videoElement.removeEventListener("loadeddata", handleReady);
+      videoElement.removeEventListener("canplay", handleReady);
+      videoElement.removeEventListener("error", handleError);
+    };
+    const handleReady = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("Could not prepare the video frame for extraction."));
+    };
+    videoElement.addEventListener("loadeddata", handleReady, { once: true });
+    videoElement.addEventListener("canplay", handleReady, { once: true });
+    videoElement.addEventListener("error", handleError, { once: true });
+  });
+}
+
+function waitForVideoSeek(videoElement: HTMLVideoElement, timeSeconds: number) {
+  if (!Number.isFinite(timeSeconds)) return Promise.resolve();
+  if (Math.abs(videoElement.currentTime - timeSeconds) <= 0.02 && !videoElement.seeking) return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      videoElement.removeEventListener("seeked", handleSeeked);
+      videoElement.removeEventListener("error", handleError);
+    };
+    const handleSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("Could not seek the video frame for extraction."));
+    };
+    videoElement.addEventListener("seeked", handleSeeked, { once: true });
+    videoElement.addEventListener("error", handleError, { once: true });
+    videoElement.currentTime = timeSeconds;
+  });
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Could not encode the extracted frame."));
+    }, "image/png");
+  });
+}
+
 function formatOpenTimingDetails(details?: Record<string, number | string | boolean | null | undefined>) {
   if (!details) return "";
   const entries = Object.entries(details).filter(([, value]) => value != null);
@@ -258,6 +388,8 @@ export function PostgresSourceVideoCodingView({
   onKickSourceLock,
   onOpenMemoDraft,
   onUpdateSourceWaveform,
+  onUpdateSourceVideoFrameIndex,
+  onExtractVideoFrame,
   onBack,
 }: PostgresSourceCodingViewProps & {
   projectStoragePath: string;
@@ -292,6 +424,9 @@ export function PostgresSourceVideoCodingView({
   const [volumeControlOpen, setVolumeControlOpen] = useState(false);
   const [zoomControlOpen, setZoomControlOpen] = useState(false);
   const [speedControlOpen, setSpeedControlOpen] = useState(false);
+  const [frameExtracting, setFrameExtracting] = useState(false);
+  const [frameExtractError, setFrameExtractError] = useState<string | null>(null);
+  const [frameSourceDraft, setFrameSourceDraft] = useState<{ file: File; title: string; previewUrl: string; extractedFromVideoSourceId: string; extractedFromVideoTimeMs: number } | null>(null);
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
   const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -304,6 +439,7 @@ export function PostgresSourceVideoCodingView({
   const playbackRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const playbackMonitorFrameRef = useRef<number | null>(null);
   const waveformRecoveryAttemptedRef = useRef<string | null>(null);
+  const frameIndexRecoveryAttemptedRef = useRef<string | null>(null);
   const openTimingStartRef = useRef<number>(performance.now());
   const volumeControlCloseTimeoutRef = useRef<number | null>(null);
   const zoomControlCloseTimeoutRef = useRef<number | null>(null);
@@ -321,6 +457,10 @@ export function PostgresSourceVideoCodingView({
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
   const resolvedFilePath = resolveProjectStoragePath(projectStoragePath, row.filePath);
   const persistedWaveformCache = useMemo(() => parseMediaWaveformCache(row.waveformPeaksJson), [row.waveformPeaksJson]);
+  const videoFrameIndexCache = useMemo(
+    () => parseMediaVideoFrameIndexCache(row.videoFrameIndexJson),
+    [row.videoFrameIndexJson],
+  );
   const waveformCache = generatedWaveformCache ?? persistedWaveformCache;
   const mediaAnnotations = useMemo(
     () => annotations
@@ -500,7 +640,8 @@ export function PostgresSourceVideoCodingView({
   useEffect(() => {
     setGeneratedWaveformCache(null);
     waveformRecoveryAttemptedRef.current = null;
-  }, [row.id, row.waveformPeaksJson]);
+    frameIndexRecoveryAttemptedRef.current = null;
+  }, [row.id, row.waveformPeaksJson, row.videoFrameIndexJson]);
 
   useEffect(() => {
     if (!resolvedFilePath) {
@@ -572,6 +713,25 @@ export function PostgresSourceVideoCodingView({
       cancelled = true;
     };
   }, [onUpdateSourceWaveform, previewBytes, row.id, waveformCache]);
+
+  useEffect(() => {
+    if (videoFrameIndexCache || !previewBytes || !onUpdateSourceVideoFrameIndex) return;
+    if (frameIndexRecoveryAttemptedRef.current === row.id) return;
+    if (waveformCache && !row.waveformPeaksJson && waveformRecoveryAttemptedRef.current === row.id) return;
+    if (!waveformCache && waveformRecoveryAttemptedRef.current !== row.id) return;
+
+    frameIndexRecoveryAttemptedRef.current = row.id;
+    let cancelled = false;
+
+    void createMediaVideoFrameIndexCache(previewBytes).then((nextCache) => {
+      if (cancelled || !nextCache) return;
+      void onUpdateSourceVideoFrameIndex(row.id, serializeMediaVideoFrameIndexCache(nextCache)).catch(() => {});
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onUpdateSourceVideoFrameIndex, previewBytes, row.id, row.waveformPeaksJson, videoFrameIndexCache, waveformCache]);
 
   useEffect(() => {
     setMediaElement(null);
@@ -986,6 +1146,12 @@ export function PostgresSourceVideoCodingView({
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (frameSourceDraft?.previewUrl) URL.revokeObjectURL(frameSourceDraft.previewUrl);
+    };
+  }, [frameSourceDraft?.previewUrl]);
+
+  useEffect(() => {
     if (!activeClipRange) return;
     setClipSelectionDraftStart(formatEditableTimestamp(activeClipRange.startMs));
     setClipSelectionDraftEnd(formatEditableTimestamp(activeClipRange.endMs));
@@ -1107,6 +1273,110 @@ export function PostgresSourceVideoCodingView({
       mediaElement.playbackRate = rate;
     }
     setPlaybackRate(rate);
+  }
+
+  function stepMediaByFrame(direction: -1 | 1) {
+    const mediaElement = mediaElementRef.current;
+    if (!mediaElement) return;
+    mediaElement.pause();
+    const durationSeconds = Number.isFinite(mediaElement.duration) ? mediaElement.duration : null;
+    const indexedFrameTime = videoFrameIndexCache
+      ? findAdjacentFrameTimestamp(videoFrameIndexCache.timestampsSeconds, mediaElement.currentTime, direction)
+      : null;
+    const unclampedTime = indexedFrameTime ?? mediaElement.currentTime + direction * FRAME_STEP_SECONDS;
+    const nextTime = Math.max(0, durationSeconds == null ? unclampedTime : Math.min(unclampedTime, durationSeconds));
+    mediaElement.currentTime = nextTime;
+    if (videoPreviewElementRef.current) {
+      videoPreviewElementRef.current.currentTime = nextTime;
+    }
+    setCurrentTimeMs(nextTime * 1000);
+    setClipPlaybackAnnotationId(null);
+  }
+
+  async function extractCurrentVideoFrame() {
+    if (!onExtractVideoFrame || frameExtracting) return;
+    const sourceVideoElement = videoPreviewElementRef.current
+      ?? (mediaElementRef.current instanceof HTMLVideoElement ? mediaElementRef.current : null);
+    if (!sourceVideoElement) {
+      setFrameExtractError("No video frame is available to extract.");
+      return;
+    }
+
+    setFrameExtracting(true);
+    setFrameExtractError(null);
+    try {
+      const mediaElement = mediaElementRef.current;
+      const currentTimeSeconds = Number.isFinite(mediaElement?.currentTime)
+        ? mediaElement!.currentTime
+        : sourceVideoElement.currentTime;
+
+      await waitForVideoReady(sourceVideoElement);
+      await waitForVideoSeek(sourceVideoElement, currentTimeSeconds);
+      await waitForVideoReady(sourceVideoElement);
+
+      const width = sourceVideoElement.videoWidth;
+      const height = sourceVideoElement.videoHeight;
+      if (width <= 0 || height <= 0) {
+        throw new Error("The current video frame has no drawable dimensions.");
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not create a canvas for the extracted frame.");
+      context.drawImage(sourceVideoElement, 0, 0, width, height);
+
+      const blob = await canvasToPngBlob(canvas);
+      const timeMs = Math.max(0, Math.round(currentTimeSeconds * 1000));
+      const title = `${row.name} frame ${formatMediaTime(timeMs)}`;
+      const fileNameBase = sanitizeFrameFileNamePart(row.name);
+      const fileNameTime = String(timeMs).padStart(8, "0");
+      const file = new File([blob], `${fileNameBase}-frame-${fileNameTime}ms.png`, { type: "image/png" });
+      setFrameSourceDraft((currentDraft) => {
+        if (currentDraft?.previewUrl) URL.revokeObjectURL(currentDraft.previewUrl);
+        return {
+          file,
+          title,
+          previewUrl: URL.createObjectURL(file),
+          extractedFromVideoSourceId: row.id,
+          extractedFromVideoTimeMs: timeMs,
+        };
+      });
+    } catch (extractError) {
+      setFrameExtractError(extractError instanceof Error ? extractError.message : "Failed to extract video frame.");
+    } finally {
+      setFrameExtracting(false);
+    }
+  }
+
+  async function approveFrameSourceDraft() {
+    if (!frameSourceDraft || !onExtractVideoFrame) return;
+    setFrameExtracting(true);
+    setFrameExtractError(null);
+    try {
+      await onExtractVideoFrame({
+        file: frameSourceDraft.file,
+        title: frameSourceDraft.title,
+        extractedFromVideoSourceId: frameSourceDraft.extractedFromVideoSourceId,
+        extractedFromVideoTimeMs: frameSourceDraft.extractedFromVideoTimeMs,
+      });
+      URL.revokeObjectURL(frameSourceDraft.previewUrl);
+      setFrameSourceDraft(null);
+    } catch (approveError) {
+      setFrameExtractError(approveError instanceof Error ? approveError.message : "Failed to create frame source.");
+    } finally {
+      setFrameExtracting(false);
+    }
+  }
+
+  function cancelFrameSourceDraft() {
+    if (frameExtracting) return;
+    setFrameSourceDraft((currentDraft) => {
+      if (currentDraft?.previewUrl) URL.revokeObjectURL(currentDraft.previewUrl);
+      return null;
+    });
+    setFrameExtractError(null);
   }
 
   const hasOwnSourceLock = !!sourceLock && sourceLock.userId === currentUserId;
@@ -1370,7 +1640,7 @@ export function PostgresSourceVideoCodingView({
                         color: "#233142",
                       }}
                     >
-                      <div className="media-player-layout-grid">
+                      <div className="media-player-layout-grid media-player-layout-grid--video">
                         {activeClipRange ? (
                           <div className="media-player-clip-anchor-slot">
                             <button
@@ -1554,6 +1824,18 @@ export function PostgresSourceVideoCodingView({
                             noTooltip
                           />
                         </div>
+                        <div className="media-player-grid-frame-back">
+                          <button
+                            type="button"
+                            className="media-player-native-control media-player-frame-step-button"
+                            onClick={() => stepMediaByFrame(-1)}
+                            disabled={!mediaElement}
+                            title="Back 1 frame"
+                            aria-label="Back 1 frame"
+                          >
+                            <FrameBackIcon />
+                          </button>
+                        </div>
                         <div className="media-player-grid-play">
                           <MediaPlayButton
                             className="media-player-native-control media-player-native-control--play"
@@ -1561,6 +1843,30 @@ export function PostgresSourceVideoCodingView({
                             aria-label="Play"
                             noTooltip
                           />
+                        </div>
+                        <div className="media-player-grid-extract-frame">
+                          <button
+                            type="button"
+                            className="media-player-native-control media-player-frame-extract-button"
+                            onClick={() => void extractCurrentVideoFrame()}
+                            disabled={!onExtractVideoFrame || !mediaElement || frameExtracting || saving}
+                            title={frameExtracting ? "Extracting frame" : "Extract frame"}
+                            aria-label={frameExtracting ? "Extracting frame" : "Extract current video frame"}
+                          >
+                            <ExtractFrameIcon />
+                          </button>
+                        </div>
+                        <div className="media-player-grid-frame-forward">
+                          <button
+                            type="button"
+                            className="media-player-native-control media-player-frame-step-button"
+                            onClick={() => stepMediaByFrame(1)}
+                            disabled={!mediaElement}
+                            title="Forward 1 frame"
+                            aria-label="Forward 1 frame"
+                          >
+                            <FrameForwardIcon />
+                          </button>
                         </div>
                         <div className="media-player-grid-seek-forward">
                           <MediaSeekForwardButton
@@ -1636,6 +1942,9 @@ export function PostgresSourceVideoCodingView({
                     </MediaControlBar>
                     </MediaController>
                   </div>
+                  {frameExtractError ? (
+                    <p className="auth-error media-player-frame-extract-error">{frameExtractError}</p>
+                  ) : null}
                 </div>
               </div>
             ) : (
@@ -1671,6 +1980,48 @@ export function PostgresSourceVideoCodingView({
         canManageMemos={canManageMemos}
         canDeleteAnnotations={canEditAnnotations}
       />
+
+      {frameSourceDraft ? (
+        <div className="modal-overlay" onClick={cancelFrameSourceDraft}>
+          <div className="modal modal--wide media-player-frame-source-modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Approve Frame Source</h2>
+            <p className="users-guide-copy" style={{ marginTop: 0, marginBottom: 16 }}>
+              Review this extracted frame before adding it as an image source.
+            </p>
+            <div className="media-player-frame-source-preview">
+              <img src={frameSourceDraft.previewUrl} alt="" />
+            </div>
+            <label className="form-label">
+              Source Title
+              <input
+                className="form-input"
+                value={frameSourceDraft.title}
+                onChange={(event) => {
+                  setFrameSourceDraft((currentDraft) => (
+                    currentDraft
+                      ? { ...currentDraft, title: event.target.value }
+                      : currentDraft
+                  ));
+                }}
+                autoFocus
+              />
+            </label>
+            {frameExtractError ? <p className="auth-error">{frameExtractError}</p> : null}
+            <div className="form-actions">
+              <button className="btn" onClick={cancelFrameSourceDraft} disabled={frameExtracting || saving}>
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                onClick={() => void approveFrameSourceDraft()}
+                disabled={frameExtracting || saving || !frameSourceDraft.title.trim()}
+              >
+                {frameExtracting || saving ? "Creating..." : "Approve and Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {editingAnnotation && canEditAnnotations ? (
         <AnnotationEditorModal

@@ -38,6 +38,7 @@
     "intl-messageformat": "^11.2.8",
     "jspdf": "^4.2.1",
     "media-chrome": "^4.19.2",
+    "mp4box": "^2.4.1",
     "pdfjs-dist": "^5.6.205",
     "pocketbase": "^0.26.8",
     "react": "^19.1.0",

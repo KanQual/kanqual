@@ -6,7 +6,9 @@ import type { PostgresExperimentCode } from "../lib/postgresExperiment";
 import type { PendingSelection, SourceAnnotationRow } from "./Postgres_Sources_View";
 import {
   AnnotationEditorModal,
+  type AnnotationContextMenuState,
   type PostgresSourceCodingViewProps,
+  PostgresSourceAnnotationContextMenu,
   PostgresSourceAnnotationPanel,
 } from "./Postgres_Source_Coding_Shared";
 
@@ -239,11 +241,14 @@ export function PostgresSourceImageCodingView({
   const [imageDisplaySize, setImageDisplaySize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
+  const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
+  const annotationContextMenuStyle = useViewportContextMenuStyle(annotationContextMenu, annotationContextMenuRef);
 
   const codesById = useMemo(() => new Map(codes.map((code) => [code.id, code])), [codes]);
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
@@ -273,10 +278,14 @@ export function PostgresSourceImageCodingView({
       if (codeContextMenuRef.current && !codeContextMenuRef.current.contains(event.target as Node)) {
         setCodeContextMenu(null);
       }
+      if (annotationContextMenuRef.current && !annotationContextMenuRef.current.contains(event.target as Node)) {
+        setAnnotationContextMenu(null);
+      }
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setCodeContextMenu(null);
+        setAnnotationContextMenu(null);
         setDraftRect(null);
         setInteractionState(null);
         setPreviewRegions({});
@@ -506,6 +515,7 @@ export function PostgresSourceImageCodingView({
     handle?: ResizeHandle,
   ) {
     if (!canEditAnnotations || !annotation.imageRegion || !overlayRef.current || saving || pendingSelection) return;
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     setSelectedAnnotationId(annotation.id);
@@ -811,6 +821,13 @@ export function PostgresSourceImageCodingView({
                                 event.stopPropagation();
                                 if (canEditAnnotations) setEditingAnnotation(annotation);
                               }}
+                              onContextMenu={(event) => {
+                                if (!canManageMemos && !canDeleteAnnotations) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setSelectedAnnotationId(annotation.id);
+                                setAnnotationContextMenu({ x: event.clientX, y: event.clientY, annotation });
+                              }}
                               onPointerDown={(event) => startRegionInteraction(event, annotation, "move")}
                               onPointerMove={handleRegionPointerMove}
                               onPointerUp={(event) => {
@@ -912,6 +929,19 @@ export function PostgresSourceImageCodingView({
           </button>
         </div>
       ) : null}
+
+      <PostgresSourceAnnotationContextMenu
+        contextMenu={annotationContextMenu}
+        contextMenuRef={annotationContextMenuRef}
+        contextMenuStyle={annotationContextMenuStyle}
+        onClose={() => setAnnotationContextMenu(null)}
+        onDeleteAnnotation={(annotationId) => {
+          void onDeleteAnnotation(annotationId);
+        }}
+        onOpenMemoDraft={onOpenMemoDraft}
+        canManageMemos={canManageMemos}
+        canDeleteAnnotations={canDeleteAnnotations}
+      />
 
       {pendingSelection && canEditAnnotations ? (
         <AnnotationEditorModal

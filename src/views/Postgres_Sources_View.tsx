@@ -13,6 +13,7 @@ import { useI18n } from "../i18n/provider";
 import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { createMediaWaveformCache, serializeMediaWaveformCache } from "../lib/mediaWaveform";
+import { createMediaVideoFrameIndexCache, serializeMediaVideoFrameIndexCache } from "../lib/mediaVideoFrameIndex";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import {
   acquirePostgresExperimentSourceLock,
@@ -41,6 +42,7 @@ import {
 import { PostgresSourceAudioCodingView } from "./Postgres_Source_Audio_Coding_View";
 import { PostgresSourceImageCodingView } from "./Postgres_Source_Image_Coding_View";
 import { AnnotationEditorModal } from "./Postgres_Source_Coding_Shared";
+import { formatMediaTime } from "./Postgres_Source_Media_Timeline";
 import { PostgresSourceTextCodingView } from "./Postgres_Source_Text_Coding_View";
 import { PostgresSourceVideoCodingView } from "./Postgres_Source_Video_Coding_View";
 
@@ -71,6 +73,9 @@ export type SourceRow = {
   content: string;
   structuredContentJson: string;
   waveformPeaksJson: string;
+  videoFrameIndexJson: string;
+  extractedFromVideoSourceId: string;
+  extractedFromVideoTimeMs: number | null;
   filePath: string;
   annotationCount: number;
   objectCount: number;
@@ -1622,6 +1627,12 @@ function PostgresSourceDetail({
             <dt>{t("projectDocuments.columns.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
             <dt>File Name</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
             <dt>Extension</dt> <dd>{fileExt ? `.${fileExt}` : "—"}</dd>
+            {isImageSource && row.extractedFromVideoSourceId ? (
+              <>
+                <dt>Extracted From Video</dt> <dd>{row.extractedFromVideoSourceId}</dd>
+                <dt>Extracted Timestamp</dt> <dd>{row.extractedFromVideoTimeMs != null ? formatMediaTime(row.extractedFromVideoTimeMs) : "N/A"}</dd>
+              </>
+            ) : null}
             <dt>Objects</dt> <dd>{formatCurrentNumber(row.objectCount)}</dd>
             <dt>{t("projectCodebook.detail.annotations")}</dt> <dd>{formatCurrentNumber(row.annotationCount)}</dd>
           </dl>
@@ -2090,6 +2101,9 @@ export function PostgresSourcesView({
             content: source.textContent,
             structuredContentJson: source.structuredContentJson,
             waveformPeaksJson: source.waveformPeaksJson ?? "",
+            videoFrameIndexJson: source.videoFrameIndexJson ?? "",
+            extractedFromVideoSourceId: source.extractedFromVideoSourceId ?? "",
+            extractedFromVideoTimeMs: source.extractedFromVideoTimeMs ?? null,
             filePath: source.storagePath,
             annotationCount: annotationCountBySourceId.get(source.id) ?? 0,
             objectCount: objectCountBySourceId.get(source.id) ?? 0,
@@ -2375,6 +2389,9 @@ export function PostgresSourcesView({
           notes: payload.notes,
           structuredContentJson: editingRow.structuredContentJson,
           waveformPeaksJson: editingRow.waveformPeaksJson,
+          videoFrameIndexJson: editingRow.videoFrameIndexJson,
+          extractedFromVideoSourceId: editingRow.extractedFromVideoSourceId,
+          extractedFromVideoTimeMs: editingRow.extractedFromVideoTimeMs,
           originalFileName: editingRow.filePath,
           storagePath: editingRow.filePath,
         });
@@ -2387,6 +2404,9 @@ export function PostgresSourcesView({
           notes: payload.notes,
           structuredContentJson: "",
           waveformPeaksJson: "",
+          videoFrameIndexJson: "",
+          extractedFromVideoSourceId: "",
+          extractedFromVideoTimeMs: null,
           originalFileName: "",
           storagePath: "",
         });
@@ -2431,6 +2451,9 @@ export function PostgresSourcesView({
           notes: payload.notes,
           structuredContentJson: "",
           waveformPeaksJson: "",
+          videoFrameIndexJson: "",
+          extractedFromVideoSourceId: "",
+          extractedFromVideoTimeMs: null,
           originalFileName: "",
           storagePath: "",
         });
@@ -2439,6 +2462,9 @@ export function PostgresSourcesView({
           const bytes = new Uint8Array(await item.file.arrayBuffer());
           const waveformPeaksJson = item.sourceKind === "audio" || item.sourceKind === "video"
             ? serializeMediaWaveformCache(await createMediaWaveformCache(bytes))
+            : "";
+          const videoFrameIndexJson = item.sourceKind === "video"
+            ? serializeMediaVideoFrameIndexCache(await createMediaVideoFrameIndexCache(bytes))
             : "";
           await importPostgresExperimentSourceFile({
             projectId,
@@ -2450,6 +2476,9 @@ export function PostgresSourcesView({
             textContent: item.extractedText,
             structuredContentJson: "",
             waveformPeaksJson,
+            videoFrameIndexJson,
+            extractedFromVideoSourceId: "",
+            extractedFromVideoTimeMs: null,
             notes: "",
           });
         }
@@ -2458,6 +2487,35 @@ export function PostgresSourcesView({
       await loadSources();
     } catch (saveError) {
       setSubmitError(saveError instanceof Error ? saveError.message : "Failed to create source.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleExtractVideoFrameSource(payload: { file: File; title: string; extractedFromVideoSourceId: string; extractedFromVideoTimeMs: number }) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const bytes = new Uint8Array(await payload.file.arrayBuffer());
+      await importPostgresExperimentSourceFile({
+        projectId,
+        sourceKind: "image",
+        title: payload.title.trim() || preliminarySourceTitleFromFileName(payload.file.name),
+        originalFileName: sourceImportSettings.storeOriginalFileName ? payload.file.name : "",
+        mediaType: inferUploadMediaType(payload.file) ?? "image/png",
+        fileBytesBase64: bytesToBase64(bytes),
+        textContent: "",
+        structuredContentJson: "",
+        waveformPeaksJson: "",
+        videoFrameIndexJson: "",
+        extractedFromVideoSourceId: payload.extractedFromVideoSourceId,
+        extractedFromVideoTimeMs: payload.extractedFromVideoTimeMs,
+        notes: "",
+      });
+      await loadSources();
+    } catch (saveError) {
+      setSubmitError(saveError instanceof Error ? saveError.message : "Failed to create frame source.");
+      throw saveError;
     } finally {
       setSubmitting(false);
     }
@@ -2677,6 +2735,9 @@ export function PostgresSourcesView({
       notes: sourceRow.notes,
       structuredContentJson: sourceRow.structuredContentJson,
       waveformPeaksJson,
+      videoFrameIndexJson: sourceRow.videoFrameIndexJson,
+      extractedFromVideoSourceId: sourceRow.extractedFromVideoSourceId,
+      extractedFromVideoTimeMs: sourceRow.extractedFromVideoTimeMs,
       originalFileName: sourceRow.filePath,
       storagePath: sourceRow.filePath,
     });
@@ -2689,6 +2750,38 @@ export function PostgresSourcesView({
     setSelectedRow((current) => (
       current?.id === sourceId
         ? { ...current, waveformPeaksJson }
+        : current
+    ));
+  }
+
+  async function handleUpdateSourceVideoFrameIndex(sourceId: string, videoFrameIndexJson: string) {
+    const sourceRow = rows.find((entry) => entry.id === sourceId);
+    if (!sourceRow) return;
+
+    await updatePostgresExperimentSource({
+      projectId,
+      sourceId: sourceRow.id,
+      sourceKind: sourceRow.type.trim(),
+      title: sourceRow.name,
+      textContent: sourceRow.content,
+      notes: sourceRow.notes,
+      structuredContentJson: sourceRow.structuredContentJson,
+      waveformPeaksJson: sourceRow.waveformPeaksJson,
+      videoFrameIndexJson,
+      extractedFromVideoSourceId: sourceRow.extractedFromVideoSourceId,
+      extractedFromVideoTimeMs: sourceRow.extractedFromVideoTimeMs,
+      originalFileName: sourceRow.filePath,
+      storagePath: sourceRow.filePath,
+    });
+
+    setRows((current) => current.map((entry) => (
+      entry.id === sourceId
+        ? { ...entry, videoFrameIndexJson }
+        : entry
+    )));
+    setSelectedRow((current) => (
+      current?.id === sourceId
+        ? { ...current, videoFrameIndexJson }
         : current
     ));
   }
@@ -2844,6 +2937,7 @@ export function PostgresSourcesView({
           onKickSourceLock={handleKickSourceLock}
           onOpenMemoDraft={onOpenPostgresMemoDraft}
           onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onUpdateSourceVideoFrameIndex={handleUpdateSourceVideoFrameIndex}
           onBack={() => {
             setSelectedRow(null);
             setSubmitError(null);
@@ -2872,6 +2966,7 @@ export function PostgresSourcesView({
           onKickSourceLock={handleKickSourceLock}
           onOpenMemoDraft={onOpenPostgresMemoDraft}
           onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onUpdateSourceVideoFrameIndex={handleUpdateSourceVideoFrameIndex}
           onBack={() => {
             setSelectedRow(null);
             setSubmitError(null);
@@ -2900,6 +2995,8 @@ export function PostgresSourcesView({
           onKickSourceLock={handleKickSourceLock}
           onOpenMemoDraft={onOpenPostgresMemoDraft}
           onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onUpdateSourceVideoFrameIndex={handleUpdateSourceVideoFrameIndex}
+          onExtractVideoFrame={handleExtractVideoFrameSource}
           onBack={() => {
             setSelectedRow(null);
             setSubmitError(null);

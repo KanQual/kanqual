@@ -1664,11 +1664,17 @@ async fn ensure_postgres_experiment_project_schema(
                     text_content TEXT NOT NULL DEFAULT '',
                     structured_content_json TEXT NOT NULL DEFAULT '{}',
                     waveform_peaks_json TEXT NOT NULL DEFAULT '',
+                    video_frame_index_json TEXT NOT NULL DEFAULT '',
+                    extracted_from_video_source_id TEXT NOT NULL DEFAULT '',
+                    extracted_from_video_time_ms BIGINT,
                     notes TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 ALTER TABLE sources ADD COLUMN IF NOT EXISTS waveform_peaks_json TEXT NOT NULL DEFAULT '';
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS video_frame_index_json TEXT NOT NULL DEFAULT '';
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS extracted_from_video_source_id TEXT NOT NULL DEFAULT '';
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS extracted_from_video_time_ms BIGINT;
                 CREATE TABLE IF NOT EXISTS source_files (
                     id TEXT PRIMARY KEY,
                     source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
@@ -2387,9 +2393,12 @@ fn map_postgres_experiment_source_row(project_id: &str, row: tokio_postgres::Row
         text_content: row.get(5),
         structured_content_json: row.get(6),
         waveform_peaks_json: row.get(7),
-        notes: row.get(8),
-        created_at: row.get(9),
-        updated_at: row.get(10),
+        video_frame_index_json: row.get(8),
+        extracted_from_video_source_id: row.get(9),
+        extracted_from_video_time_ms: row.get(10),
+        notes: row.get(11),
+        created_at: row.get(12),
+        updated_at: row.get(13),
     }
 }
 
@@ -3612,6 +3621,9 @@ struct PostgresExperimentSource {
     text_content: String,
     structured_content_json: String,
     waveform_peaks_json: String,
+    video_frame_index_json: String,
+    extracted_from_video_source_id: String,
+    extracted_from_video_time_ms: Option<i64>,
     notes: String,
     created_at: String,
     updated_at: String,
@@ -3945,6 +3957,9 @@ struct CreatePostgresExperimentSourceRequest {
     text_content: String,
     structured_content_json: Option<String>,
     waveform_peaks_json: Option<String>,
+    video_frame_index_json: Option<String>,
+    extracted_from_video_source_id: Option<String>,
+    extracted_from_video_time_ms: Option<i64>,
     notes: Option<String>,
 }
 
@@ -3960,6 +3975,9 @@ struct UpdatePostgresExperimentSourceRequest {
     text_content: String,
     structured_content_json: Option<String>,
     waveform_peaks_json: Option<String>,
+    video_frame_index_json: Option<String>,
+    extracted_from_video_source_id: Option<String>,
+    extracted_from_video_time_ms: Option<i64>,
     notes: Option<String>,
 }
 
@@ -3975,6 +3993,9 @@ struct ImportPostgresExperimentSourceFileRequest {
     text_content: String,
     structured_content_json: Option<String>,
     waveform_peaks_json: Option<String>,
+    video_frame_index_json: Option<String>,
+    extracted_from_video_source_id: Option<String>,
+    extracted_from_video_time_ms: Option<i64>,
     notes: Option<String>,
 }
 
@@ -8182,7 +8203,7 @@ async fn load_postgres_experiment_sources_for_client(
     let rows = client
         .query(
             "
-            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, notes, created_at::text, updated_at::text
+            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, video_frame_index_json, extracted_from_video_source_id, extracted_from_video_time_ms, notes, created_at::text, updated_at::text
             FROM sources
             ORDER BY created_at ASC, id ASC
             ",
@@ -8262,7 +8283,7 @@ async fn load_postgres_experiment_source_for_client(
     let row = client
         .query_opt(
             "
-            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, notes, created_at::text, updated_at::text
+            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, video_frame_index_json, extracted_from_video_source_id, extracted_from_video_time_ms, notes, created_at::text, updated_at::text
             FROM sources
             WHERE id = $1
             ",
@@ -9656,6 +9677,9 @@ async fn create_postgres_experiment_source_command(
     let storage_path = request.storage_path.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
     let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
+    let video_frame_index_json = request.video_frame_index_json.unwrap_or_default();
+    let extracted_from_video_source_id = request.extracted_from_video_source_id.unwrap_or_default().trim().to_string();
+    let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
     client
         .execute(
@@ -9669,9 +9693,12 @@ async fn create_postgres_experiment_source_command(
                 text_content,
                 structured_content_json,
                 waveform_peaks_json,
+                video_frame_index_json,
+                extracted_from_video_source_id,
+                extracted_from_video_time_ms,
                 notes
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ",
             &[
                 &source_id,
@@ -9682,6 +9709,9 @@ async fn create_postgres_experiment_source_command(
                 &request.text_content,
                 &structured_content_json,
                 &waveform_peaks_json,
+                &video_frame_index_json,
+                &extracted_from_video_source_id,
+                &extracted_from_video_time_ms,
                 &notes,
             ],
         )
@@ -9745,6 +9775,9 @@ async fn import_postgres_experiment_source_file_command(
     let media_type = request.media_type.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
     let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
+    let video_frame_index_json = request.video_frame_index_json.unwrap_or_default();
+    let extracted_from_video_source_id = request.extracted_from_video_source_id.unwrap_or_default().trim().to_string();
+    let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
     let sanitized_file_name = sanitize_postgres_experiment_file_name(&original_file_name);
     let relative_storage_path = format!("sources/{source_id}/{sanitized_file_name}");
@@ -9768,9 +9801,12 @@ async fn import_postgres_experiment_source_file_command(
                 text_content,
                 structured_content_json,
                 waveform_peaks_json,
+                video_frame_index_json,
+                extracted_from_video_source_id,
+                extracted_from_video_time_ms,
                 notes
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ",
             &[
                 &source_id,
@@ -9781,6 +9817,9 @@ async fn import_postgres_experiment_source_file_command(
                 &request.text_content,
                 &structured_content_json,
                 &waveform_peaks_json,
+                &video_frame_index_json,
+                &extracted_from_video_source_id,
+                &extracted_from_video_time_ms,
                 &notes,
             ],
         )
@@ -9868,6 +9907,9 @@ async fn update_postgres_experiment_source_command(
     let storage_path = request.storage_path.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
     let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
+    let video_frame_index_json = request.video_frame_index_json.unwrap_or_default();
+    let extracted_from_video_source_id = request.extracted_from_video_source_id.unwrap_or_default().trim().to_string();
+    let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
     let updated_count = client
         .execute(
@@ -9880,7 +9922,10 @@ async fn update_postgres_experiment_source_command(
                 text_content = $6,
                 structured_content_json = $7,
                 waveform_peaks_json = $8,
-                notes = $9,
+                video_frame_index_json = $9,
+                extracted_from_video_source_id = $10,
+                extracted_from_video_time_ms = $11,
+                notes = $12,
                 updated_at = NOW()
             WHERE id = $1
             ",
@@ -9893,6 +9938,9 @@ async fn update_postgres_experiment_source_command(
                 &request.text_content,
                 &structured_content_json,
                 &waveform_peaks_json,
+                &video_frame_index_json,
+                &extracted_from_video_source_id,
+                &extracted_from_video_time_ms,
                 &notes,
             ],
         )
@@ -9915,7 +9963,7 @@ async fn update_postgres_experiment_source_command(
         Some(&source.id),
         Some(serde_json::json!({
             "name": source.title,
-            "changedFields": ["source_kind", "title", "original_file_name", "storage_path", "text_content", "structured_content_json", "waveform_peaks_json", "notes"],
+            "changedFields": ["source_kind", "title", "original_file_name", "storage_path", "text_content", "structured_content_json", "waveform_peaks_json", "video_frame_index_json", "extracted_from_video_source_id", "extracted_from_video_time_ms", "notes"],
         })),
     ).await?;
     emit_postgres_experiment_project_change(&app, &project_id, "source", &source_id, "updated");

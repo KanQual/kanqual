@@ -313,6 +313,9 @@ export type PostgresExperimentSource = {
   textContent: string;
   structuredContentJson: string;
   waveformPeaksJson: string;
+  videoFrameIndexJson: string;
+  extractedFromVideoSourceId: string;
+  extractedFromVideoTimeMs: number | null;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -925,6 +928,9 @@ export async function createPostgresExperimentSource(data: {
   textContent: string;
   structuredContentJson?: string | null;
   waveformPeaksJson?: string | null;
+  videoFrameIndexJson?: string | null;
+  extractedFromVideoSourceId?: string | null;
+  extractedFromVideoTimeMs?: number | null;
   notes?: string | null;
 }): Promise<PostgresExperimentSource> {
   return invoke<PostgresExperimentSource>("create_postgres_experiment_source_command", {
@@ -942,6 +948,9 @@ export async function importPostgresExperimentSourceFile(data: {
   textContent: string;
   structuredContentJson?: string | null;
   waveformPeaksJson?: string | null;
+  videoFrameIndexJson?: string | null;
+  extractedFromVideoSourceId?: string | null;
+  extractedFromVideoTimeMs?: number | null;
   notes?: string | null;
 }): Promise<PostgresExperimentSource> {
   return invoke<PostgresExperimentSource>("import_postgres_experiment_source_file_command", {
@@ -959,6 +968,9 @@ export async function updatePostgresExperimentSource(data: {
   textContent: string;
   structuredContentJson?: string | null;
   waveformPeaksJson?: string | null;
+  videoFrameIndexJson?: string | null;
+  extractedFromVideoSourceId?: string | null;
+  extractedFromVideoTimeMs?: number | null;
   notes?: string | null;
 }): Promise<PostgresExperimentSource> {
   return invoke<PostgresExperimentSource>("update_postgres_experiment_source_command", {
