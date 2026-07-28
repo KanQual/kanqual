@@ -3251,6 +3251,63 @@ body {
   gap: 6px;
 }
 
+.text-size-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.text-size-control-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.text-size-control-btn--decrease {
+  font-size: 12px;
+}
+
+.text-size-control-btn--increase {
+  font-size: 18px;
+}
+
+.text-size-control-btn:hover:not(:disabled) {
+  background: var(--color-surface-alt);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+  color: var(--color-primary);
+}
+
+.text-size-control-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.text-size-control-value {
+  min-width: 34px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.text-source-content-sized .processed-transcript-text,
+.text-source-content-sized .processed-transcript-segment--metadata .processed-transcript-text {
+  font-size: inherit;
+}
+
 .doc-content-header-title {
   display: flex;
   align-items: center;

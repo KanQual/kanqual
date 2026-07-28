@@ -52,6 +52,11 @@ export type AnnotationContextMenuState = {
   annotation: SourceAnnotationRow;
 };
 
+export const SOURCE_TEXT_SIZE_DEFAULT_PX = 15;
+export const SOURCE_TEXT_SIZE_MIN_PX = 12;
+export const SOURCE_TEXT_SIZE_MAX_PX = 24;
+export const SOURCE_TEXT_SIZE_STEP_PX = 1;
+
 export type PostgresSourceCodingViewProps = {
   row: SourceRow;
   codes: PostgresExperimentCode[];
@@ -90,6 +95,44 @@ export type PostgresSourceCodingViewProps = {
   onExtractVideoFrame?: (payload: { file: File; title: string; extractedFromVideoSourceId: string; extractedFromVideoTimeMs: number }) => Promise<void>;
   onBack: () => void;
 };
+
+export function TextSizeControls({
+  fontSizePx,
+  onDecrease,
+  onIncrease,
+}: {
+  fontSizePx: number;
+  onDecrease: () => void;
+  onIncrease: () => void;
+}) {
+  return (
+    <div className="text-size-controls" aria-label="Text size">
+      <button
+        type="button"
+        className="text-size-control-btn text-size-control-btn--decrease"
+        onClick={onDecrease}
+        disabled={fontSizePx <= SOURCE_TEXT_SIZE_MIN_PX}
+        aria-label="Decrease text size"
+        title="Decrease text size"
+      >
+        A
+      </button>
+      <span className="text-size-control-value" aria-live="polite">
+        {fontSizePx}px
+      </span>
+      <button
+        type="button"
+        className="text-size-control-btn text-size-control-btn--increase"
+        onClick={onIncrease}
+        disabled={fontSizePx >= SOURCE_TEXT_SIZE_MAX_PX}
+        aria-label="Increase text size"
+        title="Increase text size"
+      >
+        A
+      </button>
+    </div>
+  );
+}
 
 function withHexAlpha(color: string, alpha: string): string {
   return /^#[0-9a-f]{6}$/i.test(color) ? `${color}${alpha}` : color;

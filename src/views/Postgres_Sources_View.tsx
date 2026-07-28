@@ -41,7 +41,14 @@ import {
 } from "../lib/postgresExperiment";
 import { PostgresSourceAudioCodingView } from "./Postgres_Source_Audio_Coding_View";
 import { PostgresSourceImageCodingView } from "./Postgres_Source_Image_Coding_View";
-import { AnnotationEditorModal } from "./Postgres_Source_Coding_Shared";
+import {
+  AnnotationEditorModal,
+  SOURCE_TEXT_SIZE_DEFAULT_PX,
+  SOURCE_TEXT_SIZE_MAX_PX,
+  SOURCE_TEXT_SIZE_MIN_PX,
+  SOURCE_TEXT_SIZE_STEP_PX,
+  TextSizeControls,
+} from "./Postgres_Source_Coding_Shared";
 import { formatMediaTime } from "./Postgres_Source_Media_Timeline";
 import { PostgresSourceTextCodingView } from "./Postgres_Source_Text_Coding_View";
 import { PostgresSourceVideoCodingView } from "./Postgres_Source_Video_Coding_View";
@@ -1375,6 +1382,7 @@ function PostgresSourceDetail({
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
   const [videoPreviewLoading, setVideoPreviewLoading] = useState(false);
+  const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
 
   const normalizedSourceType = row.type.trim().toLowerCase();
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
@@ -1594,6 +1602,14 @@ function PostgresSourceDetail({
     selection.removeAllRanges();
   }
 
+  function decreaseTextSize() {
+    setTextSizePx((current) => Math.max(SOURCE_TEXT_SIZE_MIN_PX, current - SOURCE_TEXT_SIZE_STEP_PX));
+  }
+
+  function increaseTextSize() {
+    setTextSizePx((current) => Math.min(SOURCE_TEXT_SIZE_MAX_PX, current + SOURCE_TEXT_SIZE_STEP_PX));
+  }
+
   return (
     <div className="view doc-detail-view">
       <div className="workspace-back-row workspace-back-row--split">
@@ -1730,6 +1746,13 @@ function PostgresSourceDetail({
                   )}
                 </div>
               </div>
+              {!isPdfSource && !isImageSource && !isAudioSource && !isVideoSource && row.content ? (
+                <TextSizeControls
+                  fontSizePx={textSizePx}
+                  onDecrease={decreaseTextSize}
+                  onIncrease={increaseTextSize}
+                />
+              ) : null}
             </div>
             {isPdfSource ? (
               pdfPreviewLoading ? (
@@ -1825,7 +1848,8 @@ function PostgresSourceDetail({
               row.type === "Processed Transcript" && processedTranscriptSegments.length > 0 ? (
                 <div
                   ref={transcriptViewerRef}
-                  className="doc-content-body doc-content-body--structured"
+                  className="doc-content-body doc-content-body--structured text-source-content-sized"
+                  style={{ fontSize: textSizePx }}
                 >
                   <ProcessedTranscriptView
                     segments={processedTranscriptSegments}
@@ -1841,7 +1865,7 @@ function PostgresSourceDetail({
                 >
                   <pre
                     className="doc-content-body"
-                    style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                    style={{ fontSize: textSizePx, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                   >
                     {row.content}
                   </pre>

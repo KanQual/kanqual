@@ -17,6 +17,11 @@ import {
   type PostgresSourceCodingViewProps,
   PostgresSourceAnnotationPanel,
   PostgresSourceCodingFiltersModal,
+  SOURCE_TEXT_SIZE_DEFAULT_PX,
+  SOURCE_TEXT_SIZE_MAX_PX,
+  SOURCE_TEXT_SIZE_MIN_PX,
+  SOURCE_TEXT_SIZE_STEP_PX,
+  TextSizeControls,
   orderedCodesWithDepth,
   tooltipExcerpt,
   type AnnotationHover,
@@ -65,6 +70,7 @@ export function PostgresSourceTextCodingView({
   const [hiddenUserIds, setHiddenUserIds] = useState<Set<string>>(new Set());
   const [hiddenCodeIds, setHiddenCodeIds] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
   const [stripeBars, setStripeBars] = useState<StripeBar[]>([]);
   const [stripeHover, setStripeHover] = useState<StripeHover | null>(null);
   const [annotationHover, setAnnotationHover] = useState<AnnotationHover | null>(null);
@@ -288,6 +294,14 @@ export function PostgresSourceTextCodingView({
     });
   }
 
+  function decreaseTextSize() {
+    setTextSizePx((current) => Math.max(SOURCE_TEXT_SIZE_MIN_PX, current - SOURCE_TEXT_SIZE_STEP_PX));
+  }
+
+  function increaseTextSize() {
+    setTextSizePx((current) => Math.min(SOURCE_TEXT_SIZE_MAX_PX, current + SOURCE_TEXT_SIZE_STEP_PX));
+  }
+
   async function handleQuickCode(codeId: string) {
     if (!pendingSelection || !canEditAnnotations || saving) return;
     await onCreateAnnotation(row.id, pendingSelection, { codeIds: [codeId], note: "" });
@@ -297,11 +311,13 @@ export function PostgresSourceTextCodingView({
   function renderCodingContent() {
     if (row.type === "Processed Transcript" && processedTranscriptSegments.length > 0) {
       return (
-        <ProcessedTranscriptView
-          segments={processedTranscriptSegments}
-          renderSegmentText={(segment) => segment.text}
-          selectedSortOrder={selectedOutlineSortOrder}
-        />
+        <div className="text-source-content-sized" style={{ fontSize: textSizePx }}>
+          <ProcessedTranscriptView
+            segments={processedTranscriptSegments}
+            renderSegmentText={(segment) => segment.text}
+            selectedSortOrder={selectedOutlineSortOrder}
+          />
+        </div>
       );
     }
 
@@ -317,7 +333,7 @@ export function PostgresSourceTextCodingView({
     const orderedBoundaries = [...boundaries].sort((left, right) => left - right);
 
     return (
-      <pre className="doc-content-body" style={{ whiteSpace: "pre-wrap" }}>
+      <pre className="doc-content-body" style={{ fontSize: textSizePx, whiteSpace: "pre-wrap" }}>
         {orderedBoundaries.slice(0, -1).map((start, index) => {
           const end = orderedBoundaries[index + 1];
           const text = row.content.slice(start, end);
@@ -519,6 +535,11 @@ export function PostgresSourceTextCodingView({
                 ) : null}
               </span>
               <div className="doc-toolbar-actions">
+                <TextSizeControls
+                  fontSizePx={textSizePx}
+                  onDecrease={decreaseTextSize}
+                  onIncrease={increaseTextSize}
+                />
                 <button
                   type="button"
                   className="doc-toolbar-filter-btn"
