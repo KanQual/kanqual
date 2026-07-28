@@ -18,7 +18,8 @@ const TIMELINE_HEIGHT_PX = 28;
 const SEGMENT_STRIP_ROW_HEIGHT_PX = 9;
 const SEGMENT_STRIP_ROW_GAP_PX = 4;
 const SEGMENT_STRIP_MIN_BAR_WIDTH_PX = 3;
-const SEGMENT_STRIP_PADDING_TOP_PX = 6;
+const SEGMENT_STRIP_RESERVED_LANES = 3;
+const SEGMENT_STRIP_PADDING_TOP_PX = 3;
 const SEGMENT_STRIP_PADDING_BOTTOM_PX = 2;
 const DIMMED_SEGMENT_OPACITY = 0.38;
 const SCROLLBAR_RESERVE_PX = 0;
@@ -369,12 +370,11 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       laneCount: laneEndTimes.length,
     };
   }, [mediaAnnotations]);
-  const segmentStripHeight = annotationStripBars.laneCount > 0
-    ? SEGMENT_STRIP_PADDING_TOP_PX
-      + SEGMENT_STRIP_PADDING_BOTTOM_PX
-      + annotationStripBars.laneCount * SEGMENT_STRIP_ROW_HEIGHT_PX
-      + Math.max(0, annotationStripBars.laneCount - 1) * SEGMENT_STRIP_ROW_GAP_PX
-    : 0;
+  const segmentStripLaneCount = Math.max(SEGMENT_STRIP_RESERVED_LANES, annotationStripBars.laneCount);
+  const segmentStripHeight = SEGMENT_STRIP_PADDING_TOP_PX
+    + SEGMENT_STRIP_PADDING_BOTTOM_PX
+    + segmentStripLaneCount * SEGMENT_STRIP_ROW_HEIGHT_PX
+    + Math.max(0, segmentStripLaneCount - 1) * SEGMENT_STRIP_ROW_GAP_PX;
 
   function logOpenTiming(phase: string, details?: Record<string, number | string | boolean | null | undefined>) {
     const elapsedMs = Math.round(performance.now() - openTimingStartRef.current);
@@ -897,7 +897,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
           ...waveformShellStyle,
         }}
       >
-        {segmentStripHeight > 0 && timelineViewport.scrollWidth > 0 ? (
+        {segmentStripHeight > 0 ? (
           <div
             style={{
               position: "relative",
@@ -911,7 +911,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
             <div
               style={{
                 position: "relative",
-                width: timelineViewport.scrollWidth,
+                width: Math.max(timelineViewport.scrollWidth, timelineViewport.clientWidth),
                 height: segmentStripHeight - SEGMENT_STRIP_PADDING_TOP_PX,
                 transform: `translateX(-${timelineViewport.scrollLeft}px)`,
               }}

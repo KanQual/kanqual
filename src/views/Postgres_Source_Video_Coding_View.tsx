@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import {
   MediaController,
@@ -228,6 +228,16 @@ function ClearClipIcon() {
   );
 }
 
+function TrashClipIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 5h8" />
+      <path d="M6 5V3.5h4V5" />
+      <path d="M5.25 7l.5 5.5h4.5l.5-5.5" />
+    </svg>
+  );
+}
+
 function AcceptClipIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -429,6 +439,7 @@ export function PostgresSourceVideoCodingView({
   const [frameSourceDraft, setFrameSourceDraft] = useState<{ file: File; title: string; previewUrl: string; extractedFromVideoSourceId: string; extractedFromVideoTimeMs: number } | null>(null);
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
   const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
+  const [clipDeleteConfirmation, setClipDeleteConfirmation] = useState<SourceAnnotationRow | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
@@ -518,6 +529,16 @@ export function PostgresSourceVideoCodingView({
     console.info(`[media-open:${row.id}] +${elapsedMs}ms ${phase}${formatOpenTimingDetails(details)}`);
   }
 
+  function handleClipBadgeContextMenu(event: ReactMouseEvent<HTMLElement>) {
+    if (!selectedAnnotation || (!canManageMemos && !canEditAnnotations)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setPendingSelection(null);
+    setPendingClipCodeIds([]);
+    setSelectedAnnotationId(selectedAnnotation.id);
+    setAnnotationContextMenu({ x: event.clientX, y: event.clientY, annotation: selectedAnnotation });
+  }
+
   useEffect(() => {
     playbackRangeRef.current = activePlaybackRange;
   }, [activePlaybackRange]);
@@ -535,9 +556,21 @@ export function PostgresSourceVideoCodingView({
       frameId = window.requestAnimationFrame(() => {
         frameId = null;
         const frame = videoElement.closest<HTMLElement>(".media-player-console-frame");
+        const card = videoElement.closest<HTMLElement>(".media-source-card");
+        const controlsPanel = frame?.querySelector<HTMLElement>(".media-player-controls-panel--video") ?? null;
+        const frameRect = frame?.getBoundingClientRect();
+        const cardRect = card?.getBoundingClientRect();
+        const controlsPanelRect = controlsPanel?.getBoundingClientRect();
         const maxPanelWidth = frame ? Math.max(240, frame.clientWidth - 20) : Number.POSITIVE_INFINITY;
-        const maxVideoWidth = Math.max(180, Math.min(760, maxPanelWidth - 28));
-        const maxVideoHeight = window.innerHeight * 0.35;
+        const maxVideoWidth = Math.max(180, maxPanelWidth - 28);
+        const viewportBottomPadding = 28;
+        const controlsReserveHeight = Math.max(280, controlsPanelRect ? Math.ceil(controlsPanelRect.height) + 62 : 280);
+        const availableBelowFrameTop = frameRect ? window.innerHeight - frameRect.top - viewportBottomPadding : window.innerHeight;
+        const availableCardHeight = cardRect ? cardRect.height - 54 : availableBelowFrameTop;
+        const maxVideoHeight = Math.max(
+          180,
+          Math.min(window.innerHeight * 0.62, availableBelowFrameTop - controlsReserveHeight, availableCardHeight - controlsReserveHeight),
+        );
         const naturalWidth = videoElement.videoWidth || 0;
         const naturalHeight = videoElement.videoHeight || 0;
 
@@ -623,19 +656,20 @@ export function PostgresSourceVideoCodingView({
       if (event.key === "Escape") {
         setCodeContextMenu(null);
         setAnnotationContextMenu(null);
-        if (!saving) {
+        if (pendingSelection && !saving) {
+          event.preventDefault();
           setPendingSelection(null);
           setPendingClipCodeIds([]);
         }
       }
     }
     document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, { capture: true });
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, { capture: true });
     };
-  }, [saving]);
+  }, [pendingSelection, saving]);
 
   useEffect(() => {
     setGeneratedWaveformCache(null);
@@ -1164,6 +1198,26 @@ export function PostgresSourceVideoCodingView({
     setClipPlaybackAnnotationId(null);
   }
 
+  function handleClipTrashClick() {
+    if (saving) return;
+    if (pendingSelection) {
+      clearActiveClipSelection();
+      return;
+    }
+    if (selectedAnnotation && canEditAnnotations) {
+      setClipDeleteConfirmation(selectedAnnotation);
+    }
+  }
+
+  async function confirmClipAnnotationDelete() {
+    if (!clipDeleteConfirmation || saving) return;
+    await onDeleteAnnotation(clipDeleteConfirmation.id);
+    setClipDeleteConfirmation(null);
+    setSelectedClipDraft(null);
+    setSelectedAnnotationId(null);
+    setClipPlaybackAnnotationId(null);
+  }
+
   function resetClipSelectionDraftsToActiveRange() {
     if (!activeClipRange) return;
     setClipSelectionDraftStart(formatEditableTimestamp(activeClipRange.startMs));
@@ -1403,16 +1457,8 @@ export function PostgresSourceVideoCodingView({
             {pendingSelection ? (
               <div className="codebook-selection-hint">
                 <span>
-                  Select one or more codes for this clip, then apply it.
+                  Select one or more codes for this clip.
                 </span>
-                <button
-                  type="button"
-                  className="btn btn--small btn--primary"
-                  onClick={() => void acceptActiveClipChanges()}
-                  disabled={!canEditAnnotations || saving}
-                >
-                  {saving ? "Applying..." : "Apply clip"}
-                </button>
               </div>
             ) : null}
             <ul className="code-list">
@@ -1561,7 +1607,7 @@ export function PostgresSourceVideoCodingView({
                       waveformHeight={47}
                       waveformShellStyle={{
                         width: "100%",
-                        padding: "16px 14px 0",
+                        padding: "0 14px 0",
                       }}
                       pendingSelection={pendingSelection ? {
                         startMs: pendingSelection.timeStartMs,
@@ -1595,7 +1641,7 @@ export function PostgresSourceVideoCodingView({
                     />
                   </div>
 
-                  <div className="media-player-controls-panel">
+                  <div className="media-player-controls-panel media-player-controls-panel--video">
                     <MediaController
                       className="media-player-controller"
                       style={{
@@ -1684,7 +1730,12 @@ export function PostgresSourceVideoCodingView({
                                   <div className="media-player-clip-code-badges" aria-label="Selected clip codes">
                                     {activeClipCodes.length > 0 ? (
                                       activeClipCodes.map((code) => (
-                                        <span key={code.id} className="annotation-code-badge" style={{ background: code.color }}>
+                                        <span
+                                          key={code.id}
+                                          className="annotation-code-badge"
+                                          style={{ background: code.color }}
+                                          onContextMenu={handleClipBadgeContextMenu}
+                                        >
                                           {code.label}
                                         </span>
                                       ))
@@ -1761,6 +1812,16 @@ export function PostgresSourceVideoCodingView({
                                     </span>
                                   </label>
                                 </div>
+                                <button
+                                  type="button"
+                                  className="media-player-clip-trash-button"
+                                  onClick={handleClipTrashClick}
+                                  disabled={saving || (!pendingSelection && (!selectedAnnotation || !canEditAnnotations))}
+                                  aria-label={pendingSelection ? "Discard clip selection" : "Delete clip annotation"}
+                                  title={pendingSelection ? "Discard selection" : "Delete annotation"}
+                                >
+                                  <TrashClipIcon />
+                                </button>
                               </div>
                             </div>
                           ) : (
@@ -2063,6 +2124,25 @@ export function PostgresSourceVideoCodingView({
             setEditingAnnotation(null);
           }}
         />
+      ) : null}
+
+      {clipDeleteConfirmation && canEditAnnotations ? (
+        <div className="modal-overlay" onClick={() => !saving && setClipDeleteConfirmation(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Delete clip annotation?</h2>
+            <p className="users-guide-copy">
+              This will remove the selected coded clip from this source.
+            </p>
+            <div className="form-actions">
+              <button className="btn" onClick={() => setClipDeleteConfirmation(null)} disabled={saving}>
+                Cancel
+              </button>
+              <button className="btn btn--danger" onClick={() => void confirmClipAnnotationDelete()} disabled={saving}>
+                {saving ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

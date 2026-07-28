@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import {
   MediaController,
@@ -221,6 +221,16 @@ function ClearClipIcon() {
   );
 }
 
+function TrashClipIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 5h8" />
+      <path d="M6 5V3.5h4V5" />
+      <path d="M5.25 7l.5 5.5h4.5l.5-5.5" />
+    </svg>
+  );
+}
+
 function AcceptClipIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -294,6 +304,7 @@ export function PostgresSourceMediaCodingView({
   const [speedControlOpen, setSpeedControlOpen] = useState(false);
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
   const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
+  const [clipDeleteConfirmation, setClipDeleteConfirmation] = useState<SourceAnnotationRow | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
@@ -374,6 +385,16 @@ export function PostgresSourceMediaCodingView({
     console.info(`[media-open:${row.id}] +${elapsedMs}ms ${phase}${formatOpenTimingDetails(details)}`);
   }
 
+  function handleClipBadgeContextMenu(event: ReactMouseEvent<HTMLElement>) {
+    if (!selectedAnnotation || (!canManageMemos && !canEditAnnotations)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setPendingSelection(null);
+    setPendingClipCodeIds([]);
+    setSelectedAnnotationId(selectedAnnotation.id);
+    setAnnotationContextMenu({ x: event.clientX, y: event.clientY, annotation: selectedAnnotation });
+  }
+
   useEffect(() => {
     playbackRangeRef.current = activePlaybackRange;
   }, [activePlaybackRange]);
@@ -434,19 +455,20 @@ export function PostgresSourceMediaCodingView({
       if (event.key === "Escape") {
         setCodeContextMenu(null);
         setAnnotationContextMenu(null);
-        if (!saving) {
+        if (pendingSelection && !saving) {
+          event.preventDefault();
           setPendingSelection(null);
           setPendingClipCodeIds([]);
         }
       }
     }
     document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, { capture: true });
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, { capture: true });
     };
-  }, [saving]);
+  }, [pendingSelection, saving]);
 
   useEffect(() => {
     setGeneratedWaveformCache(null);
@@ -874,6 +896,26 @@ export function PostgresSourceMediaCodingView({
     setClipPlaybackAnnotationId(null);
   }
 
+  function handleClipTrashClick() {
+    if (saving) return;
+    if (pendingSelection) {
+      clearActiveClipSelection();
+      return;
+    }
+    if (selectedAnnotation && canEditAnnotations) {
+      setClipDeleteConfirmation(selectedAnnotation);
+    }
+  }
+
+  async function confirmClipAnnotationDelete() {
+    if (!clipDeleteConfirmation || saving) return;
+    await onDeleteAnnotation(clipDeleteConfirmation.id);
+    setClipDeleteConfirmation(null);
+    setSelectedClipDraft(null);
+    setSelectedAnnotationId(null);
+    setClipPlaybackAnnotationId(null);
+  }
+
   function resetClipSelectionDraftsToActiveRange() {
     if (!activeClipRange) return;
     setClipSelectionDraftStart(formatEditableTimestamp(activeClipRange.startMs));
@@ -1009,16 +1051,8 @@ export function PostgresSourceMediaCodingView({
             {pendingSelection ? (
               <div className="codebook-selection-hint">
                 <span>
-                  Select one or more codes for this clip, then apply it.
+                  Select one or more codes for this clip.
                 </span>
-                <button
-                  type="button"
-                  className="btn btn--small btn--primary"
-                  onClick={() => void acceptActiveClipChanges()}
-                  disabled={!canEditAnnotations || saving}
-                >
-                  {saving ? "Applying..." : "Apply clip"}
-                </button>
               </div>
             ) : null}
             <ul className="code-list">
@@ -1296,7 +1330,12 @@ export function PostgresSourceMediaCodingView({
                                   <div className="media-player-clip-code-badges" aria-label="Selected clip codes">
                                     {activeClipCodes.length > 0 ? (
                                       activeClipCodes.map((code) => (
-                                        <span key={code.id} className="annotation-code-badge" style={{ background: code.color }}>
+                                        <span
+                                          key={code.id}
+                                          className="annotation-code-badge"
+                                          style={{ background: code.color }}
+                                          onContextMenu={handleClipBadgeContextMenu}
+                                        >
                                           {code.label}
                                         </span>
                                       ))
@@ -1373,6 +1412,16 @@ export function PostgresSourceMediaCodingView({
                                     </span>
                                   </label>
                                 </div>
+                                <button
+                                  type="button"
+                                  className="media-player-clip-trash-button"
+                                  onClick={handleClipTrashClick}
+                                  disabled={saving || (!pendingSelection && (!selectedAnnotation || !canEditAnnotations))}
+                                  aria-label={pendingSelection ? "Discard clip selection" : "Delete clip annotation"}
+                                  title={pendingSelection ? "Discard selection" : "Delete annotation"}
+                                >
+                                  <TrashClipIcon />
+                                </button>
                               </div>
                             </div>
                           ) : (
@@ -1594,6 +1643,25 @@ export function PostgresSourceMediaCodingView({
             setEditingAnnotation(null);
           }}
         />
+      ) : null}
+
+      {clipDeleteConfirmation && canEditAnnotations ? (
+        <div className="modal-overlay" onClick={() => !saving && setClipDeleteConfirmation(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Delete clip annotation?</h2>
+            <p className="users-guide-copy">
+              This will remove the selected coded clip from this source.
+            </p>
+            <div className="form-actions">
+              <button className="btn" onClick={() => setClipDeleteConfirmation(null)} disabled={saving}>
+                Cancel
+              </button>
+              <button className="btn btn--danger" onClick={() => void confirmClipAnnotationDelete()} disabled={saving}>
+                {saving ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
