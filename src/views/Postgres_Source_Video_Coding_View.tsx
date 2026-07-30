@@ -376,6 +376,65 @@ function formatOpenTimingDetails(details?: Record<string, number | string | bool
   return ` ${entries.map(([key, value]) => `${key}=${String(value)}`).join(" ")}`;
 }
 
+function AnnotationVideoClipPlayer({
+  annotation,
+  previewUrl,
+  mediaType,
+}: {
+  annotation: SourceAnnotationRow;
+  previewUrl: string | null;
+  mediaType: string | null;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const startSeconds = Math.max(0, (annotation.timeStartMs ?? 0) / 1000);
+  const endSeconds = Math.max(startSeconds, (annotation.timeEndMs ?? annotation.timeStartMs ?? 0) / 1000);
+  const clipLabel = annotation.timeStartMs != null && annotation.timeEndMs != null
+    ? `${formatMediaTime(annotation.timeStartMs)} - ${formatMediaTime(annotation.timeEndMs)}`
+    : annotation.quote;
+
+  if (!previewUrl || annotation.timeStartMs == null || annotation.timeEndMs == null) {
+    return null;
+  }
+
+  function handleLoadedMetadata() {
+    if (!videoRef.current) return;
+    videoRef.current.currentTime = startSeconds;
+  }
+
+  function handlePlay() {
+    if (!videoRef.current) return;
+    if (videoRef.current.currentTime < startSeconds || videoRef.current.currentTime >= endSeconds) {
+      videoRef.current.currentTime = startSeconds;
+    }
+  }
+
+  function handleTimeUpdate() {
+    if (!videoRef.current) return;
+    if (videoRef.current.currentTime >= endSeconds) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = startSeconds;
+    }
+  }
+
+  return (
+    <div className="annotation-excerpt annotation-excerpt--clip" onClick={(event) => event.stopPropagation()}>
+      <div className="annotation-excerpt-label">{clipLabel}</div>
+      <video
+        ref={videoRef}
+        controls
+        preload="metadata"
+        onClick={(event) => event.stopPropagation()}
+        onLoadedMetadata={handleLoadedMetadata}
+        onPlay={handlePlay}
+        onTimeUpdate={handleTimeUpdate}
+        className="annotation-excerpt-media annotation-excerpt-media--video"
+      >
+        <source src={previewUrl} type={mediaType ?? undefined} />
+      </video>
+    </div>
+  );
+}
+
 export function PostgresSourceVideoCodingView({
   row,
   codes,
@@ -1508,6 +1567,13 @@ export function PostgresSourceVideoCodingView({
             annotations={mediaAnnotations}
             selectedAnnotationId={selectedAnnotationId}
             codesById={codesById}
+            renderAnnotationExcerpt={(annotation) => (
+              <AnnotationVideoClipPlayer
+                annotation={annotation}
+                previewUrl={previewUrl}
+                mediaType={mediaTypeFromFileExtension(fileExt)}
+              />
+            )}
             onSelectAnnotation={(annotationId) => {
               setPendingSelection(null);
               setPendingClipCodeIds([]);

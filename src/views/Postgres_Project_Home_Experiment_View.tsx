@@ -11,8 +11,8 @@ import {
   useState,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readFile as readTauriFile, writeFile } from "@tauri-apps/plugin-fs";
 import circleFilledShapeSvg from "../assets/object-shapes/circle-filled.svg?raw";
 import circleOutlineShapeSvg from "../assets/object-shapes/circle-outline.svg?raw";
 import rectangleFilledShapeSvg from "../assets/object-shapes/rectangle-filled.svg?raw";
@@ -34,6 +34,7 @@ import tagOutlineShapeSvg from "../assets/object-shapes/tag-outline.svg?raw";
 import starFilledShapeSvg from "../assets/object-shapes/star-filled.svg?raw";
 import starOutlineShapeSvg from "../assets/object-shapes/star-outline.svg?raw";
 import sourceTextOutlineShapeSvg from "../assets/object-shapes/source-text-outline.svg?raw";
+import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline.svg?raw";
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
@@ -49,6 +50,8 @@ import {
   deletePostgresExperimentSavedDrawing,
   getPostgresExperimentProjectCanvasState,
   getPostgresExperimentSavedDrawing,
+  importPostgresExperimentObjectImage,
+  importPostgresExperimentObjectTypeImage,
   listPostgresExperimentAppUsers,
   listPostgresExperimentObjects,
   listPostgresExperimentObjectAttributeDefinitions,
@@ -64,6 +67,8 @@ import {
   savePostgresExperimentRelationship,
   savePostgresExperimentRelationshipType,
   savePostgresExperimentSavedDrawing,
+  removePostgresExperimentObjectImage,
+  removePostgresExperimentObjectTypeImage,
   updatePostgresExperimentProjectUser,
   updatePostgresExperimentRelationshipAttributeDefinition,
   type PostgresExperimentAppUser,
@@ -90,7 +95,9 @@ import {
   type SharedAttributeDraft,
 } from "../components/AttributeValuesModal";
 import { AttributeDefinitionModal } from "../components/AttributeDefinitionModal";
+import sidebarMarkLogo from "../assets/logo-mark-no-background.png";
 import sidebarLogo from "../assets/logo-no-background.png";
+import type { PostgresMemoDraftTarget } from "./Postgres_Project_Memos_View";
 
 function normalizeCanvasSvgTextHtml(html: string): string {
   const trimmed = html.trim();
@@ -118,8 +125,8 @@ const PostgresFreeDrawCanvasViewLazy = lazy(
 const PostgresExploreCanvasViewLazy = lazy(
   () => import("./Postgres_Explore_Canvas_View").then((m) => ({ default: m.PostgresExperimentExploreCanvasView })),
 );
-const PostgresMemosViewLazy = lazy(
-  () => import("./Postgres_Memos_View").then((m) => ({ default: m.PostgresMemosView })),
+const PostgresProjectMemosViewLazy = lazy(
+  () => import("./Postgres_Project_Memos_View").then((m) => ({ default: m.PostgresProjectMemosView })),
 );
 const PostgresProjectLogViewLazy = lazy(
   () => import("./Postgres_Project_Log_View").then((m) => ({ default: m.PostgresProjectLogView })),
@@ -159,19 +166,52 @@ type PostgresExperimentObjectTypeShape =
   | "star";
 type PostgresExperimentSourceObjectVisualKey =
   | "source_text"
+  | "source_pdf"
   | "source_image"
   | "source_audio"
   | "source_video";
 type PostgresExperimentObjectFill = "filled" | "outline";
+type PostgresExperimentObjectGraphicMode = "select" | "upload";
+type PostgresExperimentObjectInstanceGraphicMode = "inherit" | "select" | "upload";
 type PostgresExperimentRelationshipLineShape = "solid" | "dashed" | "dotted";
 type PostgresExperimentRelationshipArrowhead = "one_sided" | "double_sided" | "none";
 type PostgresExperimentObjectTypeSortCol = "objectType" | "count";
 type PostgresExperimentRelationshipAttributeDraft = SharedAttributeDraft;
 type TypeAttributeDraft = SharedAttributeDraft & { localId: string };
 type PostgresExperimentCanvasTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
+type PostgresExperimentImageUploadDraft = {
+  originalFileName: string;
+  fileBytesBase64: string;
+  previewUrl: string;
+  fileSizeBytes: number;
+};
+type PostgresExperimentImageCropAspect = "original" | "1:1" | "4:3" | "16:9";
+type PostgresExperimentImageCropDraft = {
+  upload: PostgresExperimentImageUploadDraft;
+  mode: "full" | "crop";
+  aspect: PostgresExperimentImageCropAspect;
+  sizePercent: number;
+  xPercent: number;
+  yPercent: number;
+  error: string;
+};
+type PostgresExperimentImageCropResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+type PostgresExperimentImageCropDragState = {
+  mode: "move" | "resize";
+  handle?: PostgresExperimentImageCropResizeHandle;
+  startClientX: number;
+  startClientY: number;
+  startSizePercent: number;
+  startXPercent: number;
+  startYPercent: number;
+  imageWidth: number;
+  imageHeight: number;
+  displayScale: number;
+};
 
 const POSTGRES_OBJECT_TYPE_DEFAULT_COLOR = "#355070";
 const POSTGRES_RELATIONSHIP_DEFAULT_COLOR = "#355070";
+const POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS: { value: PostgresExperimentObjectTypeShape; label: string }[] = [
   { value: "rounded", label: "Circle" },
   { value: "rectangle", label: "Rectangle" },
@@ -228,6 +268,7 @@ const POSTGRES_SOURCE_OBJECT_SHAPE_ASSET_URLS: Record<
   string
 > = {
   source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
+  source_pdf: buildSvgDataUrl(sourcePdfOutlineShapeSvg),
   source_image: buildSvgDataUrl(sourceImageOutlineShapeSvg),
   source_audio: buildSvgDataUrl(sourceAudioOutlineShapeSvg),
   source_video: buildSvgDataUrl(sourceVideoOutlineShapeSvg),
@@ -237,6 +278,7 @@ function isPostgresExperimentSourceObjectVisualKey(
   value: string | null | undefined,
 ): value is PostgresExperimentSourceObjectVisualKey {
   return value === "source_text"
+    || value === "source_pdf"
     || value === "source_image"
     || value === "source_audio"
     || value === "source_video";
@@ -334,12 +376,13 @@ function resolvePostgresExperimentObjectFill(
 }
 
 function getPostgresExperimentObjectAppearance(
-  object: Pick<PostgresExperimentObject, "shapeOverride" | "colorOverride" | "fillOverride">,
-  objectTypeRecord: Pick<PostgresExperimentObjectType, "shape" | "color" | "fill" | "systemKey"> | null,
+  object: Pick<PostgresExperimentObject, "shapeOverride" | "colorOverride" | "fillOverride" | "imageStoragePath">,
+  objectTypeRecord: Pick<PostgresExperimentObjectType, "shape" | "color" | "fill" | "systemKey" | "imageStoragePath"> | null,
 ): {
   shape: PostgresExperimentObjectTypeShape;
   color: string;
   fill: PostgresExperimentObjectFill;
+  imageStoragePath: string;
   sourceVisualKey: PostgresExperimentSourceObjectVisualKey | null;
   hasShapeOverride: boolean;
   hasColorOverride: boolean;
@@ -349,6 +392,7 @@ function getPostgresExperimentObjectAppearance(
     shape: resolvePostgresExperimentObjectShape(object, objectTypeRecord),
     color: resolvePostgresExperimentObjectColor(object, objectTypeRecord),
     fill: resolvePostgresExperimentObjectFill(object, objectTypeRecord),
+    imageStoragePath: object.imageStoragePath || objectTypeRecord?.imageStoragePath || "",
     sourceVisualKey: getPostgresExperimentSourceObjectVisualKey(objectTypeRecord?.systemKey),
     hasShapeOverride: !!object.shapeOverride.trim(),
     hasColorOverride: !!object.colorOverride.trim(),
@@ -443,6 +487,46 @@ function getPostgresExperimentRelationshipStrokeWidth(lineWeight: number): numbe
   if (normalized === 3) return 4;
   if (normalized === 4) return 5.5;
   return 2.5;
+}
+
+function RelationshipTypeLinePreview(props: {
+  lineShape: PostgresExperimentRelationshipLineShape;
+  lineWeight: number;
+  arrowhead: PostgresExperimentRelationshipArrowhead;
+  color: string;
+}) {
+  const { lineShape, lineWeight, arrowhead, color } = props;
+  const strokeWidth = getPostgresExperimentRelationshipStrokeWidth(lineWeight);
+  const dasharray = getPostgresExperimentRelationshipStrokeDasharray(lineShape);
+  const lineStartX = arrowhead === "double_sided" ? 14 : 8;
+  const lineEndX = arrowhead === "none" ? 62 : 56;
+
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 70 24"
+      width="70"
+      height="24"
+      style={{ display: "block", flexShrink: 0 }}
+    >
+      <line
+        x1={lineStartX}
+        y1="12"
+        x2={lineEndX}
+        y2="12"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeDasharray={dasharray}
+      />
+      {arrowhead === "double_sided" ? (
+        <path d="M8 12 L16 7.5 L16 16.5 Z" fill={color} />
+      ) : null}
+      {arrowhead !== "none" ? (
+        <path d="M64 12 L56 7.5 L56 16.5 Z" fill={color} />
+      ) : null}
+    </svg>
+  );
 }
 
 function PostgresExperimentObjectShapePicker(props: {
@@ -1222,6 +1306,22 @@ function renderSvgObjectShape(
       case "source_text":
         iconMarkup = `<text x="${width / 2}" y="${height * 0.63}" text-anchor="middle" font-size="${Math.max(20, width * 0.2)}" font-weight="800" font-family="Arial, sans-serif" letter-spacing="1" fill="${iconColor}">TXT</text>`;
         break;
+      case "source_pdf": {
+        const backInsetX = width * 0.18;
+        const backInsetY = height * 0.22;
+        const frontInsetX = width * 0.26;
+        const frontInsetY = height * 0.12;
+        const frontFoldX = width * 0.68;
+        const frontTipX = width * 0.84;
+        const frontTipY = height * 0.28;
+        iconMarkup = [
+          `<path d="M${backInsetX} ${backInsetY} H${width * 0.74} V${height * 0.76} H${backInsetX} Z" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linejoin="round" />`,
+          `<path d="M${frontInsetX} ${frontInsetY} H${frontFoldX} L${frontTipX} ${frontTipY} V${height * 0.68} H${frontInsetX} Z" fill="#ffffff" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linejoin="round" />`,
+          `<path d="M${frontFoldX} ${frontInsetY} V${frontTipY} H${frontTipX}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(3, width * 0.024)}" stroke-linejoin="round" stroke-linecap="round" />`,
+          `<path d="M${width * 0.38} ${height * 0.42} H${width * 0.66} M${width * 0.38} ${height * 0.52} H${width * 0.62}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(3, width * 0.024)}" stroke-linecap="round" />`,
+        ].join("");
+        break;
+      }
       case "source_audio":
         iconMarkup = `<path d="M${width * 0.24} ${height * 0.57} C${width * 0.29} ${height * 0.49}, ${width * 0.33} ${height * 0.49}, ${width * 0.38} ${height * 0.57} S${width * 0.47} ${height * 0.65}, ${width * 0.52} ${height * 0.57} S${width * 0.61} ${height * 0.49}, ${width * 0.66} ${height * 0.57} S${width * 0.75} ${height * 0.65}, ${width * 0.8} ${height * 0.57}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(5, width * 0.045)}" stroke-linecap="round" stroke-linejoin="round" />`;
         break;
@@ -1879,6 +1979,170 @@ function sanitizeFileStem(name: string): string {
   return trimmed.replace(/[<>:\"/\\|?*\u0000-\u001F]+/g, "-").replace(/\s+/g, " ").trim();
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function getPostgresExperimentImageMimeType(storagePath: string): string {
+  const extension = storagePath.split(".").pop()?.toLowerCase() ?? "";
+  if (extension === "svg") return "image/svg+xml";
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
+  if (extension === "gif") return "image/gif";
+  return "image/jpeg";
+}
+
+function resolvePostgresExperimentStoragePath(projectStoragePath: string, relativeStoragePath: string): string {
+  const trimmedRelativePath = relativeStoragePath.trim();
+  if (!trimmedRelativePath) return "";
+  if (/^[a-zA-Z]:[\\/]/.test(trimmedRelativePath) || trimmedRelativePath.startsWith("\\\\")) {
+    return trimmedRelativePath;
+  }
+  const trimmedProjectPath = projectStoragePath.trim().replace(/[\\/]+$/, "");
+  const normalizedRelativePath = trimmedRelativePath.replace(/^[\\/]+/, "");
+  return trimmedProjectPath ? `${trimmedProjectPath}\\${normalizedRelativePath}` : normalizedRelativePath;
+}
+
+function getFileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).pop() || "image";
+}
+
+function formatPostgresExperimentFileSize(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 1024 * 1024 ? 1 : 2)} MB`;
+}
+
+function getPostgresExperimentCropAspectRatio(
+  aspect: PostgresExperimentImageCropAspect,
+  imageWidth: number,
+  imageHeight: number,
+): number {
+  if (aspect === "1:1") return 1;
+  if (aspect === "4:3") return 4 / 3;
+  if (aspect === "16:9") return 16 / 9;
+  return imageWidth / imageHeight;
+}
+
+function getPostgresExperimentCropRect(
+  imageWidth: number,
+  imageHeight: number,
+  aspect: PostgresExperimentImageCropAspect,
+  sizePercent: number,
+  xPercent: number,
+  yPercent: number,
+) {
+  const ratio = getPostgresExperimentCropAspectRatio(aspect, imageWidth, imageHeight);
+  const imageRatio = imageWidth / imageHeight;
+  const maxCropWidth = imageRatio > ratio ? imageHeight * ratio : imageWidth;
+  const maxCropHeight = imageRatio > ratio ? imageHeight : imageWidth / ratio;
+  const scale = Math.min(1, Math.max(0.2, sizePercent / 100));
+  const width = Math.max(1, maxCropWidth * scale);
+  const height = Math.max(1, maxCropHeight * scale);
+  const x = Math.max(0, (imageWidth - width) * Math.min(100, Math.max(0, xPercent)) / 100);
+  const y = Math.max(0, (imageHeight - height) * Math.min(100, Math.max(0, yPercent)) / 100);
+  return { x, y, width, height };
+}
+
+function loadPostgresExperimentImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load the selected image for cropping."));
+    image.src = src;
+  });
+}
+
+function canvasToPostgresExperimentBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("Could not prepare the cropped image."));
+      }
+    }, mimeType, quality);
+  });
+}
+
+function getPostgresExperimentCroppedImageFileName(originalFileName: string, mimeType: string): string {
+  const stem = sanitizeFileStem(originalFileName.replace(/\.[^.]+$/, "")) || "image";
+  const extension = mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : "png";
+  return `${stem}-cropped.${extension}`;
+}
+
+async function cropPostgresExperimentImageUpload(
+  upload: PostgresExperimentImageUploadDraft,
+  aspect: PostgresExperimentImageCropAspect,
+  sizePercent: number,
+  xPercent: number,
+  yPercent: number,
+): Promise<PostgresExperimentImageUploadDraft> {
+  const image = await loadPostgresExperimentImageElement(upload.previewUrl);
+  const crop = getPostgresExperimentCropRect(image.naturalWidth, image.naturalHeight, aspect, sizePercent, xPercent, yPercent);
+  const maxOutputDimension = 1600;
+  const outputScale = Math.min(1, maxOutputDimension / Math.max(crop.width, crop.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(crop.width * outputScale));
+  canvas.height = Math.max(1, Math.round(crop.height * outputScale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare the cropped image.");
+  context.drawImage(
+    image,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  const sourceMimeType = getPostgresExperimentImageMimeType(upload.originalFileName);
+  const outputMimeType = sourceMimeType === "image/jpeg" || sourceMimeType === "image/webp" ? sourceMimeType : "image/png";
+  const blob = await canvasToPostgresExperimentBlob(canvas, outputMimeType, 0.9);
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return {
+    originalFileName: getPostgresExperimentCroppedImageFileName(upload.originalFileName, outputMimeType),
+    fileBytesBase64: bytesToBase64(bytes),
+    previewUrl: URL.createObjectURL(blob),
+    fileSizeBytes: bytes.length,
+  };
+}
+
+function usePostgresExperimentStoredImageUrl(projectStoragePath: string, imageStoragePath: string): string {
+  const [imageUrl, setImageUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    const resolvedPath = resolvePostgresExperimentStoragePath(projectStoragePath, imageStoragePath);
+    if (!resolvedPath) {
+      setImageUrl("");
+      return;
+    }
+    void readTauriFile(resolvedPath)
+      .then((bytes) => {
+        if (!active) return;
+        const blob = new Blob([bytes], { type: getPostgresExperimentImageMimeType(imageStoragePath) });
+        objectUrl = URL.createObjectURL(blob);
+        setImageUrl(objectUrl);
+      })
+      .catch(() => {
+        if (active) setImageUrl("");
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [projectStoragePath, imageStoragePath]);
+
+  return imageUrl;
+}
+
 function getObjectShapeMaskStyle(assetUrl: string): React.CSSProperties {
   return {
     WebkitMaskImage: `url("${assetUrl}")`,
@@ -1897,12 +2161,28 @@ function ObjectShapeSwatch(props: {
   fill: PostgresExperimentObjectFill;
   color: string;
   sourceVisualKey?: PostgresExperimentSourceObjectVisualKey | null;
+  imageStoragePath?: string;
+  projectStoragePath?: string;
   width: number;
   minHeight: number;
   selected?: boolean;
   style?: React.CSSProperties;
 }) {
-  const { shape, fill, color, sourceVisualKey = null, width, minHeight, selected = false, style } = props;
+  const {
+    shape,
+    fill,
+    color,
+    sourceVisualKey = null,
+    imageStoragePath = "",
+    projectStoragePath = "",
+    width,
+    minHeight,
+    selected = false,
+    style,
+  } = props;
+  const imageUrl = usePostgresExperimentStoredImageUrl(projectStoragePath, imageStoragePath);
+  const hasUploadedImage = Boolean(imageStoragePath);
+  const frameWidth = hasUploadedImage ? minHeight : width;
   const surfaceStyle = getPostgresExperimentObjectSurfaceStyle(color, fill, selected);
   const sourceOutlineAsset = sourceVisualKey ? POSTGRES_SOURCE_OBJECT_SHAPE_ASSET_URLS[sourceVisualKey] : null;
   const shapeAssets = sourceVisualKey ? null : POSTGRES_OBJECT_SHAPE_ASSET_URLS[shape];
@@ -1913,7 +2193,7 @@ function ObjectShapeSwatch(props: {
       style={{
         position: "relative",
         display: "inline-flex",
-        width,
+        width: frameWidth,
         height: minHeight,
         overflow: "hidden",
         flexShrink: 0,
@@ -1922,6 +2202,24 @@ function ObjectShapeSwatch(props: {
         ...style,
       }}
     >
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt=""
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            background: "rgba(248, 250, 252, 0.94)",
+            borderRadius: 6,
+            border: `1px solid ${hexToRgba(color, selected ? 0.56 : 0.28)}`,
+            boxSizing: "border-box",
+          }}
+        />
+      ) : (
+        <>
       <span
         style={{
           position: "absolute",
@@ -1942,7 +2240,496 @@ function ObjectShapeSwatch(props: {
           ...getObjectShapeMaskStyle(sourceOutlineAsset ?? shapeAssets!.outline),
         }}
       />
+        </>
+      )}
     </span>
+  );
+}
+
+function PostgresExperimentObjectImageControls(props: {
+  projectStoragePath: string;
+  imageStoragePath: string;
+  previewUrl?: string;
+  graphicMode?: PostgresExperimentObjectGraphicMode;
+  fallback: React.ReactNode;
+  disabled: boolean;
+  canUpload: boolean;
+  onUpload?: () => void;
+  onRemove?: () => void;
+  onGraphicModeChange?: (mode: PostgresExperimentObjectGraphicMode) => void;
+}) {
+  const {
+    projectStoragePath,
+    imageStoragePath,
+    previewUrl = "",
+    graphicMode,
+    fallback,
+    disabled,
+    canUpload,
+    onUpload,
+    onRemove,
+    onGraphicModeChange,
+  } = props;
+  const imageUrl = usePostgresExperimentStoredImageUrl(projectStoragePath, imageStoragePath);
+  const displayImageUrl = previewUrl || imageUrl;
+  const uploadModeActive = graphicMode ? graphicMode === "upload" : true;
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "112px minmax(0, 1fr)",
+        gap: 14,
+        alignItems: "center",
+      }}
+    >
+      <div
+        style={{
+          width: 112,
+          maxWidth: 112,
+          minHeight: 84,
+          maxHeight: 112,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 10,
+          border: "1px solid rgba(53, 80, 112, 0.14)",
+          background: "rgba(248, 250, 252, 0.92)",
+          overflow: "hidden",
+        }}
+      >
+        {displayImageUrl ? (
+          <img
+            src={displayImageUrl}
+            alt=""
+            style={{
+              display: "block",
+              maxWidth: "100%",
+              maxHeight: 112,
+              width: "auto",
+              height: "auto",
+              objectFit: "contain",
+            }}
+          />
+        ) : (
+          fallback
+        )}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+        {uploadModeActive ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn btn--small"
+            onClick={onUpload}
+            disabled={disabled || !canUpload || !onUpload}
+          >
+            {imageStoragePath || previewUrl ? "Replace image" : "Upload image"}
+          </button>
+          {imageStoragePath || previewUrl ? (
+            <button
+              type="button"
+              className="btn btn--ghost-danger btn--small"
+              onClick={onRemove}
+              disabled={disabled || !canUpload || !onRemove}
+            >
+              Remove
+            </button>
+          ) : null}
+          </div>
+        ) : null}
+        {uploadModeActive && !canUpload ? (
+          <p className="auth-hint" style={{ margin: 0 }}>
+            Save this record before adding an image.
+          </p>
+        ) : null}
+      </div>
+      {graphicMode && onGraphicModeChange ? (
+        <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "center" }}>
+          <div className="auth-tabs" role="tablist" aria-label="Object type graphic source" style={{ width: 220, marginBottom: 0 }}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={graphicMode === "select"}
+              className={`auth-tab ${graphicMode === "select" ? "auth-tab--active" : ""}`}
+              onClick={() => onGraphicModeChange("select")}
+              disabled={disabled}
+            >
+              Select
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={graphicMode === "upload"}
+              className={`auth-tab ${graphicMode === "upload" ? "auth-tab--active" : ""}`}
+              onClick={() => onGraphicModeChange("upload")}
+              disabled={disabled}
+            >
+              Upload
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PostgresExperimentImageCropModal(props: {
+  draft: PostgresExperimentImageCropDraft;
+  onDraftChange: (draft: PostgresExperimentImageCropDraft) => void;
+  onCancel: () => void;
+  onUseFullImage: () => void;
+  onUseCrop: () => void;
+  busy: boolean;
+}) {
+  const { draft, onDraftChange, onCancel, onUseFullImage, onUseCrop, busy } = props;
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [cropDragState, setCropDragState] = useState<PostgresExperimentImageCropDragState | null>(null);
+  const cropFrameRef = useRef<HTMLDivElement | null>(null);
+  const cropDisplay = imageDimensions
+    ? (() => {
+        const maxWidth = 420;
+        const maxHeight = 360;
+        const scale = Math.min(1, maxWidth / imageDimensions.width, maxHeight / imageDimensions.height);
+        const width = Math.max(1, Math.round(imageDimensions.width * scale));
+        const height = Math.max(1, Math.round(imageDimensions.height * scale));
+        const crop = getPostgresExperimentCropRect(
+          imageDimensions.width,
+          imageDimensions.height,
+          draft.aspect,
+          draft.sizePercent,
+          draft.xPercent,
+          draft.yPercent,
+        );
+        return {
+          width,
+          height,
+          scale,
+          crop,
+          cropStyle: {
+            left: `${(crop.x / imageDimensions.width) * 100}%`,
+            top: `${(crop.y / imageDimensions.height) * 100}%`,
+            width: `${(crop.width / imageDimensions.width) * 100}%`,
+            height: `${(crop.height / imageDimensions.height) * 100}%`,
+          },
+        };
+      })()
+    : null;
+
+  useEffect(() => {
+    let active = true;
+    void loadPostgresExperimentImageElement(draft.upload.previewUrl)
+      .then((image) => {
+        if (active) setImageDimensions({ width: image.naturalWidth, height: image.naturalHeight });
+      })
+      .catch(() => {
+        if (active) setImageDimensions(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [draft.upload.previewUrl]);
+
+  const updateDraft = (patch: Partial<PostgresExperimentImageCropDraft>) => {
+    onDraftChange({ ...draft, ...patch, error: patch.error ?? "" });
+  };
+
+  useEffect(() => {
+    if (!cropDragState) return;
+    const handlePointerMove = (event: PointerEvent) => {
+      const crop = getPostgresExperimentCropRect(
+        cropDragState.imageWidth,
+        cropDragState.imageHeight,
+        draft.aspect,
+        cropDragState.startSizePercent,
+        cropDragState.startXPercent,
+        cropDragState.startYPercent,
+      );
+      const dx = (event.clientX - cropDragState.startClientX) / cropDragState.displayScale;
+      const dy = (event.clientY - cropDragState.startClientY) / cropDragState.displayScale;
+      if (cropDragState.mode === "move") {
+        const nextX = Math.min(Math.max(0, crop.x + dx), Math.max(0, cropDragState.imageWidth - crop.width));
+        const nextY = Math.min(Math.max(0, crop.y + dy), Math.max(0, cropDragState.imageHeight - crop.height));
+        updateDraft({
+          xPercent: cropDragState.imageWidth === crop.width ? 50 : (nextX / (cropDragState.imageWidth - crop.width)) * 100,
+          yPercent: cropDragState.imageHeight === crop.height ? 50 : (nextY / (cropDragState.imageHeight - crop.height)) * 100,
+        });
+        return;
+      }
+
+      const ratio = getPostgresExperimentCropAspectRatio(draft.aspect, cropDragState.imageWidth, cropDragState.imageHeight);
+      const imageRatio = cropDragState.imageWidth / cropDragState.imageHeight;
+      const maxCropWidth = imageRatio > ratio ? cropDragState.imageHeight * ratio : cropDragState.imageWidth;
+      const maxCropHeight = imageRatio > ratio ? cropDragState.imageHeight : cropDragState.imageWidth / ratio;
+      const handle = cropDragState.handle ?? "se";
+      const xDirection = handle.includes("e") ? 1 : handle.includes("w") ? -1 : 0;
+      const yDirection = handle.includes("s") ? 1 : handle.includes("n") ? -1 : 0;
+      const widthScale = xDirection === 0 ? crop.width / maxCropWidth : (crop.width + dx * xDirection) / maxCropWidth;
+      const heightScale = yDirection === 0 ? crop.height / maxCropHeight : (crop.height + dy * yDirection) / maxCropHeight;
+      const rawScale = xDirection !== 0 && yDirection !== 0
+        ? Math.max(widthScale, heightScale)
+        : xDirection !== 0
+          ? widthScale
+          : heightScale;
+      const nextScale = Math.min(1, Math.max(0.2, rawScale));
+      const nextWidth = maxCropWidth * nextScale;
+      const nextHeight = maxCropHeight * nextScale;
+      let nextX = crop.x;
+      let nextY = crop.y;
+      if (handle.includes("w")) {
+        nextX = crop.x + crop.width - nextWidth;
+      } else if (!handle.includes("e")) {
+        nextX = crop.x + (crop.width - nextWidth) / 2;
+      }
+      if (handle.includes("n")) {
+        nextY = crop.y + crop.height - nextHeight;
+      } else if (!handle.includes("s")) {
+        nextY = crop.y + (crop.height - nextHeight) / 2;
+      }
+      nextX = Math.min(Math.max(0, nextX), Math.max(0, cropDragState.imageWidth - nextWidth));
+      nextY = Math.min(Math.max(0, nextY), Math.max(0, cropDragState.imageHeight - nextHeight));
+      updateDraft({
+        sizePercent: nextScale * 100,
+        xPercent: cropDragState.imageWidth === nextWidth ? 50 : (nextX / (cropDragState.imageWidth - nextWidth)) * 100,
+        yPercent: cropDragState.imageHeight === nextHeight ? 50 : (nextY / (cropDragState.imageHeight - nextHeight)) * 100,
+      });
+    };
+    const handlePointerUp = () => setCropDragState(null);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [cropDragState, draft.aspect, draft, onDraftChange]);
+
+  const startCropDrag = (
+    event: React.PointerEvent,
+    mode: PostgresExperimentImageCropDragState["mode"],
+    handle?: PostgresExperimentImageCropResizeHandle,
+  ) => {
+    if (!imageDimensions || !cropDisplay || busy) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const frameBounds = cropFrameRef.current?.getBoundingClientRect();
+    const displayScale = frameBounds ? frameBounds.width / imageDimensions.width : cropDisplay.scale;
+    setCropDragState({
+      mode,
+      handle,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startSizePercent: draft.sizePercent,
+      startXPercent: draft.xPercent,
+      startYPercent: draft.yPercent,
+      imageWidth: imageDimensions.width,
+      imageHeight: imageDimensions.height,
+      displayScale,
+    });
+  };
+
+  return (
+    <div className="modal-overlay" style={{ zIndex: 300 }} onClick={() => !busy && onCancel()}>
+      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
+        <h2>Use image</h2>
+        <p className="auth-hint" style={{ marginTop: 0 }}>
+          Keep the full image or select a region to use for this object graphic.
+        </p>
+        <div className="auth-tabs" role="tablist" aria-label="Image region mode">
+          <button
+            type="button"
+            className={`auth-tab ${draft.mode === "full" ? "auth-tab--active" : ""}`}
+            onClick={() => updateDraft({ mode: "full" })}
+            disabled={busy}
+          >
+            Full image
+          </button>
+          <button
+            type="button"
+            className={`auth-tab ${draft.mode === "crop" ? "auth-tab--active" : ""}`}
+            onClick={() => updateDraft({
+              mode: "crop",
+              sizePercent: draft.sizePercent === 100 ? 80 : draft.sizePercent,
+              xPercent: 50,
+              yPercent: 50,
+            })}
+            disabled={busy}
+          >
+            Select region
+          </button>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 0.8fr)",
+            gap: 18,
+            alignItems: "start",
+          }}
+        >
+          <div
+            style={{
+              border: "1px solid rgba(53, 80, 112, 0.14)",
+              borderRadius: 10,
+              background: "rgba(248, 250, 252, 0.92)",
+              padding: 12,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              minHeight: 220,
+            }}
+          >
+            {draft.mode === "crop" && cropDisplay ? (
+              <div
+                ref={cropFrameRef}
+                style={{
+                  position: "relative",
+                  width: `min(100%, ${cropDisplay.width}px)`,
+                  aspectRatio: `${cropDisplay.width} / ${cropDisplay.height}`,
+                  lineHeight: 0,
+                  userSelect: "none",
+                  touchAction: "none",
+                  overflow: "hidden",
+                  borderRadius: 8,
+                }}
+              >
+                <img
+                  src={draft.upload.previewUrl}
+                  alt=""
+                  draggable={false}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                    borderRadius: 8,
+                  }}
+                />
+                <div
+                  role="img"
+                  aria-label="Selected image region"
+                  onPointerDown={(event) => {
+                    if (event.currentTarget === event.target) startCropDrag(event, "move");
+                  }}
+                  style={{
+                    position: "absolute",
+                    left: cropDisplay.cropStyle.left,
+                    top: cropDisplay.cropStyle.top,
+                    width: cropDisplay.cropStyle.width,
+                    height: cropDisplay.cropStyle.height,
+                    border: "2px solid #ffffff",
+                    borderRadius: 6,
+                    outline: "2px solid rgba(53, 80, 112, 0.82)",
+                    boxShadow: "0 0 0 9999px rgba(15, 23, 42, 0.34), 0 10px 28px rgba(15, 23, 42, 0.22)",
+                    cursor: busy ? "default" : "move",
+                    boxSizing: "border-box",
+                    background: "rgba(255, 255, 255, 0.03)",
+                    touchAction: "none",
+                  }}
+                >
+                  {[
+                    ["nw", { left: -7, top: -7, cursor: "nwse-resize" }],
+                    ["n", { left: "50%", top: -7, transform: "translateX(-50%)", cursor: "ns-resize" }],
+                    ["ne", { right: -7, top: -7, cursor: "nesw-resize" }],
+                    ["w", { left: -7, top: "50%", transform: "translateY(-50%)", cursor: "ew-resize" }],
+                    ["e", { right: -7, top: "50%", transform: "translateY(-50%)", cursor: "ew-resize" }],
+                    ["sw", { left: -7, bottom: -7, cursor: "nesw-resize" }],
+                    ["s", { left: "50%", bottom: -7, transform: "translateX(-50%)", cursor: "ns-resize" }],
+                    ["se", { right: -7, bottom: -7, cursor: "nwse-resize" }],
+                  ].map(([handle, style]) => (
+                    <span
+                      key={handle as string}
+                      aria-hidden="true"
+                      onPointerDown={(event) => startCropDrag(
+                        event,
+                        "resize",
+                        handle as PostgresExperimentImageCropResizeHandle,
+                      )}
+                      style={{
+                        position: "absolute",
+                        width: 14,
+                        height: 14,
+                        borderRadius: 999,
+                        background: "#fff",
+                        border: "1px solid rgba(53, 80, 112, 0.5)",
+                        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.22)",
+                        cursor: busy ? "default" : (style as React.CSSProperties).cursor,
+                        ...(style as React.CSSProperties),
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <img
+                src={draft.upload.previewUrl}
+                alt=""
+                style={{
+                  display: "block",
+                  maxWidth: "100%",
+                  maxHeight: 360,
+                  width: "auto",
+                  height: "auto",
+                  borderRadius: 8,
+                }}
+              />
+            )}
+          </div>
+          <div className="form" style={{ gap: 12 }}>
+            <p className="auth-hint" style={{ margin: 0 }}>
+              {draft.upload.originalFileName} - {formatPostgresExperimentFileSize(draft.upload.fileSizeBytes)}
+            </p>
+            {imageDimensions ? (
+              <p className="auth-hint" style={{ margin: 0 }}>
+                {imageDimensions.width} x {imageDimensions.height}px
+              </p>
+            ) : null}
+            {draft.mode === "crop" ? (
+              <>
+                <label className="form-label">
+                  Aspect
+                  <select
+                    className="form-input"
+                    value={draft.aspect}
+                    onChange={(event) => updateDraft({
+                      aspect: event.target.value as PostgresExperimentImageCropAspect,
+                      sizePercent: 100,
+                      xPercent: 50,
+                      yPercent: 50,
+                    })}
+                    disabled={busy}
+                  >
+                    <option value="original">Original</option>
+                    <option value="1:1">Square</option>
+                    <option value="4:3">4:3</option>
+                    <option value="16:9">16:9</option>
+                  </select>
+                </label>
+                <p className="auth-hint" style={{ margin: 0 }}>
+                  Drag the box to move it. Drag the corner handle to resize it.
+                </p>
+              </>
+            ) : (
+              <p className="auth-hint" style={{ margin: 0 }}>
+                The original file will be uploaded without cropping.
+              </p>
+            )}
+            {draft.error ? <p className="modal-warning-text" style={{ margin: 0 }}>{draft.error}</p> : null}
+          </div>
+        </div>
+        <div className="form-actions" style={{ marginTop: 24 }}>
+          <button type="button" className="btn" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          {draft.mode === "full" ? (
+            <button type="button" className="btn btn--primary" onClick={onUseFullImage} disabled={busy}>
+              Use full image
+            </button>
+          ) : (
+            <button type="button" className="btn btn--primary" onClick={onUseCrop} disabled={busy}>
+              {busy ? "Cropping..." : "Use selected region"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2119,17 +2906,14 @@ export function PostgresProjectHomeExperimentView({
     sourceId: string;
     annotationId: string | null;
   } | null>(null);
-  const [postgresMemoDraftTarget, setPostgresMemoDraftTarget] = useState<{
-    sourceIds?: string[];
-    annotationIds?: string[];
-    codeIds?: string[];
-  } | null>(null);
+  const [postgresMemoDraftTarget, setPostgresMemoDraftTarget] = useState<PostgresMemoDraftTarget | null>(null);
   const [users, setUsers] = useState<PostgresExperimentProjectUser[]>([]);
   const [appUsers, setAppUsers] = useState<PostgresExperimentAppUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersSubmitting, setUsersSubmitting] = useState(false);
   const [usersError, setUsersError] = useState("");
   const [userNotice, setUserNotice] = useState("");
+  const [selectedUserRoleFilter, setSelectedUserRoleFilter] = useState<(typeof PROJECT_ROLE_OPTIONS)[number] | "all">("all");
   const [selectedAppUserId, setSelectedAppUserId] = useState("");
   const [userRole, setUserRole] = useState<(typeof PROJECT_ROLE_OPTIONS)[number]>("coder");
   const [addUserOpen, setAddUserOpen] = useState(false);
@@ -2159,7 +2943,9 @@ export function PostgresProjectHomeExperimentView({
   const [objectColorOverride, setObjectColorOverride] = useState("");
   const [objectFillOverride, setObjectFillOverride] = useState("");
   const [objectAttributeValues, setObjectAttributeValues] = useState<Record<string, string>>({});
+  const [draftObjectPendingImage, setDraftObjectPendingImage] = useState<PostgresExperimentImageUploadDraft | null>(null);
   const [selectedObjectTypeFilter, setSelectedObjectTypeFilter] = useState<string>("all");
+  const [selectedObjectDetailsId, setSelectedObjectDetailsId] = useState<string | null>(null);
   const [showObjectAttributesTable, setShowObjectAttributesTable] = useState(false);
   const [objectTypeSortCol, setObjectTypeSortCol] = useState<PostgresExperimentObjectTypeSortCol>("objectType");
   const [objectTypeSortDir, setObjectTypeSortDir] = useState<"asc" | "desc">("asc");
@@ -2179,6 +2965,9 @@ export function PostgresProjectHomeExperimentView({
   const [draftObjectTypeShape, setDraftObjectTypeShape] = useState<PostgresExperimentObjectTypeShape>("rounded");
   const [draftObjectTypeColor, setDraftObjectTypeColor] = useState(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
   const [draftObjectTypeFill, setDraftObjectTypeFill] = useState<PostgresExperimentObjectFill>("filled");
+  const [draftObjectTypeImageStoragePath, setDraftObjectTypeImageStoragePath] = useState("");
+  const [draftObjectTypePendingImage, setDraftObjectTypePendingImage] = useState<PostgresExperimentImageUploadDraft | null>(null);
+  const [draftObjectTypeGraphicMode, setDraftObjectTypeGraphicMode] = useState<PostgresExperimentObjectGraphicMode>("select");
   const [objectTypeModalTab, setObjectTypeModalTab] = useState<"details" | "graphics" | "attributes">("details");
   const [createObjectModalTab, setCreateObjectModalTab] = useState<"details" | "graphics" | "attributes">("details");
   const [objectTypeAttributeDrafts, setObjectTypeAttributeDrafts] = useState<TypeAttributeDraft[]>([]);
@@ -2191,6 +2980,13 @@ export function PostgresProjectHomeExperimentView({
   const [editingObjectShapeOverride, setEditingObjectShapeOverride] = useState("");
   const [editingObjectColorOverride, setEditingObjectColorOverride] = useState("");
   const [editingObjectFillOverride, setEditingObjectFillOverride] = useState("");
+  const [objectImageStoragePath, setObjectImageStoragePath] = useState("");
+  const [editingObjectImageStoragePath, setEditingObjectImageStoragePath] = useState("");
+  const [objectGraphicMode, setObjectGraphicMode] = useState<PostgresExperimentObjectInstanceGraphicMode>("inherit");
+  const [editingObjectGraphicMode, setEditingObjectGraphicMode] = useState<PostgresExperimentObjectInstanceGraphicMode>("inherit");
+  const [imageUploadSubmitting, setImageUploadSubmitting] = useState(false);
+  const [imageCropSubmitting, setImageCropSubmitting] = useState(false);
+  const [imageCropDraft, setImageCropDraft] = useState<PostgresExperimentImageCropDraft | null>(null);
   const [editingObjectAttributeValues, setEditingObjectAttributeValues] = useState<Record<string, string>>({});
   const [removingObjectId, setRemovingObjectId] = useState<string | null>(null);
   const [openObjectActionsMenu, setOpenObjectActionsMenu] = useState<{
@@ -2271,11 +3067,38 @@ export function PostgresProjectHomeExperimentView({
   const [saveFreeDrawName, setSaveFreeDrawName] = useState("");
   const [pendingCanvasNodePosition, setPendingCanvasNodePosition] = useState<PostgresExperimentCanvasPoint | null>(null);
   const pendingLocalGraphRefreshSkipsRef = useRef(0);
+  const imageCropResolverRef = useRef<((upload: PostgresExperimentImageUploadDraft | null) => void) | null>(null);
   const objectById = new Map(objects.map((object) => [object.id, object]));
   const objectTypeById = new Map(objectTypes.map((objectType) => [objectType.id, objectType]));
   const relationshipTypeById = new Map(relationshipTypes.map((relationshipType) => [relationshipType.id, relationshipType]));
+  const customObjects = useMemo(
+    () => objects.filter((object) => !object.sourceId && !isPostgresExperimentSourceObjectVisualKey(object.objectTypeSystemKey)),
+    [objects],
+  );
+  const customObjectTypes = useMemo(
+    () => objectTypes.filter((objectType) => !isPostgresExperimentSourceObjectVisualKey(objectType.systemKey)),
+    [objectTypes],
+  );
+  const customObjectTypeIds = useMemo(
+    () => new Set(customObjectTypes.map((objectType) => objectType.id)),
+    [customObjectTypes],
+  );
   const selectedCreateObjectType = objectTypeById.get(objectTypeId) ?? null;
   const selectedEditObjectType = objectTypeById.get(editingObjectTypeId) ?? null;
+  useEffect(() => {
+    return () => {
+      if (draftObjectTypePendingImage?.previewUrl) {
+        URL.revokeObjectURL(draftObjectTypePendingImage.previewUrl);
+      }
+    };
+  }, [draftObjectTypePendingImage]);
+  useEffect(() => {
+    return () => {
+      if (draftObjectPendingImage?.previewUrl) {
+        URL.revokeObjectURL(draftObjectPendingImage.previewUrl);
+      }
+    };
+  }, [draftObjectPendingImage]);
   const relationshipAttributeRows = relationships
     .filter((relationship) => !editingRelationshipAttributeTypeId || relationship.relationshipTypeId === editingRelationshipAttributeTypeId)
     .map((relationship) => ({
@@ -2283,9 +3106,9 @@ export function PostgresProjectHomeExperimentView({
     name: relationship.relationshipType,
   }));
   const objectTypeSummaries = useMemo(
-    () => objectTypes
+    () => customObjectTypes
       .map((objectTypeRecord) => {
-        const matchingObjects = objects.filter(
+        const matchingObjects = customObjects.filter(
           (object) => object.objectTypeId === objectTypeRecord.id,
         );
         const matchingDefinitions = objectAttributeDefinitions.filter(
@@ -2306,6 +3129,7 @@ export function PostgresProjectHomeExperimentView({
           shape: objectTypeRecord.shape,
           color: objectTypeRecord.color,
           fill: objectTypeRecord.fill,
+          imageStoragePath: objectTypeRecord.imageStoragePath,
           count: matchingObjects.length,
           describedCount: matchingObjects.filter((object) => object.description.trim()).length,
           attributedCount: matchingObjects.filter((object) => object.attributeValues.some((value) => value.value.trim())).length,
@@ -2325,7 +3149,7 @@ export function PostgresProjectHomeExperimentView({
         }
         return objectTypeSortDir === "asc" ? comparison : -comparison;
       }),
-    [objectAttributeDefinitions, objectTypeSortCol, objectTypeSortDir, objectTypes, objects],
+    [customObjectTypes, customObjects, objectAttributeDefinitions, objectTypeSortCol, objectTypeSortDir],
   );
   const resetFreeDrawCanvasSession = useCallback(() => {
     setCanvasScale(1);
@@ -2398,11 +3222,70 @@ export function PostgresProjectHomeExperimentView({
   }, [canvasNodes, canvasOffset.x, canvasOffset.y, canvasScale, canvasShapes, freeDrawSavedDrawingId, hiddenCanvasRelationshipIds, project.id, saveFreeDrawName]);
   const filteredObjects =
     selectedObjectTypeFilter === "all"
-      ? objects
-      : objects.filter((object) => object.objectTypeId === selectedObjectTypeFilter);
+      ? customObjects
+      : customObjects.filter((object) => object.objectTypeId === selectedObjectTypeFilter);
+  const selectedObjectDetails = selectedObjectDetailsId
+    ? filteredObjects.find((object) => object.id === selectedObjectDetailsId) ?? null
+    : null;
+  const selectedObjectDetailsType = selectedObjectDetails
+    ? objectTypeById.get(selectedObjectDetails.objectTypeId) ?? null
+    : null;
+  const selectedObjectDetailsAttributeDefinitions = selectedObjectDetails
+    ? objectAttributeDefinitions
+        .filter((definition) => definition.objectTypeId === selectedObjectDetails.objectTypeId)
+        .sort((left, right) => {
+          if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+          return left.name.localeCompare(right.name);
+        })
+    : [];
+  const selectedObjectRelationshipRows = selectedObjectDetails
+    ? relationships
+        .filter((relationship) => (
+          relationship.fromObjectId === selectedObjectDetails.id
+          || relationship.toObjectId === selectedObjectDetails.id
+        ))
+        .map((relationship) => {
+          const otherObjectId = relationship.fromObjectId === selectedObjectDetails.id
+            ? relationship.toObjectId
+            : relationship.fromObjectId;
+          const otherObject = objectById.get(otherObjectId) ?? null;
+          const otherObjectTypeRecord = otherObject ? objectTypeById.get(otherObject.objectTypeId) ?? null : null;
+          const relationshipTypeRecord = relationshipTypeById.get(relationship.relationshipTypeId) ?? null;
+          const relationshipAppearance = getPostgresExperimentRelationshipAppearance(relationship, relationshipTypeRecord);
+          return {
+            id: relationship.id,
+            otherObjectName: otherObject?.title || otherObjectId,
+            otherObjectType: otherObject?.objectType || "Unknown",
+            otherObjectShape: otherObject
+              ? resolvePostgresExperimentObjectShape(otherObject, otherObjectTypeRecord)
+              : "rounded",
+            otherObjectFill: otherObject
+              ? resolvePostgresExperimentObjectFill(otherObject, otherObjectTypeRecord)
+              : "filled",
+            otherObjectColor: otherObject
+              ? resolvePostgresExperimentObjectColor(otherObject, otherObjectTypeRecord)
+              : POSTGRES_OBJECT_TYPE_DEFAULT_COLOR,
+            otherObjectSourceVisualKey: getPostgresExperimentSourceObjectVisualKey(otherObjectTypeRecord?.systemKey),
+            otherObjectImageStoragePath: otherObject?.imageStoragePath || otherObjectTypeRecord?.imageStoragePath || "",
+            relationshipName: relationship.relationshipType || relationshipTypeRecord?.name || "Relationship",
+            relationshipLineShape: relationshipAppearance.lineShape,
+            relationshipLineWeight: relationshipAppearance.lineWeight,
+            relationshipArrowhead: relationshipAppearance.arrowhead,
+            relationshipColor: relationshipAppearance.color,
+          };
+        })
+        .sort((left, right) => (
+          left.otherObjectName.localeCompare(right.otherObjectName, undefined, { sensitivity: "base" })
+          || left.relationshipName.localeCompare(right.relationshipName, undefined, { sensitivity: "base" })
+        ))
+    : [];
   const objectAttributeDefinitionsForWorkspace = useMemo(
     () => objectAttributeDefinitions
-      .filter((definition) => selectedObjectTypeFilter === "all" || definition.objectTypeId === selectedObjectTypeFilter)
+      .filter((definition) => (
+        selectedObjectTypeFilter === "all"
+          ? customObjectTypeIds.has(definition.objectTypeId)
+          : definition.objectTypeId === selectedObjectTypeFilter
+      ))
       .sort((left, right) => {
         if (selectedObjectTypeFilter === "all") {
           const objectTypeComparison = left.objectType.localeCompare(right.objectType);
@@ -2411,7 +3294,7 @@ export function PostgresProjectHomeExperimentView({
         if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
         return left.name.localeCompare(right.name);
       }),
-    [objectAttributeDefinitions, selectedObjectTypeFilter],
+    [customObjectTypeIds, objectAttributeDefinitions, selectedObjectTypeFilter],
   );
   const sortedObjectAttributeRows = useMemo(() => {
     const rows = filteredObjects.map((object) => ({
@@ -2445,6 +3328,18 @@ export function PostgresProjectHomeExperimentView({
     objectAttributeSortDir,
   ]);
   const filteredSavedDrawings = savedDrawings.filter((drawing) => drawing.canvasKind === selectedCanvasViewKind);
+  useEffect(() => {
+    if (selectedObjectTypeFilter === "all") return;
+    if (customObjectTypeIds.has(selectedObjectTypeFilter)) return;
+    setSelectedObjectTypeFilter("all");
+  }, [customObjectTypeIds, selectedObjectTypeFilter]);
+
+  useEffect(() => {
+    if (!selectedObjectDetailsId) return;
+    if (filteredObjects.some((object) => object.id === selectedObjectDetailsId)) return;
+    setSelectedObjectDetailsId(null);
+  }, [filteredObjects, selectedObjectDetailsId]);
+
   useEffect(() => {
     if (objectAttributeSortCol === "name") return;
     if (objectAttributeDefinitionsForWorkspace.some((definition) => definition.id === objectAttributeSortCol)) return;
@@ -2483,6 +3378,10 @@ export function PostgresProjectHomeExperimentView({
         constraint: formatRelationshipTypeConstraintSummary(relationshipType),
         count: matchingRelationships.length,
         attributeDefinitionCount: matchingDefinitions.length,
+        lineShape: normalizePostgresExperimentRelationshipLineShape(relationshipType.lineShape),
+        lineWeight: normalizePostgresExperimentRelationshipLineWeight(relationshipType.lineWeight),
+        arrowhead: normalizePostgresExperimentRelationshipArrowhead(relationshipType.arrowhead),
+        color: normalizePostgresExperimentRelationshipColor(relationshipType.color),
       };
     })
     .sort((left, right) => left.relationshipType.localeCompare(right.relationshipType));
@@ -2531,6 +3430,9 @@ export function PostgresProjectHomeExperimentView({
     setObjectShapeOverride("");
     setObjectColorOverride("");
     setObjectFillOverride("");
+    setObjectImageStoragePath("");
+    setDraftObjectPendingImage(null);
+    setObjectGraphicMode("inherit");
     setObjectAttributeValues({});
     setCreateObjectModalTab("details");
     setGraphError("");
@@ -2547,6 +3449,14 @@ export function PostgresProjectHomeExperimentView({
     setEditingObjectShapeOverride(object.shapeOverride ?? "");
     setEditingObjectColorOverride(object.colorOverride ?? "");
     setEditingObjectFillOverride(object.fillOverride ?? "");
+    setEditingObjectImageStoragePath(object.imageStoragePath ?? "");
+    setEditingObjectGraphicMode(
+      object.imageStoragePath
+        ? "upload"
+        : object.shapeOverride || object.colorOverride || object.fillOverride
+          ? "select"
+          : "inherit",
+    );
     setEditingObjectAttributeValues(valuesForObject(object));
   }
 
@@ -2565,6 +3475,9 @@ export function PostgresProjectHomeExperimentView({
     setDraftObjectTypeFill(
       normalizePostgresExperimentObjectFill(objectTypeRecord.fill),
     );
+    setDraftObjectTypeImageStoragePath(objectTypeRecord.imageStoragePath ?? "");
+    setDraftObjectTypePendingImage(null);
+    setDraftObjectTypeGraphicMode(objectTypeRecord.imageStoragePath ? "upload" : "select");
     initializeObjectTypeAttributeEditor(objectTypeId);
     setObjectTypeModalTab(tab);
     setGraphError("");
@@ -2606,6 +3519,8 @@ export function PostgresProjectHomeExperimentView({
 
   function closeCreateObjectModal() {
     setPendingCanvasNodePosition(null);
+    setDraftObjectPendingImage(null);
+    setObjectImageStoragePath("");
     setCreateObjectOpen(false);
   }
 
@@ -2826,6 +3741,9 @@ export function PostgresProjectHomeExperimentView({
     colorOverride: string;
     shapeOverride: string;
     fillOverride: string;
+    imageStoragePath: string;
+    imagePreviewUrl?: string;
+    graphicMode: PostgresExperimentObjectInstanceGraphicMode;
     selectedType: PostgresExperimentObjectType | null;
     attributeDefinitions: PostgresExperimentObjectAttributeDefinition[];
     attributeValues: Record<string, string>;
@@ -2837,17 +3755,21 @@ export function PostgresProjectHomeExperimentView({
     setColorOverride: Dispatch<SetStateAction<string>>;
     setShapeOverride: Dispatch<SetStateAction<string>>;
     setFillOverride: Dispatch<SetStateAction<string>>;
+    setImageStoragePath: Dispatch<SetStateAction<string>>;
+    setGraphicMode: Dispatch<SetStateAction<PostgresExperimentObjectInstanceGraphicMode>>;
     setAttributeValues: Dispatch<SetStateAction<Record<string, string>>>;
+    onImportImage?: () => void;
+    onRemoveImage?: () => void;
+    onClearPendingImage?: () => void;
   }) {
     const inheritedColor = normalizePostgresExperimentObjectTypeColor(config.selectedType?.color || "");
     const effectiveColor = resolvePostgresExperimentObjectColor({ colorOverride: config.colorOverride }, config.selectedType);
     const colorInherited = !config.colorOverride.trim();
     const inheritedShape = resolvePostgresExperimentObjectShape({ shapeOverride: "" }, config.selectedType);
     const effectiveShape = resolvePostgresExperimentObjectShape({ shapeOverride: config.shapeOverride }, config.selectedType);
-    const shapeInherited = !config.shapeOverride.trim();
     const inheritedFill = resolvePostgresExperimentObjectFill({ fillOverride: "" }, config.selectedType);
     const effectiveFill = resolvePostgresExperimentObjectFill({ fillOverride: config.fillOverride }, config.selectedType);
-    const fillInherited = !config.fillOverride.trim();
+    const effectiveImageStoragePath = config.imageStoragePath || config.selectedType?.imageStoragePath || "";
 
     return (
       <div className="modal-overlay" onClick={() => !graphSubmitting && config.onClose()}>
@@ -2899,54 +3821,136 @@ export function PostgresProjectHomeExperimentView({
               </>
             ) : config.tab === "graphics" ? (
               <>
-                <label className="form-label">
-                  {renderOverrideFieldHeader("Color", {
-                    inherited: colorInherited,
-                    inheritedFrom: "object type",
-                    onReset: () => config.setColorOverride(""),
-                  })}
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-                    <input
-                      className="form-input form-input--color"
-                      type="color"
-                      value={effectiveColor}
-                      onChange={(event) => config.setColorOverride(event.target.value)}
-                      style={{ width: 92, minWidth: 92, height: 56 }}
-                    />
-                    <input
-                      className="form-input"
-                      value={colorInherited ? inheritedColor : config.colorOverride}
-                      onChange={(event) => config.setColorOverride(event.target.value)}
-                      style={{ flex: "0 0 148px", fontFamily: "monospace" }}
-                    />
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <div className="auth-tabs" role="tablist" aria-label="Object graphic source" style={{ width: 330, marginBottom: 0 }}>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={config.graphicMode === "inherit"}
+                      className={`auth-tab ${config.graphicMode === "inherit" ? "auth-tab--active" : ""}`}
+                      onClick={() =>
+                        handleSetObjectGraphicMode("inherit", {
+                          setMode: config.setGraphicMode,
+                          setShapeOverride: config.setShapeOverride,
+                          setColorOverride: config.setColorOverride,
+                          setFillOverride: config.setFillOverride,
+                          setImageStoragePath: config.setImageStoragePath,
+                          onClearPendingImage: config.onClearPendingImage,
+                          objectId: editingObjectId,
+                        })
+                      }
+                      disabled={graphSubmitting || imageUploadSubmitting}
+                    >
+                      Inherit
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={config.graphicMode === "select"}
+                      className={`auth-tab ${config.graphicMode === "select" ? "auth-tab--active" : ""}`}
+                      onClick={() =>
+                        handleSetObjectGraphicMode("select", {
+                          setMode: config.setGraphicMode,
+                          setShapeOverride: config.setShapeOverride,
+                          setColorOverride: config.setColorOverride,
+                          setFillOverride: config.setFillOverride,
+                          setImageStoragePath: config.setImageStoragePath,
+                          onClearPendingImage: config.onClearPendingImage,
+                          objectId: editingObjectId,
+                        })
+                      }
+                      disabled={graphSubmitting || imageUploadSubmitting}
+                    >
+                      Select
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={config.graphicMode === "upload"}
+                      className={`auth-tab ${config.graphicMode === "upload" ? "auth-tab--active" : ""}`}
+                      onClick={() =>
+                        handleSetObjectGraphicMode("upload", {
+                          setMode: config.setGraphicMode,
+                          setShapeOverride: config.setShapeOverride,
+                          setColorOverride: config.setColorOverride,
+                          setFillOverride: config.setFillOverride,
+                          setImageStoragePath: config.setImageStoragePath,
+                          objectId: editingObjectId,
+                        })
+                      }
+                      disabled={graphSubmitting || imageUploadSubmitting}
+                    >
+                      Upload
+                    </button>
                   </div>
-                </label>
-                <label className="form-label">
-                  {renderOverrideFieldHeader("Shape", {
-                    inherited: shapeInherited,
-                    inheritedFrom: "object type",
-                    onReset: () => config.setShapeOverride(""),
-                  })}
-                  <PostgresExperimentObjectShapePicker
-                    value={effectiveShape}
-                    onChange={(value) => config.setShapeOverride(value === inheritedShape ? "" : value)}
-                    previewColor={effectiveColor}
-                    previewFill={effectiveFill}
-                  />
-                </label>
-                <label className="form-label">
-                  {renderOverrideFieldHeader("Fill", {
-                    inherited: fillInherited,
-                    inheritedFrom: "object type",
-                    onReset: () => config.setFillOverride(""),
-                  })}
-                  <PostgresExperimentObjectFillPicker
-                    value={effectiveFill}
-                    onChange={(value) => config.setFillOverride(value === inheritedFill ? "" : value)}
-                    previewColor={effectiveColor}
-                    previewShape={effectiveShape}
-                  />
-                </label>
+                </div>
+                {config.graphicMode === "inherit" ? (
+                  <p className="auth-hint" style={{ margin: "4px 0 0", textAlign: "center" }}>
+                    This object will inherit its graphical elements from its object type.
+                  </p>
+                ) : config.graphicMode === "upload" ? (
+                  <label className="form-label">
+                    Image
+                    <PostgresExperimentObjectImageControls
+                      projectStoragePath={project.storagePath}
+                      imageStoragePath={effectiveImageStoragePath}
+                      previewUrl={config.imagePreviewUrl ?? ""}
+                      canUpload={!!config.onImportImage}
+                      disabled={graphSubmitting || imageUploadSubmitting}
+                      onUpload={config.onImportImage}
+                      onRemove={config.imageStoragePath || config.imagePreviewUrl ? config.onRemoveImage : undefined}
+                      fallback={(
+                        <ObjectShapeSwatch
+                          shape={effectiveShape}
+                          fill={effectiveFill}
+                          color={effectiveColor}
+                          sourceVisualKey={getPostgresExperimentSourceObjectVisualKey(config.selectedType?.systemKey)}
+                          width={56}
+                          minHeight={44}
+                        />
+                      )}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label className="form-label">
+                      Color
+                      <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+                        <input
+                          className="form-input form-input--color"
+                          type="color"
+                          value={effectiveColor}
+                          onChange={(event) => config.setColorOverride(event.target.value)}
+                          style={{ width: 92, minWidth: 92, height: 56 }}
+                        />
+                        <input
+                          className="form-input"
+                          value={colorInherited ? inheritedColor : config.colorOverride}
+                          onChange={(event) => config.setColorOverride(event.target.value)}
+                          style={{ flex: "0 0 148px", fontFamily: "monospace" }}
+                        />
+                      </div>
+                    </label>
+                    <label className="form-label">
+                      Shape
+                      <PostgresExperimentObjectShapePicker
+                        value={effectiveShape}
+                        onChange={(value) => config.setShapeOverride(value === inheritedShape ? "" : value)}
+                        previewColor={effectiveColor}
+                        previewFill={effectiveFill}
+                      />
+                    </label>
+                    <label className="form-label">
+                      Fill
+                      <PostgresExperimentObjectFillPicker
+                        value={effectiveFill}
+                        onChange={(value) => config.setFillOverride(value === inheritedFill ? "" : value)}
+                        previewColor={effectiveColor}
+                        previewShape={effectiveShape}
+                      />
+                    </label>
+                  </>
+                )}
               </>
             ) : config.attributeDefinitions.length > 0 ? (
               <div className="case-detail-attributes-table-wrap">
@@ -3391,6 +4395,24 @@ export function PostgresProjectHomeExperimentView({
   function projectRoleLabel(role: string) {
     return role.slice(0, 1).toUpperCase() + role.slice(1);
   }
+
+  const userRoleSummaries = useMemo(
+    () => PROJECT_ROLE_OPTIONS
+      .map((role) => ({
+        role,
+        label: projectRoleLabel(role),
+        count: users.filter((user) => user.role === role).length,
+      }))
+      .filter((summary) => summary.count > 0),
+    [users],
+  );
+
+  const filteredProjectUsers = useMemo(
+    () => selectedUserRoleFilter === "all"
+      ? users
+      : users.filter((user) => user.role === selectedUserRoleFilter),
+    [selectedUserRoleFilter, users],
+  );
 
   function getEditableRolesForUser(user: PostgresExperimentProjectUser) {
     if (!canChangeRoles) return [user.role];
@@ -4336,23 +5358,39 @@ export function PostgresProjectHomeExperimentView({
     setGraphSubmitting(true);
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const created = await savePostgresExperimentObject({
+      let created = await savePostgresExperimentObject({
         projectId: project.id,
         objectId: null,
         objectTypeId,
         title: objectTitle.trim(),
         description: objectDescription.trim(),
-        shapeOverride: objectShapeOverride.trim() || null,
-        colorOverride: normalizeOptionalPostgresExperimentObjectTypeColor(objectColorOverride) || null,
-        fillOverride: objectFillOverride.trim() || null,
+        shapeOverride: objectGraphicMode === "select" ? objectShapeOverride.trim() || null : null,
+        colorOverride: objectGraphicMode === "select" ? normalizeOptionalPostgresExperimentObjectTypeColor(objectColorOverride) || null : null,
+        fillOverride: objectGraphicMode === "select" ? objectFillOverride.trim() || null : null,
+        imageStoragePath: objectGraphicMode === "upload" ? objectImageStoragePath.trim() || null : null,
         attributeValues: toObjectAttributePayload(objectAttributeDefinitionsForCreateType, objectAttributeValues),
       });
+      if (objectGraphicMode === "upload" && draftObjectPendingImage) {
+        try {
+          created = await importPostgresExperimentObjectImage({
+            projectId: project.id,
+            objectId: created.id,
+            originalFileName: draftObjectPendingImage.originalFileName,
+            fileBytesBase64: draftObjectPendingImage.fileBytesBase64,
+          });
+        } catch (uploadError) {
+          setGraphError(uploadError instanceof Error ? uploadError.message : String(uploadError));
+        }
+      }
       setObjects((current) => [...current, created]);
       setObjectTitle("");
       setObjectDescription("");
       setObjectShapeOverride("");
       setObjectColorOverride("");
       setObjectFillOverride("");
+      setObjectImageStoragePath("");
+      setDraftObjectPendingImage(null);
+      setObjectGraphicMode("inherit");
       setObjectAttributeValues({});
       setSelectedObjectTypeFilter(created.objectTypeId || "all");
       closeCreateObjectModal();
@@ -4401,6 +5439,9 @@ export function PostgresProjectHomeExperimentView({
       setDraftObjectTypeShape("rounded");
       setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
       setDraftObjectTypeFill("filled");
+      setDraftObjectTypeImageStoragePath("");
+      setDraftObjectTypePendingImage(null);
+      setDraftObjectTypeGraphicMode("select");
       initializeObjectTypeAttributeEditor(null);
       setObjectTypeModalTab("details");
       setCreateObjectTypeOpen(false);
@@ -4424,6 +5465,7 @@ export function PostgresProjectHomeExperimentView({
         shape: draftObjectTypeShape,
         color: normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor),
         fill: draftObjectTypeFill,
+        imageStoragePath: draftObjectTypeImageStoragePath.trim() || null,
         attributes: objectTypeAttributeDrafts.map((draft) => ({
           id: draft.id || null,
           name: draft.name,
@@ -4432,26 +5474,311 @@ export function PostgresProjectHomeExperimentView({
           options: draft.options,
         })),
       });
-      applySavedObjectTypeState(saved.objectType, saved.attributeDefinitions);
+      let savedObjectType = saved.objectType;
+      if (draftObjectTypePendingImage) {
+        try {
+          savedObjectType = await importPostgresExperimentObjectTypeImage({
+            projectId: project.id,
+            objectTypeId: saved.objectType.id,
+            originalFileName: draftObjectTypePendingImage.originalFileName,
+            fileBytesBase64: draftObjectTypePendingImage.fileBytesBase64,
+          });
+        } catch (uploadError) {
+          setGraphError(uploadError instanceof Error ? uploadError.message : String(uploadError));
+        }
+      }
+      applySavedObjectTypeState(savedObjectType, saved.attributeDefinitions);
       setDraftObjectTypeName("");
       setDraftObjectTypeDescription("");
       setDraftObjectTypeShape("rounded");
       setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
       setDraftObjectTypeFill("filled");
+      setDraftObjectTypeImageStoragePath("");
+      setDraftObjectTypePendingImage(null);
+      setDraftObjectTypeGraphicMode("select");
       initializeObjectTypeAttributeEditor(null);
       setObjectTypeModalTab("details");
       setCreateObjectTypeOpen(false);
-      setSelectedObjectTypeFilter(saved.objectType.id);
-      setObjectTypeId(saved.objectType.id);
+      setSelectedObjectTypeFilter(savedObjectType.id);
+      setObjectTypeId(savedObjectType.id);
       setObjectTitle("");
       setObjectDescription("");
       setObjectAttributeValues({});
-      setGraphNotice(`Created object type "${saved.objectType.name}".`);
+      setGraphNotice(`Created object type "${savedObjectType.name}".`);
     } catch (error) {
       pendingLocalGraphRefreshSkipsRef.current = 0;
       setGraphError(error instanceof Error ? error.message : String(error));
     } finally {
       setGraphSubmitting(false);
+    }
+  }
+
+  function requestPostgresExperimentImageCropChoice(upload: PostgresExperimentImageUploadDraft): Promise<PostgresExperimentImageUploadDraft | null> {
+    return new Promise((resolve) => {
+      imageCropResolverRef.current = resolve;
+      setImageCropDraft({
+        upload,
+        mode: "full",
+        aspect: "original",
+        sizePercent: 100,
+        xPercent: 50,
+        yPercent: 50,
+        error: "",
+      });
+    });
+  }
+
+  function resolvePostgresExperimentImageCropChoice(upload: PostgresExperimentImageUploadDraft | null) {
+    imageCropResolverRef.current?.(upload);
+    imageCropResolverRef.current = null;
+    setImageCropDraft(null);
+  }
+
+  function handleCancelPostgresExperimentImageCropChoice() {
+    if (imageCropDraft?.upload.previewUrl) {
+      URL.revokeObjectURL(imageCropDraft.upload.previewUrl);
+    }
+    resolvePostgresExperimentImageCropChoice(null);
+  }
+
+  function handleUseFullPostgresExperimentImage() {
+    if (!imageCropDraft) return;
+    if (imageCropDraft.upload.fileSizeBytes > POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES) {
+      setImageCropDraft({
+        ...imageCropDraft,
+        error: `This image is ${formatPostgresExperimentFileSize(imageCropDraft.upload.fileSizeBytes)}. Choose a file smaller than 5 MB or select a smaller region.`,
+      });
+      return;
+    }
+    resolvePostgresExperimentImageCropChoice(imageCropDraft.upload);
+  }
+
+  async function handleUseCroppedPostgresExperimentImage() {
+    if (!imageCropDraft) return;
+    setImageCropSubmitting(true);
+    try {
+      const cropped = await cropPostgresExperimentImageUpload(
+        imageCropDraft.upload,
+        imageCropDraft.aspect,
+        imageCropDraft.sizePercent,
+        imageCropDraft.xPercent,
+        imageCropDraft.yPercent,
+      );
+      if (cropped.fileSizeBytes > POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES) {
+        URL.revokeObjectURL(cropped.previewUrl);
+        setImageCropDraft({
+          ...imageCropDraft,
+          error: `The selected region is still ${formatPostgresExperimentFileSize(cropped.fileSizeBytes)}. Select a smaller region or choose a smaller file.`,
+        });
+        return;
+      }
+      URL.revokeObjectURL(imageCropDraft.upload.previewUrl);
+      resolvePostgresExperimentImageCropChoice(cropped);
+    } catch (error) {
+      setImageCropDraft({
+        ...imageCropDraft,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setImageCropSubmitting(false);
+    }
+  }
+
+  async function pickObjectImageUpload(): Promise<PostgresExperimentImageUploadDraft | null> {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg"] }],
+    });
+    if (!selected || Array.isArray(selected)) return null;
+    const bytes = await readTauriFile(selected);
+    const originalFileName = getFileNameFromPath(selected);
+    const previewBlob = new Blob([bytes], { type: getPostgresExperimentImageMimeType(originalFileName) });
+    const upload = {
+      originalFileName,
+      fileBytesBase64: bytesToBase64(bytes),
+      previewUrl: URL.createObjectURL(previewBlob),
+      fileSizeBytes: bytes.length,
+    };
+    return requestPostgresExperimentImageCropChoice(upload);
+  }
+
+  async function handlePickPendingObjectTypeImage() {
+    setGraphError("");
+    setGraphNotice("");
+    setImageUploadSubmitting(true);
+    try {
+      const upload = await pickObjectImageUpload();
+      if (!upload) return;
+      setDraftObjectTypePendingImage(upload);
+      setDraftObjectTypeImageStoragePath("");
+      setDraftObjectTypeGraphicMode("upload");
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImageUploadSubmitting(false);
+    }
+  }
+
+  function handleRemovePendingObjectTypeImage() {
+    setDraftObjectTypePendingImage(null);
+    setDraftObjectTypeImageStoragePath("");
+    setDraftObjectTypeGraphicMode("select");
+  }
+
+  async function handlePickPendingObjectImage() {
+    setGraphError("");
+    setGraphNotice("");
+    setImageUploadSubmitting(true);
+    try {
+      const upload = await pickObjectImageUpload();
+      if (!upload) return;
+      setDraftObjectPendingImage(upload);
+      setObjectImageStoragePath("");
+      setObjectGraphicMode("upload");
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImageUploadSubmitting(false);
+    }
+  }
+
+  function handleRemovePendingObjectImage() {
+    setDraftObjectPendingImage(null);
+    setObjectImageStoragePath("");
+  }
+
+  function handleSetObjectTypeGraphicMode(mode: PostgresExperimentObjectGraphicMode) {
+    setDraftObjectTypeGraphicMode(mode);
+    if (mode === "select") {
+      if (editingObjectTypeModalId && draftObjectTypeImageStoragePath) {
+        void handleRemoveObjectTypeImage(editingObjectTypeModalId);
+      } else {
+        setDraftObjectTypePendingImage(null);
+        setDraftObjectTypeImageStoragePath("");
+      }
+    }
+  }
+
+  function handleSetObjectGraphicMode(
+    mode: PostgresExperimentObjectInstanceGraphicMode,
+    config: {
+      setMode: Dispatch<SetStateAction<PostgresExperimentObjectInstanceGraphicMode>>;
+      setShapeOverride: Dispatch<SetStateAction<string>>;
+      setColorOverride: Dispatch<SetStateAction<string>>;
+      setFillOverride: Dispatch<SetStateAction<string>>;
+      setImageStoragePath: Dispatch<SetStateAction<string>>;
+      onClearPendingImage?: () => void;
+      objectId?: string | null;
+    },
+  ) {
+    config.setMode(mode);
+    if (mode === "inherit") {
+      config.setShapeOverride("");
+      config.setColorOverride("");
+      config.setFillOverride("");
+      if (config.objectId && config.objectId === editingObjectId && editingObjectImageStoragePath) {
+        void handleRemoveEditingObjectImage(config.objectId);
+      } else {
+        config.setImageStoragePath("");
+        config.onClearPendingImage?.();
+      }
+    }
+    if (mode === "select") {
+      if (config.objectId && config.objectId === editingObjectId && editingObjectImageStoragePath) {
+        void handleRemoveEditingObjectImage(config.objectId);
+      } else {
+        config.setImageStoragePath("");
+        config.onClearPendingImage?.();
+      }
+    }
+    if (mode === "upload") {
+      config.setShapeOverride("");
+      config.setColorOverride("");
+      config.setFillOverride("");
+    }
+  }
+
+  async function handleImportObjectTypeImage(objectTypeId: string) {
+    setGraphError("");
+    setGraphNotice("");
+    setImageUploadSubmitting(true);
+    try {
+      const upload = await pickObjectImageUpload();
+      if (!upload) return;
+      const updated = await importPostgresExperimentObjectTypeImage({
+        projectId: project.id,
+        objectTypeId,
+        ...upload,
+      });
+      URL.revokeObjectURL(upload.previewUrl);
+      setObjectTypes((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+      setDraftObjectTypeImageStoragePath(updated.imageStoragePath ?? "");
+      setDraftObjectTypeGraphicMode("upload");
+      setGraphNotice(`Updated image for "${updated.name}".`);
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImageUploadSubmitting(false);
+    }
+  }
+
+  async function handleRemoveObjectTypeImage(objectTypeId: string) {
+    setGraphError("");
+    setGraphNotice("");
+    setImageUploadSubmitting(true);
+    try {
+      const updated = await removePostgresExperimentObjectTypeImage(project.id, objectTypeId);
+      setObjectTypes((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+      setDraftObjectTypeImageStoragePath("");
+      setDraftObjectTypeGraphicMode("select");
+      setGraphNotice(`Removed image for "${updated.name}".`);
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImageUploadSubmitting(false);
+    }
+  }
+
+  async function handleImportEditingObjectImage(objectId: string) {
+    setGraphError("");
+    setGraphNotice("");
+    setImageUploadSubmitting(true);
+    try {
+      const upload = await pickObjectImageUpload();
+      if (!upload) return;
+      const updated = await importPostgresExperimentObjectImage({
+        projectId: project.id,
+        objectId,
+        ...upload,
+      });
+      URL.revokeObjectURL(upload.previewUrl);
+      setObjects((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+      setEditingObjectImageStoragePath(updated.imageStoragePath ?? "");
+      setEditingObjectGraphicMode("upload");
+      setGraphNotice(`Updated image for "${updated.title}".`);
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImageUploadSubmitting(false);
+    }
+  }
+
+  async function handleRemoveEditingObjectImage(objectId: string) {
+    setGraphError("");
+    setGraphNotice("");
+    setImageUploadSubmitting(true);
+    try {
+      const updated = await removePostgresExperimentObjectImage(project.id, objectId);
+      setObjects((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+      setEditingObjectImageStoragePath("");
+      setEditingObjectGraphicMode(
+        editingObjectShapeOverride || editingObjectColorOverride || editingObjectFillOverride ? "select" : "inherit",
+      );
+      setGraphNotice(`Removed image for "${updated.title}".`);
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImageUploadSubmitting(false);
     }
   }
 
@@ -4477,6 +5804,7 @@ export function PostgresProjectHomeExperimentView({
         shape: draftObjectTypeShape,
         color: normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor),
         fill: draftObjectTypeFill,
+        imageStoragePath: draftObjectTypeImageStoragePath.trim() || null,
         attributes: objectTypeAttributeDrafts.map((draft) => ({
           id: draft.id || null,
           name: draft.name,
@@ -4492,6 +5820,7 @@ export function PostgresProjectHomeExperimentView({
       setDraftObjectTypeShape("rounded");
       setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
       setDraftObjectTypeFill("filled");
+      setDraftObjectTypeImageStoragePath("");
       initializeObjectTypeAttributeEditor(null);
       setObjectTypeModalTab("details");
       setGraphNotice(`Updated object type "${saved.objectType.name}".`);
@@ -4547,9 +5876,10 @@ export function PostgresProjectHomeExperimentView({
         objectTypeId: editingObjectTypeId,
         title: editingObjectTitle.trim(),
         description: editingObjectDescription.trim(),
-        shapeOverride: editingObjectShapeOverride.trim() || null,
-        colorOverride: normalizeOptionalPostgresExperimentObjectTypeColor(editingObjectColorOverride) || null,
-        fillOverride: editingObjectFillOverride.trim() || null,
+        shapeOverride: editingObjectGraphicMode === "select" ? editingObjectShapeOverride.trim() || null : null,
+        colorOverride: editingObjectGraphicMode === "select" ? normalizeOptionalPostgresExperimentObjectTypeColor(editingObjectColorOverride) || null : null,
+        fillOverride: editingObjectGraphicMode === "select" ? editingObjectFillOverride.trim() || null : null,
+        imageStoragePath: editingObjectGraphicMode === "upload" ? editingObjectImageStoragePath.trim() || null : null,
         attributeValues: toObjectAttributePayload(objectAttributeDefinitionsForEditingType, editingObjectAttributeValues),
       });
       console.warn("[kanqual] handleSaveObject:success", {
@@ -5065,65 +6395,179 @@ export function PostgresProjectHomeExperimentView({
                   </div>
                 </header>
 
-                <div className="users-content postgres-users-content">
+                <div className="users-content postgres-users-content" style={{ alignItems: "stretch" }}>
                   {userNotice ? <p className="settings-success">{userNotice}</p> : null}
                   {usersError ? <p className="users-error">{usersError}</p> : null}
 
-                  {usersLoading ? (
-                    <div className="empty-state postgres-users-empty-state">
-                      <p>Loading PostgreSQL project users...</p>
+                  <div
+                    className="postgres-sources-grid project-users-grid"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
+                      gap: 20,
+                      alignItems: "center",
+                      flex: 1,
+                      minHeight: 0,
+                    }}
+                  >
+                    <div
+                      className="home-primary-column"
+                      style={{
+                        alignSelf: "center",
+                        justifyContent: "flex-start",
+                        gap: 16,
+                        minHeight: 0,
+                        maxHeight: "100%",
+                        overflowY: "auto",
+                        overflowX: "hidden",
+                        paddingRight: 4,
+                      }}
+                    >
+                      <section className="home-project-card" style={{ padding: 0, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 12,
+                            padding: 18,
+                            borderBottom: "1px solid rgba(53, 80, 112, 0.08)",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                            <h2 style={{ margin: 0, fontSize: 18 }}>User roles</h2>
+                            <span className="home-restricted-value">{users.length}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <table className="users-table" style={{ tableLayout: "fixed" }}>
+                            <tbody>
+                              <tr
+                                className="users-row"
+                                style={{
+                                  background: selectedUserRoleFilter === "all" ? "rgba(53, 80, 112, 0.10)" : undefined,
+                                }}
+                              >
+                                <td
+                                  className="users-td users-td--name"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setSelectedUserRoleFilter("all")}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      setSelectedUserRoleFilter("all");
+                                    }
+                                  }}
+                                >
+                                  All
+                                </td>
+                                <td className="users-td users-td--muted">{users.length}</td>
+                              </tr>
+                              {userRoleSummaries.map((summary) => (
+                                <tr
+                                  key={summary.role}
+                                  className="users-row"
+                                  style={{
+                                    background: selectedUserRoleFilter === summary.role ? "rgba(53, 80, 112, 0.10)" : undefined,
+                                  }}
+                                >
+                                  <td
+                                    className="users-td users-td--name"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setSelectedUserRoleFilter(summary.role)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        setSelectedUserRoleFilter(summary.role);
+                                      }
+                                    }}
+                                  >
+                                    <div style={{ paddingLeft: 18 }}>{summary.label}</div>
+                                  </td>
+                                  <td className="users-td users-td--muted">{summary.count}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
                     </div>
-                  ) : users.length === 0 ? (
-                    <div className="empty-state postgres-users-empty-state">
-                      <p>No users have been added to this PostgreSQL project yet.</p>
-                    </div>
-                  ) : (
-                    <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 520 }}>
-                      <table className="users-table">
-                        <thead>
-                          <tr>
-                            <th className="users-th" style={{ width: "26%" }}>User</th>
-                            <th className="users-th" style={{ width: "28%" }}>Email</th>
-                            <th className="users-th" style={{ width: "12%" }}>Role</th>
-                            <th className="users-th" style={{ width: "17%" }}>Created</th>
-                            <th className="users-th" style={{ width: "17%" }}>Updated</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {users.map((user) => (
-                            <tr
-                              key={user.id}
-                              className={`users-row project-users-row${canChangeRoles ? "" : " users-row--disabled"}`}
-                              onClick={() => {
-                                if (canChangeRoles) {
-                                  setEditingUserId(user.id);
-                                  setEditRole(user.role as (typeof PROJECT_ROLE_OPTIONS)[number]);
-                                  setRemovingUserId(null);
-                                }
-                              }}
-                            >
-                              <td className="users-td users-td--name">
-                                <div className="postgres-users-name-cell">
-                                  <span>{user.name}</span>
-                                  <span className="postgres-users-meta">
-                                    {user.role === "owner" ? "Project owner" : "Project member"}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="users-td users-td--muted">{user.email}</td>
-                              <td className="users-td">
-                                <span className={`role-badge role-badge--${user.role}`}>
-                                  {projectRoleLabel(user.role)}
-                                </span>
-                              </td>
-                              <td className="users-td users-td--muted">{formatCurrentDateTime(user.createdAt)}</td>
-                              <td className="users-td users-td--muted">{formatCurrentDateTime(user.updatedAt)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+
+                    <section
+                      className="users-content"
+                      style={{
+                        alignItems: "stretch",
+                        justifyContent: "center",
+                        gap: 16,
+                        minHeight: 0,
+                        maxHeight: "100%",
+                        overflowY: "auto",
+                        overflowX: "hidden",
+                        paddingRight: 4,
+                      }}
+                    >
+                      {usersLoading ? (
+                        <div className="empty-state postgres-users-empty-state">
+                          <p>Loading PostgreSQL project users...</p>
+                        </div>
+                      ) : users.length === 0 ? (
+                        <div className="empty-state postgres-users-empty-state">
+                          <p>No users have been added to this PostgreSQL project yet.</p>
+                        </div>
+                      ) : filteredProjectUsers.length === 0 ? (
+                        <div className="empty-state postgres-users-empty-state">
+                          <p>No users match this role.</p>
+                        </div>
+                      ) : (
+                        <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 520 }}>
+                          <table className="users-table">
+                            <thead>
+                              <tr>
+                                <th className="users-th" style={{ width: "26%" }}>User</th>
+                                <th className="users-th" style={{ width: "28%" }}>Email</th>
+                                <th className="users-th" style={{ width: "12%" }}>Role</th>
+                                <th className="users-th" style={{ width: "17%" }}>Created</th>
+                                <th className="users-th" style={{ width: "17%" }}>Updated</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredProjectUsers.map((user) => (
+                                <tr
+                                  key={user.id}
+                                  className={`users-row project-users-row${canChangeRoles ? "" : " users-row--disabled"}`}
+                                  onClick={() => {
+                                    if (canChangeRoles) {
+                                      setEditingUserId(user.id);
+                                      setEditRole(user.role as (typeof PROJECT_ROLE_OPTIONS)[number]);
+                                      setRemovingUserId(null);
+                                    }
+                                  }}
+                                >
+                                  <td className="users-td users-td--name">
+                                    <div className="postgres-users-name-cell">
+                                      <span>{user.name}</span>
+                                      <span className="postgres-users-meta">
+                                        {user.role === "owner" ? "Project owner" : "Project member"}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="users-td users-td--muted">{user.email}</td>
+                                  <td className="users-td">
+                                    <span className={`role-badge role-badge--${user.role}`}>
+                                      {projectRoleLabel(user.role)}
+                                    </span>
+                                  </td>
+                                  <td className="users-td users-td--muted">{formatCurrentDateTime(user.createdAt)}</td>
+                                  <td className="users-td users-td--muted">{formatCurrentDateTime(user.updatedAt)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </section>
+                  </div>
                 </div>
               </div>
 
@@ -5278,93 +6722,344 @@ export function PostgresProjectHomeExperimentView({
               ) : null}
             </>
           ) : activeScreen === "sources" ? (
-            <PostgresProjectSourcesViewLazy
-              projectId={project.id}
-              currentUserId={authSession.user.id}
-              canManageSources={canManageSources}
-              canKickSourceLocks={canManageSources}
-              canManageAnnotations={canManageAnnotations}
-              canManageMemos={canManageMemos}
-              initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
-              initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
-              onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
-              onOpenPostgresMemoDraft={(payload) => {
-                setPostgresMemoDraftTarget(payload);
-                setActiveScreen("memos");
-              }}
-            />
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresProjectSourcesViewLazy
+                projectId={project.id}
+                currentUserId={authSession.user.id}
+                canManageSources={canManageSources}
+                canKickSourceLocks={canManageSources}
+                canManageAnnotations={canManageAnnotations}
+                canManageMemos={canManageMemos}
+                initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
+                initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
+                onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
+                onOpenPostgresMemoDraft={(payload) => {
+                  setPostgresMemoDraftTarget(payload);
+                  setActiveScreen("memos");
+                }}
+              />
+            </Suspense>
           ) : activeScreen === "code-text" ? (
-            <PostgresAnalysisCodeSourcesViewLazy
-              projectId={project.id}
-              currentUserId={authSession.user.id}
-              canManageSources={canManageSources}
-              canKickSourceLocks={canManageSources}
-              canManageAnnotations={canManageAnnotations}
-              canManageMemos={canManageMemos}
-              initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
-              initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
-              onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
-              onOpenPostgresMemoDraft={(payload) => {
-                setPostgresMemoDraftTarget(payload);
-                setActiveScreen("memos");
-              }}
-            />
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAnalysisCodeSourcesViewLazy
+                projectId={project.id}
+                currentUserId={authSession.user.id}
+                canManageSources={canManageSources}
+                canKickSourceLocks={canManageSources}
+                canManageAnnotations={canManageAnnotations}
+                canManageMemos={canManageMemos}
+                initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
+                initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
+                onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
+                onOpenPostgresMemoDraft={(payload) => {
+                  setPostgresMemoDraftTarget(payload);
+                  setActiveScreen("memos");
+                }}
+              />
+            </Suspense>
           ) : activeScreen === "annotations" ? (
-            <AnnotationsViewLazy
-              postgresProjectId={project.id}
-              postgresCurrentUserId={authSession.user.id}
-              onOpenPostgresSourceAnnotation={({ sourceId, annotationId }) => {
-                setPostgresSourceNavigationTarget({
-                  sourceId,
-                  annotationId,
-                });
-                setActiveScreen("sources");
-              }}
-            />
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <AnnotationsViewLazy
+                postgresProjectId={project.id}
+                postgresProjectStoragePath={project.storagePath}
+                postgresCurrentUserId={authSession.user.id}
+                onOpenPostgresSourceAnnotation={({ sourceId, annotationId }) => {
+                  setPostgresSourceNavigationTarget({
+                    sourceId,
+                    annotationId,
+                  });
+                  setActiveScreen("sources");
+                }}
+              />
+            </Suspense>
           ) : activeScreen === "codebook" ? (
-            <CodebookViewLazy
-              postgresProjectId={project.id}
-              postgresCanCreateCodes={canManageAnnotations}
-              postgresCanEditCodes={canManageAnnotations}
-              postgresCanDeleteCodes={canManageAnnotations}
-              postgresCanMemoAboutCodes={canManageMemos}
-              onOpenPostgresSourceAnnotation={({ sourceId, annotationId }: { sourceId: string; annotationId: string }) => {
-                setPostgresSourceNavigationTarget({
-                  sourceId,
-                  annotationId,
-                });
-                setActiveScreen("sources");
-              }}
-              onOpenPostgresMemoForCode={({ codeId }: { codeId: string }) => {
-                setPostgresMemoDraftTarget({
-                  codeIds: [codeId],
-                });
-                setActiveScreen("memos");
-              }}
-            />
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <CodebookViewLazy
+                postgresProjectId={project.id}
+                postgresProjectStoragePath={project.storagePath}
+                postgresCanCreateCodes={canManageAnnotations}
+                postgresCanEditCodes={canManageAnnotations}
+                postgresCanDeleteCodes={canManageAnnotations}
+                postgresCanMemoAboutCodes={canManageMemos}
+                onOpenPostgresSourceAnnotation={({ sourceId, annotationId }: { sourceId: string; annotationId: string }) => {
+                  setPostgresSourceNavigationTarget({
+                    sourceId,
+                    annotationId,
+                  });
+                  setActiveScreen("sources");
+                }}
+                onOpenPostgresMemoForCode={({ codeId }: { codeId: string }) => {
+                  setPostgresMemoDraftTarget({
+                    codeIds: [codeId],
+                  });
+                  setActiveScreen("memos");
+                }}
+              />
+            </Suspense>
           ) : activeScreen === "memos" ? (
-            <PostgresMemosViewLazy
-              projectId={project.id}
-              canManageMemos={canManageMemos}
-              initialSourceIds={postgresMemoDraftTarget?.sourceIds ?? null}
-              initialAnnotationIds={postgresMemoDraftTarget?.annotationIds ?? null}
-              initialCodeIds={postgresMemoDraftTarget?.codeIds ?? null}
-              onInitialDraftHandled={() => setPostgresMemoDraftTarget(null)}
-            />
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresProjectMemosViewLazy
+                projectId={project.id}
+                projectStoragePath={project.storagePath}
+                canManageMemos={canManageMemos}
+                draftTarget={postgresMemoDraftTarget}
+                onDraftHandled={() => setPostgresMemoDraftTarget(null)}
+              />
+            </Suspense>
           ) : activeScreen === "project-log" ? (
-            <PostgresProjectLogViewLazy
-              projectId={project.id}
-            />
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresProjectLogViewLazy
+                projectId={project.id}
+              />
+            </Suspense>
+          ) : activeScreen === "objects" && selectedObjectDetails ? (
+            <>
+              <div className="view users-view">
+                {graphNotice ? <p className="settings-success">{graphNotice}</p> : null}
+                {graphError ? <p className="auth-error">{graphError}</p> : null}
+                <div className="view doc-detail-view" style={{ padding: 0 }}>
+                  <div className="workspace-back-row workspace-back-row--split">
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setSelectedObjectDetailsId(null)}
+                    >
+                      Back
+                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => openEditObjectModal(selectedObjectDetails)}
+                      >
+                        Edit Object
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--danger"
+                        onClick={() => setRemovingObjectId(selectedObjectDetails.id)}
+                      >
+                        Delete Object
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="doc-detail-layout">
+                    <div className="doc-detail-left">
+                      <div className="case-card">
+                        <h3 className="case-card-title">Graphics</h3>
+                        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+                          <ObjectShapeSwatch
+                            shape={resolvePostgresExperimentObjectShape(selectedObjectDetails, selectedObjectDetailsType)}
+                            fill={resolvePostgresExperimentObjectFill(selectedObjectDetails, selectedObjectDetailsType)}
+                            color={resolvePostgresExperimentObjectColor(selectedObjectDetails, selectedObjectDetailsType)}
+                            sourceVisualKey={getPostgresExperimentSourceObjectVisualKey(selectedObjectDetailsType?.systemKey)}
+                            imageStoragePath={selectedObjectDetails.imageStoragePath || selectedObjectDetailsType?.imageStoragePath || ""}
+                            projectStoragePath={project.storagePath}
+                            width={48}
+                            minHeight={40}
+                          />
+                          <p className="case-card-value" style={{ margin: 0 }}>
+                            {selectedObjectDetails.objectType || "Object"}
+                          </p>
+                        </div>
+                        <dl className="user-detail-meta case-detail-meta">
+                          <dt>Color</dt>
+                          <dd>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  width: 18,
+                                  height: 18,
+                                  borderRadius: 6,
+                                  border: "1px solid rgba(53, 80, 112, 0.18)",
+                                  background: resolvePostgresExperimentObjectColor(selectedObjectDetails, selectedObjectDetailsType),
+                                }}
+                              />
+                              {selectedObjectDetails.colorOverride?.trim() || "Inherited"}
+                            </span>
+                          </dd>
+                          <dt>Shape</dt>
+                          <dd>
+                            {selectedObjectDetails.shapeOverride?.trim()
+                              ? formatPostgresExperimentObjectShapeLabel(resolvePostgresExperimentObjectShape(selectedObjectDetails, selectedObjectDetailsType))
+                              : "Inherited"}
+                          </dd>
+                          <dt>Fill</dt>
+                          <dd>
+                            {selectedObjectDetails.fillOverride?.trim()
+                              ? formatPostgresExperimentObjectFillLabel(resolvePostgresExperimentObjectFill(selectedObjectDetails, selectedObjectDetailsType))
+                              : "Inherited"}
+                          </dd>
+                        </dl>
+                      </div>
+
+                      <div className="case-card">
+                        <h3 className="case-card-title">Attributes</h3>
+                        {selectedObjectDetailsAttributeDefinitions.length > 0 ? (
+                          <dl className="user-detail-meta case-detail-meta">
+                            {selectedObjectDetailsAttributeDefinitions.map((definition) => {
+                              const rawValue = selectedObjectDetails.attributeValues.find(
+                                (value) => value.attributeDefinitionId === definition.id,
+                              )?.value ?? "";
+                              return (
+                                <div key={definition.id} style={{ display: "contents" }}>
+                                  <dt>{definition.name}</dt>
+                                  <dd>
+                                    {rawValue
+                                      ? formatPostgresExperimentAttributeDisplay(rawValue, definition.dataType)
+                                      : <span className="cases-no-docs">-</span>}
+                                  </dd>
+                                </div>
+                              );
+                            })}
+                          </dl>
+                        ) : (
+                          <p className="case-card-empty">No shared attributes for this object type yet.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="doc-detail-right doc-detail-right--annotation">
+                      <div className="case-card">
+                        <h3 className="case-card-title">Details</h3>
+                        <p className="case-card-value">{selectedObjectDetails.title || "Untitled object"}</p>
+                        <dl className="user-detail-meta case-detail-meta" style={{ marginTop: 16 }}>
+                          <dt>Object type</dt> <dd>{selectedObjectDetails.objectType || "-"}</dd>
+                          <dt>Created</dt>
+                          <dd>
+                            {formatCurrentDateTime(selectedObjectDetails.createdAt, {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            })}
+                          </dd>
+                          <dt>Updated</dt>
+                          <dd>
+                            {formatCurrentDateTime(selectedObjectDetails.updatedAt, {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            })}
+                          </dd>
+                        </dl>
+                        <div style={{ marginTop: 18 }}>
+                          <h3 className="case-card-title">Description</h3>
+                          {selectedObjectDetails.description.trim() ? (
+                            <p style={{ margin: 0, lineHeight: 1.6, overflowWrap: "anywhere" }}>
+                              {selectedObjectDetails.description}
+                            </p>
+                          ) : (
+                            <p className="case-card-empty">No description yet.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="case-card" style={{ marginTop: 16 }}>
+                        <h3 className="case-card-title">Relationships</h3>
+                        {selectedObjectRelationshipRows.length > 0 ? (
+                          <div className="case-detail-attributes-table-wrap">
+                            <table className="users-table" style={{ tableLayout: "fixed" }}>
+                              <thead>
+                                <tr>
+                                  <th className="users-th" style={{ width: "42%" }}>Other object</th>
+                                  <th className="users-th" style={{ width: "24%" }}>Object type</th>
+                                  <th className="users-th" style={{ width: "34%" }}>Relationship</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {selectedObjectRelationshipRows.map((row) => (
+                                  <tr key={row.id} className="users-row">
+                                    <td className="users-td users-td--name">
+                                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                        <ObjectShapeSwatch
+                                          shape={row.otherObjectShape}
+                                          fill={row.otherObjectFill}
+                                          color={row.otherObjectColor}
+                                          sourceVisualKey={row.otherObjectSourceVisualKey}
+                                          imageStoragePath={row.otherObjectImageStoragePath}
+                                          projectStoragePath={project.storagePath}
+                                          width={24}
+                                          minHeight={18}
+                                        />
+                                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                          {row.otherObjectName}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="users-td users-td--muted">{row.otherObjectType}</td>
+                                    <td className="users-td users-td--muted">
+                                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                        <RelationshipTypeLinePreview
+                                          lineShape={row.relationshipLineShape}
+                                          lineWeight={row.relationshipLineWeight}
+                                          arrowhead={row.relationshipArrowhead}
+                                          color={row.relationshipColor}
+                                        />
+                                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                          {row.relationshipName}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="case-card-empty">No relationships for this object yet.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {removingObjectId ? (
+                  (() => {
+                    const object = objects.find((entry) => entry.id === removingObjectId);
+                    if (!object) return null;
+                    return (
+                      <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingObjectId(null)}>
+                        <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
+                          <h2>Delete object</h2>
+                          <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                            Delete <strong>{object.title}</strong>?
+                          </p>
+                          <p className="modal-warning-text">
+                            This permanently removes the object and any relationships connected to it.
+                          </p>
+                          <div className="form-actions" style={{ marginTop: 24 }}>
+                            <button type="button" className="btn" onClick={() => setRemovingObjectId(null)} disabled={graphSubmitting}>
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--danger"
+                              onClick={() => void handleDeleteObject(object.id)}
+                              disabled={graphSubmitting}
+                            >
+                              {graphSubmitting ? "Deleting..." : "Delete object"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : null}
+              </div>
+            </>
           ) : activeScreen === "objects" ? (
             <>
               <div className="view users-view">
                 <header className="view-header">
                   <div className="users-title-wrap">
-                    <h1>
-                      {selectedObjectTypeFilter === "all"
-                        ? "Research Objects"
-                        : `${objectTypeById.get(selectedObjectTypeFilter)?.name ?? "Selected"} Objects`}
-                    </h1>
+                    <h1>Research Objects</h1>
                   </div>
                   <div className="view-header-actions">
                     <button
@@ -5377,6 +7072,9 @@ export function PostgresProjectHomeExperimentView({
                         setDraftObjectTypeShape("rounded");
                         setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
                         setDraftObjectTypeFill("filled");
+                        setDraftObjectTypeImageStoragePath("");
+                        setDraftObjectTypePendingImage(null);
+                        setDraftObjectTypeGraphicMode("select");
                         initializeObjectTypeAttributeEditor(null);
                         setObjectTypeModalTab("details");
                         setGraphError("");
@@ -5396,11 +7094,12 @@ export function PostgresProjectHomeExperimentView({
                 </header>
 
                 <div
+                  className="postgres-sources-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
                     gap: 20,
-                    alignItems: "start",
+                    alignItems: "center",
                     flex: 1,
                     minHeight: 0,
                   }}
@@ -5408,8 +7107,8 @@ export function PostgresProjectHomeExperimentView({
                   <div
                     className="home-primary-column"
                     style={{
-                      alignSelf: "start",
-                      justifyContent: "flex-start",
+                      alignSelf: "center",
+                      justifyContent: "center",
                       gap: 16,
                       minHeight: 0,
                       maxHeight: "100%",
@@ -5456,7 +7155,7 @@ export function PostgresProjectHomeExperimentView({
                             <tr>
                               <th
                                 className={`users-th${objectTypeSortCol === "objectType" ? " users-th--sorted" : ""}`}
-                                style={{ width: "50%" }}
+                                style={{ width: "76%" }}
                                 onClick={() => handleObjectTypeSort("objectType")}
                               >
                                 Type
@@ -5466,7 +7165,7 @@ export function PostgresProjectHomeExperimentView({
                               </th>
                               <th
                                 className={`users-th${objectTypeSortCol === "count" ? " users-th--sorted" : ""}`}
-                                style={{ width: "18%" }}
+                                style={{ width: "24%" }}
                                 onClick={() => handleObjectTypeSort("count")}
                               >
                                 Count
@@ -5474,7 +7173,6 @@ export function PostgresProjectHomeExperimentView({
                                   {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                                 </span>
                               </th>
-                              <th className="users-th" style={{ width: "32%" }}>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -5501,13 +7199,21 @@ export function PostgresProjectHomeExperimentView({
                                   <span className="postgres-users-meta">Across every object type</span>
                                 </div>
                               </td>
-                              <td className="users-td users-td--muted">{objects.length}</td>
-                              <td className="users-td users-td--muted">-</td>
+                              <td className="users-td users-td--muted">{customObjects.length}</td>
                             </tr>
                             {objectTypeSummaries.map((summary) => (
                               <tr
                                 key={summary.objectTypeId}
                                 className="users-row"
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  setOpenObjectActionsMenu(null);
+                                  setOpenObjectTypeActionsMenu({
+                                    id: summary.objectTypeId,
+                                    left: Math.min(event.clientX, window.innerWidth - 168),
+                                    top: Math.min(event.clientY, window.innerHeight - 96),
+                                  });
+                                }}
                                 style={{
                                   background: selectedObjectTypeFilter === summary.objectTypeId ? "rgba(53, 80, 112, 0.10)" : undefined,
                                 }}
@@ -5530,6 +7236,8 @@ export function PostgresProjectHomeExperimentView({
                                       fill={normalizePostgresExperimentObjectFill(summary.fill)}
                                       color={normalizePostgresExperimentObjectTypeColor(summary.color)}
                                       sourceVisualKey={getPostgresExperimentSourceObjectVisualKey(summary.systemKey)}
+                                      imageStoragePath={summary.imageStoragePath}
+                                      projectStoragePath={project.storagePath}
                                       width={24}
                                       minHeight={18}
                                     />
@@ -5544,93 +7252,6 @@ export function PostgresProjectHomeExperimentView({
                                   </div>
                                 </td>
                                 <td className="users-td users-td--muted">{summary.count}</td>
-                                <td className="users-td">
-                                  <button
-                                    type="button"
-                                    className="btn btn--ghost"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      const rect = event.currentTarget.getBoundingClientRect();
-                                      setOpenObjectActionsMenu(null);
-                                      setOpenObjectTypeActionsMenu((current) =>
-                                        current?.id === summary.objectTypeId
-                                          ? null
-                                          : {
-                                              id: summary.objectTypeId,
-                                              left: Math.min(rect.left, window.innerWidth - 168),
-                                              top: Math.min(rect.bottom + 4, window.innerHeight - 96),
-                                            },
-                                      );
-                                    }}
-                                  >
-                                    Actions
-                                  </button>
-                                  {openObjectTypeActionsMenu?.id === summary.objectTypeId ? (
-                                    <div
-                                      role="menu"
-                                      style={{
-                                        position: "fixed",
-                                        left: openObjectTypeActionsMenu.left,
-                                        top: openObjectTypeActionsMenu.top,
-                                        zIndex: 1200,
-                                        minWidth: 164,
-                                        padding: 6,
-                                        borderRadius: 10,
-                                        border: "1px solid rgba(53, 80, 112, 0.16)",
-                                        background: "rgba(255, 255, 255, 0.99)",
-                                        boxShadow: "0 16px 32px rgba(15, 23, 42, 0.18)",
-                                      }}
-                                      onClick={(event) => event.stopPropagation()}
-                                    >
-                                      <button
-                                        type="button"
-                                        role="menuitem"
-                                        style={{
-                                          display: "block",
-                                          width: "100%",
-                                          padding: "8px 10px",
-                                          border: "none",
-                                          background: "transparent",
-                                          borderRadius: 8,
-                                          textAlign: "left",
-                                          fontSize: 14,
-                                          fontWeight: 500,
-                                          color: "#1f2933",
-                                          cursor: "pointer",
-                                        }}
-                                        onClick={() => {
-                                          openObjectTypeModalForEdit(summary.objectTypeId, "details");
-                                          setOpenObjectTypeActionsMenu(null);
-                                        }}
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        role="menuitem"
-                                        style={{
-                                          display: "block",
-                                          width: "100%",
-                                          padding: "8px 10px",
-                                          border: "none",
-                                          background: "transparent",
-                                          borderRadius: 8,
-                                          textAlign: "left",
-                                          fontSize: 14,
-                                          fontWeight: 500,
-                                          color: "#b42318",
-                                          cursor: "pointer",
-                                        }}
-                                        onClick={() => {
-                                          setRemovingObjectTypeId(summary.objectTypeId);
-                                          setOpenObjectTypeActionsMenu(null);
-                                        }}
-                                      >
-                                        Delete
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -5638,6 +7259,71 @@ export function PostgresProjectHomeExperimentView({
                         {objectTypeSummaries.length === 0 ? (
                           <div className="empty-state" style={{ minHeight: 140 }}>
                             <p>No object types yet.</p>
+                          </div>
+                        ) : null}
+                        {openObjectTypeActionsMenu ? (
+                          <div
+                            role="menu"
+                            style={{
+                              position: "fixed",
+                              left: openObjectTypeActionsMenu.left,
+                              top: openObjectTypeActionsMenu.top,
+                              zIndex: 1200,
+                              minWidth: 164,
+                              padding: 6,
+                              borderRadius: 10,
+                              border: "1px solid rgba(53, 80, 112, 0.16)",
+                              background: "rgba(255, 255, 255, 0.99)",
+                              boxShadow: "0 16px 32px rgba(15, 23, 42, 0.18)",
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                padding: "8px 10px",
+                                border: "none",
+                                background: "transparent",
+                                borderRadius: 8,
+                                textAlign: "left",
+                                fontSize: 14,
+                                fontWeight: 500,
+                                color: "#1f2933",
+                                cursor: "pointer",
+                              }}
+                              onClick={() => {
+                                openObjectTypeModalForEdit(openObjectTypeActionsMenu.id, "details");
+                                setOpenObjectTypeActionsMenu(null);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                padding: "8px 10px",
+                                border: "none",
+                                background: "transparent",
+                                borderRadius: 8,
+                                textAlign: "left",
+                                fontSize: 14,
+                                fontWeight: 500,
+                                color: "#b42318",
+                                cursor: "pointer",
+                              }}
+                              onClick={() => {
+                                setRemovingObjectTypeId(openObjectTypeActionsMenu.id);
+                                setOpenObjectTypeActionsMenu(null);
+                              }}
+                            >
+                              Delete
+                            </button>
                           </div>
                         ) : null}
                       </div>
@@ -5648,7 +7334,8 @@ export function PostgresProjectHomeExperimentView({
                     className="users-content"
                     style={{
                       alignItems: "stretch",
-                      justifyContent: "flex-start",
+                      alignSelf: "center",
+                      justifyContent: "center",
                       gap: 16,
                       minHeight: 0,
                       maxHeight: "100%",
@@ -5762,16 +7449,31 @@ export function PostgresProjectHomeExperimentView({
                         <table className="users-table">
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "34%" }}>Title</th>
-                              <th className="users-th" style={{ width: "28%" }}>Type</th>
-                              <th className="users-th" style={{ width: "20%" }}>Updated</th>
-                              <th className="users-th" style={{ width: "18%" }}>Actions</th>
+                              <th className="users-th" style={{ width: "42%" }}>Title</th>
+                              <th className="users-th" style={{ width: "30%" }}>Type</th>
+                              <th className="users-th" style={{ width: "28%" }}>Updated</th>
                             </tr>
                           </thead>
                           <tbody>
                             {filteredObjects.map((object) => {
                               return (
-                                <tr key={object.id} className="users-row">
+                                <tr
+                                  key={object.id}
+                                  className="users-row"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setSelectedObjectDetailsId(object.id)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      setSelectedObjectDetailsId(object.id);
+                                    }
+                                  }}
+                                  style={{
+                                    background: selectedObjectDetailsId === object.id ? "rgba(53, 80, 112, 0.10)" : undefined,
+                                    cursor: "pointer",
+                                  }}
+                                >
                                   <td className="users-td users-td--name">{object.title}</td>
                                   <td className="users-td users-td--muted">{object.objectType}</td>
                                   <td className="users-td users-td--muted">
@@ -5783,93 +7485,6 @@ export function PostgresProjectHomeExperimentView({
                                       minute: "2-digit",
                                       second: "2-digit",
                                     })}
-                                  </td>
-                                  <td className="users-td">
-                                    <button
-                                      type="button"
-                                      className="btn btn--ghost"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        const rect = event.currentTarget.getBoundingClientRect();
-                                        setOpenObjectTypeActionsMenu(null);
-                                        setOpenObjectActionsMenu((current) =>
-                                          current?.id === object.id
-                                            ? null
-                                            : {
-                                                id: object.id,
-                                                left: Math.min(rect.right - 140, window.innerWidth - 156),
-                                                top: Math.min(rect.bottom + 4, window.innerHeight - 96),
-                                              },
-                                        );
-                                      }}
-                                    >
-                                      Actions
-                                    </button>
-                                    {openObjectActionsMenu?.id === object.id ? (
-                                      <div
-                                        role="menu"
-                                        style={{
-                                          position: "fixed",
-                                          left: openObjectActionsMenu.left,
-                                          top: openObjectActionsMenu.top,
-                                          zIndex: 1200,
-                                          minWidth: 164,
-                                          padding: 6,
-                                          borderRadius: 10,
-                                          border: "1px solid rgba(53, 80, 112, 0.16)",
-                                          background: "rgba(255, 255, 255, 0.99)",
-                                          boxShadow: "0 16px 32px rgba(15, 23, 42, 0.18)",
-                                        }}
-                                        onClick={(event) => event.stopPropagation()}
-                                      >
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          style={{
-                                            display: "block",
-                                            width: "100%",
-                                            padding: "8px 10px",
-                                            border: "none",
-                                            background: "transparent",
-                                            borderRadius: 8,
-                                            textAlign: "left",
-                                            fontSize: 14,
-                                            fontWeight: 500,
-                                            color: "#1f2933",
-                                            cursor: "pointer",
-                                          }}
-                                          onClick={() => {
-                                            openEditObjectModal(object);
-                                            setOpenObjectActionsMenu(null);
-                                          }}
-                                        >
-                                          Edit
-                                        </button>
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          style={{
-                                            display: "block",
-                                            width: "100%",
-                                            padding: "8px 10px",
-                                            border: "none",
-                                            background: "transparent",
-                                            borderRadius: 8,
-                                            textAlign: "left",
-                                            fontSize: 14,
-                                            fontWeight: 500,
-                                            color: "#b42318",
-                                            cursor: "pointer",
-                                          }}
-                                          onClick={() => {
-                                            setRemovingObjectId(object.id);
-                                            setOpenObjectActionsMenu(null);
-                                          }}
-                                        >
-                                          Delete
-                                      </button>
-                                      </div>
-                                    ) : null}
                                   </td>
                                 </tr>
                               );
@@ -5884,6 +7499,7 @@ export function PostgresProjectHomeExperimentView({
                   (() => {
                     const objectTypeRecord = objectTypeById.get(removingObjectTypeId);
                     if (!objectTypeRecord) return null;
+                    const affectedObjectCount = customObjects.filter((object) => object.objectTypeId === objectTypeRecord.id).length;
                     return (
                       <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingObjectTypeId(null)}>
                         <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
@@ -5892,7 +7508,10 @@ export function PostgresProjectHomeExperimentView({
                             Delete <strong>{objectTypeRecord.name}</strong>?
                           </p>
                           <p className="modal-warning-text">
-                            This deletes the object type and its shared attribute definitions. It will be blocked if any objects or relationship type restrictions still use this type.
+                            This will delete the object type and all {affectedObjectCount} objects of this type. This cannot be undone.
+                          </p>
+                          <p className="users-guide-copy" style={{ marginTop: 10, marginBottom: 0 }}>
+                            Confirm that you want to permanently delete this object type and its objects.
                           </p>
                           <div className="form-actions" style={{ marginTop: 24 }}>
                             <button type="button" className="btn" onClick={() => setRemovingObjectTypeId(null)} disabled={graphSubmitting}>
@@ -5967,6 +7586,31 @@ export function PostgresProjectHomeExperimentView({
                         ) : objectTypeModalTab === "graphics" ? (
                           <>
                             <label className="form-label">
+                              Image
+                              <PostgresExperimentObjectImageControls
+                                projectStoragePath={project.storagePath}
+                                imageStoragePath={draftObjectTypeImageStoragePath}
+                                previewUrl={draftObjectTypePendingImage?.previewUrl ?? ""}
+                                graphicMode={draftObjectTypeGraphicMode}
+                                canUpload={true}
+                                disabled={graphSubmitting || imageUploadSubmitting}
+                                onUpload={() => void handlePickPendingObjectTypeImage()}
+                                onRemove={draftObjectTypePendingImage ? handleRemovePendingObjectTypeImage : undefined}
+                                onGraphicModeChange={handleSetObjectTypeGraphicMode}
+                                fallback={(
+                                  <ObjectShapeSwatch
+                                    shape={draftObjectTypeShape}
+                                    fill={draftObjectTypeFill}
+                                    color={normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor)}
+                                    width={56}
+                                    minHeight={44}
+                                  />
+                                )}
+                              />
+                            </label>
+                            {draftObjectTypeGraphicMode === "select" ? (
+                              <>
+                            <label className="form-label">
                               Color
                               <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                                 <input
@@ -6002,6 +7646,8 @@ export function PostgresProjectHomeExperimentView({
                                 previewShape={draftObjectTypeShape}
                               />
                             </label>
+                              </>
+                            ) : null}
                           </>
                         ) : (
                           <>
@@ -6118,6 +7764,30 @@ export function PostgresProjectHomeExperimentView({
                         ) : objectTypeModalTab === "graphics" ? (
                           <>
                             <label className="form-label">
+                              Image
+                              <PostgresExperimentObjectImageControls
+                                projectStoragePath={project.storagePath}
+                                imageStoragePath={draftObjectTypeImageStoragePath}
+                                graphicMode={draftObjectTypeGraphicMode}
+                                canUpload={!!editingObjectTypeModalId}
+                                disabled={graphSubmitting || imageUploadSubmitting}
+                                onUpload={() => editingObjectTypeModalId ? void handleImportObjectTypeImage(editingObjectTypeModalId) : undefined}
+                                onRemove={() => editingObjectTypeModalId ? void handleRemoveObjectTypeImage(editingObjectTypeModalId) : undefined}
+                                onGraphicModeChange={handleSetObjectTypeGraphicMode}
+                                fallback={(
+                                  <ObjectShapeSwatch
+                                    shape={draftObjectTypeShape}
+                                    fill={draftObjectTypeFill}
+                                    color={normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor)}
+                                    width={56}
+                                    minHeight={44}
+                                  />
+                                )}
+                              />
+                            </label>
+                            {draftObjectTypeGraphicMode === "select" ? (
+                              <>
+                            <label className="form-label">
                               Color
                               <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                                 <input
@@ -6153,6 +7823,8 @@ export function PostgresProjectHomeExperimentView({
                                 previewShape={draftObjectTypeShape}
                               />
                             </label>
+                              </>
+                            ) : null}
                           </>
                         ) : (
                           <>
@@ -6265,11 +7937,7 @@ export function PostgresProjectHomeExperimentView({
               <div className="view users-view">
                 <header className="view-header">
                   <div className="users-title-wrap">
-                    <h1>
-                      {selectedRelationshipTypeFilter === "all"
-                        ? "Relationships"
-                        : `${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "Selected"} Relationships`}
-                    </h1>
+                    <h1>Relationships</h1>
                   </div>
                   <div className="view-header-actions">
                     <button
@@ -6299,16 +7967,28 @@ export function PostgresProjectHomeExperimentView({
                 </header>
 
                 <div
+                  className="postgres-sources-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
                     gap: 20,
-                    alignItems: "start",
+                    alignItems: "center",
                     flex: 1,
                     minHeight: 0,
                   }}
                 >
-                  <div className="home-primary-column" style={{ alignSelf: "start", justifyContent: "flex-start" }}>
+                  <div
+                    className="home-primary-column"
+                    style={{
+                      alignSelf: "center",
+                      justifyContent: "center",
+                      minHeight: 0,
+                      maxHeight: "100%",
+                      overflowY: "auto",
+                      overflowX: "hidden",
+                      paddingRight: 4,
+                    }}
+                  >
                     <section className="home-project-card" style={{ padding: 0, overflow: "hidden" }}>
                       <div
                         style={{
@@ -6335,9 +8015,8 @@ export function PostgresProjectHomeExperimentView({
                         <table className="users-table" style={{ tableLayout: "fixed" }}>
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "54%" }}>Type</th>
-                              <th className="users-th" style={{ width: "14%" }}>Count</th>
-                              <th className="users-th" style={{ width: "32%" }}>Actions</th>
+                              <th className="users-th" style={{ width: "76%" }}>Type</th>
+                              <th className="users-th" style={{ width: "24%" }}>Count</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -6369,14 +8048,23 @@ export function PostgresProjectHomeExperimentView({
                                 </div>
                               </td>
                               <td className="users-td users-td--muted">{relationships.length}</td>
-                              <td className="users-td users-td--muted">-</td>
                             </tr>
                             {filteredRelationshipTypeSummaries.map((summary) => (
                               <tr
                                 key={summary.relationshipTypeId}
                                 className="users-row"
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  setOpenRelationshipActionsMenu(null);
+                                  setOpenRelationshipTypeActionsMenu({
+                                    id: summary.relationshipTypeId,
+                                    left: Math.min(event.clientX, window.innerWidth - 168),
+                                    top: Math.min(event.clientY, window.innerHeight - 96),
+                                  });
+                                }}
                                 style={{
                                   background: selectedRelationshipTypeFilter === summary.relationshipTypeId ? "rgba(53, 80, 112, 0.10)" : undefined,
+                                  cursor: "context-menu",
                                 }}
                               >
                                 <td
@@ -6395,120 +8083,112 @@ export function PostgresProjectHomeExperimentView({
                                     }
                                   }}
                                 >
-                                  <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-                                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {summary.relationshipType}
-                                    </span>
-                                    <span className="postgres-users-meta" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {summary.attributeDefinitionCount} attributes
-                                    </span>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                    <RelationshipTypeLinePreview
+                                      lineShape={summary.lineShape}
+                                      lineWeight={summary.lineWeight}
+                                      arrowhead={summary.arrowhead}
+                                      color={summary.color}
+                                    />
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+                                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                        {summary.relationshipType}
+                                      </span>
+                                      <span className="postgres-users-meta" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                        {formatPostgresExperimentRelationshipLineShapeLabel(summary.lineShape)}
+                                        {" / "}
+                                        {formatPostgresExperimentRelationshipLineWeightLabel(summary.lineWeight)}
+                                        {" / "}
+                                        {formatPostgresExperimentRelationshipArrowheadLabel(summary.arrowhead)}
+                                        {" / "}
+                                        {summary.attributeDefinitionCount} attributes
+                                      </span>
+                                    </div>
                                   </div>
                                 </td>
                                 <td className="users-td users-td--muted">{summary.count}</td>
-                                <td className="users-td">
-                                  <button
-                                    type="button"
-                                    className="btn btn--ghost"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      const rect = event.currentTarget.getBoundingClientRect();
-                                      setOpenRelationshipActionsMenu(null);
-                                      setOpenRelationshipTypeActionsMenu((current) =>
-                                        current?.id === summary.relationshipTypeId
-                                          ? null
-                                          : {
-                                              id: summary.relationshipTypeId,
-                                              left: Math.min(rect.left, window.innerWidth - 168),
-                                              top: Math.min(rect.bottom + 4, window.innerHeight - 96),
-                                            },
-                                      );
-                                    }}
-                                  >
-                                    Actions
-                                  </button>
-                                  {openRelationshipTypeActionsMenu?.id === summary.relationshipTypeId ? (
-                                    <div
-                                      role="menu"
-                                      style={{
-                                        position: "fixed",
-                                        left: openRelationshipTypeActionsMenu.left,
-                                        top: openRelationshipTypeActionsMenu.top,
-                                        zIndex: 1200,
-                                        minWidth: 164,
-                                        padding: 6,
-                                        borderRadius: 10,
-                                        border: "1px solid rgba(53, 80, 112, 0.16)",
-                                        background: "rgba(255, 255, 255, 0.99)",
-                                        boxShadow: "0 16px 32px rgba(15, 23, 42, 0.18)",
-                                      }}
-                                      onClick={(event) => event.stopPropagation()}
-                                    >
-                                      <button
-                                        type="button"
-                                        role="menuitem"
-                                        style={{
-                                          display: "block",
-                                          width: "100%",
-                                          padding: "8px 10px",
-                                          border: "none",
-                                          background: "transparent",
-                                          borderRadius: 8,
-                                          textAlign: "left",
-                                          fontSize: 14,
-                                          fontWeight: 500,
-                                          color: "#1f2933",
-                                          cursor: "pointer",
-                                        }}
-                                        onClick={() => {
-                                          const relationshipType = relationshipTypeById.get(summary.relationshipTypeId);
-                                          if (!relationshipType) return;
-                                          setEditingRelationshipTypeModalId(relationshipType.id);
-                                          setDraftRelationshipTypeName(relationshipType.name);
-                                          setDraftRelationshipLineShape(normalizePostgresExperimentRelationshipLineShape(relationshipType.lineShape));
-                                          setDraftRelationshipLineWeight(normalizePostgresExperimentRelationshipLineWeight(relationshipType.lineWeight));
-                                          setDraftRelationshipArrowhead(normalizePostgresExperimentRelationshipArrowhead(relationshipType.arrowhead));
-                                          setDraftRelationshipColor(normalizePostgresExperimentRelationshipColor(relationshipType.color));
-                                          setDraftRelationshipFromObjectTypeIds(relationshipType.fromObjectTypeIds || []);
-                                          setDraftRelationshipToObjectTypeIds(relationshipType.toObjectTypeIds || []);
-                                          setRelationshipTypeModalTab("details");
-                                          initializeRelationshipTypeAttributeEditor(relationshipType.id);
-                                          setGraphError("");
-                                          setOpenRelationshipTypeActionsMenu(null);
-                                        }}
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        role="menuitem"
-                                        style={{
-                                          display: "block",
-                                          width: "100%",
-                                          padding: "8px 10px",
-                                          border: "none",
-                                          background: "transparent",
-                                          borderRadius: 8,
-                                          textAlign: "left",
-                                          fontSize: 14,
-                                          fontWeight: 500,
-                                          color: "#b42318",
-                                          cursor: "pointer",
-                                        }}
-                                        onClick={() => {
-                                          setRemovingRelationshipTypeId(summary.relationshipTypeId);
-                                          setOpenRelationshipTypeActionsMenu(null);
-                                          setGraphError("");
-                                        }}
-                                      >
-                                        Delete
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
+                        {openRelationshipTypeActionsMenu ? (
+                          <div
+                            role="menu"
+                            style={{
+                              position: "fixed",
+                              left: openRelationshipTypeActionsMenu.left,
+                              top: openRelationshipTypeActionsMenu.top,
+                              zIndex: 1200,
+                              minWidth: 164,
+                              padding: 6,
+                              borderRadius: 10,
+                              border: "1px solid rgba(53, 80, 112, 0.16)",
+                              background: "rgba(255, 255, 255, 0.99)",
+                              boxShadow: "0 16px 32px rgba(15, 23, 42, 0.18)",
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                padding: "8px 10px",
+                                border: "none",
+                                background: "transparent",
+                                borderRadius: 8,
+                                textAlign: "left",
+                                fontSize: 14,
+                                fontWeight: 500,
+                                color: "#1f2933",
+                                cursor: "pointer",
+                              }}
+                              onClick={() => {
+                                const relationshipType = relationshipTypeById.get(openRelationshipTypeActionsMenu.id);
+                                if (!relationshipType) return;
+                                setEditingRelationshipTypeModalId(relationshipType.id);
+                                setDraftRelationshipTypeName(relationshipType.name);
+                                setDraftRelationshipLineShape(normalizePostgresExperimentRelationshipLineShape(relationshipType.lineShape));
+                                setDraftRelationshipLineWeight(normalizePostgresExperimentRelationshipLineWeight(relationshipType.lineWeight));
+                                setDraftRelationshipArrowhead(normalizePostgresExperimentRelationshipArrowhead(relationshipType.arrowhead));
+                                setDraftRelationshipColor(normalizePostgresExperimentRelationshipColor(relationshipType.color));
+                                setDraftRelationshipFromObjectTypeIds(relationshipType.fromObjectTypeIds || []);
+                                setDraftRelationshipToObjectTypeIds(relationshipType.toObjectTypeIds || []);
+                                setRelationshipTypeModalTab("details");
+                                initializeRelationshipTypeAttributeEditor(relationshipType.id);
+                                setGraphError("");
+                                setOpenRelationshipTypeActionsMenu(null);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                padding: "8px 10px",
+                                border: "none",
+                                background: "transparent",
+                                borderRadius: 8,
+                                textAlign: "left",
+                                fontSize: 14,
+                                fontWeight: 500,
+                                color: "#b42318",
+                                cursor: "pointer",
+                              }}
+                              onClick={() => {
+                                setRemovingRelationshipTypeId(openRelationshipTypeActionsMenu.id);
+                                setOpenRelationshipTypeActionsMenu(null);
+                                setGraphError("");
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ) : null}
                         {filteredRelationshipTypeSummaries.length === 0 ? (
                           <div className="empty-state" style={{ minHeight: 140 }}>
                             <p>No relationship types match that search.</p>
@@ -6518,7 +8198,20 @@ export function PostgresProjectHomeExperimentView({
                     </section>
                   </div>
 
-                  <section className="users-content" style={{ alignItems: "stretch", justifyContent: "flex-start", gap: 16 }}>
+                  <section
+                    className="users-content"
+                    style={{
+                      alignItems: "stretch",
+                      alignSelf: "center",
+                      justifyContent: "center",
+                      gap: 16,
+                      minHeight: 0,
+                      maxHeight: "100%",
+                      overflowY: "auto",
+                      overflowX: "hidden",
+                      paddingRight: 4,
+                    }}
+                  >
                     {graphNotice ? <p className="settings-success">{graphNotice}</p> : null}
                     {graphError ? <p className="auth-error">{graphError}</p> : null}
 
@@ -6680,6 +8373,9 @@ export function PostgresProjectHomeExperimentView({
                 (() => {
                   const relationshipTypeRecord = relationshipTypeById.get(removingRelationshipTypeId);
                   if (!relationshipTypeRecord) return null;
+                  const affectedRelationshipCount = relationships.filter(
+                    (relationship) => relationship.relationshipTypeId === relationshipTypeRecord.id,
+                  ).length;
                   return (
                     <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingRelationshipTypeId(null)}>
                       <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
@@ -6688,7 +8384,7 @@ export function PostgresProjectHomeExperimentView({
                           Delete <strong>{relationshipTypeRecord.name}</strong>?
                         </p>
                         <p className="modal-warning-text">
-                          This deletes the relationship type and its shared attribute definitions. It will be blocked if any relationships still use this type.
+                          This will delete the relationship type, its shared attribute definitions, and all {affectedRelationshipCount} relationships of this type. This cannot be undone.
                         </p>
                         <div className="form-actions" style={{ marginTop: 24 }}>
                           <button type="button" className="btn" onClick={() => setRemovingRelationshipTypeId(null)} disabled={graphSubmitting}>
@@ -6819,7 +8515,21 @@ export function PostgresProjectHomeExperimentView({
                   openSaveFreeDrawModal();
                 }}
                 onCreateObjectAt={openCreateObjectModal}
-                onOpenCreateObjectType={() => setCreateObjectTypeOpen(true)}
+                onOpenCreateObjectType={() => {
+                  setEditingObjectTypeModalId(null);
+                  setDraftObjectTypeName("");
+                  setDraftObjectTypeDescription("");
+                  setDraftObjectTypeShape("rounded");
+                  setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
+                  setDraftObjectTypeFill("filled");
+                  setDraftObjectTypeImageStoragePath("");
+                  setDraftObjectTypePendingImage(null);
+                  setDraftObjectTypeGraphicMode("select");
+                  initializeObjectTypeAttributeEditor(null);
+                  setObjectTypeModalTab("details");
+                  setGraphError("");
+                  setCreateObjectTypeOpen(true);
+                }}
                 onOpenCreateRelationshipType={() => setCreateRelationshipTypeOpen(true)}
                 onEditObject={openEditObjectModal}
                 onDeleteObject={(objectId) => setRemovingObjectId(objectId)}
@@ -7336,6 +9046,16 @@ export function PostgresProjectHomeExperimentView({
               );
             })()
           ) : null}
+          {imageCropDraft ? (
+            <PostgresExperimentImageCropModal
+              draft={imageCropDraft}
+              onDraftChange={setImageCropDraft}
+              onCancel={handleCancelPostgresExperimentImageCropChoice}
+              onUseFullImage={handleUseFullPostgresExperimentImage}
+              onUseCrop={() => void handleUseCroppedPostgresExperimentImage()}
+              busy={imageCropSubmitting}
+            />
+          ) : null}
           {createObjectOpen ? (
             renderObjectModal({
               title: "Create object",
@@ -7349,6 +9069,9 @@ export function PostgresProjectHomeExperimentView({
               colorOverride: objectColorOverride,
               shapeOverride: objectShapeOverride,
               fillOverride: objectFillOverride,
+              imageStoragePath: objectImageStoragePath,
+              imagePreviewUrl: draftObjectPendingImage?.previewUrl ?? "",
+              graphicMode: objectGraphicMode,
               selectedType: selectedCreateObjectType,
               attributeDefinitions: objectAttributeDefinitionsForCreateType,
               attributeValues: objectAttributeValues,
@@ -7360,7 +9083,12 @@ export function PostgresProjectHomeExperimentView({
               setColorOverride: setObjectColorOverride,
               setShapeOverride: setObjectShapeOverride,
               setFillOverride: setObjectFillOverride,
+              setImageStoragePath: setObjectImageStoragePath,
+              setGraphicMode: setObjectGraphicMode,
               setAttributeValues: setObjectAttributeValues,
+              onImportImage: () => void handlePickPendingObjectImage(),
+              onRemoveImage: handleRemovePendingObjectImage,
+              onClearPendingImage: handleRemovePendingObjectImage,
             })
           ) : null}
           {editingObjectId ? (
@@ -7376,6 +9104,8 @@ export function PostgresProjectHomeExperimentView({
               colorOverride: editingObjectColorOverride,
               shapeOverride: editingObjectShapeOverride,
               fillOverride: editingObjectFillOverride,
+              imageStoragePath: editingObjectImageStoragePath,
+              graphicMode: editingObjectGraphicMode,
               selectedType: selectedEditObjectType,
               attributeDefinitions: objectAttributeDefinitionsForEditingType,
               attributeValues: editingObjectAttributeValues,
@@ -7387,7 +9117,11 @@ export function PostgresProjectHomeExperimentView({
               setColorOverride: setEditingObjectColorOverride,
               setShapeOverride: setEditingObjectShapeOverride,
               setFillOverride: setEditingObjectFillOverride,
+              setImageStoragePath: setEditingObjectImageStoragePath,
+              setGraphicMode: setEditingObjectGraphicMode,
               setAttributeValues: setEditingObjectAttributeValues,
+              onImportImage: () => void handleImportEditingObjectImage(editingObjectId),
+              onRemoveImage: () => void handleRemoveEditingObjectImage(editingObjectId),
             })
           ) : null}
           {createRelationshipOpen ? (
@@ -7615,6 +9349,10 @@ function PostgresExperimentSidebar({
     <aside className="sidebar">
       <div className="sidebar-brand">
         <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
+        <div className="brand-collapsed-lockup" aria-hidden="true">
+          <img src={sidebarMarkLogo} alt="" className="brand-collapsed-logo" />
+          <span className="brand-collapsed-title">Kanqual</span>
+        </div>
       </div>
 
       {activeProject ? (

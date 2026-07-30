@@ -389,6 +389,7 @@ export type PostgresExperimentAnnotationSummary = {
   displayId: number;
   projectId: string;
   sourceId: string;
+  sourceKind: string;
   codeIds: string[];
   primaryCodeId: string;
   primaryCodeLabel: string;
@@ -406,6 +407,7 @@ export type PostgresExperimentAnnotationSummary = {
     height: number;
     imageWidth: number;
     imageHeight: number;
+    pageNumber?: number | null;
   } | null;
   createdByProjectUserId: string;
   createdByName: string;
@@ -437,6 +439,7 @@ export type PostgresExperimentObjectType = {
   shape: string;
   color: string;
   fill: string;
+  imageStoragePath: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -454,6 +457,7 @@ export type PostgresExperimentObject = {
   shapeOverride: string;
   colorOverride: string;
   fillOverride: string;
+  imageStoragePath: string;
   eventStartAt: string | null;
   eventEndAt: string | null;
   eventTimePrecision: string | null;
@@ -1149,6 +1153,7 @@ export async function createPostgresExperimentAnnotation(data: {
     height: number;
     imageWidth: number;
     imageHeight: number;
+    pageNumber?: number | null;
   } | null;
 }): Promise<PostgresExperimentAnnotationSummary> {
   return invoke<PostgresExperimentAnnotationSummary>("create_postgres_experiment_annotation_command", {
@@ -1174,6 +1179,7 @@ export async function updatePostgresExperimentAnnotation(data: {
     height: number;
     imageWidth: number;
     imageHeight: number;
+    pageNumber?: number | null;
   } | null;
 }): Promise<PostgresExperimentAnnotationSummary> {
   return invoke<PostgresExperimentAnnotationSummary>("update_postgres_experiment_annotation_command", {
@@ -1259,6 +1265,7 @@ export async function createPostgresExperimentObjectType(data: {
   shape: string;
   color: string;
   fill: string;
+  imageStoragePath?: string | null;
 }): Promise<PostgresExperimentObjectType> {
   return invoke<PostgresExperimentObjectType>("create_postgres_experiment_object_type_command", {
     request: data,
@@ -1273,6 +1280,7 @@ export async function updatePostgresExperimentObjectType(data: {
   shape: string;
   color: string;
   fill: string;
+  imageStoragePath?: string | null;
 }): Promise<PostgresExperimentObjectType> {
   return invoke<PostgresExperimentObjectType>("update_postgres_experiment_object_type_command", {
     request: data,
@@ -1287,6 +1295,7 @@ export async function savePostgresExperimentObjectType(data: {
   shape: string;
   color: string;
   fill: string;
+  imageStoragePath?: string | null;
   attributes: Array<{
     id?: string | null;
     name: string;
@@ -1302,6 +1311,27 @@ export async function savePostgresExperimentObjectType(data: {
 
 export async function deletePostgresExperimentObjectType(projectId: string, objectTypeId: string): Promise<void> {
   await invoke("delete_postgres_experiment_object_type_command", {
+    projectId,
+    objectTypeId,
+  });
+}
+
+export async function importPostgresExperimentObjectTypeImage(data: {
+  projectId: string;
+  objectTypeId: string;
+  originalFileName: string;
+  fileBytesBase64: string;
+}): Promise<PostgresExperimentObjectType> {
+  return invoke<PostgresExperimentObjectType>("import_postgres_experiment_object_type_image_command", {
+    request: data,
+  });
+}
+
+export async function removePostgresExperimentObjectTypeImage(
+  projectId: string,
+  objectTypeId: string,
+): Promise<PostgresExperimentObjectType> {
+  return invoke<PostgresExperimentObjectType>("remove_postgres_experiment_object_type_image_command", {
     projectId,
     objectTypeId,
   });
@@ -1441,6 +1471,7 @@ export async function createPostgresExperimentObject(data: {
   shapeOverride?: string | null;
   colorOverride?: string | null;
   fillOverride?: string | null;
+  imageStoragePath?: string | null;
   eventStartAt?: string | null;
   eventEndAt?: string | null;
   eventTimePrecision?: string | null;
@@ -1465,6 +1496,7 @@ export async function updatePostgresExperimentObject(data: {
   shapeOverride?: string | null;
   colorOverride?: string | null;
   fillOverride?: string | null;
+  imageStoragePath?: string | null;
   eventStartAt?: string | null;
   eventEndAt?: string | null;
   eventTimePrecision?: string | null;
@@ -1489,6 +1521,7 @@ export async function savePostgresExperimentObject(data: {
   shapeOverride?: string | null;
   colorOverride?: string | null;
   fillOverride?: string | null;
+  imageStoragePath?: string | null;
   eventStartAt?: string | null;
   eventEndAt?: string | null;
   eventTimePrecision?: string | null;
@@ -1506,6 +1539,27 @@ export async function savePostgresExperimentObject(data: {
 
 export async function deletePostgresExperimentObject(projectId: string, objectId: string): Promise<void> {
   await invoke("delete_postgres_experiment_object_command", {
+    projectId,
+    objectId,
+  });
+}
+
+export async function importPostgresExperimentObjectImage(data: {
+  projectId: string;
+  objectId: string;
+  originalFileName: string;
+  fileBytesBase64: string;
+}): Promise<PostgresExperimentObject> {
+  return invoke<PostgresExperimentObject>("import_postgres_experiment_object_image_command", {
+    request: data,
+  });
+}
+
+export async function removePostgresExperimentObjectImage(
+  projectId: string,
+  objectId: string,
+): Promise<PostgresExperimentObject> {
+  return invoke<PostgresExperimentObject>("remove_postgres_experiment_object_image_command", {
     projectId,
     objectId,
   });

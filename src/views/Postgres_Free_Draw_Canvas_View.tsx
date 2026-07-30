@@ -37,6 +37,7 @@ type PostgresExperimentObjectTypeShape =
   | "star";
 type PostgresExperimentSourceObjectVisualKey =
   | "source_text"
+  | "source_pdf"
   | "source_image"
   | "source_audio"
   | "source_video";

@@ -2,18 +2,13 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::xlm_roberta::{Config as XlmRobertaConfig, XLMRobertaModel};
 use rand::distributions::{Alphanumeric, DistString};
 use rand::RngCore;
-use tauri::Emitter;
-use tauri::Manager;
-use tauri::webview::WebviewWindowBuilder;
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandChild;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -25,6 +20,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::webview::WebviewWindowBuilder;
+use tauri::Emitter;
+use tauri::Manager;
+use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_shell::ShellExt;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use tokio_postgres::{GenericClient, NoTls};
 use zeroize::Zeroizing;
@@ -99,13 +99,17 @@ impl std::ops::Deref for CachedPostgresClient {
     type Target = tokio_postgres::Client;
 
     fn deref(&self) -> &Self::Target {
-        self.client.as_ref().expect("cached postgres client missing inner client")
+        self.client
+            .as_ref()
+            .expect("cached postgres client missing inner client")
     }
 }
 
 impl std::ops::DerefMut for CachedPostgresClient {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.client.as_mut().expect("cached postgres client missing inner client")
+        self.client
+            .as_mut()
+            .expect("cached postgres client missing inner client")
     }
 }
 
@@ -128,11 +132,17 @@ impl Drop for CachedPostgresClient {
 async fn wait_for_pb_port(timeout: Duration) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if tokio::net::TcpStream::connect("127.0.0.1:8090").await.is_ok() {
+        if tokio::net::TcpStream::connect("127.0.0.1:8090")
+            .await
+            .is_ok()
+        {
             return;
         }
         if tokio::time::Instant::now() >= deadline {
-            eprintln!("[kanqual] PocketBase did not open port 8090 within {:?}", timeout);
+            eprintln!(
+                "[kanqual] PocketBase did not open port 8090 within {:?}",
+                timeout
+            );
             return;
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -170,11 +180,20 @@ fn ensure_packaged_sidecar_executable() -> Result<(), String> {
     }
 
     let mut permissions = fs::metadata(&sidecar_path)
-        .map_err(|e| format!("Could not read PocketBase sidecar metadata at {}: {e}", sidecar_path.display()))?
+        .map_err(|e| {
+            format!(
+                "Could not read PocketBase sidecar metadata at {}: {e}",
+                sidecar_path.display()
+            )
+        })?
         .permissions();
     permissions.set_mode(0o755);
-    fs::set_permissions(&sidecar_path, permissions)
-        .map_err(|e| format!("Could not mark PocketBase sidecar as executable at {}: {e}", sidecar_path.display()))?;
+    fs::set_permissions(&sidecar_path, permissions).map_err(|e| {
+        format!(
+            "Could not mark PocketBase sidecar as executable at {}: {e}",
+            sidecar_path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -185,7 +204,12 @@ fn ensure_packaged_sidecar_executable() -> Result<(), String> {
 
 /// Spawn a PocketBase serve process with the given bind address.
 /// Returns the child handle on success.
-fn spawn_pb_serve(app: &tauri::AppHandle, bind: &str, pb_dir_arg: &str, pb_migrations_arg: &str) -> Result<CommandChild, String> {
+fn spawn_pb_serve(
+    app: &tauri::AppHandle,
+    bind: &str,
+    pb_dir_arg: &str,
+    pb_migrations_arg: &str,
+) -> Result<CommandChild, String> {
     ensure_packaged_sidecar_executable()?;
     let http_arg = format!("--http={}", bind);
     let (_, child) = app
@@ -242,7 +266,10 @@ async fn start_local_pocketbase_runtime(
             &pb_migrations_arg,
         ])
         .output();
-    if tokio::time::timeout(Duration::from_secs(10), upsert).await.is_err() {
+    if tokio::time::timeout(Duration::from_secs(10), upsert)
+        .await
+        .is_err()
+    {
         eprintln!("[kanqual] pocketbase superuser upsert timed out after 10 s");
     }
 
@@ -302,7 +329,12 @@ fn smoke_test_env_var(name: &str) -> Option<String> {
 
 fn smoke_test_enabled() -> bool {
     smoke_test_env_var("KANQUAL_SMOKE_TEST")
-        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -320,7 +352,10 @@ fn smoke_test_state_path() -> Option<PathBuf> {
     smoke_test_env_var("KANQUAL_SMOKE_STATE_PATH").map(PathBuf::from)
 }
 
-fn write_smoke_test_state(_app: &tauri::AppHandle, payload: serde_json::Value) -> Result<(), String> {
+fn write_smoke_test_state(
+    _app: &tauri::AppHandle,
+    payload: serde_json::Value,
+) -> Result<(), String> {
     let Some(state_path) = smoke_test_state_path() else {
         return Ok(());
     };
@@ -381,7 +416,6 @@ fn current_time_ms() -> u64 {
         .as_millis() as u64
 }
 
-
 fn backend_identity_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(kanqual_data_dir(app)?.join(BACKEND_IDENTITY_FILE))
 }
@@ -395,7 +429,9 @@ fn postgres_runtime_config_path(app: &tauri::AppHandle) -> Result<PathBuf, Strin
 }
 
 fn generate_backend_identity() -> BackendIdentity {
-    let suffix = Alphanumeric.sample_string(&mut rand::rngs::OsRng, 24).to_lowercase();
+    let suffix = Alphanumeric
+        .sample_string(&mut rand::rngs::OsRng, 24)
+        .to_lowercase();
     let password = Alphanumeric.sample_string(&mut rand::rngs::OsRng, 48);
     BackendIdentity {
         version: 1,
@@ -421,7 +457,9 @@ fn generate_postgres_bootstrap_identity() -> PostgresBootstrapIdentity {
     }
 }
 
-fn postgres_runtime_config_from_identity(identity: &PostgresBootstrapIdentity) -> PostgresRuntimeConfig {
+fn postgres_runtime_config_from_identity(
+    identity: &PostgresBootstrapIdentity,
+) -> PostgresRuntimeConfig {
     PostgresRuntimeConfig {
         version: 1,
         host: identity.host.clone(),
@@ -459,7 +497,9 @@ fn load_or_create_backend_identity(app: &tauri::AppHandle) -> Result<BackendIden
     if path.exists() {
         if let Ok(text) = fs::read_to_string(&path) {
             if let Ok(identity) = serde_json::from_str::<BackendIdentity>(&text) {
-                if !identity.superuser_email.trim().is_empty() && !identity.superuser_password.trim().is_empty() {
+                if !identity.superuser_email.trim().is_empty()
+                    && !identity.superuser_password.trim().is_empty()
+                {
                     return Ok(identity);
                 }
             }
@@ -484,7 +524,8 @@ fn load_or_create_postgres_bootstrap_identity(
                 if !identity.superuser_name.trim().is_empty()
                     && !identity.app_role_name.trim().is_empty()
                     && !identity.app_role_password.trim().is_empty()
-                    && (identity.admin_handoff_completed || !identity.temporary_superuser_password.trim().is_empty())
+                    && (identity.admin_handoff_completed
+                        || !identity.temporary_superuser_password.trim().is_empty())
                 {
                     return Ok(identity);
                 }
@@ -498,7 +539,10 @@ fn load_or_create_postgres_bootstrap_identity(
     Ok(identity)
 }
 
-fn save_postgres_runtime_config(app: &tauri::AppHandle, config: &PostgresRuntimeConfig) -> Result<(), String> {
+fn save_postgres_runtime_config(
+    app: &tauri::AppHandle,
+    config: &PostgresRuntimeConfig,
+) -> Result<(), String> {
     let path = postgres_runtime_config_path(app)?;
     let serialized = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     fs::write(&path, serialized).map_err(|e| e.to_string())
@@ -584,7 +628,10 @@ async fn ensure_postgres_experiment_text_array_column(
 
     let escaped_table_name = format!("\"{}\"", sql_escape_identifier(table_name));
     let escaped_column_name = format!("\"{}\"", sql_escape_identifier(column_name));
-    let escaped_legacy_column_name = format!("\"{}\"", sql_escape_identifier(legacy_single_value_column_name));
+    let escaped_legacy_column_name = format!(
+        "\"{}\"",
+        sql_escape_identifier(legacy_single_value_column_name)
+    );
 
     if !has_text_array_type {
         if column_metadata.is_some() {
@@ -697,7 +744,10 @@ async fn connect_postgres_database(
 }
 
 fn postgres_connection_cache_key(config: &PostgresRuntimeConfig) -> String {
-    format!("{}:{}:{}:{}", config.host, config.port, config.user, config.database)
+    format!(
+        "{}:{}:{}:{}",
+        config.host, config.port, config.user, config.database
+    )
 }
 
 async fn connect_postgres_database_with_config(
@@ -1019,14 +1069,17 @@ fn normalize_postgres_experiment_llm_settings(
 ) -> PostgresExperimentLlmSettings {
     let defaults = default_postgres_experiment_llm_settings();
     let chunk_size = clamp_postgres_experiment_i32(settings.chunk_size, 100, 20_000);
-    let overlap_size = clamp_postgres_experiment_i32(settings.overlap_size, 0, (chunk_size - 1).max(0));
-    let candidate_limit = clamp_postgres_experiment_i32(settings.ollama_relevant_segments_candidate_limit, 1, 50);
+    let overlap_size =
+        clamp_postgres_experiment_i32(settings.overlap_size, 0, (chunk_size - 1).max(0));
+    let candidate_limit =
+        clamp_postgres_experiment_i32(settings.ollama_relevant_segments_candidate_limit, 1, 50);
     let max_results = clamp_postgres_experiment_i32(
         settings.ollama_relevant_segments_max_results,
         1,
         candidate_limit,
     );
-    let connection_mode = normalize_postgres_experiment_llm_connection_mode(&settings.connection_mode);
+    let connection_mode =
+        normalize_postgres_experiment_llm_connection_mode(&settings.connection_mode);
 
     PostgresExperimentLlmSettings {
         chunk_size,
@@ -1124,13 +1177,13 @@ fn deserialize_postgres_experiment_llm_settings(raw: &str) -> PostgresExperiment
         .unwrap_or_else(|_| default_postgres_experiment_llm_settings())
 }
 
-fn postgres_experiment_preference_subject_key(
-    session: &PostgresExperimentAuthSession,
-) -> String {
+fn postgres_experiment_preference_subject_key(session: &PostgresExperimentAuthSession) -> String {
     format!("{}:{}", session.auth_kind, session.user.id)
 }
 
-async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Result<PostgresSchemaMigrationResult, String> {
+async fn ensure_postgres_experiment_control_schema(
+    app: &tauri::AppHandle,
+) -> Result<PostgresSchemaMigrationResult, String> {
     let (client, connection_task) = connect_postgres_runtime(app).await?;
     execute_postgres_statements(
         &client,
@@ -1172,7 +1225,9 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             &[],
         )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment control project name column: {e}"))?
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment control project name column: {e}")
+        })?
         .is_some();
     let projects_has_description_column = client
         .query_opt(
@@ -1185,7 +1240,11 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             &[],
         )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment control project description column: {e}"))?
+        .map_err(|e| {
+            format!(
+                "Could not inspect PostgreSQL experiment control project description column: {e}"
+            )
+        })?
         .is_some();
 
     execute_postgres_statements(
@@ -1241,8 +1300,9 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
         let project_id: String = row.get(0);
         let database_name = postgres_project_database_name(&project_id);
         let storage_path = postgres_project_storage_path(app, &project_id)?;
-        fs::create_dir_all(&storage_path)
-            .map_err(|e| format!("Could not create PostgreSQL project storage directory for backfill: {e}"))?;
+        fs::create_dir_all(&storage_path).map_err(|e| {
+            format!("Could not create PostgreSQL project storage directory for backfill: {e}")
+        })?;
         client
             .execute(
                 "
@@ -1251,10 +1311,16 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
                     storage_path = $3
                 WHERE id = $1
                 ",
-                &[&project_id, &database_name, &storage_path.to_string_lossy().to_string()],
+                &[
+                    &project_id,
+                    &database_name,
+                    &storage_path.to_string_lossy().to_string(),
+                ],
             )
             .await
-            .map_err(|e| format!("Could not backfill PostgreSQL experiment control project metadata: {e}"))?;
+            .map_err(|e| {
+                format!("Could not backfill PostgreSQL experiment control project metadata: {e}")
+            })?;
     }
 
     if projects_has_name_column || projects_has_description_column {
@@ -1267,7 +1333,9 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
                 &[],
             )
             .await
-            .map_err(|e| format!("Could not load legacy PostgreSQL experiment project metadata: {e}"))?;
+            .map_err(|e| {
+                format!("Could not load legacy PostgreSQL experiment project metadata: {e}")
+            })?;
 
         for row in legacy_rows {
             let project_id: String = row.get(0);
@@ -1275,7 +1343,8 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             let name: String = row.get(2);
             let description: String = row.get(3);
             ensure_postgres_experiment_project_schema(app, &database_name).await?;
-            let (project_client, project_connection_task) = connect_postgres_database(app, &database_name).await?;
+            let (project_client, project_connection_task) =
+                connect_postgres_database(app, &database_name).await?;
             project_client
                 .execute(
                     "
@@ -1307,13 +1376,22 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
         client
             .execute("ALTER TABLE projects DROP COLUMN IF EXISTS name", &[])
             .await
-            .map_err(|e| format!("Could not remove legacy PostgreSQL experiment project name column: {e}"))?;
+            .map_err(|e| {
+                format!("Could not remove legacy PostgreSQL experiment project name column: {e}")
+            })?;
     }
     if projects_has_description_column {
         client
-            .execute("ALTER TABLE projects DROP COLUMN IF EXISTS description", &[])
+            .execute(
+                "ALTER TABLE projects DROP COLUMN IF EXISTS description",
+                &[],
+            )
             .await
-            .map_err(|e| format!("Could not remove legacy PostgreSQL experiment project description column: {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "Could not remove legacy PostgreSQL experiment project description column: {e}"
+                )
+            })?;
     }
 
     client
@@ -1355,10 +1433,15 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             VALUES ('singleton', FALSE, 'upload', TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, $1)
             ON CONFLICT (id) DO NOTHING
             ",
-            &[&serde_json::to_string(&default_postgres_experiment_llm_settings()).map_err(|e| e.to_string())?],
+            &[
+                &serde_json::to_string(&default_postgres_experiment_llm_settings())
+                    .map_err(|e| e.to_string())?,
+            ],
         )
         .await
-        .map_err(|e| format!("Could not initialize PostgreSQL experiment installation settings: {e}"))?;
+        .map_err(|e| {
+            format!("Could not initialize PostgreSQL experiment installation settings: {e}")
+        })?;
     client
         .execute(
             "
@@ -1403,10 +1486,15 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             VALUES ($1, $2)
             ON CONFLICT (version) DO NOTHING
             ",
-            &[&7_i32, &"control_device_state_and_remembered_accounts_schema"],
+            &[
+                &7_i32,
+                &"control_device_state_and_remembered_accounts_schema",
+            ],
         )
         .await
-        .map_err(|e| format!("Could not record PostgreSQL experiment device-state migration: {e}"))?;
+        .map_err(|e| {
+            format!("Could not record PostgreSQL experiment device-state migration: {e}")
+        })?;
     client
         .execute(
             "
@@ -1417,7 +1505,9 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             &[&8_i32, &"control_user_locale_and_project_state_schema"],
         )
         .await
-        .map_err(|e| format!("Could not record PostgreSQL experiment user-project-state migration: {e}"))?;
+        .map_err(|e| {
+            format!("Could not record PostgreSQL experiment user-project-state migration: {e}")
+        })?;
     client
         .execute(
             "
@@ -1425,10 +1515,15 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             VALUES ($1, $2)
             ON CONFLICT (version) DO NOTHING
             ",
-            &[&9_i32, &"control_document_import_installation_settings_schema"],
+            &[
+                &9_i32,
+                &"control_document_import_installation_settings_schema",
+            ],
         )
         .await
-        .map_err(|e| format!("Could not record PostgreSQL experiment document-import migration: {e}"))?;
+        .map_err(|e| {
+            format!("Could not record PostgreSQL experiment document-import migration: {e}")
+        })?;
     client
         .execute(
             "
@@ -1439,7 +1534,9 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
             &[&10_i32, &"control_llm_and_recent_limit_settings_schema"],
         )
         .await
-        .map_err(|e| format!("Could not record PostgreSQL experiment llm/recent-limit migration: {e}"))?;
+        .map_err(|e| {
+            format!("Could not record PostgreSQL experiment llm/recent-limit migration: {e}")
+        })?;
     client
         .execute(
             "
@@ -1464,7 +1561,10 @@ async fn ensure_postgres_experiment_control_schema(app: &tauri::AppHandle) -> Re
         .map_err(|e| format!("Could not record PostgreSQL experiment migration: {e}"))?;
 
     let rows = client
-        .query("SELECT version FROM app_schema_migrations ORDER BY version", &[])
+        .query(
+            "SELECT version FROM app_schema_migrations ORDER BY version",
+            &[],
+        )
         .await
         .map_err(|e| format!("Could not load PostgreSQL experiment migrations: {e}"))?;
 
@@ -1495,7 +1595,8 @@ async fn ensure_postgres_experiment_project_schema(
         }
     }
 
-    let (client, connection_task) = connect_postgres_database(app, &normalized_database_name).await?;
+    let (client, connection_task) =
+        connect_postgres_database(app, &normalized_database_name).await?;
     let lock_key = normalized_database_name.clone();
     client
         .execute(
@@ -1503,7 +1604,9 @@ async fn ensure_postgres_experiment_project_schema(
             &[&lock_key],
         )
         .await
-        .map_err(|e| format!("Could not lock PostgreSQL experiment project schema migration: {e}"))?;
+        .map_err(|e| {
+            format!("Could not lock PostgreSQL experiment project schema migration: {e}")
+        })?;
 
     let ensure_result: Result<PostgresSchemaMigrationResult, String> = async {
         client
@@ -1562,6 +1665,7 @@ async fn ensure_postgres_experiment_project_schema(
                     shape_override TEXT,
                     color_override TEXT,
                     fill_override TEXT,
+                    image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
@@ -1573,6 +1677,7 @@ async fn ensure_postgres_experiment_project_schema(
                     shape TEXT NOT NULL DEFAULT 'rounded',
                     color TEXT NOT NULL DEFAULT '#355070',
                     fill TEXT NOT NULL DEFAULT 'filled',
+                    image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
@@ -1702,6 +1807,7 @@ async fn ensure_postgres_experiment_project_schema(
                     id TEXT PRIMARY KEY,
                     display_id BIGINT NOT NULL DEFAULT nextval('annotation_display_id_seq'),
                     source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                    source_kind TEXT NOT NULL DEFAULT '',
                     anchor_kind TEXT NOT NULL DEFAULT 'text_span',
                     start_offset INTEGER,
                     end_offset INTEGER,
@@ -1839,11 +1945,13 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'rounded';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#355070';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS fill TEXT NOT NULL DEFAULT 'filled';
+                ALTER TABLE object_types ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS source_id TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS object_type_id TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS shape_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS color_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS fill_override TEXT;
+                ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS object_type_id TEXT;
                 ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS object_type TEXT NOT NULL DEFAULT '';
                 ALTER TABLE relationship_types ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
@@ -1875,6 +1983,7 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE saved_drawings ADD COLUMN IF NOT EXISTS canvas_state_json TEXT NOT NULL DEFAULT '{}';
                 ALTER TABLE annotations ADD COLUMN IF NOT EXISTS display_id BIGINT;
                 ALTER TABLE annotations ALTER COLUMN display_id SET DEFAULT nextval('annotation_display_id_seq');
+                ALTER TABLE annotations ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAULT '';
                 ",
             )
             .await
@@ -1895,6 +2004,12 @@ async fn ensure_postgres_experiment_project_schema(
                 WHERE a.id = numbered.id;
 
                 ALTER TABLE annotations ALTER COLUMN display_id SET NOT NULL;
+
+                UPDATE annotations AS a
+                SET source_kind = COALESCE(s.source_kind, '')
+                FROM sources s
+                WHERE a.source_id = s.id
+                  AND COALESCE(a.source_kind, '') = '';
                 ",
             )
             .await
@@ -2355,12 +2470,19 @@ fn postgres_projects_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String>
     Ok(kanqual_data_dir(app)?.join("postgres-projects"))
 }
 
-fn postgres_project_storage_path(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+fn postgres_project_storage_path(
+    app: &tauri::AppHandle,
+    project_id: &str,
+) -> Result<PathBuf, String> {
     Ok(postgres_projects_root_dir(app)?.join(project_id))
 }
 
 fn postgres_project_database_name(project_id: &str) -> String {
-    let token = project_id.chars().filter(|ch| ch.is_ascii_alphanumeric()).take(12).collect::<String>();
+    let token = project_id
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(12)
+        .collect::<String>();
     format!("{POSTGRES_PROJECT_DATABASE_PREFIX}{token}")
 }
 
@@ -2377,12 +2499,16 @@ fn map_postgres_experiment_object_type_row(
         shape: row.get(4),
         color: row.get(5),
         fill: row.get(6),
-        created_at: row.get(7),
-        updated_at: row.get(8),
+        image_storage_path: row.get(7),
+        created_at: row.get(8),
+        updated_at: row.get(9),
     }
 }
 
-fn map_postgres_experiment_source_row(project_id: &str, row: tokio_postgres::Row) -> PostgresExperimentSource {
+fn map_postgres_experiment_source_row(
+    project_id: &str,
+    row: tokio_postgres::Row,
+) -> PostgresExperimentSource {
     PostgresExperimentSource {
         id: row.get(0),
         project_id: project_id.to_string(),
@@ -2402,7 +2528,9 @@ fn map_postgres_experiment_source_row(project_id: &str, row: tokio_postgres::Row
     }
 }
 
-fn map_postgres_experiment_source_object_link_row(row: tokio_postgres::Row) -> PostgresExperimentSourceObjectLink {
+fn map_postgres_experiment_source_object_link_row(
+    row: tokio_postgres::Row,
+) -> PostgresExperimentSourceObjectLink {
     PostgresExperimentSourceObjectLink {
         source_id: row.get(0),
         object_id: row.get(1),
@@ -2428,7 +2556,10 @@ fn map_postgres_experiment_source_attribute_definition_row(
     }
 }
 
-fn map_postgres_experiment_code_row(project_id: &str, row: tokio_postgres::Row) -> PostgresExperimentCode {
+fn map_postgres_experiment_code_row(
+    project_id: &str,
+    row: tokio_postgres::Row,
+) -> PostgresExperimentCode {
     PostgresExperimentCode {
         id: row.get(0),
         project_id: project_id.to_string(),
@@ -2462,17 +2593,18 @@ fn map_postgres_experiment_object_row(
         shape_override: row.get::<usize, Option<String>>(8).unwrap_or_default(),
         color_override: row.get::<usize, Option<String>>(9).unwrap_or_default(),
         fill_override: row.get::<usize, Option<String>>(10).unwrap_or_default(),
-        event_start_at: row.get(11),
-        event_end_at: row.get(12),
-        event_time_precision: row.get(13),
-        event_timezone: row.get(14),
-        event_is_instant: row.get(15),
+        image_storage_path: row.get::<usize, Option<String>>(11).unwrap_or_default(),
+        event_start_at: row.get(12),
+        event_end_at: row.get(13),
+        event_time_precision: row.get(14),
+        event_timezone: row.get(15),
+        event_is_instant: row.get(16),
         attribute_values: attribute_values_by_object_id
             .get(&object_id)
             .cloned()
             .unwrap_or_default(),
-        created_at: row.get(16),
-        updated_at: row.get(17),
+        created_at: row.get(17),
+        updated_at: row.get(18),
     }
 }
 
@@ -2532,7 +2664,9 @@ async fn load_postgres_experiment_project_record(
     load_postgres_experiment_project_from_registry(app, registry).await
 }
 
-fn row_to_postgres_experiment_app_user_record(row: tokio_postgres::Row) -> PostgresExperimentAppUserRecord {
+fn row_to_postgres_experiment_app_user_record(
+    row: tokio_postgres::Row,
+) -> PostgresExperimentAppUserRecord {
     PostgresExperimentAppUserRecord {
         user: PostgresExperimentAppUser {
             id: row.get(0),
@@ -2600,7 +2734,8 @@ async fn resolve_postgres_experiment_auth_session(
     app: &tauri::AppHandle,
     runtime_auth_state: Option<&tauri::State<'_, PostgresExperimentAuthState>>,
 ) -> Result<Option<PostgresExperimentAuthSession>, String> {
-    let runtime_session = runtime_auth_state.and_then(|state| get_postgres_runtime_auth_session(state));
+    let runtime_session =
+        runtime_auth_state.and_then(|state| get_postgres_runtime_auth_session(state));
     if let Some(stored_session) = runtime_session {
         if stored_session.auth_kind == "postgres_admin" {
             let identity = load_or_create_postgres_bootstrap_identity(app)?;
@@ -2611,7 +2746,9 @@ async fn resolve_postgres_experiment_auth_session(
             }));
         }
 
-        let Some(user_record) = load_postgres_experiment_app_user_by_id(app, &stored_session.user_id).await? else {
+        let Some(user_record) =
+            load_postgres_experiment_app_user_by_id(app, &stored_session.user_id).await?
+        else {
             if let Some(state) = runtime_auth_state {
                 set_postgres_runtime_auth_session(state, None);
             }
@@ -2678,7 +2815,8 @@ async fn require_postgres_experiment_project_access(
         return Ok(session);
     }
 
-    let membership_role = postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
+    let membership_role =
+        postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
     if membership_role.is_some() {
         return Ok(session);
     }
@@ -2691,12 +2829,14 @@ async fn require_postgres_experiment_project_membership_management(
     runtime_auth_state: Option<&tauri::State<'_, PostgresExperimentAuthState>>,
     project: &PostgresExperimentProject,
 ) -> Result<PostgresExperimentAuthSession, String> {
-    let session = require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
+    let session =
+        require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
     if postgres_experiment_session_is_admin(&session) {
         return Ok(session);
     }
 
-    let membership_role = postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
+    let membership_role =
+        postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
     if matches!(membership_role.as_deref(), Some("owner" | "admin")) {
         return Ok(session);
     }
@@ -2710,16 +2850,21 @@ async fn require_postgres_experiment_project_invite_access(
     project: &PostgresExperimentProject,
     requested_role: &str,
 ) -> Result<PostgresExperimentAuthSession, String> {
-    let session = require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
+    let session =
+        require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
     if postgres_experiment_session_is_admin(&session) {
         return Ok(session);
     }
 
-    let membership_role = postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
+    let membership_role =
+        postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
     match membership_role.as_deref() {
         Some("owner") => Ok(session),
         Some("editor") if requested_role != "owner" => Ok(session),
-        _ => Err("Only project owners, administrators, or editors can add users to this project.".to_string()),
+        _ => Err(
+            "Only project owners, administrators, or editors can add users to this project."
+                .to_string(),
+        ),
     }
 }
 
@@ -2728,12 +2873,14 @@ async fn require_postgres_experiment_project_source_management(
     runtime_auth_state: Option<&tauri::State<'_, PostgresExperimentAuthState>>,
     project: &PostgresExperimentProject,
 ) -> Result<PostgresExperimentAuthSession, String> {
-    let session = require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
+    let session =
+        require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
     if postgres_experiment_session_is_admin(&session) {
         return Ok(session);
     }
 
-    let membership_role = postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
+    let membership_role =
+        postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
     match membership_role.as_deref() {
         Some("owner" | "editor") => Ok(session),
         _ => Err("Only project owners, administrators, or editors can manage sources.".to_string()),
@@ -2745,12 +2892,14 @@ async fn require_postgres_experiment_project_code_management(
     runtime_auth_state: Option<&tauri::State<'_, PostgresExperimentAuthState>>,
     project: &PostgresExperimentProject,
 ) -> Result<PostgresExperimentAuthSession, String> {
-    let session = require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
+    let session =
+        require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
     if postgres_experiment_session_is_admin(&session) {
         return Ok(session);
     }
 
-    let membership_role = postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
+    let membership_role =
+        postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
     match membership_role.as_deref() {
         Some("owner" | "editor") => Ok(session),
         _ => Err("Only project owners, administrators, or editors can manage codes.".to_string()),
@@ -2762,15 +2911,20 @@ async fn require_postgres_experiment_project_annotation_management(
     runtime_auth_state: Option<&tauri::State<'_, PostgresExperimentAuthState>>,
     project: &PostgresExperimentProject,
 ) -> Result<PostgresExperimentAuthSession, String> {
-    let session = require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
+    let session =
+        require_postgres_experiment_project_access(app, runtime_auth_state, project).await?;
     if postgres_experiment_session_is_admin(&session) {
         return Ok(session);
     }
 
-    let membership_role = postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
+    let membership_role =
+        postgres_experiment_project_membership_role(app, project, &session.user.email).await?;
     match membership_role.as_deref() {
         Some("owner" | "editor" | "coder") => Ok(session),
-        _ => Err("Only project owners, administrators, editors, or coders can manage annotations.".to_string()),
+        _ => Err(
+            "Only project owners, administrators, editors, or coders can manage annotations."
+                .to_string(),
+        ),
     }
 }
 
@@ -2897,7 +3051,10 @@ async fn create_postgres_database_if_missing(
 ) -> Result<(), String> {
     let (client, connection_task) = connect_postgres_database(app, "postgres").await?;
     let exists = client
-        .query_opt("SELECT 1 FROM pg_database WHERE datname = $1", &[&database_name])
+        .query_opt(
+            "SELECT 1 FROM pg_database WHERE datname = $1",
+            &[&database_name],
+        )
         .await
         .map_err(|e| format!("Could not inspect PostgreSQL databases: {e}"))?
         .is_some();
@@ -3038,7 +3195,9 @@ fn default_postgres_auth_session_kind() -> String {
     "app_user".to_string()
 }
 
-fn build_postgres_experiment_local_admin_user(identity: &PostgresBootstrapIdentity) -> PostgresExperimentAppUser {
+fn build_postgres_experiment_local_admin_user(
+    identity: &PostgresBootstrapIdentity,
+) -> PostgresExperimentAppUser {
     PostgresExperimentAppUser {
         id: format!("postgres-admin:{}", identity.superuser_name),
         name: "PostgreSQL Administrator".to_string(),
@@ -3081,6 +3240,63 @@ fn sanitize_postgres_experiment_file_name(value: &str) -> String {
     }
 }
 
+fn validate_postgres_experiment_image_file_name(value: &str) -> Result<String, String> {
+    let sanitized = sanitize_postgres_experiment_file_name(value);
+    let extension = Path::new(&sanitized)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "svg" => Ok(sanitized),
+        _ => Err("Choose a PNG, JPG, WEBP, GIF, or SVG image.".to_string()),
+    }
+}
+
+fn write_postgres_experiment_project_image_file(
+    project: &PostgresExperimentProject,
+    folder: &str,
+    record_id: &str,
+    original_file_name: &str,
+    file_bytes_base64: &str,
+) -> Result<String, String> {
+    let file_bytes = BASE64_STANDARD
+        .decode(file_bytes_base64.trim())
+        .map_err(|e| format!("Could not decode image file: {e}"))?;
+    if file_bytes.is_empty() {
+        return Err("Choose a non-empty image file.".to_string());
+    }
+    const POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+    if file_bytes.len() > POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES {
+        return Err("Choose an image smaller than 5 MB.".to_string());
+    }
+    let sanitized_file_name = validate_postgres_experiment_image_file_name(original_file_name)?;
+    let image_file_id = generate_identifier();
+    let relative_storage_path =
+        format!("{folder}/{record_id}/{image_file_id}-{sanitized_file_name}");
+    let absolute_storage_path = Path::new(&project.storage_path).join(&relative_storage_path);
+    if let Some(parent) = absolute_storage_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!("Could not create PostgreSQL experiment image storage directory: {e}")
+        })?;
+    }
+    fs::write(&absolute_storage_path, &file_bytes)
+        .map_err(|e| format!("Could not save PostgreSQL experiment image file: {e}"))?;
+    Ok(relative_storage_path)
+}
+
+fn remove_postgres_experiment_project_file_if_present(
+    project: &PostgresExperimentProject,
+    relative_path: &str,
+) {
+    let trimmed = relative_path.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let absolute_path = Path::new(&project.storage_path).join(trimmed);
+    let _ = fs::remove_file(absolute_path);
+}
+
 fn emit_postgres_experiment_project_change(
     app: &tauri::AppHandle,
     project_id: &str,
@@ -3111,7 +3327,9 @@ async fn append_postgres_experiment_project_log_for_client(
     let details_json = details
         .map(|value| serde_json::to_string(&value))
         .transpose()
-        .map_err(|e| format!("Could not serialize PostgreSQL experiment project log details: {e}"))?;
+        .map_err(|e| {
+            format!("Could not serialize PostgreSQL experiment project log details: {e}")
+        })?;
     client
         .execute(
             "
@@ -3143,12 +3361,16 @@ async fn append_postgres_experiment_project_log_for_client(
     Ok(())
 }
 
-fn postgres_experiment_auth_not_ready_message(identity: &PostgresBootstrapIdentity) -> Option<String> {
+fn postgres_experiment_auth_not_ready_message(
+    identity: &PostgresBootstrapIdentity,
+) -> Option<String> {
     if !identity.bootstrap_applied {
         return Some("Complete PostgreSQL bootstrap before using PostgreSQL app auth.".to_string());
     }
     if !identity.admin_handoff_completed {
-        return Some("Complete PostgreSQL admin handoff before using PostgreSQL app auth.".to_string());
+        return Some(
+            "Complete PostgreSQL admin handoff before using PostgreSQL app auth.".to_string(),
+        );
     }
     None
 }
@@ -3584,6 +3806,7 @@ struct PostgresExperimentObject {
     shape_override: String,
     color_override: String,
     fill_override: String,
+    image_storage_path: String,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
     event_time_precision: Option<String>,
@@ -3605,6 +3828,7 @@ struct PostgresExperimentObjectType {
     shape: String,
     color: String,
     fill: String,
+    image_storage_path: String,
     created_at: String,
     updated_at: String,
 }
@@ -3700,6 +3924,7 @@ struct PostgresExperimentImageRegionSelector {
     height: f64,
     image_width: f64,
     image_height: f64,
+    page_number: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -3709,6 +3934,7 @@ struct PostgresExperimentAnnotationSummary {
     display_id: i64,
     project_id: String,
     source_id: String,
+    source_kind: String,
     code_ids: Vec<String>,
     primary_code_id: String,
     primary_code_label: String,
@@ -4150,7 +4376,9 @@ fn validate_postgres_experiment_annotation_time_range(
     }
     if let (Some(start_ms), Some(end_ms)) = (time_start_ms, time_end_ms) {
         if end_ms < start_ms {
-            return Err("Annotation end time must be greater than or equal to the start time.".to_string());
+            return Err(
+                "Annotation end time must be greater than or equal to the start time.".to_string(),
+            );
         }
     }
     Ok(())
@@ -4249,6 +4477,7 @@ struct CreatePostgresExperimentObjectRequest {
     shape_override: Option<String>,
     color_override: Option<String>,
     fill_override: Option<String>,
+    image_storage_path: Option<String>,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
     event_time_precision: Option<String>,
@@ -4269,6 +4498,7 @@ struct UpdatePostgresExperimentObjectRequest {
     shape_override: Option<String>,
     color_override: Option<String>,
     fill_override: Option<String>,
+    image_storage_path: Option<String>,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
     event_time_precision: Option<String>,
@@ -4289,6 +4519,7 @@ struct SavePostgresExperimentObjectRequest {
     shape_override: Option<String>,
     color_override: Option<String>,
     fill_override: Option<String>,
+    image_storage_path: Option<String>,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
     event_time_precision: Option<String>,
@@ -4314,6 +4545,7 @@ struct CreatePostgresExperimentObjectTypeRequest {
     shape: String,
     color: String,
     fill: String,
+    image_storage_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -4326,6 +4558,7 @@ struct UpdatePostgresExperimentObjectTypeRequest {
     shape: String,
     color: String,
     fill: String,
+    image_storage_path: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -4349,8 +4582,27 @@ struct SavePostgresExperimentObjectTypeRequest {
     shape: String,
     color: String,
     fill: String,
+    image_storage_path: Option<String>,
     #[serde(default)]
     attributes: Vec<SavePostgresExperimentObjectTypeAttributeDefinitionInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportPostgresExperimentObjectImageRequest {
+    project_id: String,
+    object_id: String,
+    original_file_name: String,
+    file_bytes_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportPostgresExperimentObjectTypeImageRequest {
+    project_id: String,
+    object_type_id: String,
+    original_file_name: String,
+    file_bytes_base64: String,
 }
 
 #[derive(Serialize)]
@@ -5240,14 +5492,25 @@ struct OllamaCodeSummaryResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OllamaMostTypicalAnnotationModelItem {
-    #[serde(alias = "annotationIndex", alias = "annotation_index", alias = "index", alias = "annotation")]
+    #[serde(
+        alias = "annotationIndex",
+        alias = "annotation_index",
+        alias = "index",
+        alias = "annotation"
+    )]
     annotation_index: u64,
     reasoning: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct OllamaMostTypicalAnnotationModelResponse {
-    #[serde(alias = "annotations", alias = "items", alias = "results", alias = "typical_annotations", alias = "typicalAnnotations")]
+    #[serde(
+        alias = "annotations",
+        alias = "items",
+        alias = "results",
+        alias = "typical_annotations",
+        alias = "typicalAnnotations"
+    )]
     annotations: Vec<OllamaMostTypicalAnnotationModelItem>,
 }
 
@@ -5305,7 +5568,13 @@ struct OllamaDocumentChunkProcessingRequest {
 struct OllamaDocumentSegmentModelItem {
     segment_type: String,
     speaker_id: Option<String>,
-    #[serde(alias = "content", alias = "segmentText", alias = "segment_text", alias = "value", default)]
+    #[serde(
+        alias = "content",
+        alias = "segmentText",
+        alias = "segment_text",
+        alias = "value",
+        default
+    )]
     text: Option<String>,
 }
 
@@ -5397,7 +5666,12 @@ struct OllamaUniqueAnnotationModelItem {
 
 #[derive(Deserialize)]
 struct OllamaUniqueAnnotationsModelResponse {
-    #[serde(alias = "items", alias = "results", alias = "unique_annotations", alias = "uniqueAnnotations")]
+    #[serde(
+        alias = "items",
+        alias = "results",
+        alias = "unique_annotations",
+        alias = "uniqueAnnotations"
+    )]
     annotations: Vec<OllamaUniqueAnnotationModelItem>,
 }
 
@@ -5487,7 +5761,11 @@ fn looks_like_named_speaker_label(value: &str) -> bool {
     let Some(normalized) = normalize_proper_name_candidate(value) else {
         return false;
     };
-    if normalized.chars().all(|ch| ch.is_uppercase() || !ch.is_alphabetic()) && normalized.len() <= 4 {
+    if normalized
+        .chars()
+        .all(|ch| ch.is_uppercase() || !ch.is_alphabetic())
+        && normalized.len() <= 4
+    {
         return false;
     }
     if normalized.chars().all(|ch| ch.is_alphanumeric()) && normalized.len() <= 3 {
@@ -5535,7 +5813,9 @@ fn extract_leading_inline_speaker_label(text: &str) -> Option<(String, String)> 
             return None;
         }
         let after_delimiter = after[after.chars().next()?.len_utf8()..].trim_start();
-        let cleaned = format!("{}{}", leading_ws, after_delimiter).trim().to_string();
+        let cleaned = format!("{}{}", leading_ws, after_delimiter)
+            .trim()
+            .to_string();
         return Some((candidate.to_string(), cleaned));
     }
 
@@ -5564,7 +5844,9 @@ fn extract_leading_inline_speaker_label(text: &str) -> Option<(String, String)> 
         return None;
     }
     let after_delimiter = trimmed[delimiter_index + delimiter_text.len()..].trim_start();
-    let cleaned = format!("{}{}", leading_ws, after_delimiter).trim().to_string();
+    let cleaned = format!("{}{}", leading_ws, after_delimiter)
+        .trim()
+        .to_string();
     Some((candidate.to_string(), cleaned))
 }
 
@@ -5598,7 +5880,11 @@ fn extract_transcript_leading_metadata(text: &str) -> (String, Option<String>, S
         }
     }
 
-    (remaining.trim().to_string(), speaker_id, timestamps.join(" "))
+    (
+        remaining.trim().to_string(),
+        speaker_id,
+        timestamps.join(" "),
+    )
 }
 
 fn infer_inline_speaker_label(text: &str) -> Option<String> {
@@ -5643,7 +5929,9 @@ fn is_supported_timestamp_body(body: &str) -> bool {
     parts.iter().all(|part| {
         let fields = part.split(':').collect::<Vec<_>>();
         (fields.len() == 2 || fields.len() == 3)
-            && fields.iter().all(|field| !field.is_empty() && field.chars().all(|ch| ch.is_ascii_digit()))
+            && fields
+                .iter()
+                .all(|field| !field.is_empty() && field.chars().all(|ch| ch.is_ascii_digit()))
     })
 }
 
@@ -5758,7 +6046,10 @@ impl From<EmbeddingModelDownloadStatusState> for EmbeddingModelDownloadStatus {
                 Some(0.0)
             }
         } else if value.total_files > 0 {
-            Some((value.downloaded_files as f64 / value.total_files as f64 * 100.0).clamp(0.0, 100.0))
+            Some(
+                (value.downloaded_files as f64 / value.total_files as f64 * 100.0)
+                    .clamp(0.0, 100.0),
+            )
         } else if value.phase == "completed" {
             Some(100.0)
         } else {
@@ -5781,7 +6072,9 @@ impl From<EmbeddingModelDownloadStatusState> for EmbeddingModelDownloadStatus {
 impl From<ProjectEmbeddingBuildStatusState> for ProjectEmbeddingBuildStatus {
     fn from(value: ProjectEmbeddingBuildStatusState) -> Self {
         let progress_percent = if value.total_items > 0 {
-            Some((value.completed_items as f64 / value.total_items as f64 * 100.0).clamp(0.0, 100.0))
+            Some(
+                (value.completed_items as f64 / value.total_items as f64 * 100.0).clamp(0.0, 100.0),
+            )
         } else if value.phase == "completed" {
             Some(100.0)
         } else {
@@ -5825,7 +6118,8 @@ async fn get_postgres_experiment_status_command(
     let psql_path = postgres_psql_path();
     let postgresql_conf_path = postgres_conf_path();
     let bootstrap_identity_path = postgres_bootstrap_identity_path(&app)?;
-    let service_reachable = can_reach_postgres(&identity.host, identity.port, Duration::from_millis(750)).await;
+    let service_reachable =
+        can_reach_postgres(&identity.host, identity.port, Duration::from_millis(750)).await;
 
     Ok(PostgresExperimentStatus {
         host: identity.host,
@@ -5911,17 +6205,13 @@ async fn complete_postgres_admin_handoff_command(
     if new_superuser_name.is_empty() {
         return Err("Enter a PostgreSQL admin username.".to_string());
     }
-    if !new_superuser_name
-        .chars()
-        .enumerate()
-        .all(|(index, ch)| {
-            if index == 0 {
-                ch == '_' || ch.is_ascii_alphabetic()
-            } else {
-                ch == '_' || ch.is_ascii_alphanumeric()
-            }
-        })
-    {
+    if !new_superuser_name.chars().enumerate().all(|(index, ch)| {
+        if index == 0 {
+            ch == '_' || ch.is_ascii_alphabetic()
+        } else {
+            ch == '_' || ch.is_ascii_alphanumeric()
+        }
+    }) {
         return Err("Use a PostgreSQL admin username that starts with a letter or underscore and only contains letters, numbers, or underscores.".to_string());
     }
     if new_superuser_password.is_empty() {
@@ -5933,13 +6223,17 @@ async fn complete_postgres_admin_handoff_command(
 
     let mut identity = load_or_create_postgres_bootstrap_identity(&app)?;
     if !identity.bootstrap_applied {
-        return Err("Run the PostgreSQL bootstrap step before completing admin handoff.".to_string());
+        return Err(
+            "Run the PostgreSQL bootstrap step before completing admin handoff.".to_string(),
+        );
     }
     if identity.admin_handoff_completed {
         return get_postgres_experiment_status_command(app).await;
     }
     if identity.temporary_superuser_password.trim().is_empty() {
-        return Err("The temporary PostgreSQL admin credential is unavailable for handoff.".to_string());
+        return Err(
+            "The temporary PostgreSQL admin credential is unavailable for handoff.".to_string(),
+        );
     }
 
     if new_superuser_name != identity.superuser_name {
@@ -5956,7 +6250,10 @@ async fn complete_postgres_admin_handoff_command(
         )
         .map_err(|error| format!("Failed to inspect PostgreSQL roles: {error}"))?;
         if role_exists.trim() == "1" {
-            return Err("That PostgreSQL admin username already exists. Choose a different username.".to_string());
+            return Err(
+                "That PostgreSQL admin username already exists. Choose a different username."
+                    .to_string(),
+            );
         }
 
         run_psql_command(
@@ -5986,7 +6283,9 @@ async fn complete_postgres_admin_handoff_command(
                 sql_escape_literal(&retired_bootstrap_password),
             ),
         )
-        .map_err(|error| format!("Failed to retire the temporary PostgreSQL bootstrap password: {error}"))?;
+        .map_err(|error| {
+            format!("Failed to retire the temporary PostgreSQL bootstrap password: {error}")
+        })?;
         identity.superuser_name = new_superuser_name;
     } else {
         run_psql_command(
@@ -6047,7 +6346,8 @@ async fn get_postgres_experiment_auth_status_command(
 
     ensure_postgres_experiment_control_schema(&app).await?;
     let registered_user_count = count_postgres_experiment_app_users(&app).await?;
-    let current_session = resolve_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
+    let current_session =
+        resolve_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
 
     Ok(PostgresExperimentAuthStatus {
         bootstrap_applied,
@@ -6096,9 +6396,10 @@ async fn get_postgres_experiment_installation_settings_command(
     Ok(row
         .map(|row| PostgresExperimentInstallationSettings {
             startup_reopen_last_project: row.get(0),
-            document_import_default_mode: normalize_postgres_experiment_document_import_default_mode(
-                row.get::<_, String>(1).as_str(),
-            ),
+            document_import_default_mode:
+                normalize_postgres_experiment_document_import_default_mode(
+                    row.get::<_, String>(1).as_str(),
+                ),
             document_import_auto_name_from_file: row.get(2),
             document_import_trim_imported_text: row.get(3),
             document_import_warn_before_empty_import: row.get(4),
@@ -6117,7 +6418,8 @@ async fn save_postgres_experiment_installation_settings_command(
     runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
     settings: PostgresExperimentInstallationSettings,
 ) -> Result<PostgresExperimentInstallationSettings, String> {
-    let _session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
+    let _session =
+        require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
     ensure_postgres_experiment_control_schema(&app).await?;
 
     let next = PostgresExperimentInstallationSettings {
@@ -6129,8 +6431,10 @@ async fn save_postgres_experiment_installation_settings_command(
         document_import_trim_imported_text: settings.document_import_trim_imported_text,
         document_import_warn_before_empty_import: settings.document_import_warn_before_empty_import,
         privacy_mask_file_paths: settings.privacy_mask_file_paths,
-        privacy_clear_recent_projects_on_sign_out: settings.privacy_clear_recent_projects_on_sign_out,
-        privacy_forget_login_identities_on_logout: settings.privacy_forget_login_identities_on_logout,
+        privacy_clear_recent_projects_on_sign_out: settings
+            .privacy_clear_recent_projects_on_sign_out,
+        privacy_forget_login_identities_on_logout: settings
+            .privacy_forget_login_identities_on_logout,
         updates_auto_check: settings.updates_auto_check,
         llm: normalize_postgres_experiment_llm_settings(settings.llm),
     };
@@ -6223,8 +6527,10 @@ async fn get_postgres_experiment_user_preferences_command(
             locale: normalize_postgres_experiment_locale(row.get::<_, String>(3).as_str()),
             recent_project_limit: normalize_postgres_experiment_recent_project_limit(row.get(4)),
             theme_state: normalize_postgres_experiment_theme_state(
-                serde_json::from_str::<PostgresExperimentThemeState>(row.get::<_, String>(5).as_str())
-                    .unwrap_or_else(|_| default_postgres_experiment_theme_state()),
+                serde_json::from_str::<PostgresExperimentThemeState>(
+                    row.get::<_, String>(5).as_str(),
+                )
+                .unwrap_or_else(|_| default_postgres_experiment_theme_state()),
             ),
         })
         .unwrap_or_else(default_postgres_experiment_user_preferences))
@@ -6244,7 +6550,9 @@ async fn save_postgres_experiment_user_preferences_command(
         density: normalize_postgres_experiment_density(&preferences.density),
         font_size: normalize_postgres_experiment_font_size(&preferences.font_size),
         locale: normalize_postgres_experiment_locale(&preferences.locale),
-        recent_project_limit: normalize_postgres_experiment_recent_project_limit(preferences.recent_project_limit),
+        recent_project_limit: normalize_postgres_experiment_recent_project_limit(
+            preferences.recent_project_limit,
+        ),
         theme_state: normalize_postgres_experiment_theme_state(preferences.theme_state),
     };
     let subject_key = postgres_experiment_preference_subject_key(&session);
@@ -6473,10 +6781,9 @@ async fn rename_postgres_experiment_remembered_account_command(
     ensure_postgres_experiment_control_schema(&app).await?;
     let trimmed_name = next_name.trim().to_string();
     let (mut client, connection_task) = connect_postgres_runtime(&app).await?;
-    let transaction = client
-        .transaction()
-        .await
-        .map_err(|e| format!("Could not start PostgreSQL experiment remembered-account update: {e}"))?;
+    let transaction = client.transaction().await.map_err(|e| {
+        format!("Could not start PostgreSQL experiment remembered-account update: {e}")
+    })?;
     transaction
         .execute(
             "
@@ -6486,7 +6793,9 @@ async fn rename_postgres_experiment_remembered_account_command(
             &[&normalized_previous_email, &normalized_next_email],
         )
         .await
-        .map_err(|e| format!("Could not clear outdated PostgreSQL experiment remembered account rows: {e}"))?;
+        .map_err(|e| {
+            format!("Could not clear outdated PostgreSQL experiment remembered account rows: {e}")
+        })?;
     transaction
         .execute(
             "
@@ -6501,11 +6810,12 @@ async fn rename_postgres_experiment_remembered_account_command(
             &[&normalized_next_email, &trimmed_name],
         )
         .await
-        .map_err(|e| format!("Could not save renamed PostgreSQL experiment remembered account: {e}"))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|e| format!("Could not commit PostgreSQL experiment remembered-account update: {e}"))?;
+        .map_err(|e| {
+            format!("Could not save renamed PostgreSQL experiment remembered account: {e}")
+        })?;
+    transaction.commit().await.map_err(|e| {
+        format!("Could not commit PostgreSQL experiment remembered-account update: {e}")
+    })?;
     connection_task.abort();
 
     Ok(())
@@ -6587,7 +6897,8 @@ async fn remember_postgres_experiment_project_opened_command(
     };
 
     let subject_key = postgres_experiment_preference_subject_key(&session);
-    let current = get_postgres_experiment_user_project_state_command(app.clone(), runtime_auth_state).await?;
+    let current =
+        get_postgres_experiment_user_project_state_command(app.clone(), runtime_auth_state).await?;
     let mut recent_projects = current
         .recent_projects
         .into_iter()
@@ -6626,7 +6937,11 @@ async fn remember_postgres_experiment_project_opened_command(
                 recent_projects_json = EXCLUDED.recent_projects_json,
                 updated_at = NOW()
             ",
-            &[&subject_key, &next.last_opened_project_id, &recent_projects_json],
+            &[
+                &subject_key,
+                &next.last_opened_project_id,
+                &recent_projects_json,
+            ],
         )
         .await
         .map_err(|e| format!("Could not save PostgreSQL experiment user project state: {e}"))?;
@@ -6646,9 +6961,12 @@ async fn remove_postgres_experiment_project_from_state_command(
 
     let trimmed_project_id = project_id.trim().to_string();
     let subject_key = postgres_experiment_preference_subject_key(&session);
-    let current = get_postgres_experiment_user_project_state_command(app.clone(), runtime_auth_state).await?;
+    let current =
+        get_postgres_experiment_user_project_state_command(app.clone(), runtime_auth_state).await?;
     let next = PostgresExperimentUserProjectState {
-        last_opened_project_id: if current.last_opened_project_id.as_deref() == Some(trimmed_project_id.as_str()) {
+        last_opened_project_id: if current.last_opened_project_id.as_deref()
+            == Some(trimmed_project_id.as_str())
+        {
             None
         } else {
             current.last_opened_project_id
@@ -6678,7 +6996,11 @@ async fn remove_postgres_experiment_project_from_state_command(
                 recent_projects_json = EXCLUDED.recent_projects_json,
                 updated_at = NOW()
             ",
-            &[&subject_key, &next.last_opened_project_id, &recent_projects_json],
+            &[
+                &subject_key,
+                &next.last_opened_project_id,
+                &recent_projects_json,
+            ],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment user project state: {e}"))?;
@@ -6734,7 +7056,10 @@ async fn register_postgres_experiment_app_user_command(
         return Err("Choose a password with at least 8 characters.".to_string());
     }
 
-    if load_postgres_experiment_app_user_by_email(&app, &email).await?.is_some() {
+    if load_postgres_experiment_app_user_by_email(&app, &email)
+        .await?
+        .is_some()
+    {
         return Err("An account with that email already exists.".to_string());
     }
 
@@ -6799,7 +7124,9 @@ async fn login_postgres_experiment_admin_command(
 
     let identity = load_or_create_postgres_bootstrap_identity(&app)?;
     if username != identity.superuser_name {
-        return Err("That username is not the configured local PostgreSQL administrator.".to_string());
+        return Err(
+            "That username is not the configured local PostgreSQL administrator.".to_string(),
+        );
     }
     let _ = run_psql_command(
         &identity.host,
@@ -6986,7 +7313,8 @@ async fn change_postgres_experiment_app_user_password_command(
         return Err("Choose a password with at least 8 characters.".to_string());
     }
 
-    let Some(user_record) = load_postgres_experiment_app_user_by_id(&app, &session.user.id).await? else {
+    let Some(user_record) = load_postgres_experiment_app_user_by_id(&app, &session.user.id).await?
+    else {
         return Err("Could not load the signed-in PostgreSQL user.".to_string());
     };
     if !verify_postgres_app_user_password(&current_password, &user_record.password_hash)? {
@@ -7028,7 +7356,8 @@ async fn list_postgres_experiment_app_users_command(
     app: tauri::AppHandle,
     runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
 ) -> Result<Vec<PostgresExperimentAppUser>, String> {
-    let _session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
+    let _session =
+        require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
     let (client, connection_task) = connect_postgres_runtime(&app).await?;
     let rows = client
         .query(
@@ -7121,7 +7450,8 @@ async fn create_postgres_experiment_project_command(
     let project_id = generate_identifier();
     let database_name = postgres_project_database_name(&project_id);
     let storage_path = postgres_project_storage_path(&app, &project_id)?;
-    fs::create_dir_all(&storage_path).map_err(|e| format!("Could not create project storage directory: {e}"))?;
+    fs::create_dir_all(&storage_path)
+        .map_err(|e| format!("Could not create project storage directory: {e}"))?;
 
     if let Err(error) = create_postgres_database_if_missing(&app, &database_name).await {
         let _ = fs::remove_dir_all(&storage_path);
@@ -7143,7 +7473,11 @@ async fn create_postgres_experiment_project_command(
             VALUES ($1, $2, $3)
             RETURNING id, database_name, storage_path, created_at::text, updated_at::text
             ",
-            &[&project_id, &database_name, &storage_path.to_string_lossy().to_string()],
+            &[
+                &project_id,
+                &database_name,
+                &storage_path.to_string_lossy().to_string(),
+            ],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment project: {e}"))?;
@@ -7151,7 +7485,8 @@ async fn create_postgres_experiment_project_command(
 
     if let Err(error) = (async {
         ensure_postgres_experiment_project_schema(&app, &database_name).await?;
-        let (project_client, project_connection_task) = connect_postgres_database(&app, &database_name).await?;
+        let (project_client, project_connection_task) =
+            connect_postgres_database(&app, &database_name).await?;
         project_client
             .execute(
                 "
@@ -7179,10 +7514,18 @@ async fn create_postgres_experiment_project_command(
                     role = EXCLUDED.role,
                     updated_at = NOW()
                 ",
-                &[&generate_identifier(), &session.user.id, &creator_name, &creator_email, &creator_role],
+                &[
+                    &generate_identifier(),
+                    &session.user.id,
+                    &creator_name,
+                    &creator_email,
+                    &creator_role,
+                ],
             )
             .await
-            .map_err(|e| format!("Could not add the project creator to PostgreSQL project access: {e}"))?;
+            .map_err(|e| {
+                format!("Could not add the project creator to PostgreSQL project access: {e}")
+            })?;
         project_connection_task.abort();
         Ok::<(), String>(())
     })
@@ -7191,7 +7534,9 @@ async fn create_postgres_experiment_project_command(
         let _ = drop_postgres_database_if_exists(&app, &database_name).await;
         let _ = fs::remove_dir_all(&storage_path);
         let (cleanup_client, cleanup_connection_task) = connect_postgres_runtime(&app).await?;
-        let _ = cleanup_client.execute("DELETE FROM projects WHERE id = $1", &[&project_id]).await;
+        let _ = cleanup_client
+            .execute("DELETE FROM projects WHERE id = $1", &[&project_id])
+            .await;
         cleanup_connection_task.abort();
         return Err(error);
     }
@@ -7226,8 +7571,14 @@ async fn update_postgres_experiment_project_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_membership_management(&app, Some(&runtime_auth_state), &project).await?;
-    let (project_client, project_connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let _session = require_postgres_experiment_project_membership_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    let (project_client, project_connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
     project_client
         .execute(
             "
@@ -7253,7 +7604,9 @@ async fn update_postgres_experiment_project_command(
             &[&project_id],
         )
         .await
-        .map_err(|e| format!("Could not update PostgreSQL experiment project registry timestamp: {e}"))?;
+        .map_err(|e| {
+            format!("Could not update PostgreSQL experiment project registry timestamp: {e}")
+        })?;
     connection_task.abort();
     let updated = load_postgres_experiment_project_record(&app, &project_id).await?;
     emit_postgres_experiment_project_change(&app, &project_id, "project", &project_id, "updated");
@@ -7272,12 +7625,19 @@ async fn delete_postgres_experiment_project_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_membership_management(&app, Some(&runtime_auth_state), &project).await?;
+    let _session = require_postgres_experiment_project_membership_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
 
     drop_postgres_database_if_exists(&app, &project.database_name).await?;
     if let Err(error) = fs::remove_dir_all(&project.storage_path) {
         if std::path::Path::new(&project.storage_path).exists() {
-            return Err(format!("Could not remove PostgreSQL project storage: {error}"));
+            return Err(format!(
+                "Could not remove PostgreSQL project storage: {error}"
+            ));
         }
     }
 
@@ -7303,7 +7663,9 @@ async fn list_postgres_experiment_project_users_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let rows = client
@@ -7352,7 +7714,13 @@ async fn create_postgres_experiment_project_user_command(
         return Err("Choose a registered user to add.".to_string());
     }
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_invite_access(&app, Some(&runtime_auth_state), &project, &role).await?;
+    let session = require_postgres_experiment_project_invite_access(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+        &role,
+    )
+    .await?;
     let Some(app_user) = load_postgres_experiment_app_user_by_id(&app, &app_user_id).await? else {
         return Err("The selected registered user could not be found.".to_string());
     };
@@ -7366,7 +7734,13 @@ async fn create_postgres_experiment_project_user_command(
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id, app_user_id, name, email, role, created_at::text, updated_at::text
             ",
-            &[&user_id, &app_user.user.id, &app_user.user.name, &app_user.user.email, &role],
+            &[
+                &user_id,
+                &app_user.user.id,
+                &app_user.user.name,
+                &app_user.user.email,
+                &role,
+            ],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment project user: {e}"))?;
@@ -7392,8 +7766,15 @@ async fn create_postgres_experiment_project_user_command(
             "email": created.email,
             "nextRole": created.role,
         })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "project_user", &created.id, "created");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "project_user",
+        &created.id,
+        "created",
+    );
     connection_task.abort();
     Ok(created)
 }
@@ -7415,7 +7796,12 @@ async fn update_postgres_experiment_project_user_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_membership_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_membership_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let existing = client
@@ -7435,14 +7821,21 @@ async fn update_postgres_experiment_project_user_command(
     };
     let existing_role: String = existing.get(4);
     if role == "owner" || existing_role == "owner" {
-        let requester_role = postgres_experiment_project_membership_role(&app, &project, &session.user.email).await?;
-        if !postgres_experiment_session_is_admin(&session) && requester_role.as_deref() != Some("owner") {
+        let requester_role =
+            postgres_experiment_project_membership_role(&app, &project, &session.user.email)
+                .await?;
+        if !postgres_experiment_session_is_admin(&session)
+            && requester_role.as_deref() != Some("owner")
+        {
             connection_task.abort();
-            return Err("Only project owners or administrators can change project ownership.".to_string());
+            return Err(
+                "Only project owners or administrators can change project ownership.".to_string(),
+            );
         }
     }
     if existing_role == "owner" && role != "owner" {
-        let owner_count = count_postgres_experiment_project_users_by_role(&app, &project, "owner").await?;
+        let owner_count =
+            count_postgres_experiment_project_users_by_role(&app, &project, "owner").await?;
         if owner_count <= 1 {
             connection_task.abort();
             return Err("A project must always have at least one owner.".to_string());
@@ -7484,8 +7877,15 @@ async fn update_postgres_experiment_project_user_command(
             "previousRole": existing_role,
             "nextRole": updated.role,
         })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "project_user", &updated.id, "updated");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "project_user",
+        &updated.id,
+        "updated",
+    );
     connection_task.abort();
     Ok(updated)
 }
@@ -7504,7 +7904,12 @@ async fn delete_postgres_experiment_project_user_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_membership_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_membership_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let existing = client
@@ -7517,7 +7922,9 @@ async fn delete_postgres_experiment_project_user_command(
             &[&project_user_id],
         )
         .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment project user for removal: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment project user for removal: {e}")
+        })?;
     let Some(existing) = existing else {
         connection_task.abort();
         return Err("The PostgreSQL project user could not be found.".to_string());
@@ -7525,17 +7932,26 @@ async fn delete_postgres_experiment_project_user_command(
     let existing_app_user_id: String = existing.get(1);
     let existing_email: String = existing.get(2);
     let existing_role: String = existing.get(3);
-    if existing_app_user_id == session.user.id || existing_email.eq_ignore_ascii_case(&session.user.email) {
+    if existing_app_user_id == session.user.id
+        || existing_email.eq_ignore_ascii_case(&session.user.email)
+    {
         connection_task.abort();
         return Err("You cannot remove your own account from this project.".to_string());
     }
     if existing_role == "owner" {
-        let requester_role = postgres_experiment_project_membership_role(&app, &project, &session.user.email).await?;
-        if !postgres_experiment_session_is_admin(&session) && requester_role.as_deref() != Some("owner") {
+        let requester_role =
+            postgres_experiment_project_membership_role(&app, &project, &session.user.email)
+                .await?;
+        if !postgres_experiment_session_is_admin(&session)
+            && requester_role.as_deref() != Some("owner")
+        {
             connection_task.abort();
-            return Err("Only project owners or administrators can remove a project owner.".to_string());
+            return Err(
+                "Only project owners or administrators can remove a project owner.".to_string(),
+            );
         }
-        let owner_count = count_postgres_experiment_project_users_by_role(&app, &project, "owner").await?;
+        let owner_count =
+            count_postgres_experiment_project_users_by_role(&app, &project, "owner").await?;
         if owner_count <= 1 {
             connection_task.abort();
             return Err("A project must always have at least one owner.".to_string());
@@ -7546,7 +7962,10 @@ async fn delete_postgres_experiment_project_user_command(
         "previousRole": existing_role,
     });
     client
-        .execute("DELETE FROM project_users WHERE id = $1", &[&project_user_id])
+        .execute(
+            "DELETE FROM project_users WHERE id = $1",
+            &[&project_user_id],
+        )
         .await
         .map_err(|e| format!("Could not remove PostgreSQL experiment project user: {e}"))?;
     append_postgres_experiment_project_log_for_client(
@@ -7557,8 +7976,15 @@ async fn delete_postgres_experiment_project_user_command(
         "Removed a project member",
         Some(&project_user_id),
         Some(removed_details),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "project_user", &project_user_id, "deleted");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "project_user",
+        &project_user_id,
+        "deleted",
+    );
     connection_task.abort();
     Ok(DeletePostgresExperimentProjectUserResult {
         project_id,
@@ -7578,9 +8004,13 @@ async fn get_postgres_experiment_project_ai_assist_settings_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     let row = load_postgres_experiment_project_settings_row(&app, &project).await?;
-    Ok(postgres_experiment_project_ai_assist_settings_from_row(&row))
+    Ok(postgres_experiment_project_ai_assist_settings_from_row(
+        &row,
+    ))
 }
 
 #[tauri::command]
@@ -7595,8 +8025,12 @@ async fn save_postgres_experiment_project_ai_assist_settings_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session =
-        require_postgres_experiment_project_membership_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_membership_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let row = client
@@ -7630,13 +8064,19 @@ async fn save_postgres_experiment_project_ai_assist_settings_command(
             ],
         )
         .await
-        .map_err(|e| format!("Could not save PostgreSQL experiment project AI Assist settings: {e}"))?;
+        .map_err(|e| {
+            format!("Could not save PostgreSQL experiment project AI Assist settings: {e}")
+        })?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
         &session,
         "project.ai_assist.update",
-        if request.settings.enabled { "Enabled AI Assist for this project" } else { "Disabled AI Assist for this project" },
+        if request.settings.enabled {
+            "Enabled AI Assist for this project"
+        } else {
+            "Disabled AI Assist for this project"
+        },
         Some("default"),
         Some(serde_json::json!({
             "enabled": request.settings.enabled,
@@ -7649,10 +8089,19 @@ async fn save_postgres_experiment_project_ai_assist_settings_command(
                 "allow_draft_reports"
             ],
         })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "project_settings", "default", "updated");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "project_settings",
+        "default",
+        "updated",
+    );
     connection_task.abort();
-    Ok(postgres_experiment_project_ai_assist_settings_from_row(&row))
+    Ok(postgres_experiment_project_ai_assist_settings_from_row(
+        &row,
+    ))
 }
 
 #[tauri::command]
@@ -7667,7 +8116,9 @@ async fn get_postgres_experiment_project_document_import_settings_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     let row = load_postgres_experiment_project_settings_row(&app, &project).await?;
     Ok(postgres_experiment_project_document_import_settings_from_row(&row))
 }
@@ -7684,8 +8135,12 @@ async fn save_postgres_experiment_project_document_import_settings_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session =
-        require_postgres_experiment_project_membership_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_membership_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let row = client
@@ -7707,7 +8162,9 @@ async fn save_postgres_experiment_project_document_import_settings_command(
             &[&request.settings.store_original_file_name],
         )
         .await
-        .map_err(|e| format!("Could not save PostgreSQL experiment project document import settings: {e}"))?;
+        .map_err(|e| {
+            format!("Could not save PostgreSQL experiment project document import settings: {e}")
+        })?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -7718,8 +8175,15 @@ async fn save_postgres_experiment_project_document_import_settings_command(
         Some(serde_json::json!({
             "changedFields": ["document_import_store_original_file_name"],
         })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "project_settings", "default", "updated");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "project_settings",
+        "default",
+        "updated",
+    );
     connection_task.abort();
     Ok(postgres_experiment_project_document_import_settings_from_row(&row))
 }
@@ -7736,7 +8200,9 @@ async fn get_postgres_experiment_project_canvas_state_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     let row = load_postgres_experiment_project_settings_row(&app, &project).await?;
     Ok(postgres_experiment_project_canvas_state_from_row(&row))
 }
@@ -7753,10 +8219,13 @@ async fn save_postgres_experiment_project_canvas_state_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let canvas_state_json = serde_json::to_string(&request.state)
-        .map_err(|e| format!("Could not serialize PostgreSQL experiment project canvas state: {e}"))?;
+    let canvas_state_json = serde_json::to_string(&request.state).map_err(|e| {
+        format!("Could not serialize PostgreSQL experiment project canvas state: {e}")
+    })?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let existing_canvas_state_json: String = client
         .query_one(
@@ -7768,7 +8237,9 @@ async fn save_postgres_experiment_project_canvas_state_command(
             &[],
         )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment project canvas state before save: {e}"))?
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment project canvas state before save: {e}")
+        })?
         .get(0);
     if existing_canvas_state_json == canvas_state_json {
         connection_task.abort();
@@ -7808,7 +8279,8 @@ async fn save_postgres_experiment_project_canvas_state_command(
             "shapeCount": request.state.shapes.len(),
             "hiddenRelationshipCount": request.state.hidden_relationship_ids.len(),
         })),
-    ).await?;
+    )
+    .await?;
     connection_task.abort();
     Ok(postgres_experiment_project_canvas_state_from_row(&row))
 }
@@ -7845,15 +8317,23 @@ async fn save_postgres_experiment_saved_drawing_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
 
-    let drawing_state_json = serde_json::to_string(&request.state)
-        .map_err(|e| format!("Could not serialize PostgreSQL experiment saved drawing state: {e}"))?;
+    let drawing_state_json = serde_json::to_string(&request.state).map_err(|e| {
+        format!("Could not serialize PostgreSQL experiment saved drawing state: {e}")
+    })?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let created = drawing_id.is_none();
     let resolved_drawing_id = drawing_id.unwrap_or_else(generate_identifier);
-    let resolved_name = name.unwrap_or_else(|| format!("Drawing {}", &resolved_drawing_id.chars().take(8).collect::<String>()));
+    let resolved_name = name.unwrap_or_else(|| {
+        format!(
+            "Drawing {}",
+            &resolved_drawing_id.chars().take(8).collect::<String>()
+        )
+    });
 
     let row = if created {
         client
@@ -7926,7 +8406,9 @@ async fn list_postgres_experiment_saved_drawings_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &trimmed_project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
 
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
@@ -7961,7 +8443,9 @@ async fn list_postgres_experiment_saved_drawing_summaries_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &trimmed_project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
 
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
@@ -7975,7 +8459,9 @@ async fn list_postgres_experiment_saved_drawing_summaries_command(
             &[],
         )
         .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment saved drawing summaries: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment saved drawing summaries: {e}")
+        })?;
     connection_task.abort();
 
     Ok(rows
@@ -8001,7 +8487,9 @@ async fn get_postgres_experiment_saved_drawing_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &trimmed_project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
 
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
@@ -8019,7 +8507,10 @@ async fn get_postgres_experiment_saved_drawing_command(
     connection_task.abort();
 
     match row {
-        Some(row) => Ok(map_postgres_experiment_saved_drawing_row(&trimmed_project_id, row)),
+        Some(row) => Ok(map_postgres_experiment_saved_drawing_row(
+            &trimmed_project_id,
+            row,
+        )),
         None => Err("Saved drawing not found.".to_string()),
     }
 }
@@ -8041,17 +8532,27 @@ async fn delete_postgres_experiment_saved_drawing_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &trimmed_project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
 
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let deleted_name = client
-        .query_opt("SELECT name FROM saved_drawings WHERE id = $1", &[&trimmed_drawing_id])
+        .query_opt(
+            "SELECT name FROM saved_drawings WHERE id = $1",
+            &[&trimmed_drawing_id],
+        )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment saved drawing before deletion: {e}"))?
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment saved drawing before deletion: {e}")
+        })?
         .map(|row| row.get::<usize, String>(0));
     client
-        .execute("DELETE FROM saved_drawings WHERE id = $1", &[&trimmed_drawing_id])
+        .execute(
+            "DELETE FROM saved_drawings WHERE id = $1",
+            &[&trimmed_drawing_id],
+        )
         .await
         .map_err(|e| format!("Could not delete PostgreSQL experiment saved drawing: {e}"))?;
     append_postgres_experiment_project_log_for_client(
@@ -8064,7 +8565,8 @@ async fn delete_postgres_experiment_saved_drawing_command(
         Some(serde_json::json!({
             "name": deleted_name,
         })),
-    ).await?;
+    )
+    .await?;
     connection_task.abort();
 
     emit_postgres_experiment_project_change(
@@ -8182,7 +8684,7 @@ async fn load_postgres_experiment_object_types_for_client(
     let rows = client
         .query(
             "
-            SELECT id, system_key, name, description, shape, color, fill, created_at::text, updated_at::text
+            SELECT id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
             FROM object_types
             ORDER BY lower(name) ASC, created_at ASC, id ASC
             ",
@@ -8230,7 +8732,9 @@ async fn delete_expired_postgres_experiment_source_locks_for_client(
             &[&now_ms],
         )
         .await
-        .map_err(|e| format!("Could not clear expired PostgreSQL experiment source lock kicks: {e}"))?;
+        .map_err(|e| {
+            format!("Could not clear expired PostgreSQL experiment source lock kicks: {e}")
+        })?;
     client
         .execute(
             "
@@ -8357,7 +8861,9 @@ async fn load_postgres_experiment_source_attribute_values_for_client(
             &[],
         )
         .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment source attribute values: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment source attribute values: {e}")
+        })?;
     Ok(rows
         .into_iter()
         .map(|row| PostgresExperimentSourceAttributeValue {
@@ -8615,6 +9121,7 @@ async fn load_postgres_experiment_annotation_summaries_for_client(
             SELECT
                 a.id,
                 a.source_id,
+                COALESCE(NULLIF(a.source_kind, ''), s.source_kind, '') AS source_kind,
                 a.display_id,
                 COALESCE(ac.code_ids, ARRAY[]::TEXT[]) AS code_ids,
                 COALESCE(ac.primary_code_id, '') AS primary_code_id,
@@ -8642,6 +9149,7 @@ async fn load_postgres_experiment_annotation_summaries_for_client(
                 INNER JOIN codes c ON c.id = ac.code_id
                 WHERE ac.annotation_id = a.id
             ) ac ON TRUE
+            LEFT JOIN sources s ON s.id = a.source_id
             LEFT JOIN codes pc ON pc.id = ac.primary_code_id
             LEFT JOIN project_users pu ON pu.id = a.created_by_project_user_id
             ORDER BY a.created_at ASC, a.id ASC
@@ -8654,24 +9162,27 @@ async fn load_postgres_experiment_annotation_summaries_for_client(
         .into_iter()
         .map(|row| PostgresExperimentAnnotationSummary {
             id: row.get(0),
-            display_id: row.get(2),
+            display_id: row.get(3),
             project_id: project_id.to_string(),
             source_id: row.get(1),
-            code_ids: row.get(3),
-            primary_code_id: row.get(4),
-            primary_code_label: row.get(5),
-            start_offset: row.get(6),
-            end_offset: row.get(7),
-            time_start_ms: row.get(8),
-            time_end_ms: row.get(9),
-            quote: row.get(10),
-            note: row.get(11),
-            anchor_kind: row.get(12),
-            image_region: parse_postgres_experiment_annotation_image_region(row.get::<_, String>(13).as_str()),
-            created_by_project_user_id: row.get(14),
-            created_by_name: row.get(15),
-            created_at: row.get(16),
-            updated_at: row.get(17),
+            source_kind: row.get(2),
+            code_ids: row.get(4),
+            primary_code_id: row.get(5),
+            primary_code_label: row.get(6),
+            start_offset: row.get(7),
+            end_offset: row.get(8),
+            time_start_ms: row.get(9),
+            time_end_ms: row.get(10),
+            quote: row.get(11),
+            note: row.get(12),
+            anchor_kind: row.get(13),
+            image_region: parse_postgres_experiment_annotation_image_region(
+                row.get::<_, String>(14).as_str(),
+            ),
+            created_by_project_user_id: row.get(15),
+            created_by_name: row.get(16),
+            created_at: row.get(17),
+            updated_at: row.get(18),
         })
         .collect())
 }
@@ -8909,7 +9420,8 @@ async fn load_postgres_experiment_object_type_for_client(
     client: &tokio_postgres::Client,
     object_type_id: &str,
 ) -> Result<(String, String), String> {
-    let object_type = load_postgres_experiment_object_type_record_for_client(client, object_type_id).await?;
+    let object_type =
+        load_postgres_experiment_object_type_record_for_client(client, object_type_id).await?;
     Ok((object_type.id, object_type.name))
 }
 
@@ -8927,7 +9439,9 @@ async fn load_postgres_experiment_object_type_record_for_system_key_for_client(
             &[&system_key],
         )
         .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment object type by system key: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment object type by system key: {e}")
+        })?;
     row.map(|row| PostgresExperimentResolvedObjectType {
         id: row.get(0),
         name: row.get(1),
@@ -8944,7 +9458,9 @@ async fn sync_postgres_experiment_source_object_for_client(
     notes: &str,
 ) -> Result<(), String> {
     let system_key = postgres_experiment_source_object_type_system_key(source_kind);
-    let object_type = load_postgres_experiment_object_type_record_for_system_key_for_client(client, system_key).await?;
+    let object_type =
+        load_postgres_experiment_object_type_record_for_system_key_for_client(client, system_key)
+            .await?;
     let existing_object_id = client
         .query_opt(
             "
@@ -8970,10 +9486,18 @@ async fn sync_postgres_experiment_source_object_for_client(
                     updated_at = NOW()
                 WHERE id = $1
                 ",
-                &[&object_id, &object_type.id, &object_type.name, &title, &notes],
+                &[
+                    &object_id,
+                    &object_type.id,
+                    &object_type.name,
+                    &title,
+                    &notes,
+                ],
             )
             .await
-            .map_err(|e| format!("Could not update PostgreSQL experiment source-backed object: {e}"))?;
+            .map_err(|e| {
+                format!("Could not update PostgreSQL experiment source-backed object: {e}")
+            })?;
     } else {
         let object_id = generate_identifier();
         client
@@ -9004,13 +9528,22 @@ async fn sync_all_postgres_experiment_source_objects_for_client(
             &[],
         )
         .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment sources for object sync: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment sources for object sync: {e}")
+        })?;
     for row in rows {
         let source_id: String = row.get(0);
         let source_kind: String = row.get(1);
         let title: String = row.get(2);
         let notes: String = row.get(3);
-        sync_postgres_experiment_source_object_for_client(client, &source_id, &source_kind, &title, &notes).await?;
+        sync_postgres_experiment_source_object_for_client(
+            client,
+            &source_id,
+            &source_kind,
+            &title,
+            &notes,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -9019,7 +9552,10 @@ fn ensure_postgres_experiment_object_type_is_not_source_backed(
     object_type: &PostgresExperimentResolvedObjectType,
 ) -> Result<(), String> {
     if is_postgres_experiment_source_object_system_key(object_type.system_key.as_deref()) {
-        return Err("Sources create and manage these built-in source object types automatically.".to_string());
+        return Err(
+            "Sources create and manage these built-in source object types automatically."
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -9124,7 +9660,9 @@ async fn validate_postgres_experiment_relationship_type_constraints_for_client(
             &[&vec![from_object_id.to_string(), to_object_id.to_string()]],
         )
         .await
-        .map_err(|e| format!("Could not validate PostgreSQL experiment relationship object types: {e}"))?;
+        .map_err(|e| {
+            format!("Could not validate PostgreSQL experiment relationship object types: {e}")
+        })?;
 
     let mut object_type_by_object_id: HashMap<String, Option<String>> = HashMap::new();
     for row in rows {
@@ -9137,7 +9675,11 @@ async fn validate_postgres_experiment_relationship_type_constraints_for_client(
             .and_then(|value| value.clone());
         if !actual_from_object_type_id
             .as_deref()
-            .map(|value| allowed_from_object_type_ids.iter().any(|allowed_id| allowed_id == value))
+            .map(|value| {
+                allowed_from_object_type_ids
+                    .iter()
+                    .any(|allowed_id| allowed_id == value)
+            })
             .unwrap_or(false)
         {
             return Err(format!(
@@ -9152,7 +9694,11 @@ async fn validate_postgres_experiment_relationship_type_constraints_for_client(
             .and_then(|value| value.clone());
         if !actual_to_object_type_id
             .as_deref()
-            .map(|value| allowed_to_object_type_ids.iter().any(|allowed_id| allowed_id == value))
+            .map(|value| {
+                allowed_to_object_type_ids
+                    .iter()
+                    .any(|allowed_id| allowed_id == value)
+            })
             .unwrap_or(false)
         {
             return Err(format!(
@@ -9185,8 +9731,11 @@ async fn load_postgres_experiment_object_attribute_values_for_client(
             &[],
         )
         .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment object attribute values: {e}"))?;
-    let mut values_by_object_id: HashMap<String, Vec<PostgresExperimentObjectAttributeValue>> = HashMap::new();
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment object attribute values: {e}")
+        })?;
+    let mut values_by_object_id: HashMap<String, Vec<PostgresExperimentObjectAttributeValue>> =
+        HashMap::new();
     for row in rows {
         let object_id: String = row.get(1);
         values_by_object_id
@@ -9233,7 +9782,10 @@ async fn save_postgres_experiment_object_attribute_values_for_client(
         let options_json: String = row.get(2);
         definitions_by_id.insert(
             row.get(0),
-            (row.get(1), parse_postgres_experiment_attribute_options_json(&options_json)),
+            (
+                row.get(1),
+                parse_postgres_experiment_attribute_options_json(&options_json),
+            ),
         );
     }
 
@@ -9247,7 +9799,9 @@ async fn save_postgres_experiment_object_attribute_values_for_client(
             &[&object_id],
         )
         .await
-        .map_err(|e| format!("Could not load existing PostgreSQL experiment object attributes: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load existing PostgreSQL experiment object attributes: {e}")
+        })?;
 
     let mut existing_value_ids_by_definition_id: HashMap<String, String> = HashMap::new();
     for row in existing_rows {
@@ -9258,9 +9812,14 @@ async fn save_postgres_experiment_object_attribute_values_for_client(
     for (definition_id, existing_value_id) in &existing_value_ids_by_definition_id {
         if !allowed_definition_ids.contains(definition_id) {
             client
-                .execute("DELETE FROM object_attribute_values WHERE id = $1", &[existing_value_id])
+                .execute(
+                    "DELETE FROM object_attribute_values WHERE id = $1",
+                    &[existing_value_id],
+                )
                 .await
-                .map_err(|e| format!("Could not remove PostgreSQL experiment object attribute value: {e}"))?;
+                .map_err(|e| {
+                    format!("Could not remove PostgreSQL experiment object attribute value: {e}")
+                })?;
         }
     }
 
@@ -9278,16 +9837,23 @@ async fn save_postgres_experiment_object_attribute_values_for_client(
         let (data_type, options) = definitions_by_id
             .get(&attribute_definition_id)
             .cloned()
-            .ok_or_else(|| "One or more object attributes no longer exist in this project.".to_string())?;
+            .ok_or_else(|| {
+                "One or more object attributes no longer exist in this project.".to_string()
+            })?;
 
         if data_type == "categorical"
             && !trimmed_value.is_empty()
             && !options.iter().any(|option| option == &trimmed_value)
         {
-            return Err(format!("Choose one of the allowed values for object attribute \"{}\".", attribute_definition_id));
+            return Err(format!(
+                "Choose one of the allowed values for object attribute \"{}\".",
+                attribute_definition_id
+            ));
         }
 
-        if let Some(existing_value_id) = existing_value_ids_by_definition_id.get(&attribute_definition_id) {
+        if let Some(existing_value_id) =
+            existing_value_ids_by_definition_id.get(&attribute_definition_id)
+        {
             if trimmed_value.is_empty() {
                 client
                     .execute(
@@ -9295,7 +9861,9 @@ async fn save_postgres_experiment_object_attribute_values_for_client(
                         &[existing_value_id],
                     )
                     .await
-                    .map_err(|e| format!("Could not clear PostgreSQL experiment object attribute value: {e}"))?;
+                    .map_err(|e| {
+                        format!("Could not clear PostgreSQL experiment object attribute value: {e}")
+                    })?;
             } else {
                 client
                     .execute(
@@ -9308,7 +9876,11 @@ async fn save_postgres_experiment_object_attribute_values_for_client(
                         &[existing_value_id, &trimmed_value],
                     )
                     .await
-                    .map_err(|e| format!("Could not update PostgreSQL experiment object attribute value: {e}"))?;
+                    .map_err(|e| {
+                        format!(
+                            "Could not update PostgreSQL experiment object attribute value: {e}"
+                        )
+                    })?;
             }
         } else if !trimmed_value.is_empty() {
             client
@@ -9334,7 +9906,9 @@ fn normalize_optional_postgres_experiment_text(value: Option<&str>) -> Option<St
         .map(str::to_string)
 }
 
-fn normalize_postgres_experiment_event_time_precision(value: Option<&str>) -> Result<String, String> {
+fn normalize_postgres_experiment_event_time_precision(
+    value: Option<&str>,
+) -> Result<String, String> {
     let normalized = value
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -9360,7 +9934,8 @@ async fn save_postgres_experiment_event_fields_for_client(
         let start_at = normalize_optional_postgres_experiment_text(event_start_at)
             .ok_or_else(|| "Events require a start date/time.".to_string())?;
         let end_at = normalize_optional_postgres_experiment_text(event_end_at);
-        let time_precision = normalize_postgres_experiment_event_time_precision(event_time_precision)?;
+        let time_precision =
+            normalize_postgres_experiment_event_time_precision(event_time_precision)?;
         let timezone = event_timezone.unwrap_or("").trim().to_string();
         let is_instant = event_is_instant.unwrap_or(false);
         client
@@ -9382,7 +9957,10 @@ async fn save_postgres_experiment_event_fields_for_client(
             .map_err(|e| format!("Could not save PostgreSQL experiment event fields: {e}"))?;
     } else {
         client
-            .execute("DELETE FROM event_objects WHERE object_id = $1", &[&object_id])
+            .execute(
+                "DELETE FROM event_objects WHERE object_id = $1",
+                &[&object_id],
+            )
             .await
             .map_err(|e| format!("Could not clear PostgreSQL experiment event fields: {e}"))?;
     }
@@ -9411,6 +9989,7 @@ async fn load_postgres_experiment_object_for_client(
                 o.shape_override,
                 o.color_override,
                 o.fill_override,
+                o.image_storage_path,
                 e.start_at::text,
                 e.end_at::text,
                 e.time_precision,
@@ -9478,9 +10057,13 @@ async fn load_postgres_experiment_relationship_attribute_values_for_client(
             &[],
         )
         .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment relationship attribute values: {e}"))?;
-    let mut values_by_relationship_id: HashMap<String, Vec<PostgresExperimentRelationshipAttributeValue>> =
-        HashMap::new();
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment relationship attribute values: {e}")
+        })?;
+    let mut values_by_relationship_id: HashMap<
+        String,
+        Vec<PostgresExperimentRelationshipAttributeValue>,
+    > = HashMap::new();
     for row in rows {
         let relationship_id: String = row.get(1);
         values_by_relationship_id
@@ -9520,14 +10103,19 @@ async fn save_postgres_experiment_relationship_attribute_values_for_client(
             &[&normalized_relationship_type_id],
         )
         .await
-        .map_err(|e| format!("Could not validate PostgreSQL experiment relationship attributes: {e}"))?;
+        .map_err(|e| {
+            format!("Could not validate PostgreSQL experiment relationship attributes: {e}")
+        })?;
 
     let mut definitions_by_id: HashMap<String, (String, Vec<String>)> = HashMap::new();
     for row in definition_rows {
         let options_json: String = row.get(2);
         definitions_by_id.insert(
             row.get(0),
-            (row.get(1), parse_postgres_experiment_attribute_options_json(&options_json)),
+            (
+                row.get(1),
+                parse_postgres_experiment_attribute_options_json(&options_json),
+            ),
         );
     }
 
@@ -9541,7 +10129,9 @@ async fn save_postgres_experiment_relationship_attribute_values_for_client(
             &[&relationship_id],
         )
         .await
-        .map_err(|e| format!("Could not load existing PostgreSQL experiment relationship attributes: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load existing PostgreSQL experiment relationship attributes: {e}")
+        })?;
 
     let mut existing_value_ids_by_definition_id: HashMap<String, String> = HashMap::new();
     for row in existing_rows {
@@ -9560,7 +10150,11 @@ async fn save_postgres_experiment_relationship_attribute_values_for_client(
                     &[existing_value_id],
                 )
                 .await
-                .map_err(|e| format!("Could not remove PostgreSQL experiment relationship attribute value: {e}"))?;
+                .map_err(|e| {
+                    format!(
+                        "Could not remove PostgreSQL experiment relationship attribute value: {e}"
+                    )
+                })?;
         }
     }
 
@@ -9571,7 +10165,10 @@ async fn save_postgres_experiment_relationship_attribute_values_for_client(
             return Err("Relationship attribute definition id is required.".to_string());
         }
         if !seen_definition_ids.insert(attribute_definition_id.clone()) {
-            return Err("Relationship attribute values must not repeat the same attribute definition.".to_string());
+            return Err(
+                "Relationship attribute values must not repeat the same attribute definition."
+                    .to_string(),
+            );
         }
 
         let Some((data_type, options)) = definitions_by_id.get(&attribute_definition_id) else {
@@ -9579,11 +10176,18 @@ async fn save_postgres_experiment_relationship_attribute_values_for_client(
         };
 
         let value = input.value.trim().to_string();
-        if data_type == "categorical" && !value.is_empty() && !options.iter().any(|option| option == &value) {
-            return Err(format!("Relationship attribute value \"{value}\" is not one of the allowed options."));
+        if data_type == "categorical"
+            && !value.is_empty()
+            && !options.iter().any(|option| option == &value)
+        {
+            return Err(format!(
+                "Relationship attribute value \"{value}\" is not one of the allowed options."
+            ));
         }
 
-        if let Some(existing_value_id) = existing_value_ids_by_definition_id.get(&attribute_definition_id) {
+        if let Some(existing_value_id) =
+            existing_value_ids_by_definition_id.get(&attribute_definition_id)
+        {
             if value.is_empty() {
                 client
                     .execute(
@@ -9639,7 +10243,9 @@ async fn list_postgres_experiment_sources_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let sources = load_postgres_experiment_sources_for_client(&client, &project_id).await?;
@@ -9668,17 +10274,30 @@ async fn create_postgres_experiment_source_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
 
     let source_id = generate_identifier();
-    let original_file_name = request.original_file_name.unwrap_or_default().trim().to_string();
+    let original_file_name = request
+        .original_file_name
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let storage_path = request.storage_path.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
     let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
     let video_frame_index_json = request.video_frame_index_json.unwrap_or_default();
-    let extracted_from_video_source_id = request.extracted_from_video_source_id.unwrap_or_default().trim().to_string();
+    let extracted_from_video_source_id = request
+        .extracted_from_video_source_id
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
     client
@@ -9717,9 +10336,17 @@ async fn create_postgres_experiment_source_command(
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment source: {e}"))?;
-    sync_postgres_experiment_source_object_for_client(&client, &source_id, &source_kind, &title, &notes).await?;
+    sync_postgres_experiment_source_object_for_client(
+        &client,
+        &source_id,
+        &source_kind,
+        &title,
+        &notes,
+    )
+    .await?;
 
-    let source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -9730,8 +10357,12 @@ async fn create_postgres_experiment_source_command(
         Some(serde_json::json!({
             "name": source.title,
             "sourceKind": source.source_kind,
+            "extractedFromVideoSourceId": source.extracted_from_video_source_id,
+            "extractedFromVideoTimeMs": source.extracted_from_video_time_ms,
+            "createdFromVideoFrame": !source.extracted_from_video_source_id.is_empty(),
         })),
-    ).await?;
+    )
+    .await?;
     emit_postgres_experiment_project_change(&app, &project_id, "source", &source_id, "created");
     connection_task.abort();
     Ok(source)
@@ -9763,7 +10394,12 @@ async fn import_postgres_experiment_source_file_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
 
@@ -9776,15 +10412,20 @@ async fn import_postgres_experiment_source_file_command(
     let structured_content_json = request.structured_content_json.unwrap_or_default();
     let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
     let video_frame_index_json = request.video_frame_index_json.unwrap_or_default();
-    let extracted_from_video_source_id = request.extracted_from_video_source_id.unwrap_or_default().trim().to_string();
+    let extracted_from_video_source_id = request
+        .extracted_from_video_source_id
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
     let sanitized_file_name = sanitize_postgres_experiment_file_name(&original_file_name);
     let relative_storage_path = format!("sources/{source_id}/{sanitized_file_name}");
     let absolute_storage_path = Path::new(&project.storage_path).join(&relative_storage_path);
     if let Some(parent) = absolute_storage_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Could not create PostgreSQL experiment source storage directory: {e}"))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            format!("Could not create PostgreSQL experiment source storage directory: {e}")
+        })?;
     }
     fs::write(&absolute_storage_path, &file_bytes)
         .map_err(|e| format!("Could not save imported PostgreSQL experiment source file: {e}"))?;
@@ -9825,7 +10466,14 @@ async fn import_postgres_experiment_source_file_command(
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment source: {e}"))?;
-    sync_postgres_experiment_source_object_for_client(&client, &source_id, &source_kind, &title, &notes).await?;
+    sync_postgres_experiment_source_object_for_client(
+        &client,
+        &source_id,
+        &source_kind,
+        &title,
+        &notes,
+    )
+    .await?;
 
     client
         .execute(
@@ -9853,7 +10501,8 @@ async fn import_postgres_experiment_source_file_command(
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment source file record: {e}"))?;
 
-    let source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -9866,8 +10515,12 @@ async fn import_postgres_experiment_source_file_command(
             "sourceKind": source.source_kind,
             "fileName": original_file_name,
             "sizeBytes": file_bytes.len(),
+            "extractedFromVideoSourceId": source.extracted_from_video_source_id,
+            "extractedFromVideoTimeMs": source.extracted_from_video_time_ms,
+            "createdFromVideoFrame": !source.extracted_from_video_source_id.is_empty(),
         })),
-    ).await?;
+    )
+    .await?;
     emit_postgres_experiment_project_change(&app, &project_id, "source", &source_id, "created");
     connection_task.abort();
     Ok(source)
@@ -9899,16 +10552,29 @@ async fn update_postgres_experiment_source_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
 
-    let original_file_name = request.original_file_name.unwrap_or_default().trim().to_string();
+    let original_file_name = request
+        .original_file_name
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let storage_path = request.storage_path.unwrap_or_default().trim().to_string();
     let structured_content_json = request.structured_content_json.unwrap_or_default();
     let waveform_peaks_json = request.waveform_peaks_json.unwrap_or_default();
     let video_frame_index_json = request.video_frame_index_json.unwrap_or_default();
-    let extracted_from_video_source_id = request.extracted_from_video_source_id.unwrap_or_default().trim().to_string();
+    let extracted_from_video_source_id = request
+        .extracted_from_video_source_id
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
     let updated_count = client
@@ -9951,9 +10617,17 @@ async fn update_postgres_experiment_source_command(
         connection_task.abort();
         return Err("The selected source could not be found.".to_string());
     }
-    sync_postgres_experiment_source_object_for_client(&client, &source_id, &source_kind, &title, &notes).await?;
+    sync_postgres_experiment_source_object_for_client(
+        &client,
+        &source_id,
+        &source_kind,
+        &title,
+        &notes,
+    )
+    .await?;
 
-    let source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -9989,12 +10663,21 @@ async fn delete_postgres_experiment_source_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let deleted_source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let deleted_source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     client
-        .execute("DELETE FROM research_objects WHERE source_id = $1", &[&source_id])
+        .execute(
+            "DELETE FROM research_objects WHERE source_id = $1",
+            &[&source_id],
+        )
         .await
         .map_err(|e| format!("Could not delete PostgreSQL experiment source-backed object: {e}"))?;
     let deleted_count = client
@@ -10017,7 +10700,8 @@ async fn delete_postgres_experiment_source_command(
         Some(serde_json::json!({
             "name": deleted_source.title,
         })),
-    ).await?;
+    )
+    .await?;
     emit_postgres_experiment_project_change(&app, &project_id, "source", &source_id, "deleted");
     connection_task.abort();
     Ok(())
@@ -10035,7 +10719,9 @@ async fn list_postgres_experiment_source_locks_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let now_ms = current_time_ms() as i64;
@@ -10064,12 +10750,18 @@ async fn acquire_postgres_experiment_source_lock_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session =
-        require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
-    let _source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let _source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     let now_ms = current_time_ms() as i64;
     let lease_expires_at = now_ms + SOURCE_LOCK_LEASE_MS;
 
@@ -10094,9 +10786,9 @@ async fn acquire_postgres_experiment_source_lock_command(
         .await
         .map_err(|e| format!("Could not inspect PostgreSQL experiment source lock kicks: {e}"))?
     {
-        tx.rollback()
-            .await
-            .map_err(|e| format!("Could not roll back PostgreSQL experiment source lock sync: {e}"))?;
+        tx.rollback().await.map_err(|e| {
+            format!("Could not roll back PostgreSQL experiment source lock sync: {e}")
+        })?;
         connection_task.abort();
         return Ok(AcquirePostgresExperimentSourceLockResult {
             ok: false,
@@ -10134,9 +10826,9 @@ async fn acquire_postgres_experiment_source_lock_command(
             let user_name = lock_row.get::<usize, String>(2);
             let expires_at_ms = lock_row.get::<usize, i64>(3);
             let updated_at = lock_row.get::<usize, String>(5);
-            tx.rollback()
-                .await
-                .map_err(|e| format!("Could not roll back PostgreSQL experiment source lock sync: {e}"))?;
+            tx.rollback().await.map_err(|e| {
+                format!("Could not roll back PostgreSQL experiment source lock sync: {e}")
+            })?;
             connection_task.abort();
             return Ok(AcquirePostgresExperimentSourceLockResult {
                 ok: false,
@@ -10182,7 +10874,13 @@ async fn acquire_postgres_experiment_source_lock_command(
             updated_at: updated_row.get(6),
             reason: None,
         };
-        emit_postgres_experiment_project_change(&app, &project_id, "source_lock", &lock.id, "updated");
+        emit_postgres_experiment_project_change(
+            &app,
+            &project_id,
+            "source_lock",
+            &lock.id,
+            "updated",
+        );
         return Ok(AcquirePostgresExperimentSourceLockResult {
             ok: true,
             lock: Some(lock),
@@ -10242,8 +10940,12 @@ async fn release_postgres_experiment_source_lock_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session =
-        require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     client
@@ -10285,11 +10987,18 @@ async fn kick_postgres_experiment_source_lock_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
-    let _source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let _source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     let now_ms = current_time_ms() as i64;
     let tx = client
         .transaction()
@@ -10308,11 +11017,13 @@ async fn kick_postgres_experiment_source_lock_command(
             &[&lock_id, &source_id, &now_ms],
         )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment source lock before removal: {e}"))?
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment source lock before removal: {e}")
+        })?
     else {
-        tx.rollback()
-            .await
-            .map_err(|e| format!("Could not roll back PostgreSQL experiment source lock removal: {e}"))?;
+        tx.rollback().await.map_err(|e| {
+            format!("Could not roll back PostgreSQL experiment source lock removal: {e}")
+        })?;
         connection_task.abort();
         return Ok(());
     };
@@ -10326,7 +11037,9 @@ async fn kick_postgres_experiment_source_lock_command(
         &[&source_id, &locked_user_id],
     )
     .await
-    .map_err(|e| format!("Could not clear existing PostgreSQL experiment source lock kicks: {e}"))?;
+    .map_err(|e| {
+        format!("Could not clear existing PostgreSQL experiment source lock kicks: {e}")
+    })?;
     tx.execute(
         "
         INSERT INTO source_lock_kicks (id, source_id, user_id, kicked_by_user_id, kicked_by_name, expires_at_ms)
@@ -10358,7 +11071,13 @@ async fn kick_postgres_experiment_source_lock_command(
     connection_task.abort();
 
     emit_postgres_experiment_project_change(&app, &project_id, "source_lock", &lock_id, "deleted");
-    emit_postgres_experiment_project_change(&app, &project_id, "source_lock_kick", &source_id, "created");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "source_lock_kick",
+        &source_id,
+        "created",
+    );
     Ok(())
 }
 
@@ -10374,7 +11093,9 @@ async fn list_postgres_experiment_source_object_links_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let links = load_postgres_experiment_source_object_links_for_client(&client).await?;
@@ -10408,11 +11129,18 @@ async fn set_postgres_experiment_source_objects_command(
     object_ids.dedup();
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
-    let source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     let source_backing_object_id = client
         .query_opt(
             "
@@ -10440,7 +11168,9 @@ async fn set_postgres_experiment_source_objects_command(
                 &[&object_ids],
             )
             .await
-            .map_err(|e| format!("Could not validate PostgreSQL experiment source-object associations: {e}"))?;
+            .map_err(|e| {
+                format!("Could not validate PostgreSQL experiment source-object associations: {e}")
+            })?;
         let existing_ids = rows
             .into_iter()
             .map(|row| row.get::<_, String>(0))
@@ -10464,7 +11194,9 @@ async fn set_postgres_experiment_source_objects_command(
         &[&source_id],
     )
     .await
-    .map_err(|e| format!("Could not clear PostgreSQL experiment source-object associations: {e}"))?;
+    .map_err(|e| {
+        format!("Could not clear PostgreSQL experiment source-object associations: {e}")
+    })?;
 
     for object_id in &object_ids {
         tx.execute(
@@ -10475,7 +11207,9 @@ async fn set_postgres_experiment_source_objects_command(
             &[&source_id, object_id],
         )
         .await
-        .map_err(|e| format!("Could not save PostgreSQL experiment source-object association: {e}"))?;
+        .map_err(|e| {
+            format!("Could not save PostgreSQL experiment source-object association: {e}")
+        })?;
     }
 
     tx.commit()
@@ -10499,8 +11233,15 @@ async fn set_postgres_experiment_source_objects_command(
             "addedCount": links.len(),
             "removedCount": 0,
         })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "source_object", &source_id, "updated");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "source_object",
+        &source_id,
+        "updated",
+    );
     connection_task.abort();
     Ok(links)
 }
@@ -10517,10 +11258,14 @@ async fn list_postgres_experiment_source_attribute_definitions_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let definitions = load_postgres_experiment_source_attribute_definitions_for_client(&client, &project_id).await?;
+    let definitions =
+        load_postgres_experiment_source_attribute_definitions_for_client(&client, &project_id)
+            .await?;
     connection_task.abort();
     Ok(definitions)
 }
@@ -10537,7 +11282,9 @@ async fn list_postgres_experiment_source_attribute_values_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let values = load_postgres_experiment_source_attribute_values_for_client(&client).await?;
@@ -10568,9 +11315,15 @@ async fn save_postgres_experiment_source_attribute_command(
     let options = normalize_attribute_options(&request.options);
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
     let tx = client
         .transaction()
@@ -10590,8 +11343,9 @@ async fn save_postgres_experiment_source_attribute_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .is_none();
-    let options_json = serde_json::to_string(&options)
-        .map_err(|e| format!("Could not serialize PostgreSQL experiment source attribute options: {e}"))?;
+    let options_json = serde_json::to_string(&options).map_err(|e| {
+        format!("Could not serialize PostgreSQL experiment source attribute options: {e}")
+    })?;
 
     if created {
         let next_sort_order = tx
@@ -10600,7 +11354,9 @@ async fn save_postgres_experiment_source_attribute_command(
                 &[],
             )
             .await
-            .map_err(|e| format!("Could not prepare PostgreSQL experiment source attribute sort order: {e}"))?
+            .map_err(|e| {
+                format!("Could not prepare PostgreSQL experiment source attribute sort order: {e}")
+            })?
             .get::<usize, i32>(0);
         tx.execute(
             "
@@ -10623,7 +11379,13 @@ async fn save_postgres_experiment_source_attribute_command(
                     updated_at = NOW()
                 WHERE id = $1
                 ",
-                &[&attribute_definition_id, &name, &data_type, &description, &options_json],
+                &[
+                    &attribute_definition_id,
+                    &name,
+                    &data_type,
+                    &description,
+                    &options_json,
+                ],
             )
             .await
             .map_err(|e| format!("Could not update PostgreSQL experiment source attribute: {e}"))?;
@@ -10633,10 +11395,9 @@ async fn save_postgres_experiment_source_attribute_command(
         }
     }
 
-    let source_rows = tx
-        .query("SELECT id FROM sources", &[])
-        .await
-        .map_err(|e| format!("Could not validate PostgreSQL experiment source attribute values: {e}"))?;
+    let source_rows = tx.query("SELECT id FROM sources", &[]).await.map_err(|e| {
+        format!("Could not validate PostgreSQL experiment source attribute values: {e}")
+    })?;
     let valid_source_ids = source_rows
         .into_iter()
         .map(|row| row.get::<usize, String>(0))
@@ -10652,7 +11413,9 @@ async fn save_postgres_experiment_source_attribute_command(
             &[&attribute_definition_id],
         )
         .await
-        .map_err(|e| format!("Could not load existing PostgreSQL experiment source attribute values: {e}"))?;
+        .map_err(|e| {
+            format!("Could not load existing PostgreSQL experiment source attribute values: {e}")
+        })?;
     let mut existing_value_ids_by_source_id: HashMap<String, String> = HashMap::new();
     for row in existing_rows {
         existing_value_ids_by_source_id.insert(row.get(1), row.get(0));
@@ -10665,15 +11428,23 @@ async fn save_postgres_experiment_source_attribute_command(
             return Err("Each source attribute value must include a source id.".to_string());
         }
         if !seen_source_ids.insert(source_id.clone()) {
-            return Err("Each source attribute can only appear once per source in a save request.".to_string());
+            return Err(
+                "Each source attribute can only appear once per source in a save request."
+                    .to_string(),
+            );
         }
         if !valid_source_ids.contains(&source_id) {
             return Err("One or more sources no longer exist in this project.".to_string());
         }
 
         let value = input.value.trim().to_string();
-        if data_type == "categorical" && !value.is_empty() && !options.iter().any(|option| option == &value) {
-            return Err(format!("Choose one of the allowed values for source attribute \"{name}\"."));
+        if data_type == "categorical"
+            && !value.is_empty()
+            && !options.iter().any(|option| option == &value)
+        {
+            return Err(format!(
+                "Choose one of the allowed values for source attribute \"{name}\"."
+            ));
         }
 
         if let Some(existing_value_id) = existing_value_ids_by_source_id.get(&source_id) {
@@ -10683,7 +11454,9 @@ async fn save_postgres_experiment_source_attribute_command(
                     &[existing_value_id],
                 )
                 .await
-                .map_err(|e| format!("Could not clear PostgreSQL experiment source attribute value: {e}"))?;
+                .map_err(|e| {
+                    format!("Could not clear PostgreSQL experiment source attribute value: {e}")
+                })?;
             } else {
                 tx.execute(
                     "
@@ -10695,7 +11468,9 @@ async fn save_postgres_experiment_source_attribute_command(
                     &[existing_value_id, &value],
                 )
                 .await
-                .map_err(|e| format!("Could not update PostgreSQL experiment source attribute value: {e}"))?;
+                .map_err(|e| {
+                    format!("Could not update PostgreSQL experiment source attribute value: {e}")
+                })?;
             }
         } else if !value.is_empty() {
             tx.execute(
@@ -10703,22 +11478,30 @@ async fn save_postgres_experiment_source_attribute_command(
                 INSERT INTO source_attribute_values (id, source_id, attribute_definition_id, value)
                 VALUES ($1, $2, $3, $4)
                 ",
-                &[&generate_identifier(), &source_id, &attribute_definition_id, &value],
+                &[
+                    &generate_identifier(),
+                    &source_id,
+                    &attribute_definition_id,
+                    &value,
+                ],
             )
             .await
-            .map_err(|e| format!("Could not create PostgreSQL experiment source attribute value: {e}"))?;
+            .map_err(|e| {
+                format!("Could not create PostgreSQL experiment source attribute value: {e}")
+            })?;
         }
     }
 
-    tx.commit()
-        .await
-        .map_err(|e| format!("Could not commit PostgreSQL experiment source attribute save: {e}"))?;
+    tx.commit().await.map_err(|e| {
+        format!("Could not commit PostgreSQL experiment source attribute save: {e}")
+    })?;
 
-    let definition = load_postgres_experiment_source_attribute_definitions_for_client(&client, &project_id)
-        .await?
-        .into_iter()
-        .find(|definition| definition.id == attribute_definition_id)
-        .ok_or_else(|| "The saved source attribute could not be reloaded.".to_string())?;
+    let definition =
+        load_postgres_experiment_source_attribute_definitions_for_client(&client, &project_id)
+            .await?
+            .into_iter()
+            .find(|definition| definition.id == attribute_definition_id)
+            .ok_or_else(|| "The saved source attribute could not be reloaded.".to_string())?;
     let values = load_postgres_experiment_source_attribute_values_for_client(&client)
         .await?
         .into_iter()
@@ -10728,7 +11511,11 @@ async fn save_postgres_experiment_source_attribute_command(
         &client,
         &project_id,
         &session,
-        if created { "document_attribute.create" } else { "document_attribute.update" },
+        if created {
+            "document_attribute.create"
+        } else {
+            "document_attribute.update"
+        },
         &format!("Saved source attribute \"{}\"", definition.name),
         Some(&attribute_definition_id),
         Some(serde_json::json!({
@@ -10736,7 +11523,8 @@ async fn save_postgres_experiment_source_attribute_command(
             "attributeName": definition.name.clone(),
             "changedValueCount": values.len(),
         })),
-    ).await?;
+    )
+    .await?;
 
     emit_postgres_experiment_project_change(
         &app,
@@ -10745,7 +11533,13 @@ async fn save_postgres_experiment_source_attribute_command(
         &attribute_definition_id,
         if created { "created" } else { "updated" },
     );
-    emit_postgres_experiment_project_change(&app, &project_id, "source_attribute_value", &attribute_definition_id, "updated");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "source_attribute_value",
+        &attribute_definition_id,
+        "updated",
+    );
     connection_task.abort();
 
     Ok(SavePostgresExperimentSourceAttributeResult {
@@ -10772,7 +11566,12 @@ async fn delete_postgres_experiment_source_attribute_definition_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_source_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let deleted_name = client
@@ -10781,7 +11580,9 @@ async fn delete_postgres_experiment_source_attribute_definition_command(
             &[&attribute_definition_id],
         )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment source attribute before deletion: {e}"))?
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment source attribute before deletion: {e}")
+        })?
         .map(|row| row.get::<usize, String>(0));
     let deleted_count = client
         .execute(
@@ -10807,8 +11608,15 @@ async fn delete_postgres_experiment_source_attribute_definition_command(
             "name": deleted_name.clone(),
             "attributeName": deleted_name.clone(),
         })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "source_attribute_definition", &attribute_definition_id, "deleted");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "source_attribute_definition",
+        &attribute_definition_id,
+        "deleted",
+    );
     connection_task.abort();
     Ok(DeletePostgresExperimentSourceAttributeDefinitionResult {
         project_id,
@@ -10828,10 +11636,13 @@ async fn list_postgres_experiment_annotation_summaries_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let annotations = load_postgres_experiment_annotation_summaries_for_client(&client, &project_id).await?;
+    let annotations =
+        load_postgres_experiment_annotation_summaries_for_client(&client, &project_id).await?;
     connection_task.abort();
     Ok(annotations)
 }
@@ -10848,7 +11659,9 @@ async fn list_postgres_experiment_codes_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let codes = load_postgres_experiment_codes_for_client(&client, &project_id).await?;
@@ -10873,18 +11686,32 @@ async fn create_postgres_experiment_code_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_code_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_code_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
 
-    let color = request.color.unwrap_or_else(|| "#6366f1".to_string()).trim().to_string();
+    let color = request
+        .color
+        .unwrap_or_else(|| "#6366f1".to_string())
+        .trim()
+        .to_string();
     let description = request.description.unwrap_or_default();
     let shortcut = request.shortcut.unwrap_or_default().trim().to_string();
     let parent_code_id = request.parent_code_id.and_then(|value| {
         let trimmed = value.trim().to_string();
-        if trimmed.is_empty() { None } else { Some(trimmed) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
     });
-    validate_postgres_experiment_code_parent_for_client(&client, None, parent_code_id.as_deref()).await?;
+    validate_postgres_experiment_code_parent_for_client(&client, None, parent_code_id.as_deref())
+        .await?;
 
     let code_id = generate_identifier();
     client
@@ -10901,7 +11728,14 @@ async fn create_postgres_experiment_code_command(
                 COALESCE((SELECT MAX(sort_order) + 1 FROM codes), 0)
             )
             ",
-            &[&code_id, &parent_code_id, &label, &description, &color, &shortcut],
+            &[
+                &code_id,
+                &parent_code_id,
+                &label,
+                &description,
+                &color,
+                &shortcut,
+            ],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment code: {e}"))?;
@@ -10917,7 +11751,8 @@ async fn create_postgres_experiment_code_command(
         Some(serde_json::json!({
             "label": code.label,
         })),
-    ).await?;
+    )
+    .await?;
     emit_postgres_experiment_project_change(&app, &project_id, "code", &code_id, "created");
     connection_task.abort();
     Ok(code)
@@ -10945,18 +11780,36 @@ async fn update_postgres_experiment_code_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_code_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_code_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
 
-    let color = request.color.unwrap_or_else(|| "#6366f1".to_string()).trim().to_string();
+    let color = request
+        .color
+        .unwrap_or_else(|| "#6366f1".to_string())
+        .trim()
+        .to_string();
     let description = request.description.unwrap_or_default();
     let shortcut = request.shortcut.unwrap_or_default().trim().to_string();
     let parent_code_id = request.parent_code_id.and_then(|value| {
         let trimmed = value.trim().to_string();
-        if trimmed.is_empty() { None } else { Some(trimmed) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
     });
-    validate_postgres_experiment_code_parent_for_client(&client, Some(&code_id), parent_code_id.as_deref()).await?;
+    validate_postgres_experiment_code_parent_for_client(
+        &client,
+        Some(&code_id),
+        parent_code_id.as_deref(),
+    )
+    .await?;
 
     let updated_count = client
         .execute(
@@ -10970,7 +11823,14 @@ async fn update_postgres_experiment_code_command(
                 updated_at = NOW()
             WHERE id = $1
             ",
-            &[&code_id, &parent_code_id, &label, &description, &color, &shortcut],
+            &[
+                &code_id,
+                &parent_code_id,
+                &label,
+                &description,
+                &color,
+                &shortcut,
+            ],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment code: {e}"))?;
@@ -10992,7 +11852,8 @@ async fn update_postgres_experiment_code_command(
             "label": code.label,
             "changedFields": ["parent_code_id", "label", "description", "color", "shortcut"],
         })),
-    ).await?;
+    )
+    .await?;
     emit_postgres_experiment_project_change(&app, &project_id, "code", &code_id, "updated");
     connection_task.abort();
     Ok(code)
@@ -11016,7 +11877,12 @@ async fn delete_postgres_experiment_code_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_code_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_code_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let deleted_label = client
@@ -11045,8 +11911,9 @@ async fn delete_postgres_experiment_code_command(
         Some(serde_json::json!({
             "label": deleted_label,
         })),
-    ).await?;
-emit_postgres_experiment_project_change(&app, &project_id, "code", &code_id, "deleted");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(&app, &project_id, "code", &code_id, "deleted");
     connection_task.abort();
     Ok(())
 }
@@ -11069,21 +11936,36 @@ async fn create_postgres_experiment_annotation_command(
 
     if let (Some(start_offset), Some(end_offset)) = (request.start_offset, request.end_offset) {
         if end_offset < start_offset {
-            return Err("Annotation end offset must be greater than or equal to the start offset.".to_string());
+            return Err(
+                "Annotation end offset must be greater than or equal to the start offset."
+                    .to_string(),
+            );
         }
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
     let code_ids = normalize_postgres_experiment_identifier_list(request.code_ids);
     validate_postgres_experiment_annotation_code_ids_for_client(&client, &code_ids).await?;
-    let _source = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
-    let created_by_project_user_id = resolve_postgres_experiment_project_user_id_for_email(&client, &session.user.email).await?;
+    let source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let created_by_project_user_id =
+        resolve_postgres_experiment_project_user_id_for_email(&client, &session.user.email).await?;
     let annotation_id = generate_identifier();
-    let anchor_kind = request.anchor_kind.unwrap_or_else(|| "text_span".to_string()).trim().to_string();
+    let anchor_kind = request
+        .anchor_kind
+        .unwrap_or_else(|| "text_span".to_string())
+        .trim()
+        .to_string();
     validate_postgres_experiment_annotation_time_range(request.time_start_ms, request.time_end_ms)?;
     let quote = request.quote.unwrap_or_default();
     let note = request.note.unwrap_or_default();
@@ -11094,24 +11976,23 @@ async fn create_postgres_experiment_annotation_command(
             .ok_or_else(|| "Image annotations require a saved image region.".to_string())?;
         validate_postgres_experiment_annotation_image_region(region)?;
     }
-    let region_selector_json = serialize_postgres_experiment_annotation_image_region(
-        if anchor_kind == "image_rect" {
+    let region_selector_json =
+        serialize_postgres_experiment_annotation_image_region(if anchor_kind == "image_rect" {
             image_region.as_ref()
         } else {
             None
-        },
-    )?;
+        })?;
 
-    let transaction = client
-        .transaction()
-        .await
-        .map_err(|e| format!("Could not start PostgreSQL experiment annotation transaction: {e}"))?;
+    let transaction = client.transaction().await.map_err(|e| {
+        format!("Could not start PostgreSQL experiment annotation transaction: {e}")
+    })?;
     transaction
         .execute(
             "
             INSERT INTO annotations (
                 id,
                 source_id,
+                source_kind,
                 anchor_kind,
                 start_offset,
                 end_offset,
@@ -11122,11 +12003,12 @@ async fn create_postgres_experiment_annotation_command(
                 region_selector_json,
                 created_by_project_user_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ",
             &[
                 &annotation_id,
                 &source_id,
+                &source.source_kind,
                 &anchor_kind,
                 &request.start_offset,
                 &request.end_offset,
@@ -11147,14 +12029,21 @@ async fn create_postgres_experiment_annotation_command(
                 &[&annotation_id, code_id],
             )
             .await
-            .map_err(|e| format!("Could not create PostgreSQL experiment annotation-code link: {e}"))?;
+            .map_err(|e| {
+                format!("Could not create PostgreSQL experiment annotation-code link: {e}")
+            })?;
     }
     transaction
         .commit()
         .await
         .map_err(|e| format!("Could not commit PostgreSQL experiment annotation: {e}"))?;
 
-    let annotation = load_postgres_experiment_annotation_summary_for_client(&client, &project_id, &annotation_id).await?;
+    let annotation = load_postgres_experiment_annotation_summary_for_client(
+        &client,
+        &project_id,
+        &annotation_id,
+    )
+    .await?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -11163,13 +12052,27 @@ async fn create_postgres_experiment_annotation_command(
         "Added an annotation",
         Some(&annotation.id),
         Some(serde_json::json!({
+            "annotationId": annotation.id,
+            "sourceId": annotation.source_id,
+            "sourceKind": source.source_kind,
+            "anchorKind": annotation.anchor_kind,
+            "startOffset": annotation.start_offset,
+            "endOffset": annotation.end_offset,
+            "imageRegion": annotation.image_region,
             "quote": annotation.quote,
             "codeCount": annotation.code_ids.len(),
             "timeStartMs": annotation.time_start_ms,
             "timeEndMs": annotation.time_end_ms,
         })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "annotation", &annotation_id, "created");
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "annotation",
+        &annotation_id,
+        "created",
+    );
     connection_task.abort();
     Ok(annotation)
 }
@@ -11192,18 +12095,31 @@ async fn update_postgres_experiment_annotation_command(
 
     if let (Some(start_offset), Some(end_offset)) = (request.start_offset, request.end_offset) {
         if end_offset < start_offset {
-            return Err("Annotation end offset must be greater than or equal to the start offset.".to_string());
+            return Err(
+                "Annotation end offset must be greater than or equal to the start offset."
+                    .to_string(),
+            );
         }
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
     let code_ids = normalize_postgres_experiment_identifier_list(request.code_ids);
     validate_postgres_experiment_annotation_code_ids_for_client(&client, &code_ids).await?;
-    let anchor_kind = request.anchor_kind.unwrap_or_else(|| "text_span".to_string()).trim().to_string();
+    let anchor_kind = request
+        .anchor_kind
+        .unwrap_or_else(|| "text_span".to_string())
+        .trim()
+        .to_string();
     validate_postgres_experiment_annotation_time_range(request.time_start_ms, request.time_end_ms)?;
     let quote = request.quote.unwrap_or_default();
     let note = request.note.unwrap_or_default();
@@ -11214,23 +12130,22 @@ async fn update_postgres_experiment_annotation_command(
             .ok_or_else(|| "Image annotations require a saved image region.".to_string())?;
         validate_postgres_experiment_annotation_image_region(region)?;
     }
-    let region_selector_json = serialize_postgres_experiment_annotation_image_region(
-        if anchor_kind == "image_rect" {
+    let region_selector_json =
+        serialize_postgres_experiment_annotation_image_region(if anchor_kind == "image_rect" {
             image_region.as_ref()
         } else {
             None
-        },
-    )?;
+        })?;
 
-    let transaction = client
-        .transaction()
-        .await
-        .map_err(|e| format!("Could not start PostgreSQL experiment annotation transaction: {e}"))?;
+    let transaction = client.transaction().await.map_err(|e| {
+        format!("Could not start PostgreSQL experiment annotation transaction: {e}")
+    })?;
     let updated_count = transaction
         .execute(
             "
             UPDATE annotations
-            SET anchor_kind = $2,
+            SET source_kind = COALESCE((SELECT source_kind FROM sources WHERE id = annotations.source_id), source_kind),
+                anchor_kind = $2,
                 start_offset = $3,
                 end_offset = $4,
                 time_start_ms = $5,
@@ -11260,7 +12175,10 @@ async fn update_postgres_experiment_annotation_command(
         return Err("The selected annotation could not be found.".to_string());
     }
     transaction
-        .execute("DELETE FROM annotation_codes WHERE annotation_id = $1", &[&annotation_id])
+        .execute(
+            "DELETE FROM annotation_codes WHERE annotation_id = $1",
+            &[&annotation_id],
+        )
         .await
         .map_err(|e| format!("Could not replace PostgreSQL experiment annotation codes: {e}"))?;
     for code_id in &code_ids {
@@ -11270,14 +12188,24 @@ async fn update_postgres_experiment_annotation_command(
                 &[&annotation_id, code_id],
             )
             .await
-            .map_err(|e| format!("Could not create PostgreSQL experiment annotation-code link: {e}"))?;
+            .map_err(|e| {
+                format!("Could not create PostgreSQL experiment annotation-code link: {e}")
+            })?;
     }
     transaction
         .commit()
         .await
         .map_err(|e| format!("Could not commit PostgreSQL experiment annotation update: {e}"))?;
 
-    let annotation = load_postgres_experiment_annotation_summary_for_client(&client, &project_id, &annotation_id).await?;
+    let annotation = load_postgres_experiment_annotation_summary_for_client(
+        &client,
+        &project_id,
+        &annotation_id,
+    )
+    .await?;
+    let source =
+        load_postgres_experiment_source_for_client(&client, &project_id, &annotation.source_id)
+            .await?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -11286,13 +12214,27 @@ async fn update_postgres_experiment_annotation_command(
         "Updated an annotation",
         Some(&annotation.id),
         Some(serde_json::json!({
+            "annotationId": annotation.id,
+            "sourceId": annotation.source_id,
+            "sourceKind": source.source_kind,
+            "anchorKind": annotation.anchor_kind,
+            "startOffset": annotation.start_offset,
+            "endOffset": annotation.end_offset,
+            "imageRegion": annotation.image_region,
             "quote": annotation.quote,
+            "codeCount": annotation.code_ids.len(),
             "timeStartMs": annotation.time_start_ms,
             "timeEndMs": annotation.time_end_ms,
             "changedFields": ["anchor_kind", "start_offset", "end_offset", "time_start_ms", "time_end_ms", "quote", "note", "code_ids"],
         })),
     ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "annotation", &annotation_id, "updated");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "annotation",
+        &annotation_id,
+        "updated",
+    );
     connection_task.abort();
     Ok(annotation)
 }
@@ -11315,14 +12257,56 @@ async fn delete_postgres_experiment_annotation_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let deleted_quote = client
-        .query_opt("SELECT quote FROM annotations WHERE id = $1", &[&annotation_id])
+    let deleted_annotation = client
+        .query_opt(
+            "
+            SELECT
+                a.source_id,
+                COALESCE(s.source_kind, '') AS source_kind,
+                a.anchor_kind,
+                a.quote,
+                a.time_start_ms,
+                a.time_end_ms,
+                a.start_offset,
+                a.end_offset,
+                a.region_selector_json,
+                COALESCE(ac.code_count, 0)::BIGINT AS code_count
+            FROM annotations a
+            LEFT JOIN sources s ON s.id = a.source_id
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*) AS code_count
+                FROM annotation_codes ac
+                WHERE ac.annotation_id = a.id
+            ) ac ON TRUE
+            WHERE a.id = $1
+            ",
+            &[&annotation_id],
+        )
         .await
         .map_err(|e| format!("Could not inspect PostgreSQL experiment annotation before deletion: {e}"))?
-        .map(|row| row.get::<usize, String>(0));
+        .map(|row| {
+            serde_json::json!({
+                "annotationId": annotation_id,
+                "sourceId": row.get::<usize, String>(0),
+                "sourceKind": row.get::<usize, String>(1),
+                "anchorKind": row.get::<usize, String>(2),
+                "quote": row.get::<usize, String>(3),
+                "timeStartMs": row.get::<usize, Option<i64>>(4),
+                "timeEndMs": row.get::<usize, Option<i64>>(5),
+                "startOffset": row.get::<usize, Option<i32>>(6),
+                "endOffset": row.get::<usize, Option<i32>>(7),
+                "imageRegion": parse_postgres_experiment_annotation_image_region(row.get::<usize, String>(8).as_str()),
+                "codeCount": row.get::<usize, i64>(9),
+            })
+        });
     let deleted_count = client
         .execute("DELETE FROM annotations WHERE id = $1", &[&annotation_id])
         .await
@@ -11340,11 +12324,16 @@ async fn delete_postgres_experiment_annotation_command(
         "annotation.delete",
         "Deleted an annotation",
         Some(&annotation_id),
-        Some(serde_json::json!({
-            "quote": deleted_quote,
-        })),
-    ).await?;
-    emit_postgres_experiment_project_change(&app, &project_id, "annotation", &annotation_id, "deleted");
+        deleted_annotation,
+    )
+    .await?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "annotation",
+        &annotation_id,
+        "deleted",
+    );
     connection_task.abort();
     Ok(())
 }
@@ -11361,7 +12350,9 @@ async fn list_postgres_experiment_project_log_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let entries = load_postgres_experiment_project_log_for_client(&client, &project_id).await?;
@@ -11381,7 +12372,9 @@ async fn list_postgres_experiment_memos_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let memos = load_postgres_experiment_memos_for_client(&client, &project_id).await?;
@@ -11406,9 +12399,15 @@ async fn create_postgres_experiment_memo_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
     let source_ids = normalize_postgres_experiment_identifier_list(request.source_ids);
     let annotation_ids = normalize_postgres_experiment_identifier_list(request.annotation_ids);
@@ -11420,7 +12419,8 @@ async fn create_postgres_experiment_memo_command(
         validate_postgres_experiment_annotation_code_ids_for_client(&client, &code_ids).await?;
     }
     validate_postgres_experiment_object_ids_for_client(&client, &object_ids).await?;
-    let created_by_project_user_id = resolve_postgres_experiment_project_user_id_for_email(&client, &session.user.email).await?;
+    let created_by_project_user_id =
+        resolve_postgres_experiment_project_user_id_for_email(&client, &session.user.email).await?;
     let memo_id = generate_identifier();
     let body = request.body.unwrap_or_default();
 
@@ -11454,7 +12454,9 @@ async fn create_postgres_experiment_memo_command(
                 &[&memo_id, annotation_id],
             )
             .await
-            .map_err(|e| format!("Could not create PostgreSQL experiment memo-annotation link: {e}"))?;
+            .map_err(|e| {
+                format!("Could not create PostgreSQL experiment memo-annotation link: {e}")
+            })?;
     }
     for code_id in &code_ids {
         transaction
@@ -11492,7 +12494,8 @@ async fn create_postgres_experiment_memo_command(
             "documentCount": memo.source_ids.len(),
             "codeCount": memo.code_ids.len(),
         })),
-    ).await?;
+    )
+    .await?;
     emit_postgres_experiment_project_change(&app, &project_id, "memo", &memo_id, "created");
     connection_task.abort();
     Ok(memo)
@@ -11520,9 +12523,15 @@ async fn update_postgres_experiment_memo_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
 
     let source_ids = normalize_postgres_experiment_identifier_list(request.source_ids);
     let annotation_ids = normalize_postgres_experiment_identifier_list(request.annotation_ids);
@@ -11562,7 +12571,10 @@ async fn update_postgres_experiment_memo_command(
         .await
         .map_err(|e| format!("Could not replace PostgreSQL experiment memo sources: {e}"))?;
     transaction
-        .execute("DELETE FROM memo_annotations WHERE memo_id = $1", &[&memo_id])
+        .execute(
+            "DELETE FROM memo_annotations WHERE memo_id = $1",
+            &[&memo_id],
+        )
         .await
         .map_err(|e| format!("Could not replace PostgreSQL experiment memo annotations: {e}"))?;
     transaction
@@ -11589,7 +12601,9 @@ async fn update_postgres_experiment_memo_command(
                 &[&memo_id, annotation_id],
             )
             .await
-            .map_err(|e| format!("Could not create PostgreSQL experiment memo-annotation link: {e}"))?;
+            .map_err(|e| {
+                format!("Could not create PostgreSQL experiment memo-annotation link: {e}")
+            })?;
     }
     for code_id in &code_ids {
         transaction
@@ -11650,7 +12664,12 @@ async fn delete_postgres_experiment_memo_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_annotation_management(&app, Some(&runtime_auth_state), &project).await?;
+    let session = require_postgres_experiment_project_annotation_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let deleted_title = client
@@ -11678,7 +12697,8 @@ async fn delete_postgres_experiment_memo_command(
         Some(serde_json::json!({
             "title": deleted_title,
         })),
-    ).await?;
+    )
+    .await?;
     emit_postgres_experiment_project_change(&app, &project_id, "memo", &memo_id, "deleted");
     connection_task.abort();
     Ok(())
@@ -11696,10 +12716,13 @@ async fn list_postgres_experiment_object_types_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let object_types = load_postgres_experiment_object_types_for_client(&client, &project_id).await?;
+    let object_types =
+        load_postgres_experiment_object_types_for_client(&client, &project_id).await?;
     connection_task.abort();
     Ok(object_types)
 }
@@ -11716,6 +12739,12 @@ async fn create_postgres_experiment_object_type_command(
     let shape = request.shape.trim().to_string();
     let color = request.color.trim().to_string();
     let fill = request.fill.trim().to_string();
+    let image_storage_path = request
+        .image_storage_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     if project_id.is_empty() {
         return Err("Project id is required.".to_string());
     }
@@ -11733,28 +12762,40 @@ async fn create_postgres_experiment_object_type_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    if let Some((_, existing_name)) = find_postgres_experiment_object_type_for_client(&client, &name).await? {
+    if let Some((_, existing_name)) =
+        find_postgres_experiment_object_type_for_client(&client, &name).await?
+    {
         connection_task.abort();
-        return Err(format!("The object type \"{existing_name}\" already exists."));
+        return Err(format!(
+            "The object type \"{existing_name}\" already exists."
+        ));
     }
     let object_type_id = generate_identifier();
     let row = client
         .query_one(
             "
-            INSERT INTO object_types (id, name, description, shape, color, fill)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, system_key, name, description, shape, color, fill, created_at::text, updated_at::text
+            INSERT INTO object_types (id, name, description, shape, color, fill, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&object_type_id, &name, &description, &shape, &color, &fill],
+            &[&object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment object type: {e}"))?;
     connection_task.abort();
     let created = map_postgres_experiment_object_type_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "object_type", &created.id, "created");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_type",
+        &created.id,
+        "created",
+    );
     Ok(created)
 }
 
@@ -11771,6 +12812,12 @@ async fn update_postgres_experiment_object_type_command(
     let shape = request.shape.trim().to_string();
     let color = request.color.trim().to_string();
     let fill = request.fill.trim().to_string();
+    let image_storage_path = request
+        .image_storage_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     if project_id.is_empty() || object_type_id.is_empty() {
         return Err("Project and object type identifiers are required.".to_string());
     }
@@ -11788,13 +12835,19 @@ async fn update_postgres_experiment_object_type_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    if let Some((existing_id, existing_name)) = find_postgres_experiment_object_type_for_client(&client, &name).await? {
+    if let Some((existing_id, existing_name)) =
+        find_postgres_experiment_object_type_for_client(&client, &name).await?
+    {
         if existing_id != object_type_id {
             connection_task.abort();
-            return Err(format!("The object type \"{existing_name}\" already exists."));
+            return Err(format!(
+                "The object type \"{existing_name}\" already exists."
+            ));
         }
     }
 
@@ -11807,17 +12860,141 @@ async fn update_postgres_experiment_object_type_command(
                 shape = $4,
                 color = $5,
                 fill = $6,
+                image_storage_path = $7,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, fill, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&object_type_id, &name, &description, &shape, &color, &fill],
+            &[&object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment object type: {e}"))?;
     connection_task.abort();
     let updated = map_postgres_experiment_object_type_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "object_type", &updated.id, "updated");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_type",
+        &updated.id,
+        "updated",
+    );
+    Ok(updated)
+}
+
+#[tauri::command]
+async fn import_postgres_experiment_object_type_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: ImportPostgresExperimentObjectTypeImageRequest,
+) -> Result<PostgresExperimentObjectType, String> {
+    let project_id = request.project_id.trim().to_string();
+    let object_type_id = request.object_type_id.trim().to_string();
+    if project_id.is_empty() || object_type_id.is_empty() {
+        return Err("Project and object type identifiers are required.".to_string());
+    }
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let object_type =
+        load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
+    ensure_postgres_experiment_object_type_is_not_source_backed(&object_type)?;
+    let previous_path = client
+        .query_one(
+            "SELECT image_storage_path FROM object_types WHERE id = $1",
+            &[&object_type_id],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment object type image: {e}"))?
+        .get::<usize, String>(0);
+    let image_storage_path = write_postgres_experiment_project_image_file(
+        &project,
+        "object-types",
+        &object_type_id,
+        &request.original_file_name,
+        &request.file_bytes_base64,
+    )?;
+    let row = client
+        .query_one(
+            "
+            UPDATE object_types
+            SET image_storage_path = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            ",
+            &[&object_type_id, &image_storage_path],
+        )
+        .await
+        .map_err(|e| format!("Could not update PostgreSQL experiment object type image: {e}"))?;
+    remove_postgres_experiment_project_file_if_present(&project, &previous_path);
+    connection_task.abort();
+    let updated = map_postgres_experiment_object_type_row(&project_id, row);
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_type",
+        &object_type_id,
+        "updated",
+    );
+    Ok(updated)
+}
+
+#[tauri::command]
+async fn remove_postgres_experiment_object_type_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+    object_type_id: String,
+) -> Result<PostgresExperimentObjectType, String> {
+    let project_id = project_id.trim().to_string();
+    let object_type_id = object_type_id.trim().to_string();
+    if project_id.is_empty() || object_type_id.is_empty() {
+        return Err("Project and object type identifiers are required.".to_string());
+    }
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let object_type =
+        load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
+    ensure_postgres_experiment_object_type_is_not_source_backed(&object_type)?;
+    let previous_path = client
+        .query_one(
+            "SELECT image_storage_path FROM object_types WHERE id = $1",
+            &[&object_type_id],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment object type image: {e}"))?
+        .get::<usize, String>(0);
+    let empty_path = String::new();
+    let row = client
+        .query_one(
+            "
+            UPDATE object_types
+            SET image_storage_path = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            ",
+            &[&object_type_id, &empty_path],
+        )
+        .await
+        .map_err(|e| format!("Could not remove PostgreSQL experiment object type image: {e}"))?;
+    remove_postgres_experiment_project_file_if_present(&project, &previous_path);
+    connection_task.abort();
+    let updated = map_postgres_experiment_object_type_row(&project_id, row);
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_type",
+        &object_type_id,
+        "updated",
+    );
     Ok(updated)
 }
 
@@ -11839,6 +13016,12 @@ async fn save_postgres_experiment_object_type_command(
     let shape = request.shape.trim().to_string();
     let color = request.color.trim().to_string();
     let fill = request.fill.trim().to_string();
+    let image_storage_path = request
+        .image_storage_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
 
     if project_id.is_empty() {
         return Err("Project id is required.".to_string());
@@ -11880,13 +13063,20 @@ async fn save_postgres_experiment_object_type_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    if let Some((existing_id, existing_name)) = find_postgres_experiment_object_type_for_client(&client, &name).await? {
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
+    if let Some((existing_id, existing_name)) =
+        find_postgres_experiment_object_type_for_client(&client, &name).await?
+    {
         if object_type_id.as_deref() != Some(existing_id.as_str()) {
             connection_task.abort();
-            return Err(format!("The object type \"{existing_name}\" already exists."));
+            return Err(format!(
+                "The object type \"{existing_name}\" already exists."
+            ));
         }
     }
 
@@ -11899,11 +13089,11 @@ async fn save_postgres_experiment_object_type_command(
     let object_type_row = if created {
         tx.query_one(
             "
-            INSERT INTO object_types (id, name, description, shape, color, fill)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, system_key, name, description, shape, color, fill, created_at::text, updated_at::text
+            INSERT INTO object_types (id, name, description, shape, color, fill, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&resolved_object_type_id, &name, &description, &shape, &color, &fill],
+            &[&resolved_object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
         ).await
     } else {
         tx.query_one(
@@ -11914,11 +13104,12 @@ async fn save_postgres_experiment_object_type_command(
                 shape = $4,
                 color = $5,
                 fill = $6,
+                image_storage_path = $7,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, fill, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&resolved_object_type_id, &name, &description, &shape, &color, &fill],
+            &[&resolved_object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
         ).await
     }
     .map_err(|e| format!("Could not save PostgreSQL experiment object type: {e}"))?;
@@ -11935,7 +13126,8 @@ async fn save_postgres_experiment_object_type_command(
         )
         .await
         .map_err(|e| format!("Could not inspect PostgreSQL experiment object attributes: {e}"))?;
-    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, i32)> = HashMap::new();
+    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, i32)> =
+        HashMap::new();
     let mut next_sort_order = 0;
     for row in existing_attribute_rows {
         let id: String = row.get(0);
@@ -11983,7 +13175,9 @@ async fn save_postgres_experiment_object_type_command(
         &[&resolved_object_type_id, &name],
     )
     .await
-    .map_err(|e| format!("Could not synchronize PostgreSQL experiment object attribute names: {e}"))?;
+    .map_err(|e| {
+        format!("Could not synchronize PostgreSQL experiment object attribute names: {e}")
+    })?;
 
     tx.execute(
         "
@@ -11998,9 +13192,12 @@ async fn save_postgres_experiment_object_type_command(
     .await
     .map_err(|e| format!("Could not synchronize PostgreSQL experiment object records: {e}"))?;
 
-    for (attribute_id, attribute_name, data_type, attribute_description, options) in normalized_attributes {
-        let options_json = serde_json::to_string(&options)
-            .map_err(|e| format!("Could not encode PostgreSQL experiment object attribute options: {e}"))?;
+    for (attribute_id, attribute_name, data_type, attribute_description, options) in
+        normalized_attributes
+    {
+        let options_json = serde_json::to_string(&options).map_err(|e| {
+            format!("Could not encode PostgreSQL experiment object attribute options: {e}")
+        })?;
         if let Some(attribute_id) = attribute_id {
             let Some((current_name, current_data_type, current_description, current_options, _)) =
                 existing_attribute_by_id.get(&attribute_id)
@@ -12026,7 +13223,15 @@ async fn save_postgres_experiment_object_type_command(
                     updated_at = NOW()
                 WHERE id = $1
                 ",
-                &[&attribute_id, &resolved_object_type_id, &name, &attribute_name, &data_type, &attribute_description, &options_json],
+                &[
+                    &attribute_id,
+                    &resolved_object_type_id,
+                    &name,
+                    &attribute_name,
+                    &data_type,
+                    &attribute_description,
+                    &options_json,
+                ],
             )
             .await
             .map_err(|e| format!("Could not update PostgreSQL experiment object attribute: {e}"))?;
@@ -12117,29 +13322,21 @@ async fn delete_postgres_experiment_object_type_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let deleted_name = client
-        .query_opt("SELECT name FROM object_types WHERE id = $1", &[&object_type_id])
-        .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment object type before deletion: {e}"))?
-        .map(|row| row.get::<usize, String>(0));
-
-    let object_count: i64 = client
-        .query_one(
-            "SELECT COUNT(*) FROM research_objects WHERE object_type_id = $1",
+        .query_opt(
+            "SELECT name FROM object_types WHERE id = $1",
             &[&object_type_id],
         )
         .await
-        .map_err(|e| format!("Could not check PostgreSQL experiment object type usage: {e}"))?
-        .get(0);
-    if object_count > 0 {
-        connection_task.abort();
-        return Err(format!(
-            "Cannot delete this object type because {object_count} object(s) still use it."
-        ));
-    }
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment object type before deletion: {e}")
+        })?
+        .map(|row| row.get::<usize, String>(0));
 
     let relationship_type_count: i64 = client
         .query_one(
@@ -12152,7 +13349,9 @@ async fn delete_postgres_experiment_object_type_command(
             &[&object_type_id],
         )
         .await
-        .map_err(|e| format!("Could not check PostgreSQL experiment relationship type constraints: {e}"))?
+        .map_err(|e| {
+            format!("Could not check PostgreSQL experiment relationship type constraints: {e}")
+        })?
         .get(0);
     if relationship_type_count > 0 {
         connection_task.abort();
@@ -12174,13 +13373,25 @@ async fn delete_postgres_experiment_object_type_command(
         return Err("Built-in object types cannot be deleted.".to_string());
     }
 
+    let deleted_object_count = client
+        .execute(
+            "DELETE FROM research_objects WHERE object_type_id = $1",
+            &[&object_type_id],
+        )
+        .await
+        .map_err(|e| {
+            format!("Could not delete PostgreSQL experiment objects for this type: {e}")
+        })?;
+
     client
         .execute(
             "DELETE FROM object_attribute_definitions WHERE object_type_id = $1",
             &[&object_type_id],
         )
         .await
-        .map_err(|e| format!("Could not delete PostgreSQL experiment object type attributes: {e}"))?;
+        .map_err(|e| {
+            format!("Could not delete PostgreSQL experiment object type attributes: {e}")
+        })?;
 
     let deleted_rows = client
         .execute("DELETE FROM object_types WHERE id = $1", &[&object_type_id])
@@ -12201,10 +13412,18 @@ async fn delete_postgres_experiment_object_type_command(
         Some(&object_type_id),
         Some(serde_json::json!({
             "name": deleted_name,
+            "deletedObjectCount": deleted_object_count,
         })),
-    ).await?;
+    )
+    .await?;
     connection_task.abort();
-    emit_postgres_experiment_project_change(&app, &project_id, "object_type", &object_type_id, "deleted");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_type",
+        &object_type_id,
+        "deleted",
+    );
     Ok(())
 }
 
@@ -12220,10 +13439,13 @@ async fn list_postgres_experiment_relationship_types_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let relationship_types = load_postgres_experiment_relationship_types_for_client(&client, &project_id).await?;
+    let relationship_types =
+        load_postgres_experiment_relationship_types_for_client(&client, &project_id).await?;
     connection_task.abort();
     Ok(relationship_types)
 }
@@ -12242,13 +13464,22 @@ async fn delete_postgres_experiment_relationship_type_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let deleted_name = client
-        .query_opt("SELECT name FROM relationship_types WHERE id = $1", &[&relationship_type_id])
+        .query_opt(
+            "SELECT name FROM relationship_types WHERE id = $1",
+            &[&relationship_type_id],
+        )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment relationship type before deletion: {e}"))?
+        .map_err(|e| {
+            format!(
+                "Could not inspect PostgreSQL experiment relationship type before deletion: {e}"
+            )
+        })?
         .map(|row| row.get::<usize, String>(0));
 
     let relationship_count: i64 = client
@@ -12259,12 +13490,14 @@ async fn delete_postgres_experiment_relationship_type_command(
         .await
         .map_err(|e| format!("Could not check PostgreSQL experiment relationship type usage: {e}"))?
         .get(0);
-    if relationship_count > 0 {
-        connection_task.abort();
-        return Err(format!(
-            "Cannot delete this relationship type because {relationship_count} relationship(s) still use it."
-        ));
-    }
+
+    client
+        .execute(
+            "DELETE FROM object_relationships WHERE relationship_type_id = $1",
+            &[&relationship_type_id],
+        )
+        .await
+        .map_err(|e| format!("Could not delete PostgreSQL experiment relationships for this relationship type: {e}"))?;
 
     client
         .execute(
@@ -12272,10 +13505,15 @@ async fn delete_postgres_experiment_relationship_type_command(
             &[&relationship_type_id],
         )
         .await
-        .map_err(|e| format!("Could not delete PostgreSQL experiment relationship type attributes: {e}"))?;
+        .map_err(|e| {
+            format!("Could not delete PostgreSQL experiment relationship type attributes: {e}")
+        })?;
 
     let deleted_rows = client
-        .execute("DELETE FROM relationship_types WHERE id = $1", &[&relationship_type_id])
+        .execute(
+            "DELETE FROM relationship_types WHERE id = $1",
+            &[&relationship_type_id],
+        )
         .await
         .map_err(|e| format!("Could not delete PostgreSQL experiment relationship type: {e}"))?;
 
@@ -12293,8 +13531,10 @@ async fn delete_postgres_experiment_relationship_type_command(
         Some(&relationship_type_id),
         Some(serde_json::json!({
             "name": deleted_name,
+            "deletedRelationshipCount": relationship_count,
         })),
-    ).await?;
+    )
+    .await?;
     connection_task.abort();
 
     emit_postgres_experiment_project_change(
@@ -12320,8 +13560,10 @@ async fn create_postgres_experiment_relationship_type_command(
     let line_weight = request.line_weight;
     let arrowhead = request.arrowhead.trim().to_string();
     let color = request.color.trim().to_string();
-    let from_object_type_ids = normalize_postgres_experiment_object_type_id_list(request.from_object_type_ids);
-    let to_object_type_ids = normalize_postgres_experiment_object_type_id_list(request.to_object_type_ids);
+    let from_object_type_ids =
+        normalize_postgres_experiment_object_type_id_list(request.from_object_type_ids);
+    let to_object_type_ids =
+        normalize_postgres_experiment_object_type_id_list(request.to_object_type_ids);
     if project_id.is_empty() {
         return Err("Project id is required.".to_string());
     }
@@ -12342,7 +13584,9 @@ async fn create_postgres_experiment_relationship_type_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     for object_type_id in &from_object_type_ids {
@@ -12351,9 +13595,13 @@ async fn create_postgres_experiment_relationship_type_command(
     for object_type_id in &to_object_type_ids {
         let _ = load_postgres_experiment_object_type_for_client(&client, object_type_id).await?;
     }
-    if let Some((_, existing_name)) = find_postgres_experiment_relationship_type_for_client(&client, &name).await? {
+    if let Some((_, existing_name)) =
+        find_postgres_experiment_relationship_type_for_client(&client, &name).await?
+    {
         connection_task.abort();
-        return Err(format!("Relationship type \"{existing_name}\" already exists."));
+        return Err(format!(
+            "Relationship type \"{existing_name}\" already exists."
+        ));
     }
 
     let relationship_type_id = generate_identifier();
@@ -12383,7 +13631,13 @@ async fn create_postgres_experiment_relationship_type_command(
         .map_err(|e| format!("Could not create PostgreSQL experiment relationship type: {e}"))?;
     connection_task.abort();
     let created = map_postgres_experiment_relationship_type_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship_type", &created.id, "created");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship_type",
+        &created.id,
+        "created",
+    );
     Ok(created)
 }
 
@@ -12401,8 +13655,10 @@ async fn update_postgres_experiment_relationship_type_command(
     let line_weight = request.line_weight;
     let arrowhead = request.arrowhead.trim().to_string();
     let color = request.color.trim().to_string();
-    let from_object_type_ids = normalize_postgres_experiment_object_type_id_list(request.from_object_type_ids);
-    let to_object_type_ids = normalize_postgres_experiment_object_type_id_list(request.to_object_type_ids);
+    let from_object_type_ids =
+        normalize_postgres_experiment_object_type_id_list(request.from_object_type_ids);
+    let to_object_type_ids =
+        normalize_postgres_experiment_object_type_id_list(request.to_object_type_ids);
 
     if project_id.is_empty() || relationship_type_id.is_empty() {
         return Err("Project and relationship type identifiers are required.".to_string());
@@ -12424,7 +13680,9 @@ async fn update_postgres_experiment_relationship_type_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     for object_type_id in &from_object_type_ids {
@@ -12433,10 +13691,14 @@ async fn update_postgres_experiment_relationship_type_command(
     for object_type_id in &to_object_type_ids {
         let _ = load_postgres_experiment_object_type_for_client(&client, object_type_id).await?;
     }
-    if let Some((existing_id, existing_name)) = find_postgres_experiment_relationship_type_for_client(&client, &name).await? {
+    if let Some((existing_id, existing_name)) =
+        find_postgres_experiment_relationship_type_for_client(&client, &name).await?
+    {
         if existing_id != relationship_type_id {
             connection_task.abort();
-            return Err(format!("Relationship type \"{existing_name}\" already exists."));
+            return Err(format!(
+                "Relationship type \"{existing_name}\" already exists."
+            ));
         }
     }
 
@@ -12475,7 +13737,13 @@ async fn update_postgres_experiment_relationship_type_command(
         .map_err(|e| format!("Could not update PostgreSQL experiment relationship type: {e}"))?;
     connection_task.abort();
     let updated = map_postgres_experiment_relationship_type_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship_type", &updated.id, "updated");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship_type",
+        &updated.id,
+        "updated",
+    );
     Ok(updated)
 }
 
@@ -12498,8 +13766,10 @@ async fn save_postgres_experiment_relationship_type_command(
     let line_weight = request.line_weight;
     let arrowhead = request.arrowhead.trim().to_string();
     let color = request.color.trim().to_string();
-    let from_object_type_ids = normalize_postgres_experiment_object_type_id_list(request.from_object_type_ids);
-    let to_object_type_ids = normalize_postgres_experiment_object_type_id_list(request.to_object_type_ids);
+    let from_object_type_ids =
+        normalize_postgres_experiment_object_type_id_list(request.from_object_type_ids);
+    let to_object_type_ids =
+        normalize_postgres_experiment_object_type_id_list(request.to_object_type_ids);
 
     if project_id.is_empty() {
         return Err("Project id is required.".to_string());
@@ -12538,32 +13808,40 @@ async fn save_postgres_experiment_relationship_type_command(
         let description = attribute.description.trim().to_string();
         let options = normalize_attribute_options(&attribute.options);
         if data_type == "categorical" && options.len() < 2 {
-            return Err("Categorical relationship attributes need at least two options.".to_string());
+            return Err(
+                "Categorical relationship attributes need at least two options.".to_string(),
+            );
         }
         normalized_attributes.push((id, name, data_type, description, options));
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
     for object_type_id in &from_object_type_ids {
         let _ = load_postgres_experiment_object_type_for_client(&client, object_type_id).await?;
     }
     for object_type_id in &to_object_type_ids {
         let _ = load_postgres_experiment_object_type_for_client(&client, object_type_id).await?;
     }
-    if let Some((existing_id, existing_name)) = find_postgres_experiment_relationship_type_for_client(&client, &name).await? {
+    if let Some((existing_id, existing_name)) =
+        find_postgres_experiment_relationship_type_for_client(&client, &name).await?
+    {
         if relationship_type_id.as_deref() != Some(existing_id.as_str()) {
             connection_task.abort();
-            return Err(format!("Relationship type \"{existing_name}\" already exists."));
+            return Err(format!(
+                "Relationship type \"{existing_name}\" already exists."
+            ));
         }
     }
 
-    let tx = client
-        .transaction()
-        .await
-        .map_err(|e| format!("Could not begin PostgreSQL experiment relationship type save: {e}"))?;
+    let tx = client.transaction().await.map_err(|e| {
+        format!("Could not begin PostgreSQL experiment relationship type save: {e}")
+    })?;
     let created = relationship_type_id.is_none();
     let resolved_relationship_type_id = relationship_type_id.unwrap_or_else(generate_identifier);
     let relationship_type_row = if created {
@@ -12633,8 +13911,11 @@ async fn save_postgres_experiment_relationship_type_command(
             &[&resolved_relationship_type_id],
         )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment relationship attributes: {e}"))?;
-    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, i32)> = HashMap::new();
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment relationship attributes: {e}")
+        })?;
+    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, i32)> =
+        HashMap::new();
     let mut next_sort_order = 0;
     for row in existing_attribute_rows {
         let id: String = row.get(0);
@@ -12667,7 +13948,9 @@ async fn save_postgres_experiment_relationship_type_command(
                 &[attribute_id],
             )
             .await
-            .map_err(|e| format!("Could not delete PostgreSQL experiment relationship attribute: {e}"))?;
+            .map_err(|e| {
+                format!("Could not delete PostgreSQL experiment relationship attribute: {e}")
+            })?;
         }
     }
 
@@ -12682,9 +13965,13 @@ async fn save_postgres_experiment_relationship_type_command(
         &[&resolved_relationship_type_id, &name],
     )
     .await
-    .map_err(|e| format!("Could not synchronize PostgreSQL experiment relationship attribute names: {e}"))?;
+    .map_err(|e| {
+        format!("Could not synchronize PostgreSQL experiment relationship attribute names: {e}")
+    })?;
 
-    for (attribute_id, attribute_name, data_type, attribute_description, options) in normalized_attributes {
+    for (attribute_id, attribute_name, data_type, attribute_description, options) in
+        normalized_attributes
+    {
         let options_json = serde_json::to_string(&options)
             .map_err(|e| format!("Could not encode relationship attribute options: {e}"))?;
         if let Some(attribute_id) = attribute_id {
@@ -12712,10 +13999,20 @@ async fn save_postgres_experiment_relationship_type_command(
                     updated_at = NOW()
                 WHERE id = $1
                 ",
-                &[&attribute_id, &resolved_relationship_type_id, &name, &attribute_name, &data_type, &attribute_description, &options_json],
+                &[
+                    &attribute_id,
+                    &resolved_relationship_type_id,
+                    &name,
+                    &attribute_name,
+                    &data_type,
+                    &attribute_description,
+                    &options_json,
+                ],
             )
             .await
-            .map_err(|e| format!("Could not update PostgreSQL experiment relationship attribute: {e}"))?;
+            .map_err(|e| {
+                format!("Could not update PostgreSQL experiment relationship attribute: {e}")
+            })?;
         } else {
             let new_attribute_id = generate_identifier();
             tx.execute(
@@ -12749,10 +14046,11 @@ async fn save_postgres_experiment_relationship_type_command(
         .map(|row| map_postgres_experiment_relationship_attribute_definition_row(&project_id, row))
         .collect::<Vec<_>>();
 
-    tx.commit()
-        .await
-        .map_err(|e| format!("Could not commit PostgreSQL experiment relationship type save: {e}"))?;
-    let relationship_type = map_postgres_experiment_relationship_type_row(&project_id, relationship_type_row);
+    tx.commit().await.map_err(|e| {
+        format!("Could not commit PostgreSQL experiment relationship type save: {e}")
+    })?;
+    let relationship_type =
+        map_postgres_experiment_relationship_type_row(&project_id, relationship_type_row);
     let log_label = if created {
         format!("Added relationship type \"{}\"", relationship_type.name)
     } else {
@@ -12804,10 +14102,13 @@ async fn list_postgres_experiment_objects_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let attribute_values_by_object_id = load_postgres_experiment_object_attribute_values_for_client(&client).await?;
+    let attribute_values_by_object_id =
+        load_postgres_experiment_object_attribute_values_for_client(&client).await?;
     let rows = client
         .query(
             "
@@ -12823,6 +14124,7 @@ async fn list_postgres_experiment_objects_command(
                 o.shape_override,
                 o.color_override,
                 o.fill_override,
+                o.image_storage_path,
                 e.start_at::text,
                 e.end_at::text,
                 e.time_precision,
@@ -12843,7 +14145,9 @@ async fn list_postgres_experiment_objects_command(
     connection_task.abort();
     Ok(rows
         .into_iter()
-        .map(|row| map_postgres_experiment_object_row(&project_id, row, &attribute_values_by_object_id))
+        .map(|row| {
+            map_postgres_experiment_object_row(&project_id, row, &attribute_values_by_object_id)
+        })
         .collect())
 }
 
@@ -12859,10 +14163,14 @@ async fn list_postgres_experiment_object_attribute_definitions_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let definitions = load_postgres_experiment_object_attribute_definitions_for_client(&client, &project_id).await?;
+    let definitions =
+        load_postgres_experiment_object_attribute_definitions_for_client(&client, &project_id)
+            .await?;
     connection_task.abort();
     Ok(definitions)
 }
@@ -12896,16 +14204,22 @@ async fn create_postgres_experiment_object_attribute_definition_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let (object_type_id, object_type_name) =
         load_postgres_experiment_object_type_for_client(&client, &object_type_id).await?;
     let attribute_definition_id = generate_identifier();
-    let options_json = serde_json::to_string(&options)
-        .map_err(|e| format!("Could not encode PostgreSQL experiment object attribute options: {e}"))?;
+    let options_json = serde_json::to_string(&options).map_err(|e| {
+        format!("Could not encode PostgreSQL experiment object attribute options: {e}")
+    })?;
     let sort_order_row = client
-        .query_one("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM object_attribute_definitions", &[])
+        .query_one(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM object_attribute_definitions",
+            &[],
+        )
         .await
         .map_err(|e| format!("Could not determine object attribute order: {e}"))?;
     let sort_order: i32 = sort_order_row.get(0);
@@ -12922,7 +14236,13 @@ async fn create_postgres_experiment_object_attribute_definition_command(
         .map_err(|e| format!("Could not create PostgreSQL experiment object attribute: {e}"))?;
     connection_task.abort();
     let created = map_postgres_experiment_object_attribute_definition_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "object_attribute_definition", &created.id, "created");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_attribute_definition",
+        &created.id,
+        "created",
+    );
     Ok(created)
 }
 
@@ -12956,13 +14276,16 @@ async fn update_postgres_experiment_object_attribute_definition_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let (object_type_id, object_type_name) =
         load_postgres_experiment_object_type_for_client(&client, &object_type_id).await?;
-    let options_json = serde_json::to_string(&options)
-        .map_err(|e| format!("Could not encode PostgreSQL experiment object attribute options: {e}"))?;
+    let options_json = serde_json::to_string(&options).map_err(|e| {
+        format!("Could not encode PostgreSQL experiment object attribute options: {e}")
+    })?;
     let row = client
         .query_one(
             "
@@ -12983,7 +14306,13 @@ async fn update_postgres_experiment_object_attribute_definition_command(
         .map_err(|e| format!("Could not update PostgreSQL experiment object attribute: {e}"))?;
     connection_task.abort();
     let updated = map_postgres_experiment_object_attribute_definition_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "object_attribute_definition", &updated.id, "updated");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_attribute_definition",
+        &updated.id,
+        "updated",
+    );
     Ok(updated)
 }
 
@@ -13001,7 +14330,9 @@ async fn delete_postgres_experiment_object_attribute_definition_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     client
@@ -13012,7 +14343,13 @@ async fn delete_postgres_experiment_object_attribute_definition_command(
         .await
         .map_err(|e| format!("Could not delete PostgreSQL experiment object attribute: {e}"))?;
     connection_task.abort();
-    emit_postgres_experiment_project_change(&app, &project_id, "object_attribute_definition", &attribute_definition_id, "deleted");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "object_attribute_definition",
+        &attribute_definition_id,
+        "deleted",
+    );
     Ok(DeletePostgresExperimentObjectAttributeDefinitionResult {
         project_id,
         attribute_definition_id,
@@ -13047,6 +14384,12 @@ async fn create_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let image_storage_path = request
+        .image_storage_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     let event_start_at = request.event_start_at.as_deref();
     let event_end_at = request.event_end_at.as_deref();
     let event_time_precision = request.event_time_precision.as_deref();
@@ -13065,23 +14408,32 @@ async fn create_postgres_experiment_object_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let object_type = load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
+    let object_type =
+        load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
     ensure_postgres_experiment_object_type_is_not_source_backed(&object_type)?;
     let object_id = generate_identifier();
     client
         .execute(
             "
-            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, fill_override)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, fill_override, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ",
-            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override],
+            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment object: {e}"))?;
-    save_postgres_experiment_object_attribute_values_for_client(&*client, &object_id, &object_type.id, &attribute_values).await?;
+    save_postgres_experiment_object_attribute_values_for_client(
+        &*client,
+        &object_id,
+        &object_type.id,
+        &attribute_values,
+    )
+    .await?;
     save_postgres_experiment_event_fields_for_client(
         &*client,
         &object_id,
@@ -13093,9 +14445,15 @@ async fn create_postgres_experiment_object_command(
         event_is_instant,
     )
     .await?;
-    let attribute_values_by_object_id = load_postgres_experiment_object_attribute_values_for_client(&client).await?;
-    let created =
-        load_postgres_experiment_object_for_client(&client, &project_id, &object_id, &attribute_values_by_object_id).await?;
+    let attribute_values_by_object_id =
+        load_postgres_experiment_object_attribute_values_for_client(&client).await?;
+    let created = load_postgres_experiment_object_for_client(
+        &client,
+        &project_id,
+        &object_id,
+        &attribute_values_by_object_id,
+    )
+    .await?;
     connection_task.abort();
     emit_postgres_experiment_project_change(&app, &project_id, "object", &created.id, "created");
     Ok(created)
@@ -13130,6 +14488,12 @@ async fn update_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let image_storage_path = request
+        .image_storage_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     let event_start_at = request.event_start_at.as_deref();
     let event_end_at = request.event_end_at.as_deref();
     let event_time_precision = request.event_time_precision.as_deref();
@@ -13148,14 +14512,20 @@ async fn update_postgres_experiment_object_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    if load_postgres_experiment_source_id_for_object_for_client(&client, &object_id).await?.is_some() {
+    if load_postgres_experiment_source_id_for_object_for_client(&client, &object_id)
+        .await?
+        .is_some()
+    {
         connection_task.abort();
         return Err("This object is managed from the Sources workflow.".to_string());
     }
-    let object_type = load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
+    let object_type =
+        load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
     ensure_postgres_experiment_object_type_is_not_source_backed(&object_type)?;
     client
         .execute(
@@ -13168,14 +14538,31 @@ async fn update_postgres_experiment_object_command(
                 shape_override = $6,
                 color_override = $7,
                 fill_override = $8,
+                image_storage_path = $9,
                 updated_at = NOW()
             WHERE id = $1
             ",
-            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override],
+            &[
+                &object_id,
+                &object_type.id,
+                &object_type.name,
+                &title,
+                &description,
+                &shape_override,
+                &color_override,
+                &fill_override,
+                &image_storage_path,
+            ],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment object: {e}"))?;
-    save_postgres_experiment_object_attribute_values_for_client(&*client, &object_id, &object_type.id, &attribute_values).await?;
+    save_postgres_experiment_object_attribute_values_for_client(
+        &*client,
+        &object_id,
+        &object_type.id,
+        &attribute_values,
+    )
+    .await?;
     save_postgres_experiment_event_fields_for_client(
         &*client,
         &object_id,
@@ -13187,9 +14574,15 @@ async fn update_postgres_experiment_object_command(
         event_is_instant,
     )
     .await?;
-    let attribute_values_by_object_id = load_postgres_experiment_object_attribute_values_for_client(&client).await?;
-    let updated =
-        load_postgres_experiment_object_for_client(&client, &project_id, &object_id, &attribute_values_by_object_id).await?;
+    let attribute_values_by_object_id =
+        load_postgres_experiment_object_attribute_values_for_client(&client).await?;
+    let updated = load_postgres_experiment_object_for_client(
+        &client,
+        &project_id,
+        &object_id,
+        &attribute_values_by_object_id,
+    )
+    .await?;
     connection_task.abort();
     emit_postgres_experiment_project_change(&app, &project_id, "object", &object_id, "updated");
     Ok(updated)
@@ -13229,6 +14622,12 @@ async fn save_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let image_storage_path = request
+        .image_storage_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     let event_start_at = request.event_start_at.as_deref();
     let event_end_at = request.event_end_at.as_deref();
     let event_time_precision = request.event_time_precision.as_deref();
@@ -13255,13 +14654,20 @@ async fn save_postgres_experiment_object_command(
     );
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let object_type = load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
+    let object_type =
+        load_postgres_experiment_object_type_record_for_client(&client, &object_type_id).await?;
     ensure_postgres_experiment_object_type_is_not_source_backed(&object_type)?;
     if let Some(existing_object_id) = object_id.as_deref() {
-        if load_postgres_experiment_source_id_for_object_for_client(&client, existing_object_id).await?.is_some() {
+        if load_postgres_experiment_source_id_for_object_for_client(&client, existing_object_id)
+            .await?
+            .is_some()
+        {
             connection_task.abort();
             return Err("This object is managed from the Sources workflow.".to_string());
         }
@@ -13275,10 +14681,10 @@ async fn save_postgres_experiment_object_command(
     if created {
         tx.execute(
             "
-            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, fill_override)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, fill_override, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ",
-            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override],
+            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override, &image_storage_path],
         ).await
     } else {
         tx.execute(
@@ -13291,10 +14697,11 @@ async fn save_postgres_experiment_object_command(
                 shape_override = $6,
                 color_override = $7,
                 fill_override = $8,
+                image_storage_path = $9,
                 updated_at = NOW()
             WHERE id = $1
             ",
-            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override],
+            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override, &image_storage_path],
         ).await
     }
     .map_err(|e| format!("Could not save PostgreSQL experiment object: {e}"))?;
@@ -13326,10 +14733,10 @@ async fn save_postgres_experiment_object_command(
         .map_err(|e| format!("Could not commit PostgreSQL experiment object save: {e}"))?;
     eprintln!(
         "[kanqual] save_postgres_experiment_object_command:committed object_id={} created={}",
-        resolved_object_id,
-        created
+        resolved_object_id, created
     );
-    let attribute_values_by_object_id = load_postgres_experiment_object_attribute_values_for_client(&client).await?;
+    let attribute_values_by_object_id =
+        load_postgres_experiment_object_attribute_values_for_client(&client).await?;
     let saved = load_postgres_experiment_object_for_client(
         &client,
         &project_id,
@@ -13374,6 +14781,141 @@ async fn save_postgres_experiment_object_command(
 }
 
 #[tauri::command]
+async fn import_postgres_experiment_object_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: ImportPostgresExperimentObjectImageRequest,
+) -> Result<PostgresExperimentObject, String> {
+    let project_id = request.project_id.trim().to_string();
+    let object_id = request.object_id.trim().to_string();
+    if project_id.is_empty() || object_id.is_empty() {
+        return Err("Project and object identifiers are required.".to_string());
+    }
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    if load_postgres_experiment_source_id_for_object_for_client(&client, &object_id)
+        .await?
+        .is_some()
+    {
+        connection_task.abort();
+        return Err("This object is managed from the Sources workflow.".to_string());
+    }
+    let previous_path = client
+        .query_one(
+            "SELECT image_storage_path FROM research_objects WHERE id = $1",
+            &[&object_id],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment object image: {e}"))?
+        .get::<usize, String>(0);
+    let image_storage_path = write_postgres_experiment_project_image_file(
+        &project,
+        "objects",
+        &object_id,
+        &request.original_file_name,
+        &request.file_bytes_base64,
+    )?;
+    let updated_count = client
+        .execute(
+            "
+            UPDATE research_objects
+            SET image_storage_path = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            ",
+            &[&object_id, &image_storage_path],
+        )
+        .await
+        .map_err(|e| format!("Could not update PostgreSQL experiment object image: {e}"))?;
+    if updated_count == 0 {
+        connection_task.abort();
+        return Err("The selected object could not be found.".to_string());
+    }
+    remove_postgres_experiment_project_file_if_present(&project, &previous_path);
+    let attribute_values_by_object_id =
+        load_postgres_experiment_object_attribute_values_for_client(&client).await?;
+    let updated = load_postgres_experiment_object_for_client(
+        &client,
+        &project_id,
+        &object_id,
+        &attribute_values_by_object_id,
+    )
+    .await?;
+    connection_task.abort();
+    emit_postgres_experiment_project_change(&app, &project_id, "object", &object_id, "updated");
+    Ok(updated)
+}
+
+#[tauri::command]
+async fn remove_postgres_experiment_object_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+    object_id: String,
+) -> Result<PostgresExperimentObject, String> {
+    let project_id = project_id.trim().to_string();
+    let object_id = object_id.trim().to_string();
+    if project_id.is_empty() || object_id.is_empty() {
+        return Err("Project and object identifiers are required.".to_string());
+    }
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    if load_postgres_experiment_source_id_for_object_for_client(&client, &object_id)
+        .await?
+        .is_some()
+    {
+        connection_task.abort();
+        return Err("This object is managed from the Sources workflow.".to_string());
+    }
+    let previous_path = client
+        .query_one(
+            "SELECT image_storage_path FROM research_objects WHERE id = $1",
+            &[&object_id],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment object image: {e}"))?
+        .get::<usize, String>(0);
+    let empty_path = String::new();
+    let updated_count = client
+        .execute(
+            "
+            UPDATE research_objects
+            SET image_storage_path = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            ",
+            &[&object_id, &empty_path],
+        )
+        .await
+        .map_err(|e| format!("Could not remove PostgreSQL experiment object image: {e}"))?;
+    if updated_count == 0 {
+        connection_task.abort();
+        return Err("The selected object could not be found.".to_string());
+    }
+    remove_postgres_experiment_project_file_if_present(&project, &previous_path);
+    let attribute_values_by_object_id =
+        load_postgres_experiment_object_attribute_values_for_client(&client).await?;
+    let updated = load_postgres_experiment_object_for_client(
+        &client,
+        &project_id,
+        &object_id,
+        &attribute_values_by_object_id,
+    )
+    .await?;
+    connection_task.abort();
+    emit_postgres_experiment_project_change(&app, &project_id, "object", &object_id, "updated");
+    Ok(updated)
+}
+
+#[tauri::command]
 async fn delete_postgres_experiment_object_command(
     app: tauri::AppHandle,
     runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
@@ -13387,17 +14929,27 @@ async fn delete_postgres_experiment_object_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    if load_postgres_experiment_source_id_for_object_for_client(&client, &object_id).await?.is_some() {
+    if load_postgres_experiment_source_id_for_object_for_client(&client, &object_id)
+        .await?
+        .is_some()
+    {
         connection_task.abort();
         return Err("This object is managed from the Sources workflow.".to_string());
     }
     let deleted_title = client
-        .query_opt("SELECT title FROM research_objects WHERE id = $1", &[&object_id])
+        .query_opt(
+            "SELECT title FROM research_objects WHERE id = $1",
+            &[&object_id],
+        )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment object before deletion: {e}"))?
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment object before deletion: {e}")
+        })?
         .map(|row| row.get::<usize, String>(0));
     client
         .execute("DELETE FROM research_objects WHERE id = $1", &[&object_id])
@@ -13413,10 +14965,14 @@ async fn delete_postgres_experiment_object_command(
         Some(serde_json::json!({
             "title": deleted_title,
         })),
-    ).await?;
+    )
+    .await?;
     connection_task.abort();
     emit_postgres_experiment_project_change(&app, &project_id, "object", &object_id, "deleted");
-    Ok(DeletePostgresExperimentObjectResult { project_id, object_id })
+    Ok(DeletePostgresExperimentObjectResult {
+        project_id,
+        object_id,
+    })
 }
 
 #[tauri::command]
@@ -13431,10 +14987,13 @@ async fn list_postgres_experiment_relationships_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let attribute_values_by_relationship_id = load_postgres_experiment_relationship_attribute_values_for_client(&client).await?;
+    let attribute_values_by_relationship_id =
+        load_postgres_experiment_relationship_attribute_values_for_client(&client).await?;
     let rows = client
         .query(
             "
@@ -13484,10 +15043,16 @@ async fn list_postgres_experiment_relationship_attribute_definitions_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let definitions = load_postgres_experiment_relationship_attribute_definitions_for_client(&client, &project_id).await?;
+    let definitions = load_postgres_experiment_relationship_attribute_definitions_for_client(
+        &client,
+        &project_id,
+    )
+    .await?;
     connection_task.abort();
     Ok(definitions)
 }
@@ -13520,11 +15085,14 @@ async fn create_postgres_experiment_relationship_attribute_definition_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let (relationship_type_id, relationship_type_name, _, _) =
-        load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id).await?;
+        load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id)
+            .await?;
     let sort_order: i32 = client
         .query_one(
             "
@@ -13553,7 +15121,13 @@ async fn create_postgres_experiment_relationship_attribute_definition_command(
         .map_err(|e| format!("Could not create PostgreSQL experiment relationship attribute: {e}"))?;
     connection_task.abort();
     let created = map_postgres_experiment_relationship_attribute_definition_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship_attribute_definition", &created.id, "created");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship_attribute_definition",
+        &created.id,
+        "created",
+    );
     Ok(created)
 }
 
@@ -13586,11 +15160,14 @@ async fn update_postgres_experiment_relationship_attribute_definition_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let (relationship_type_id, relationship_type_name, _, _) =
-        load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id).await?;
+        load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id)
+            .await?;
     let options_json = serde_json::to_string(&options)
         .map_err(|e| format!("Could not encode relationship attribute options: {e}"))?;
     let row = client
@@ -13613,7 +15190,13 @@ async fn update_postgres_experiment_relationship_attribute_definition_command(
         .map_err(|e| format!("Could not update PostgreSQL experiment relationship attribute: {e}"))?;
     connection_task.abort();
     let updated = map_postgres_experiment_relationship_attribute_definition_row(&project_id, row);
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship_attribute_definition", &attribute_definition_id, "updated");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship_attribute_definition",
+        &attribute_definition_id,
+        "updated",
+    );
     Ok(updated)
 }
 
@@ -13631,7 +15214,9 @@ async fn delete_postgres_experiment_relationship_attribute_definition_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     client
@@ -13643,13 +15228,23 @@ async fn delete_postgres_experiment_relationship_attribute_definition_command(
             &[&attribute_definition_id],
         )
         .await
-        .map_err(|e| format!("Could not delete PostgreSQL experiment relationship attribute: {e}"))?;
+        .map_err(|e| {
+            format!("Could not delete PostgreSQL experiment relationship attribute: {e}")
+        })?;
     connection_task.abort();
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship_attribute_definition", &attribute_definition_id, "deleted");
-    Ok(DeletePostgresExperimentRelationshipAttributeDefinitionResult {
-        project_id,
-        attribute_definition_id,
-    })
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship_attribute_definition",
+        &attribute_definition_id,
+        "deleted",
+    );
+    Ok(
+        DeletePostgresExperimentRelationshipAttributeDefinitionResult {
+            project_id,
+            attribute_definition_id,
+        },
+    )
 }
 
 #[tauri::command]
@@ -13700,11 +15295,18 @@ async fn create_postgres_experiment_relationship_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let (relationship_type_id, relationship_type_name, allowed_from_object_type_ids, allowed_to_object_type_ids) =
-        load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id).await?;
+    let (
+        relationship_type_id,
+        relationship_type_name,
+        allowed_from_object_type_ids,
+        allowed_to_object_type_ids,
+    ) = load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id)
+        .await?;
     validate_postgres_experiment_relationship_type_constraints_for_client(
         &client,
         &from_object_id,
@@ -13712,7 +15314,8 @@ async fn create_postgres_experiment_relationship_command(
         &relationship_type_name,
         &allowed_from_object_type_ids,
         &allowed_to_object_type_ids,
-    ).await?;
+    )
+    .await?;
     let relationship_id = generate_identifier();
     let row = client
         .query_one(
@@ -13725,8 +15328,15 @@ async fn create_postgres_experiment_relationship_command(
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment relationship: {e}"))?;
-    save_postgres_experiment_relationship_attribute_values_for_client(&*client, &relationship_id, &relationship_type_id, &attribute_values).await?;
-    let attribute_values_by_relationship_id = load_postgres_experiment_relationship_attribute_values_for_client(&client).await?;
+    save_postgres_experiment_relationship_attribute_values_for_client(
+        &*client,
+        &relationship_id,
+        &relationship_type_id,
+        &attribute_values,
+    )
+    .await?;
+    let attribute_values_by_relationship_id =
+        load_postgres_experiment_relationship_attribute_values_for_client(&client).await?;
     connection_task.abort();
     let created = PostgresExperimentRelationship {
         id: row.get(0),
@@ -13747,7 +15357,13 @@ async fn create_postgres_experiment_relationship_command(
         created_at: row.get(10),
         updated_at: row.get(11),
     };
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship", &created.id, "created");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship",
+        &created.id,
+        "created",
+    );
     Ok(created)
 }
 
@@ -13800,11 +15416,18 @@ async fn update_postgres_experiment_relationship_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let _session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let (relationship_type_id, relationship_type_name, allowed_from_object_type_ids, allowed_to_object_type_ids) =
-        load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id).await?;
+    let (
+        relationship_type_id,
+        relationship_type_name,
+        allowed_from_object_type_ids,
+        allowed_to_object_type_ids,
+    ) = load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id)
+        .await?;
     validate_postgres_experiment_relationship_type_constraints_for_client(
         &client,
         &from_object_id,
@@ -13812,7 +15435,8 @@ async fn update_postgres_experiment_relationship_command(
         &relationship_type_name,
         &allowed_from_object_type_ids,
         &allowed_to_object_type_ids,
-    ).await?;
+    )
+    .await?;
     let row = client
         .query_one(
             "
@@ -13834,8 +15458,15 @@ async fn update_postgres_experiment_relationship_command(
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment relationship: {e}"))?;
-    save_postgres_experiment_relationship_attribute_values_for_client(&*client, &relationship_id, &relationship_type_id, &attribute_values).await?;
-    let attribute_values_by_relationship_id = load_postgres_experiment_relationship_attribute_values_for_client(&client).await?;
+    save_postgres_experiment_relationship_attribute_values_for_client(
+        &*client,
+        &relationship_id,
+        &relationship_type_id,
+        &attribute_values,
+    )
+    .await?;
+    let attribute_values_by_relationship_id =
+        load_postgres_experiment_relationship_attribute_values_for_client(&client).await?;
     connection_task.abort();
     let updated = PostgresExperimentRelationship {
         id: row.get(0),
@@ -13856,7 +15487,13 @@ async fn update_postgres_experiment_relationship_command(
         created_at: row.get(10),
         updated_at: row.get(11),
     };
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship", &relationship_id, "updated");
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship",
+        &relationship_id,
+        "updated",
+    );
     Ok(updated)
 }
 
@@ -13914,11 +15551,19 @@ async fn save_postgres_experiment_relationship_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
-    let (mut client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    let (relationship_type_id, relationship_type_name, allowed_from_object_type_ids, allowed_to_object_type_ids) =
-        load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
+    let (
+        relationship_type_id,
+        relationship_type_name,
+        allowed_from_object_type_ids,
+        allowed_to_object_type_ids,
+    ) = load_postgres_experiment_relationship_type_for_client(&client, &relationship_type_id)
+        .await?;
     validate_postgres_experiment_relationship_type_constraints_for_client(
         &client,
         &from_object_id,
@@ -14045,16 +15690,26 @@ async fn delete_postgres_experiment_relationship_command(
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
-    let session = require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project).await?;
+    let session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let deleted_relationship_type = client
-        .query_opt("SELECT relationship_type FROM object_relationships WHERE id = $1", &[&relationship_id])
+        .query_opt(
+            "SELECT relationship_type FROM object_relationships WHERE id = $1",
+            &[&relationship_id],
+        )
         .await
-        .map_err(|e| format!("Could not inspect PostgreSQL experiment relationship before deletion: {e}"))?
+        .map_err(|e| {
+            format!("Could not inspect PostgreSQL experiment relationship before deletion: {e}")
+        })?
         .map(|row| row.get::<usize, String>(0));
     client
-        .execute("DELETE FROM object_relationships WHERE id = $1", &[&relationship_id])
+        .execute(
+            "DELETE FROM object_relationships WHERE id = $1",
+            &[&relationship_id],
+        )
         .await
         .map_err(|e| format!("Could not delete PostgreSQL experiment relationship: {e}"))?;
     append_postgres_experiment_project_log_for_client(
@@ -14067,10 +15722,20 @@ async fn delete_postgres_experiment_relationship_command(
         Some(serde_json::json!({
             "relationshipType": deleted_relationship_type,
         })),
-    ).await?;
+    )
+    .await?;
     connection_task.abort();
-    emit_postgres_experiment_project_change(&app, &project_id, "relationship", &relationship_id, "deleted");
-    Ok(DeletePostgresExperimentRelationshipResult { project_id, relationship_id })
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "relationship",
+        &relationship_id,
+        "deleted",
+    );
+    Ok(DeletePostgresExperimentRelationshipResult {
+        project_id,
+        relationship_id,
+    })
 }
 
 #[tauri::command]
@@ -14116,7 +15781,9 @@ async fn authenticate_internal_superuser(
 ) -> Result<String, String> {
     let identity = load_or_create_backend_identity(app)?;
     let response = client
-        .post(format!("{PB_URL}/api/collections/_superusers/auth-with-password"))
+        .post(format!(
+            "{PB_URL}/api/collections/_superusers/auth-with-password"
+        ))
         .header("User-Agent", "Kanqual/0.9")
         .json(&serde_json::json!({
             "identity": identity.superuser_email,
@@ -14138,7 +15805,9 @@ async fn delete_collection_records(
     let mut page = 1_u32;
     loop {
         let response = client
-            .get(format!("{PB_URL}/api/collections/{collection_name}/records"))
+            .get(format!(
+                "{PB_URL}/api/collections/{collection_name}/records"
+            ))
             .bearer_auth(token)
             .query(&[
                 ("page", page.to_string()),
@@ -14158,7 +15827,10 @@ async fn delete_collection_records(
 
         for record in payload.items {
             client
-                .delete(format!("{PB_URL}/api/collections/{collection_name}/records/{}", record.id))
+                .delete(format!(
+                    "{PB_URL}/api/collections/{collection_name}/records/{}",
+                    record.id
+                ))
                 .bearer_auth(token)
                 .send()
                 .await
@@ -14187,13 +15859,20 @@ async fn find_user_by_email(
         .query(&[
             ("page", "1".to_string()),
             ("perPage", "1".to_string()),
-            ("filter", format!("email=\"{}\"", email.replace('\\', "\\\\").replace('"', "\\\""))),
+            (
+                "filter",
+                format!(
+                    "email=\"{}\"",
+                    email.replace('\\', "\\\\").replace('"', "\\\"")
+                ),
+            ),
         ])
         .send()
         .await
         .map_err(|e| e.to_string())?;
     let response = response.error_for_status().map_err(|e| e.to_string())?;
-    let payload: PocketBaseListResponse<Value> = response.json().await.map_err(|e| e.to_string())?;
+    let payload: PocketBaseListResponse<Value> =
+        response.json().await.map_err(|e| e.to_string())?;
     Ok(payload.items.into_iter().next())
 }
 
@@ -14223,12 +15902,14 @@ async fn find_project_role_for_user(
         .await
         .map_err(|e| e.to_string())?;
     let response = response.error_for_status().map_err(|e| e.to_string())?;
-    let payload: PocketBaseListResponse<Value> = response.json().await.map_err(|e| e.to_string())?;
-    Ok(payload
-        .items
-        .into_iter()
-        .next()
-        .and_then(|value| value.get("role").and_then(Value::as_str).map(ToString::to_string)))
+    let payload: PocketBaseListResponse<Value> =
+        response.json().await.map_err(|e| e.to_string())?;
+    Ok(payload.items.into_iter().next().and_then(|value| {
+        value
+            .get("role")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+    }))
 }
 
 fn normalized_app_role(role: Option<String>) -> String {
@@ -14270,7 +15951,8 @@ async fn authenticate_requesting_user(
     let response = response
         .error_for_status()
         .map_err(|_| "Your session is no longer valid. Please sign in again.".to_string())?;
-    let payload: PocketBaseAuthRefreshResponse = response.json().await.map_err(|e| e.to_string())?;
+    let payload: PocketBaseAuthRefreshResponse =
+        response.json().await.map_err(|e| e.to_string())?;
     let user_id = payload
         .record
         .get("id")
@@ -14360,7 +16042,10 @@ fn value_id(value: &Value) -> Result<String, String> {
 }
 
 fn value_string(value: &Value, key: &str) -> Option<String> {
-    value.get(key).and_then(Value::as_str).map(ToString::to_string)
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 fn field_name(field: &Value) -> Option<&str> {
@@ -14387,16 +16072,11 @@ async fn pb_get_json(
     path: &str,
     query: Option<&[(&str, String)]>,
 ) -> Result<Value, String> {
-    let mut request = client
-        .get(format!("{PB_URL}{path}"))
-        .bearer_auth(token);
+    let mut request = client.get(format!("{PB_URL}{path}")).bearer_auth(token);
     if let Some(query_pairs) = query {
         request = request.query(query_pairs);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = request.send().await.map_err(|e| e.to_string())?;
     let response = response.error_for_status().map_err(|e| e.to_string())?;
     response.json().await.map_err(|e| e.to_string())
 }
@@ -14459,7 +16139,13 @@ async fn update_collection(
     collection_id: &str,
     payload: &Value,
 ) -> Result<(), String> {
-    pb_patch_json(client, token, &format!("/api/collections/{collection_id}"), payload).await?;
+    pb_patch_json(
+        client,
+        token,
+        &format!("/api/collections/{collection_id}"),
+        payload,
+    )
+    .await?;
     Ok(())
 }
 
@@ -14554,8 +16240,14 @@ async fn ensure_metadata_value_http(
     key: &str,
 ) -> Result<String, String> {
     let filter = format!("key=\"{}\"", escape_filter_value(key));
-    if let Some(existing) = get_first_record_by_filter(client, token, APP_METADATA_COLLECTION, &filter).await? {
-        if let Some(value) = existing.get("value").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+    if let Some(existing) =
+        get_first_record_by_filter(client, token, APP_METADATA_COLLECTION, &filter).await?
+    {
+        if let Some(value) = existing
+            .get("value")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
             return Ok(value.to_string());
         }
         let generated = generate_identifier();
@@ -14589,7 +16281,11 @@ async fn backfill_user_identifiers_http(
         client,
         token,
         "users",
-        &[("page", "1".to_string()), ("perPage", "500".to_string()), ("sort", "created".to_string())],
+        &[
+            ("page", "1".to_string()),
+            ("perPage", "500".to_string()),
+            ("sort", "created".to_string()),
+        ],
     )
     .await?;
     for user in users {
@@ -14610,23 +16306,29 @@ async fn backfill_user_identifiers_http(
     Ok(())
 }
 
-async fn backfill_user_app_roles_http(
-    client: &reqwest::Client,
-    token: &str,
-) -> Result<(), String> {
+async fn backfill_user_app_roles_http(client: &reqwest::Client, token: &str) -> Result<(), String> {
     let users = list_records(
         client,
         token,
         "users",
-        &[("page", "1".to_string()), ("perPage", "500".to_string()), ("sort", "created".to_string())],
+        &[
+            ("page", "1".to_string()),
+            ("perPage", "500".to_string()),
+            ("sort", "created".to_string()),
+        ],
     )
     .await?;
     if users.is_empty() {
         return Ok(());
     }
 
-    let has_administrator = users.iter().any(|user| value_string(user, "app_role").as_deref() == Some("administrator"));
-    let first_user_id = users.first().and_then(|user| value_string(user, "id")).unwrap_or_default();
+    let has_administrator = users
+        .iter()
+        .any(|user| value_string(user, "app_role").as_deref() == Some("administrator"));
+    let first_user_id = users
+        .first()
+        .and_then(|user| value_string(user, "id"))
+        .unwrap_or_default();
 
     for user in users {
         let user_id = value_id(&user)?;
@@ -14658,7 +16360,11 @@ async fn backfill_project_member_roles_http(
         client,
         token,
         "project_members",
-        &[("page", "1".to_string()), ("perPage", "500".to_string()), ("sort", "created".to_string())],
+        &[
+            ("page", "1".to_string()),
+            ("perPage", "500".to_string()),
+            ("sort", "created".to_string()),
+        ],
     )
     .await?;
     if memberships.is_empty() {
@@ -14681,7 +16387,10 @@ async fn backfill_project_member_roles_http(
             )
             .await?;
         }
-        by_project.entry(project_id).or_default().push((id, normalized_role));
+        by_project
+            .entry(project_id)
+            .or_default()
+            .push((id, normalized_role));
     }
 
     for memberships in by_project.values() {
@@ -14701,10 +16410,7 @@ async fn backfill_project_member_roles_http(
     Ok(())
 }
 
-async fn backfill_document_types_http(
-    client: &reqwest::Client,
-    token: &str,
-) -> Result<(), String> {
+async fn backfill_document_types_http(client: &reqwest::Client, token: &str) -> Result<(), String> {
     let documents = list_records(
         client,
         token,
@@ -14761,16 +16467,19 @@ async fn upsert_collection_http(
             .cloned()
             .unwrap_or_default();
 
-        let needs_rule_update =
-            existing.get("listRule") != open_rules.get("listRule")
-                || existing.get("viewRule") != open_rules.get("viewRule")
-                || existing.get("createRule") != open_rules.get("createRule")
-                || existing.get("updateRule") != open_rules.get("updateRule")
-                || existing.get("deleteRule") != open_rules.get("deleteRule");
+        let needs_rule_update = existing.get("listRule") != open_rules.get("listRule")
+            || existing.get("viewRule") != open_rules.get("viewRule")
+            || existing.get("createRule") != open_rules.get("createRule")
+            || existing.get("updateRule") != open_rules.get("updateRule")
+            || existing.get("deleteRule") != open_rules.get("deleteRule");
 
         let missing_custom: Vec<Value> = definition_fields
             .iter()
-            .filter(|field| !field_name(field).map(|name| field_exists(&existing_fields, name)).unwrap_or(false))
+            .filter(|field| {
+                !field_name(field)
+                    .map(|name| field_exists(&existing_fields, name))
+                    .unwrap_or(false)
+            })
             .cloned()
             .collect();
 
@@ -14796,8 +16505,12 @@ async fn upsert_collection_http(
                 .filter(|field| {
                     field_name(field)
                         .map(|name| {
-                            definition_fields.iter().any(|df| field_name(df) == Some(name))
-                                || auto_date_fields.iter().any(|df| field_name(df) == Some(name))
+                            definition_fields
+                                .iter()
+                                .any(|df| field_name(df) == Some(name))
+                                || auto_date_fields
+                                    .iter()
+                                    .any(|df| field_name(df) == Some(name))
                         })
                         .unwrap_or(false)
                 })
@@ -14810,11 +16523,20 @@ async fn upsert_collection_http(
 
         let missing_dates: Vec<Value> = auto_date_fields
             .iter()
-            .filter(|field| !field_name(field).map(|name| field_exists(&existing_fields, name)).unwrap_or(false))
+            .filter(|field| {
+                !field_name(field)
+                    .map(|name| field_exists(&existing_fields, name))
+                    .unwrap_or(false)
+            })
             .cloned()
             .collect();
 
-        if needs_rule_update || !missing_dates.is_empty() || !missing_custom.is_empty() || existing_changed || extra_fields_removed {
+        if needs_rule_update
+            || !missing_dates.is_empty()
+            || !missing_custom.is_empty()
+            || existing_changed
+            || extra_fields_removed
+        {
             let mut patch = serde_json::Map::new();
             if needs_rule_update {
                 if let Some(rules) = open_rules.as_object() {
@@ -14823,7 +16545,11 @@ async fn upsert_collection_http(
                     }
                 }
             }
-            if !missing_dates.is_empty() || !missing_custom.is_empty() || existing_changed || extra_fields_removed {
+            if !missing_dates.is_empty()
+                || !missing_custom.is_empty()
+                || existing_changed
+                || extra_fields_removed
+            {
                 let mut fields = pruned_fields;
                 fields.extend(missing_custom);
                 fields.extend(missing_dates);
@@ -14853,10 +16579,7 @@ async fn upsert_collection_http(
     create_collection(client, token, &Value::Object(payload)).await
 }
 
-async fn ensure_backend_setup_http(
-    client: &reqwest::Client,
-    token: &str,
-) -> Result<(), String> {
+async fn ensure_backend_setup_http(client: &reqwest::Client, token: &str) -> Result<(), String> {
     if let Some(users_collection) = get_collection_by_name(client, token, "users").await? {
         let existing_fields = users_collection
             .get("fields")
@@ -14866,16 +16589,16 @@ async fn ensure_backend_setup_http(
         let has_user_identifier = field_exists(&existing_fields, "user_identifier");
         let has_must_change_password = field_exists(&existing_fields, "must_change_password");
         let has_app_role = field_exists(&existing_fields, "app_role");
-        let needs_user_patch =
-            users_collection.get("listRule") != Some(&Value::String(AUTH_RULE.to_string()))
-                || users_collection.get("viewRule") != Some(&Value::String(AUTH_RULE.to_string()))
-                || users_collection.get("createRule") != Some(&Value::String(String::new()))
-                || users_collection.get("updateRule") != Some(&Value::String(AUTH_RULE.to_string()))
-                || users_collection.get("deleteRule") != Some(&Value::String(AUTH_RULE.to_string()))
-                || users_collection.get("authRule") != Some(&Value::String(String::new()))
-                || !has_user_identifier
-                || !has_must_change_password
-                || !has_app_role;
+        let needs_user_patch = users_collection.get("listRule")
+            != Some(&Value::String(AUTH_RULE.to_string()))
+            || users_collection.get("viewRule") != Some(&Value::String(AUTH_RULE.to_string()))
+            || users_collection.get("createRule") != Some(&Value::String(String::new()))
+            || users_collection.get("updateRule") != Some(&Value::String(AUTH_RULE.to_string()))
+            || users_collection.get("deleteRule") != Some(&Value::String(AUTH_RULE.to_string()))
+            || users_collection.get("authRule") != Some(&Value::String(String::new()))
+            || !has_user_identifier
+            || !has_must_change_password
+            || !has_app_role;
         if needs_user_patch {
             let mut fields = existing_fields.clone();
             if !has_user_identifier {
@@ -14930,16 +16653,24 @@ async fn ensure_backend_setup_http(
     backfill_user_identifiers_http(client, token).await?;
     backfill_user_app_roles_http(client, token).await?;
 
-    upsert_collection_http(client, token, "projects", serde_json::json!({
-        "fields": [
-            { "name": "name", "type": "text", "required": true },
-            { "name": "description", "type": "text" },
-            { "name": "backend_identifier", "type": "text" },
-            { "name": "users_table_identifier", "type": "text" }
-        ]
-    }), false).await?;
+    upsert_collection_http(
+        client,
+        token,
+        "projects",
+        serde_json::json!({
+            "fields": [
+                { "name": "name", "type": "text", "required": true },
+                { "name": "description", "type": "text" },
+                { "name": "backend_identifier", "type": "text" },
+                { "name": "users_table_identifier", "type": "text" }
+            ]
+        }),
+        false,
+    )
+    .await?;
 
-    let projects = get_collection_by_name(client, token, "projects").await?
+    let projects = get_collection_by_name(client, token, "projects")
+        .await?
         .ok_or_else(|| "The projects collection is missing after setup.".to_string())?;
     let projects_id = value_id(&projects)?;
 
@@ -14993,7 +16724,8 @@ async fn ensure_backend_setup_http(
             { "name": "deleted_at", "type": "text" }
         ]
     }), false).await?;
-    let project_ai_chats = get_collection_by_name(client, token, "project_ai_chats").await?
+    let project_ai_chats = get_collection_by_name(client, token, "project_ai_chats")
+        .await?
         .ok_or_else(|| "The project_ai_chats collection is missing after setup.".to_string())?;
     let project_ai_chats_id = value_id(&project_ai_chats)?;
 
@@ -15049,7 +16781,8 @@ async fn ensure_backend_setup_http(
             { "name": "created_by_identifier", "type": "text" }
         ]
     }), false).await?;
-    let codes = get_collection_by_name(client, token, "codes").await?
+    let codes = get_collection_by_name(client, token, "codes")
+        .await?
         .ok_or_else(|| "The codes collection is missing after setup.".to_string())?;
     let codes_id = value_id(&codes)?;
     upsert_collection_http(client, token, "codes", serde_json::json!({
@@ -15066,7 +16799,8 @@ async fn ensure_backend_setup_http(
         ]
     }), false).await?;
 
-    let documents = get_collection_by_name(client, token, "documents").await?
+    let documents = get_collection_by_name(client, token, "documents")
+        .await?
         .ok_or_else(|| "The documents collection is missing after setup.".to_string())?;
     let documents_id = value_id(&documents)?;
 
@@ -15101,7 +16835,8 @@ async fn ensure_backend_setup_http(
         ]
     }), true).await?;
 
-    let annotations = get_collection_by_name(client, token, "annotations").await?
+    let annotations = get_collection_by_name(client, token, "annotations")
+        .await?
         .ok_or_else(|| "The annotations collection is missing after setup.".to_string())?;
     let annotations_id = value_id(&annotations)?;
     upsert_collection_http(client, token, "memos", serde_json::json!({
@@ -15157,7 +16892,8 @@ async fn ensure_backend_setup_http(
             { "name": "deleted_at", "type": "text" }
         ]
     }), false).await?;
-    let cases = get_collection_by_name(client, token, "cases").await?
+    let cases = get_collection_by_name(client, token, "cases")
+        .await?
         .ok_or_else(|| "The cases collection is missing after setup.".to_string())?;
     let cases_id = value_id(&cases)?;
     upsert_collection_http(client, token, "project_uploaded_files", serde_json::json!({
@@ -15205,8 +16941,12 @@ async fn ensure_backend_setup_http(
             { "name": "deleted_at", "type": "text" }
         ]
     }), false).await?;
-    let case_attribute_definitions = get_collection_by_name(client, token, "case_attribute_definitions").await?
-        .ok_or_else(|| "The case_attribute_definitions collection is missing after setup.".to_string())?;
+    let case_attribute_definitions =
+        get_collection_by_name(client, token, "case_attribute_definitions")
+            .await?
+            .ok_or_else(|| {
+                "The case_attribute_definitions collection is missing after setup.".to_string()
+            })?;
     let case_attribute_definitions_id = value_id(&case_attribute_definitions)?;
     upsert_collection_http(client, token, "case_attribute_values", serde_json::json!({
         "fields": [
@@ -15228,8 +16968,12 @@ async fn ensure_backend_setup_http(
             { "name": "deleted_at", "type": "text" }
         ]
     }), false).await?;
-    let document_attribute_definitions = get_collection_by_name(client, token, "document_attribute_definitions").await?
-        .ok_or_else(|| "The document_attribute_definitions collection is missing after setup.".to_string())?;
+    let document_attribute_definitions =
+        get_collection_by_name(client, token, "document_attribute_definitions")
+            .await?
+            .ok_or_else(|| {
+                "The document_attribute_definitions collection is missing after setup.".to_string()
+            })?;
     let document_attribute_definitions_id = value_id(&document_attribute_definitions)?;
     upsert_collection_http(client, token, "document_attribute_values", serde_json::json!({
         "fields": [
@@ -15265,7 +17009,10 @@ async fn ensure_backend_setup_http(
         ]
     }), false).await?;
 
-    if get_collection_by_name(client, token, "project_presence").await?.is_none() {
+    if get_collection_by_name(client, token, "project_presence")
+        .await?
+        .is_none()
+    {
         create_collection(
             client,
             token,
@@ -15365,11 +17112,15 @@ async fn delete_user_account_command(
     let client = reqwest::Client::new();
     let requester = ensure_requesting_administrator(&client, &auth_token).await?;
     if requester.user_id == trimmed_user_id {
-        return Err("Administrators cannot delete their own active account from this action.".to_string());
+        return Err(
+            "Administrators cannot delete their own active account from this action.".to_string(),
+        );
     }
     let token = authenticate_internal_superuser(&app, &client).await?;
     client
-        .delete(format!("{PB_URL}/api/collections/users/records/{trimmed_user_id}"))
+        .delete(format!(
+            "{PB_URL}/api/collections/users/records/{trimmed_user_id}"
+        ))
         .bearer_auth(token)
         .send()
         .await
@@ -15439,7 +17190,11 @@ async fn register_user_account_command(
     let response = response.error_for_status().map_err(|e| e.to_string())?;
     let payload: PocketBaseListResponse<PocketBaseRecordId> =
         response.json().await.map_err(|e| e.to_string())?;
-    let app_role = if payload.items.is_empty() { "administrator" } else { "standard" };
+    let app_role = if payload.items.is_empty() {
+        "administrator"
+    } else {
+        "standard"
+    };
 
     let create_payload = serde_json::json!({
         "name": request.name,
@@ -15482,7 +17237,11 @@ async fn ensure_imported_user_account_command(
     let name = {
         let trimmed = request.request.name.trim();
         if trimmed.is_empty() {
-            email.split('@').next().unwrap_or("Imported User").to_string()
+            email
+                .split('@')
+                .next()
+                .unwrap_or("Imported User")
+                .to_string()
         } else {
             trimmed.to_string()
         }
@@ -15494,10 +17253,15 @@ async fn ensure_imported_user_account_command(
             .and_then(Value::as_str)
             .ok_or_else(|| "PocketBase returned an invalid user record.".to_string())?
             .to_string();
-        let existing_name = existing.get("name").and_then(Value::as_str).unwrap_or_default();
+        let existing_name = existing
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if !name.is_empty() && existing_name != name {
             client
-                .patch(format!("{PB_URL}/api/collections/users/records/{existing_id}"))
+                .patch(format!(
+                    "{PB_URL}/api/collections/users/records/{existing_id}"
+                ))
                 .bearer_auth(&token)
                 .json(&serde_json::json!({ "name": name }))
                 .send()
@@ -15580,12 +17344,16 @@ async fn update_user_account_command(
     }
 
     if requester.user_id == trimmed_user_id && payload.contains_key("email") {
-        return Err("Administrators cannot change their own account email from this action.".to_string());
+        return Err(
+            "Administrators cannot change their own account email from this action.".to_string(),
+        );
     }
 
     let token = authenticate_internal_superuser(&app, &client).await?;
     client
-        .patch(format!("{PB_URL}/api/collections/users/records/{trimmed_user_id}"))
+        .patch(format!(
+            "{PB_URL}/api/collections/users/records/{trimmed_user_id}"
+        ))
         .bearer_auth(token)
         .json(&Value::Object(payload))
         .send()
@@ -15597,7 +17365,10 @@ async fn update_user_account_command(
 }
 
 #[tauri::command]
-async fn clear_app_data_records_command(app: tauri::AppHandle, auth_token: String) -> Result<(), String> {
+async fn clear_app_data_records_command(
+    app: tauri::AppHandle,
+    auth_token: String,
+) -> Result<(), String> {
     let client = reqwest::Client::new();
     ensure_requesting_administrator(&client, &auth_token).await?;
     let token = authenticate_internal_superuser(&app, &client).await?;
@@ -15605,11 +17376,7 @@ async fn clear_app_data_records_command(app: tauri::AppHandle, auth_token: Strin
     let response = client
         .get(format!("{PB_URL}/api/collections"))
         .bearer_auth(&token)
-        .query(&[
-            ("page", "1"),
-            ("perPage", "500"),
-            ("fields", "name,system"),
-        ])
+        .query(&[("page", "1"), ("perPage", "500"), ("fields", "name,system")])
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -15620,7 +17387,11 @@ async fn clear_app_data_records_command(app: tauri::AppHandle, auth_token: Strin
     let mut ordered_collections = payload
         .items
         .into_iter()
-        .filter(|collection| !collection.system && collection.name != "users" && collection.name != APP_METADATA_COLLECTION)
+        .filter(|collection| {
+            !collection.system
+                && collection.name != "users"
+                && collection.name != APP_METADATA_COLLECTION
+        })
         .map(|collection| collection.name)
         .collect::<Vec<_>>();
     ordered_collections.push("users".to_string());
@@ -15682,7 +17453,8 @@ async fn list_registered_user_accounts_command(
             .await
             .map_err(|e| e.to_string())?;
         let response = response.error_for_status().map_err(|e| e.to_string())?;
-        let payload: PocketBaseListResponse<Value> = response.json().await.map_err(|e| e.to_string())?;
+        let payload: PocketBaseListResponse<Value> =
+            response.json().await.map_err(|e| e.to_string())?;
 
         for record in payload.items {
             users.push(RegisteredUserAccountSummary {
@@ -15735,7 +17507,10 @@ fn ensure_project_backup_json_shape(text: &str) -> Result<(), String> {
     let object = parsed
         .as_object()
         .ok_or_else(|| "The decrypted file is not a Kanqual backup.".to_string())?;
-    let kind = object.get("kind").and_then(Value::as_str).unwrap_or_default();
+    let kind = object
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if kind != "kanqual-project-backup" {
         return Err("The decrypted file is not a Kanqual project backup.".to_string());
     }
@@ -15745,7 +17520,10 @@ fn ensure_project_backup_json_shape(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn decrypt_encrypted_backup_payload_inner(encrypted_backup: &str, password: &str) -> Result<String, String> {
+fn decrypt_encrypted_backup_payload_inner(
+    encrypted_backup: &str,
+    password: &str,
+) -> Result<String, String> {
     let envelope: EncryptedBackupEnvelope = serde_json::from_str(encrypted_backup)
         .map_err(|_| "The selected file is not a valid encrypted Kanqual backup.".to_string())?;
     if envelope.kind != ENCRYPTED_BACKUP_KIND || envelope.version != ENCRYPTED_BACKUP_VERSION {
@@ -15829,8 +17607,11 @@ fn decrypt_project_backup_payload(request: DecryptProjectBackupRequest) -> Resul
 }
 
 #[tauri::command]
-fn decrypt_project_backup_preview(request: DecryptProjectBackupRequest) -> Result<DecryptedProjectBackupPreview, String> {
-    let plaintext = decrypt_encrypted_backup_payload_inner(&request.encrypted_backup, &request.password)?;
+fn decrypt_project_backup_preview(
+    request: DecryptProjectBackupRequest,
+) -> Result<DecryptedProjectBackupPreview, String> {
+    let plaintext =
+        decrypt_encrypted_backup_payload_inner(&request.encrypted_backup, &request.password)?;
     let parsed: Value = serde_json::from_str(&plaintext)
         .map_err(|_| "The decrypted backup is not valid JSON.".to_string())?;
     let object = parsed
@@ -15844,7 +17625,10 @@ fn decrypt_project_backup_preview(request: DecryptProjectBackupRequest) -> Resul
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("Imported Project")
             .to_string(),
-        created_at: object.get("createdAt").and_then(Value::as_str).map(ToString::to_string),
+        created_at: object
+            .get("createdAt")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         version: object
             .get("version")
             .and_then(Value::as_u64)
@@ -15863,23 +17647,40 @@ fn embedding_model_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn ollama_base_url(protocol: &str, host: &str, port: u16) -> String {
     format!(
         "{}://{}:{}",
-        if protocol.eq_ignore_ascii_case("https") { "https" } else { "http" },
+        if protocol.eq_ignore_ascii_case("https") {
+            "https"
+        } else {
+            "http"
+        },
         host.trim().trim_end_matches('/'),
         port,
     )
 }
 
-fn project_embedding_index_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+fn project_embedding_index_dir(
+    app: &tauri::AppHandle,
+    project_id: &str,
+) -> Result<PathBuf, String> {
     let app_data_dir = kanqual_data_dir(app)?;
-    Ok(app_data_dir.join("ai").join("project_indexes").join(project_id))
+    Ok(app_data_dir
+        .join("ai")
+        .join("project_indexes")
+        .join(project_id))
 }
 
-fn project_embedding_metadata_path(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+fn project_embedding_metadata_path(
+    app: &tauri::AppHandle,
+    project_id: &str,
+) -> Result<PathBuf, String> {
     Ok(project_embedding_index_dir(app, project_id)?.join(PROJECT_EMBEDDING_METADATA_FILE))
 }
 
-fn project_embedding_metadata_temp_path(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
-    Ok(project_embedding_index_dir(app, project_id)?.join(format!("{PROJECT_EMBEDDING_METADATA_FILE}.tmp")))
+fn project_embedding_metadata_temp_path(
+    app: &tauri::AppHandle,
+    project_id: &str,
+) -> Result<PathBuf, String> {
+    Ok(project_embedding_index_dir(app, project_id)?
+        .join(format!("{PROJECT_EMBEDDING_METADATA_FILE}.tmp")))
 }
 
 fn cleanup_stale_project_embedding_metadata_temp_file(
@@ -15930,7 +17731,9 @@ fn collect_directory_stats(path: &Path) -> Result<(u64, u64), String> {
     for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let child_path = entry.path();
-        if child_path.file_name().and_then(|value| value.to_str()) == Some(EMBEDDING_MODEL_METADATA_FILE) {
+        if child_path.file_name().and_then(|value| value.to_str())
+            == Some(EMBEDDING_MODEL_METADATA_FILE)
+        {
             continue;
         }
         let metadata = entry.metadata().map_err(|e| e.to_string())?;
@@ -15971,7 +17774,9 @@ fn latest_directory_modified_ms(path: &Path) -> Result<Option<u64>, String> {
     for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let child_path = entry.path();
-        if child_path.file_name().and_then(|value| value.to_str()) == Some(EMBEDDING_MODEL_METADATA_FILE) {
+        if child_path.file_name().and_then(|value| value.to_str())
+            == Some(EMBEDDING_MODEL_METADATA_FILE)
+        {
             continue;
         }
         let metadata = entry.metadata().map_err(|e| e.to_string())?;
@@ -16019,7 +17824,8 @@ fn read_embedding_model_downloaded_at_ms(model_dir: &Path) -> Result<Option<u64>
     let metadata_path = embedding_model_metadata_path(model_dir);
     if metadata_path.exists() {
         let raw = fs::read_to_string(&metadata_path).map_err(|e| e.to_string())?;
-        let metadata: EmbeddingModelMetadata = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        let metadata: EmbeddingModelMetadata =
+            serde_json::from_str(&raw).map_err(|e| e.to_string())?;
         return Ok(Some(metadata.downloaded_at_ms));
     }
     latest_directory_modified_ms(model_dir)
@@ -16060,7 +17866,8 @@ fn embedding_model_status(app: &tauri::AppHandle) -> Result<EmbeddingModelStatus
     let installed = model_dir.join("config.json").exists()
         && model_dir.join("modules.json").exists()
         && model_dir.join("tokenizer_config.json").exists()
-        && (model_dir.join("model.safetensors").exists() || model_dir.join("pytorch_model.bin").exists());
+        && (model_dir.join("model.safetensors").exists()
+            || model_dir.join("pytorch_model.bin").exists());
     let (files, bytes) = collect_directory_stats(&model_dir)?;
     let downloaded_at_ms = if installed {
         read_embedding_model_downloaded_at_ms(&model_dir)?
@@ -16094,7 +17901,9 @@ fn load_embedding_runtime(app: &tauri::AppHandle) -> Result<LocalEmbeddingRuntim
         .collect::<Vec<_>>();
 
     if weight_paths.is_empty() {
-        return Err("The installed multilingual-e5 model is missing safetensors weight files.".to_string());
+        return Err(
+            "The installed multilingual-e5 model is missing safetensors weight files.".to_string(),
+        );
     }
 
     let config_raw = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
@@ -16151,8 +17960,10 @@ fn embed_text_batch(
     let token_type_ids = vec![vec![0_u32; max_len]; input_ids.len()];
 
     let input_ids_tensor = Tensor::new(input_ids, &runtime.device).map_err(|e| e.to_string())?;
-    let attention_mask_tensor = Tensor::new(attention_masks.clone(), &runtime.device).map_err(|e| e.to_string())?;
-    let token_type_ids_tensor = Tensor::new(token_type_ids, &runtime.device).map_err(|e| e.to_string())?;
+    let attention_mask_tensor =
+        Tensor::new(attention_masks.clone(), &runtime.device).map_err(|e| e.to_string())?;
+    let token_type_ids_tensor =
+        Tensor::new(token_type_ids, &runtime.device).map_err(|e| e.to_string())?;
 
     let hidden = runtime
         .model
@@ -16213,7 +18024,9 @@ struct PlannedProjectEmbeddingChunk {
     embedding: Option<Vec<f32>>,
 }
 
-fn project_embedding_store_item_from_build_item(source_item: &ProjectEmbeddingBuildItem) -> ProjectEmbeddingStoreItem {
+fn project_embedding_store_item_from_build_item(
+    source_item: &ProjectEmbeddingBuildItem,
+) -> ProjectEmbeddingStoreItem {
     ProjectEmbeddingStoreItem {
         id: source_item.id.clone(),
         item_type: source_item.item_type.clone(),
@@ -16236,7 +18049,11 @@ fn build_project_embedding_index(
     app: &tauri::AppHandle,
     request: ProjectEmbeddingBuildRequest,
 ) -> Result<ProjectEmbeddingStoreSnapshot, String> {
-    let total_requested_items = request.sources.iter().map(|source| source.items.len()).sum::<usize>();
+    let total_requested_items = request
+        .sources
+        .iter()
+        .map(|source| source.items.len())
+        .sum::<usize>();
     let mut runtime = load_embedding_runtime(app)?;
     let index_dir = project_embedding_index_dir(app, &request.project_id)?;
     fs::create_dir_all(&index_dir).map_err(|e| e.to_string())?;
@@ -16281,7 +18098,10 @@ fn build_project_embedding_index(
             let mut grouped = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
             for chunk in metadata.chunks.iter().filter(|chunk| chunk.active) {
                 grouped
-                    .entry(project_embedding_source_key(&chunk.source_type, &chunk.source_id))
+                    .entry(project_embedding_source_key(
+                        &chunk.source_type,
+                        &chunk.source_id,
+                    ))
                     .or_default()
                     .push(chunk.clone());
             }
@@ -16330,7 +18150,8 @@ fn build_project_embedding_index(
             continue;
         }
 
-        let mut reusable_chunks_by_hash = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
+        let mut reusable_chunks_by_hash =
+            HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
         if let Some(existing_chunks) = existing_active_chunks_by_source.get(&source_key) {
             for chunk in existing_chunks {
                 reusable_chunks_by_hash
@@ -16341,7 +18162,9 @@ fn build_project_embedding_index(
         }
 
         for source_item in &source.items {
-            if let Some(reusable_chunks) = reusable_chunks_by_hash.get_mut(&source_item.content_hash) {
+            if let Some(reusable_chunks) =
+                reusable_chunks_by_hash.get_mut(&source_item.content_hash)
+            {
                 if let Some(existing_chunk) = reusable_chunks.pop() {
                     reused_total += 1;
                     let mut item = project_embedding_store_item_from_build_item(source_item);
@@ -16487,13 +18310,17 @@ fn build_project_embedding_index(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    metadata_chunks.extend(planned_chunks.iter().map(|chunk| ProjectEmbeddingMetadataChunk {
-        vector_id: chunk.vector_id,
-        source_type: chunk.source_type.clone(),
-        source_id: chunk.source_id.clone(),
-        active: true,
-        item: chunk.item.clone(),
-    }));
+    metadata_chunks.extend(
+        planned_chunks
+            .iter()
+            .map(|chunk| ProjectEmbeddingMetadataChunk {
+                vector_id: chunk.vector_id,
+                source_type: chunk.source_type.clone(),
+                source_id: chunk.source_id.clone(),
+                active: true,
+                item: chunk.item.clone(),
+            }),
+    );
 
     let mut metadata_sources = existing_metadata
         .as_ref()
@@ -16502,7 +18329,8 @@ fn build_project_embedding_index(
                 .sources
                 .iter()
                 .filter_map(|source| {
-                    let source_key = project_embedding_source_key(&source.source_type, &source.source_id);
+                    let source_key =
+                        project_embedding_source_key(&source.source_type, &source.source_id);
                     if !source.active {
                         return Some(source.clone());
                     }
@@ -16598,11 +18426,7 @@ fn read_project_embedding_store_status(
         }
     };
 
-    let active_item_count = metadata
-        .chunks
-        .iter()
-        .filter(|chunk| chunk.active)
-        .count() as u64;
+    let active_item_count = metadata.chunks.iter().filter(|chunk| chunk.active).count() as u64;
     if active_item_count == 0 {
         return Ok(ProjectEmbeddingStoreStatus {
             exists: false,
@@ -16664,11 +18488,16 @@ fn load_active_project_embedding_items(
 
 fn format_embedding_time_range_label(low_seconds: u64, high_seconds: u64) -> String {
     let low_minutes = ((low_seconds as f64) / 60.0).ceil().max(1.0) as u64;
-    let high_minutes = ((high_seconds as f64) / 60.0).ceil().max(low_minutes as f64) as u64;
+    let high_minutes = ((high_seconds as f64) / 60.0)
+        .ceil()
+        .max(low_minutes as f64) as u64;
     if high_seconds <= 90 {
         "Likely under 2 minutes on this device".to_string()
     } else {
-        format!("Likely around {}-{} minutes on this device", low_minutes, high_minutes)
+        format!(
+            "Likely around {}-{} minutes on this device",
+            low_minutes, high_minutes
+        )
     }
 }
 
@@ -16713,7 +18542,10 @@ fn get_project_embedding_store_build_preflight(
             let mut grouped = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
             for chunk in metadata.chunks.iter().filter(|chunk| chunk.active) {
                 grouped
-                    .entry(project_embedding_source_key(&chunk.source_type, &chunk.source_id))
+                    .entry(project_embedding_source_key(
+                        &chunk.source_type,
+                        &chunk.source_id,
+                    ))
                     .or_default()
                     .push(chunk.clone());
             }
@@ -16739,7 +18571,8 @@ fn get_project_embedding_store_build_preflight(
             continue;
         }
 
-        let mut reusable_chunks_by_hash = HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
+        let mut reusable_chunks_by_hash =
+            HashMap::<String, Vec<ProjectEmbeddingMetadataChunk>>::new();
         if let Some(existing_chunks) = existing_active_chunks_by_source.get(&source_key) {
             for chunk in existing_chunks {
                 reusable_chunks_by_hash
@@ -16750,7 +18583,9 @@ fn get_project_embedding_store_build_preflight(
         }
 
         for source_item in &source.items {
-            if let Some(reusable_chunks) = reusable_chunks_by_hash.get_mut(&source_item.content_hash) {
+            if let Some(reusable_chunks) =
+                reusable_chunks_by_hash.get_mut(&source_item.content_hash)
+            {
                 if reusable_chunks.pop().is_some() {
                     reused_items += 1;
                     continue;
@@ -16775,18 +18610,17 @@ fn get_project_embedding_store_build_preflight(
         (
             None,
             None,
-            "No new embeddings should be needed; the existing project index can likely be reused.".to_string(),
+            "No new embeddings should be needed; the existing project index can likely be reused."
+                .to_string(),
         )
     } else {
         let warmup_seconds = 60.0_f64;
         let seconds_per_batch_low = 22.0_f64;
         let seconds_per_batch_high = 34.0_f64;
-        let low = (warmup_seconds
-            + pending_batches as f64 * seconds_per_batch_low)
+        let low = (warmup_seconds + pending_batches as f64 * seconds_per_batch_low)
             .ceil()
             .max(120.0) as u64;
-        let high = (warmup_seconds
-            + pending_batches as f64 * seconds_per_batch_high)
+        let high = (warmup_seconds + pending_batches as f64 * seconds_per_batch_high)
             .ceil()
             .max(low as f64 + 120.0) as u64;
         (
@@ -16818,11 +18652,17 @@ fn dot_similarity(left: &[f32], right: &[f32]) -> f32 {
 fn citation_preview(text: &str, max_chars: usize) -> String {
     let trimmed = text.trim();
     let without_prefix = trimmed.strip_prefix("passage: ").unwrap_or(trimmed);
-    let compact = without_prefix.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact = without_prefix
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if compact.chars().count() <= max_chars {
         compact
     } else {
-        let mut shortened = compact.chars().take(max_chars.saturating_sub(1)).collect::<String>();
+        let mut shortened = compact
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>();
         shortened.push('…');
         shortened
     }
@@ -16856,8 +18696,12 @@ fn parse_string_from_value(value: &Value, keys: &[&str]) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn parse_most_typical_annotation_payload(json_content: &str) -> Result<OllamaMostTypicalAnnotationModelResponse, String> {
-    if let Ok(parsed) = serde_json::from_str::<OllamaMostTypicalAnnotationModelResponse>(json_content) {
+fn parse_most_typical_annotation_payload(
+    json_content: &str,
+) -> Result<OllamaMostTypicalAnnotationModelResponse, String> {
+    if let Ok(parsed) =
+        serde_json::from_str::<OllamaMostTypicalAnnotationModelResponse>(json_content)
+    {
         return Ok(parsed);
     }
 
@@ -16867,7 +18711,8 @@ fn parse_most_typical_annotation_payload(json_content: &str) -> Result<OllamaMos
     let items_value = if let Some(array) = value.as_array() {
         Some(array)
     } else {
-        value.get("annotations")
+        value
+            .get("annotations")
             .or_else(|| value.get("items"))
             .or_else(|| value.get("results"))
             .or_else(|| value.get("typical_annotations"))
@@ -16879,8 +18724,12 @@ fn parse_most_typical_annotation_payload(json_content: &str) -> Result<OllamaMos
         let annotations = items
             .iter()
             .filter_map(|item| {
-                let annotation_index = parse_u64_from_value(item, &["annotation_index", "annotationIndex", "index", "annotation"])?;
-                let reasoning = parse_string_from_value(item, &["reasoning", "reason", "explanation"]);
+                let annotation_index = parse_u64_from_value(
+                    item,
+                    &["annotation_index", "annotationIndex", "index", "annotation"],
+                )?;
+                let reasoning =
+                    parse_string_from_value(item, &["reasoning", "reason", "explanation"]);
                 Some(OllamaMostTypicalAnnotationModelItem {
                     annotation_index,
                     reasoning,
@@ -16892,8 +18741,11 @@ fn parse_most_typical_annotation_payload(json_content: &str) -> Result<OllamaMos
         }
     }
 
-    let annotation_index = parse_u64_from_value(&value, &["annotation_index", "annotationIndex", "index", "annotation"])
-        .ok_or_else(|| "Could not find an annotation index in Ollama's response.".to_string())?;
+    let annotation_index = parse_u64_from_value(
+        &value,
+        &["annotation_index", "annotationIndex", "index", "annotation"],
+    )
+    .ok_or_else(|| "Could not find an annotation index in Ollama's response.".to_string())?;
     let reasoning = parse_string_from_value(&value, &["reasoning", "reason", "explanation"]);
 
     Ok(OllamaMostTypicalAnnotationModelResponse {
@@ -16904,7 +18756,9 @@ fn parse_most_typical_annotation_payload(json_content: &str) -> Result<OllamaMos
     })
 }
 
-fn parse_unique_annotations_payload(json_content: &str) -> Result<OllamaUniqueAnnotationsModelResponse, String> {
+fn parse_unique_annotations_payload(
+    json_content: &str,
+) -> Result<OllamaUniqueAnnotationsModelResponse, String> {
     if let Ok(parsed) = serde_json::from_str::<OllamaUniqueAnnotationsModelResponse>(json_content) {
         return Ok(parsed);
     }
@@ -16915,7 +18769,8 @@ fn parse_unique_annotations_payload(json_content: &str) -> Result<OllamaUniqueAn
     let items_value = if let Some(array) = value.as_array() {
         Some(array)
     } else {
-        value.get("annotations")
+        value
+            .get("annotations")
             .or_else(|| value.get("items"))
             .or_else(|| value.get("results"))
             .or_else(|| value.get("unique_annotations"))
@@ -16927,7 +18782,8 @@ fn parse_unique_annotations_payload(json_content: &str) -> Result<OllamaUniqueAn
     let annotations = items_value
         .iter()
         .filter_map(|item| {
-            let index = parse_u64_from_value(item, &["index", "annotation_index", "annotationIndex"])?;
+            let index =
+                parse_u64_from_value(item, &["index", "annotation_index", "annotationIndex"])?;
             let reasoning = parse_string_from_value(item, &["reasoning", "reason", "explanation"]);
             Some(OllamaUniqueAnnotationModelItem { index, reasoning })
         })
@@ -17028,8 +18884,7 @@ async fn download_model_file(
 ) -> Result<u64, String> {
     let url = format!(
         "https://huggingface.co/{}/resolve/main/{}?download=true",
-        EMBEDDING_MODEL_REPO_ID,
-        relative_path
+        EMBEDDING_MODEL_REPO_ID, relative_path
     );
     let response = client
         .get(url)
@@ -17146,9 +19001,12 @@ fn cancel_multilingual_e5_download(
     state: tauri::State<'_, EmbeddingModelDownloadState>,
 ) -> Result<EmbeddingModelDownloadStatus, String> {
     let client = reqwest::Client::new();
-    let requester = tauri::async_runtime::block_on(ensure_requesting_administrator(&client, &auth_token))?;
+    let requester =
+        tauri::async_runtime::block_on(ensure_requesting_administrator(&client, &auth_token))?;
     if !app_role_allows_embedding_model_management(&requester.app_role) {
-        return Err("You do not have permission to manage embedding models on this device.".to_string());
+        return Err(
+            "You do not have permission to manage embedding models on this device.".to_string(),
+        );
     }
     update_embedding_download_status(&state, |status| {
         if status.phase == "downloading" {
@@ -17167,9 +19025,12 @@ fn clear_multilingual_e5_model(
     state: tauri::State<'_, EmbeddingModelDownloadState>,
 ) -> Result<EmbeddingModelStatus, String> {
     let client = reqwest::Client::new();
-    let requester = tauri::async_runtime::block_on(ensure_requesting_administrator(&client, &auth_token))?;
+    let requester =
+        tauri::async_runtime::block_on(ensure_requesting_administrator(&client, &auth_token))?;
     if !app_role_allows_embedding_model_management(&requester.app_role) {
-        return Err("You do not have permission to manage embedding models on this device.".to_string());
+        return Err(
+            "You do not have permission to manage embedding models on this device.".to_string(),
+        );
     }
     let current = state.0.lock().unwrap().clone();
     if current.phase == "downloading" || current.phase == "cancelling" {
@@ -17181,16 +19042,19 @@ fn clear_multilingual_e5_model(
         fs::remove_dir_all(&model_dir).map_err(|e| e.to_string())?;
     }
 
-    set_embedding_download_status(&state, EmbeddingModelDownloadStatusState {
-        phase: "idle".to_string(),
-        downloaded_bytes: 0,
-        total_bytes: None,
-        downloaded_files: 0,
-        total_files: 0,
-        current_file: None,
-        message: Some("Local multilingual-e5 files cleared.".to_string()),
-        cancel_requested: false,
-    });
+    set_embedding_download_status(
+        &state,
+        EmbeddingModelDownloadStatusState {
+            phase: "idle".to_string(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            downloaded_files: 0,
+            total_files: 0,
+            current_file: None,
+            message: Some("Local multilingual-e5 files cleared.".to_string()),
+            cancel_requested: false,
+        },
+    );
 
     embedding_model_status(&app)
 }
@@ -17204,20 +19068,28 @@ async fn download_multilingual_e5_model(
     let client = reqwest::Client::new();
     let requester = ensure_requesting_administrator(&client, &auth_token).await?;
     if !app_role_allows_embedding_model_management(&requester.app_role) {
-        return Err("You do not have permission to manage embedding models on this device.".to_string());
+        return Err(
+            "You do not have permission to manage embedding models on this device.".to_string(),
+        );
     }
     let initial_status = embedding_model_status(&app)?;
     if initial_status.installed {
-        set_embedding_download_status(&download_state, EmbeddingModelDownloadStatusState {
-            phase: "completed".to_string(),
-            downloaded_bytes: initial_status.bytes,
-            total_bytes: Some(EMBEDDING_MODEL_EXPECTED_SIZE_BYTES),
-            downloaded_files: initial_status.files,
-            total_files: initial_status.files,
-            current_file: None,
-            message: Some(format!("{} is already available on this device.", initial_status.display_name)),
-            cancel_requested: false,
-        });
+        set_embedding_download_status(
+            &download_state,
+            EmbeddingModelDownloadStatusState {
+                phase: "completed".to_string(),
+                downloaded_bytes: initial_status.bytes,
+                total_bytes: Some(EMBEDDING_MODEL_EXPECTED_SIZE_BYTES),
+                downloaded_files: initial_status.files,
+                total_files: initial_status.files,
+                current_file: None,
+                message: Some(format!(
+                    "{} is already available on this device.",
+                    initial_status.display_name
+                )),
+                cancel_requested: false,
+            },
+        );
         return Ok(initial_status);
     }
 
@@ -17248,60 +19120,80 @@ async fn download_multilingual_e5_model(
         "Downloading embedding model from Hugging Face...".to_string()
     };
 
-    set_embedding_download_status(&download_state, EmbeddingModelDownloadStatusState {
-        phase: "downloading".to_string(),
-        downloaded_bytes,
-        total_bytes,
-        downloaded_files,
-        total_files,
-        current_file: None,
-        message: Some(resume_message),
-        cancel_requested: false,
-    });
+    set_embedding_download_status(
+        &download_state,
+        EmbeddingModelDownloadStatusState {
+            phase: "downloading".to_string(),
+            downloaded_bytes,
+            total_bytes,
+            downloaded_files,
+            total_files,
+            current_file: None,
+            message: Some(resume_message),
+            cancel_requested: false,
+        },
+    );
 
     for relative_path in pending_files {
         if is_embedding_download_cancel_requested(&download_state) {
-            set_embedding_download_status(&download_state, EmbeddingModelDownloadStatusState {
-                phase: "cancelled".to_string(),
-                downloaded_bytes,
-                total_bytes,
-                downloaded_files,
-                total_files,
-                current_file: None,
-                message: Some("Download cancelled.".to_string()),
-                cancel_requested: false,
-            });
+            set_embedding_download_status(
+                &download_state,
+                EmbeddingModelDownloadStatusState {
+                    phase: "cancelled".to_string(),
+                    downloaded_bytes,
+                    total_bytes,
+                    downloaded_files,
+                    total_files,
+                    current_file: None,
+                    message: Some("Download cancelled.".to_string()),
+                    cancel_requested: false,
+                },
+            );
             return embedding_model_status(&app);
         }
         update_embedding_download_status(&download_state, |status| {
             status.current_file = Some(relative_path.clone());
         });
-        let file_size = match download_model_file(&client, &relative_path, &model_dir, &download_state, downloaded_bytes).await {
+        let file_size = match download_model_file(
+            &client,
+            &relative_path,
+            &model_dir,
+            &download_state,
+            downloaded_bytes,
+        )
+        .await
+        {
             Ok(size) => size,
             Err(error) => {
                 if error == "Download cancelled." {
-                    set_embedding_download_status(&download_state, EmbeddingModelDownloadStatusState {
-                        phase: "cancelled".to_string(),
+                    set_embedding_download_status(
+                        &download_state,
+                        EmbeddingModelDownloadStatusState {
+                            phase: "cancelled".to_string(),
+                            downloaded_bytes,
+                            total_bytes,
+                            downloaded_files,
+                            total_files,
+                            current_file: None,
+                            message: Some("Download cancelled.".to_string()),
+                            cancel_requested: false,
+                        },
+                    );
+                    return embedding_model_status(&app);
+                }
+                set_embedding_download_status(
+                    &download_state,
+                    EmbeddingModelDownloadStatusState {
+                        phase: "error".to_string(),
                         downloaded_bytes,
                         total_bytes,
                         downloaded_files,
                         total_files,
-                        current_file: None,
-                        message: Some("Download cancelled.".to_string()),
+                        current_file: Some(relative_path.clone()),
+                        message: Some(error.clone()),
                         cancel_requested: false,
-                    });
-                    return embedding_model_status(&app);
-                }
-                set_embedding_download_status(&download_state, EmbeddingModelDownloadStatusState {
-                    phase: "error".to_string(),
-                    downloaded_bytes,
-                    total_bytes,
-                    downloaded_files,
-                    total_files,
-                    current_file: Some(relative_path.clone()),
-                    message: Some(error.clone()),
-                    cancel_requested: false,
-                });
+                    },
+                );
                 return Err(error);
             }
         };
@@ -17321,16 +19213,22 @@ async fn download_multilingual_e5_model(
     write_embedding_model_metadata(&model_dir, downloaded_at_ms)?;
 
     let final_status = embedding_model_status(&app)?;
-    set_embedding_download_status(&download_state, EmbeddingModelDownloadStatusState {
-        phase: "completed".to_string(),
-        downloaded_bytes: final_status.bytes,
-        total_bytes: Some(final_status.bytes),
-        downloaded_files: final_status.files,
-        total_files: final_status.files,
-        current_file: None,
-        message: Some(format!("{} downloaded successfully.", final_status.display_name)),
-        cancel_requested: false,
-    });
+    set_embedding_download_status(
+        &download_state,
+        EmbeddingModelDownloadStatusState {
+            phase: "completed".to_string(),
+            downloaded_bytes: final_status.bytes,
+            total_bytes: Some(final_status.bytes),
+            downloaded_files: final_status.files,
+            total_files: final_status.files,
+            current_file: None,
+            message: Some(format!(
+                "{} downloaded successfully.",
+                final_status.display_name
+            )),
+            cancel_requested: false,
+        },
+    );
 
     Ok(final_status)
 }
@@ -17374,10 +19272,20 @@ async fn discover_ollama_models(
             items
                 .iter()
                 .map(|item| OllamaModelSummary {
-                    name: item.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    name: item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
                     size: item.get("size").and_then(Value::as_u64),
-                    modified_at: item.get("modified_at").and_then(Value::as_str).map(ToOwned::to_owned),
-                    digest: item.get("digest").and_then(Value::as_str).map(ToOwned::to_owned),
+                    modified_at: item
+                        .get("modified_at")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
+                    digest: item
+                        .get("digest")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
                     parameter_size: item
                         .get("details")
                         .and_then(|details| details.get("parameter_size"))
@@ -17400,7 +19308,12 @@ async fn discover_ollama_models(
         version,
         model_count: models.len() as u64,
         models,
-        message: if tags_payload.get("models").and_then(Value::as_array).map(|items| items.is_empty()).unwrap_or(true) {
+        message: if tags_payload
+            .get("models")
+            .and_then(Value::as_array)
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        {
             format!("Connected to Ollama at {base_url}, but no models are installed yet.")
         } else {
             format!("Connected to Ollama at {base_url}.")
@@ -17430,7 +19343,10 @@ fn parse_openai_compatible_models(payload: &Value) -> Vec<CloudLlmModelSummary> 
                     Some(CloudLlmModelSummary {
                         name: id.clone(),
                         id,
-                        publisher: item.get("owned_by").and_then(Value::as_str).map(ToOwned::to_owned),
+                        publisher: item
+                            .get("owned_by")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -17602,7 +19518,10 @@ async fn discover_cloud_llm_models(
                                     .map(ToOwned::to_owned)
                                     .unwrap_or_else(|| id.clone()),
                                 id,
-                                publisher: item.get("publisher").and_then(Value::as_str).map(ToOwned::to_owned),
+                                publisher: item
+                                    .get("publisher")
+                                    .and_then(Value::as_str)
+                                    .map(ToOwned::to_owned),
                             })
                         })
                         .collect::<Vec<_>>()
@@ -17704,14 +19623,20 @@ async fn discover_cloud_llm_models(
 }
 
 enum ResolvedLlmRuntime {
-    Ollama { base_url: String, cloud_auth: Option<String> },
+    Ollama {
+        base_url: String,
+        cloud_auth: Option<String>,
+    },
     OpenAiCompat {
         provider_label: &'static str,
         base_url: String,
         api_key: String,
         extra_headers: Vec<(&'static str, String)>,
     },
-    Anthropic { base_url: String, api_key: String },
+    Anthropic {
+        base_url: String,
+        api_key: String,
+    },
 }
 
 fn resolve_llm_runtime(
@@ -17723,7 +19648,8 @@ fn resolve_llm_runtime(
     port: u16,
 ) -> Result<ResolvedLlmRuntime, String> {
     if connection_mode == Some("cloud") {
-        let provider = cloud_provider.ok_or_else(|| "Choose a cloud provider before using AI Assist.".to_string())?;
+        let provider = cloud_provider
+            .ok_or_else(|| "Choose a cloud provider before using AI Assist.".to_string())?;
         let api_key = cloud_api_secret
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -17788,7 +19714,10 @@ async fn run_llm_chat_completion(
     json_mode: bool,
 ) -> Result<String, String> {
     match runtime {
-        ResolvedLlmRuntime::Ollama { base_url, cloud_auth } => {
+        ResolvedLlmRuntime::Ollama {
+            base_url,
+            cloud_auth,
+        } => {
             let endpoint = if cloud_auth.is_some() {
                 format!("{base_url}/chat")
             } else {
@@ -17841,7 +19770,8 @@ async fn run_llm_chat_completion(
             api_key,
             extra_headers,
         } => {
-            let mut full_messages = vec![serde_json::json!({"role": "system", "content": system_prompt})];
+            let mut full_messages =
+                vec![serde_json::json!({"role": "system", "content": system_prompt})];
             full_messages.extend(messages);
             let send_request = |include_temperature: bool| {
                 let mut request = client
@@ -17891,11 +19821,15 @@ async fn run_llm_chat_completion(
                             .map(|text| text.trim().chars().take(280).collect::<String>())
                             .filter(|text| !text.is_empty())
                             .unwrap_or_else(|| "No response body.".to_string());
-                        return Err(format!("{provider_label} returned an error ({retry_status}): {retry_detail}"));
+                        return Err(format!(
+                            "{provider_label} returned an error ({retry_status}): {retry_detail}"
+                        ));
                     }
                     retry_response.json().await.map_err(|e| e.to_string())?
                 } else {
-                    return Err(format!("{provider_label} returned an error ({status}): {detail}"));
+                    return Err(format!(
+                        "{provider_label} returned an error ({status}): {detail}"
+                    ));
                 }
             };
             payload
@@ -17915,11 +19849,19 @@ async fn run_llm_chat_completion(
                 .into_iter()
                 .filter_map(|message| {
                     let role = message.get("role").and_then(Value::as_str)?;
-                    let content = message.get("content").and_then(Value::as_str)?.trim().to_string();
+                    let content = message
+                        .get("content")
+                        .and_then(Value::as_str)?
+                        .trim()
+                        .to_string();
                     if content.is_empty() {
                         return None;
                     }
-                    let normalized_role = if role == "assistant" { "assistant" } else { "user" };
+                    let normalized_role = if role == "assistant" {
+                        "assistant"
+                    } else {
+                        "user"
+                    };
                     Some(serde_json::json!({
                         "role": normalized_role,
                         "content": content,
@@ -17957,7 +19899,11 @@ async fn run_llm_chat_completion(
                             }
                         }
                     }
-                    if combined.trim().is_empty() { None } else { Some(combined) }
+                    if combined.trim().is_empty() {
+                        None
+                    } else {
+                        Some(combined)
+                    }
                 })
                 .map(|value| value.trim().to_string())
                 .ok_or_else(|| "Anthropic returned an empty response.".to_string())
@@ -17981,7 +19927,10 @@ async fn chat_with_project_ollama(
 
     let indexed_items = load_active_project_embedding_items(&app, &request.project_id)?;
     if indexed_items.is_empty() {
-        return Err("The local project embedding store is empty. Re-run project embeddings first.".to_string());
+        return Err(
+            "The local project embedding store is empty. Re-run project embeddings first."
+                .to_string(),
+        );
     }
 
     let query_text = if request.prefix_queries {
@@ -18002,7 +19951,10 @@ async fn chat_with_project_ollama(
         || !request.selected_code_ids.is_empty()
         || !request.selected_annotation_ids.is_empty()
         || !request.selected_memo_ids.is_empty();
-    let restrict_to_selected_context = request.selected_context_mode.trim().eq_ignore_ascii_case("restrict");
+    let restrict_to_selected_context = request
+        .selected_context_mode
+        .trim()
+        .eq_ignore_ascii_case("restrict");
 
     let matches_selected_context = |item: &ProjectEmbeddingStoreItem| {
         request
@@ -18106,19 +20058,22 @@ async fn chat_with_project_ollama(
                 return None;
             }
 
-            Some((item, OllamaProjectChatCitation {
-                id: item.id.clone(),
-                item_type: item.item_type.clone(),
-                title: item.title.clone(),
-                preview: citation_preview(&item.text, 160),
-                document_id: item.document_id.clone(),
-                case_id: item.case_id.clone(),
-                code_id: item.code_id.clone(),
-                annotation_id: item.annotation_id.clone(),
-                memo_id: item.memo_id.clone(),
-                start_offset: item.start_offset,
-                end_offset: item.end_offset,
-            }))
+            Some((
+                item,
+                OllamaProjectChatCitation {
+                    id: item.id.clone(),
+                    item_type: item.item_type.clone(),
+                    title: item.title.clone(),
+                    preview: citation_preview(&item.text, 160),
+                    document_id: item.document_id.clone(),
+                    case_id: item.case_id.clone(),
+                    code_id: item.code_id.clone(),
+                    annotation_id: item.annotation_id.clone(),
+                    memo_id: item.memo_id.clone(),
+                    start_offset: item.start_offset,
+                    end_offset: item.end_offset,
+                },
+            ))
         })
         .take(4)
         .collect::<Vec<_>>();
@@ -18160,11 +20115,23 @@ async fn chat_with_project_ollama(
         "content": system_prompt,
     })];
 
-    for message in request.conversation.iter().rev().take(12).collect::<Vec<_>>().into_iter().rev() {
+    for message in request
+        .conversation
+        .iter()
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
         if message.content.trim().is_empty() {
             continue;
         }
-        let role = if message.role == "assistant" { "assistant" } else { "user" };
+        let role = if message.role == "assistant" {
+            "assistant"
+        } else {
+            "user"
+        };
         messages.push(serde_json::json!({
             "role": role,
             "content": message.content,
@@ -18231,16 +20198,27 @@ async fn find_relevant_project_segments_with_ollama(
 
     let indexed_items = load_active_project_embedding_items(&app, &request.project_id)?;
     if indexed_items.is_empty() {
-        return Err("The local project embedding store is empty. Re-run project embeddings first.".to_string());
+        return Err(
+            "The local project embedding store is empty. Re-run project embeddings first."
+                .to_string(),
+        );
     }
 
-    let query = match request.code_description.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    let query = match request
+        .code_description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(description) => format!(
             "Find project segments relevant to the code \"{}\". Code description: {}",
             request.code_label.trim(),
             description
         ),
-        None => format!("Find project segments relevant to the code \"{}\"", request.code_label.trim()),
+        None => format!(
+            "Find project segments relevant to the code \"{}\"",
+            request.code_label.trim()
+        ),
     };
     let query_text = if request.prefix_queries {
         format!("query: {}", query)
@@ -18258,8 +20236,7 @@ async fn find_relevant_project_segments_with_ollama(
     let mut ranked_items = indexed_items
         .iter()
         .filter(|item| {
-            item.item_type != "code"
-                && item.document_id.as_deref() == Some(active_document_id)
+            item.item_type != "code" && item.document_id.as_deref() == Some(active_document_id)
         })
         .map(|item| (dot_similarity(&query_embedding, &item.embedding), item))
         .collect::<Vec<_>>();
@@ -18335,8 +20312,10 @@ async fn find_relevant_project_segments_with_ollama(
     .await?;
 
     let json_content = extract_json_object(&content).unwrap_or(&content);
-    let parsed: OllamaRelevantSegmentsModelResponse = serde_json::from_str(json_content)
-        .map_err(|e| format!("Could not parse the configured LLM's relevant-segments response: {e}"))?;
+    let parsed: OllamaRelevantSegmentsModelResponse =
+        serde_json::from_str(json_content).map_err(|e| {
+            format!("Could not parse the configured LLM's relevant-segments response: {e}")
+        })?;
 
     let candidate_map = candidate_items
         .iter()
@@ -18395,7 +20374,9 @@ async fn generate_attribute_value_suggestions_with_ollama(
         return Err("Choose an attribute before generating suggestions.".to_string());
     }
     if request.items.is_empty() {
-        return Err("No case or document content is available to analyze for this attribute.".to_string());
+        return Err(
+            "No case or document content is available to analyze for this attribute.".to_string(),
+        );
     }
 
     let data_type = request.attribute_data_type.trim().to_ascii_lowercase();
@@ -18441,8 +20422,17 @@ async fn generate_attribute_value_suggestions_with_ollama(
     let mut suggestions = Vec::with_capacity(request.items.len());
     let total_items = request.items.len() as u64;
     for (index, item) in request.items.into_iter().enumerate() {
-        if cancelled_runs.0.lock().unwrap().contains(request.run_id.as_str()) {
-            cancelled_runs.0.lock().unwrap().remove(request.run_id.as_str());
+        if cancelled_runs
+            .0
+            .lock()
+            .unwrap()
+            .contains(request.run_id.as_str())
+        {
+            cancelled_runs
+                .0
+                .lock()
+                .unwrap()
+                .remove(request.run_id.as_str());
             return Err("Attribute suggestion generation was stopped.".to_string());
         }
         let item_id = item.id.trim().to_string();
@@ -18462,17 +20452,20 @@ async fn generate_attribute_value_suggestions_with_ollama(
             };
             suggestions.push(suggestion);
             if let Some(last) = suggestions.last() {
-                let _ = app.emit("attribute-suggestion-progress", OllamaAttributeSuggestionProgressEvent {
-                    run_id: request.run_id.clone(),
-                    item_id: last.item_id.clone(),
-                    item_name: last.item_name.clone(),
-                    suggested_value: last.suggested_value.clone(),
-                    evidence_text: last.evidence_text.clone(),
-                    completed_items,
-                    total_items,
-                    model: request.model.clone(),
-                    base_url: base_url.clone(),
-                });
+                let _ = app.emit(
+                    "attribute-suggestion-progress",
+                    OllamaAttributeSuggestionProgressEvent {
+                        run_id: request.run_id.clone(),
+                        item_id: last.item_id.clone(),
+                        item_name: last.item_name.clone(),
+                        suggested_value: last.suggested_value.clone(),
+                        evidence_text: last.evidence_text.clone(),
+                        completed_items,
+                        total_items,
+                        model: request.model.clone(),
+                        base_url: base_url.clone(),
+                    },
+                );
             }
             continue;
         }
@@ -18485,14 +20478,19 @@ async fn generate_attribute_value_suggestions_with_ollama(
             attribute_options_text,
             data_type_instruction,
         );
-        let user_message = format!(
-            "Source item: {}\nSource text:\n{}",
-            item_name,
-            content,
-        );
+        let user_message = format!("Source item: {}\nSource text:\n{}", item_name, content,);
 
-        if cancelled_runs.0.lock().unwrap().contains(request.run_id.as_str()) {
-            cancelled_runs.0.lock().unwrap().remove(request.run_id.as_str());
+        if cancelled_runs
+            .0
+            .lock()
+            .unwrap()
+            .contains(request.run_id.as_str())
+        {
+            cancelled_runs
+                .0
+                .lock()
+                .unwrap()
+                .remove(request.run_id.as_str());
             return Err("Attribute suggestion generation was stopped.".to_string());
         }
         let content = run_llm_chat_completion(
@@ -18510,7 +20508,9 @@ async fn generate_attribute_value_suggestions_with_ollama(
 
         let json_content = extract_json_object(&content).unwrap_or(&content);
         let parsed: OllamaAttributeSuggestionModelResponse = serde_json::from_str(json_content)
-            .map_err(|e| format!("Could not parse the configured LLM's attribute-suggestion response: {e}"))?;
+            .map_err(|e| {
+                format!("Could not parse the configured LLM's attribute-suggestion response: {e}")
+            })?;
         let suggested_value = parsed.value.unwrap_or_default().trim().to_string();
         let normalized_value = if data_type == "categorical" {
             canonicalize_categorical_suggestion(&suggested_value, &attribute_options)
@@ -18531,17 +20531,20 @@ async fn generate_attribute_value_suggestions_with_ollama(
         };
         suggestions.push(suggestion);
         if let Some(last) = suggestions.last() {
-            let _ = app.emit("attribute-suggestion-progress", OllamaAttributeSuggestionProgressEvent {
-                run_id: request.run_id.clone(),
-                item_id: last.item_id.clone(),
-                item_name: last.item_name.clone(),
-                suggested_value: last.suggested_value.clone(),
-                evidence_text: last.evidence_text.clone(),
-                completed_items,
-                total_items,
-                model: request.model.clone(),
-                base_url: base_url.clone(),
-            });
+            let _ = app.emit(
+                "attribute-suggestion-progress",
+                OllamaAttributeSuggestionProgressEvent {
+                    run_id: request.run_id.clone(),
+                    item_id: last.item_id.clone(),
+                    item_name: last.item_name.clone(),
+                    suggested_value: last.suggested_value.clone(),
+                    evidence_text: last.evidence_text.clone(),
+                    completed_items,
+                    total_items,
+                    model: request.model.clone(),
+                    base_url: base_url.clone(),
+                },
+            );
         }
     }
 
@@ -18576,7 +20579,10 @@ async fn generate_code_conceptual_summary_with_ollama(
         return Err("No code selected.".to_string());
     }
     if request.annotations.is_empty() {
-        return Err("This code has no annotations yet. Add some annotations before running analysis.".to_string());
+        return Err(
+            "This code has no annotations yet. Add some annotations before running analysis."
+                .to_string(),
+        );
     }
 
     let runtime = resolve_llm_runtime(
@@ -18608,7 +20614,12 @@ async fn generate_code_conceptual_summary_with_ollama(
 
     let mut annotations_text = String::new();
     for (i, ann) in request.annotations.iter().enumerate() {
-        let line = format!("[{}] [{}] \"{}\"\n", i + 1, ann.document_name.trim(), ann.quote.trim());
+        let line = format!(
+            "[{}] [{}] \"{}\"\n",
+            i + 1,
+            ann.document_name.trim(),
+            ann.quote.trim()
+        );
         if annotations_text.len() + line.len() > 16_000 {
             annotations_text.push_str("... (additional annotations truncated for length)\n");
             break;
@@ -18671,7 +20682,10 @@ async fn generate_most_typical_annotation_with_ollama(
         return Err("Choose an LLM model before running code analysis.".to_string());
     }
     if request.annotations.is_empty() {
-        return Err("This code has no annotations yet. Add some annotations before running analysis.".to_string());
+        return Err(
+            "This code has no annotations yet. Add some annotations before running analysis."
+                .to_string(),
+        );
     }
 
     let runtime = resolve_llm_runtime(
@@ -18697,7 +20711,12 @@ async fn generate_most_typical_annotation_with_ollama(
 
     let mut annotations_text = String::new();
     for (i, ann) in request.annotations.iter().enumerate() {
-        let line = format!("[{}] [{}] \"{}\"\n", i + 1, ann.document_name.trim(), ann.quote.trim());
+        let line = format!(
+            "[{}] [{}] \"{}\"\n",
+            i + 1,
+            ann.document_name.trim(),
+            ann.quote.trim()
+        );
         if annotations_text.len() + line.len() > 16_000 {
             annotations_text.push_str("... (additional annotations truncated)\n");
             break;
@@ -18751,7 +20770,9 @@ async fn generate_most_typical_annotation_with_ollama(
         .collect::<Vec<_>>();
 
     if annotations.is_empty() {
-        return Err("The configured LLM did not return any valid typical annotation indexes.".to_string());
+        return Err(
+            "The configured LLM did not return any valid typical annotation indexes.".to_string(),
+        );
     }
 
     Ok(OllamaMostTypicalAnnotationResponse {
@@ -18883,11 +20904,19 @@ async fn process_document_with_ollama(
         })?;
 
         let json_part = extract_json_object(&raw).unwrap_or(&raw);
-        let parsed: OllamaDocumentSegmentsModelResponse = serde_json::from_str(json_part)
-            .map_err(|e| format!("Could not parse the LLM response for chunk {}: {e}", chunk_index + 1))?;
+        let parsed: OllamaDocumentSegmentsModelResponse =
+            serde_json::from_str(json_part).map_err(|e| {
+                format!(
+                    "Could not parse the LLM response for chunk {}: {e}",
+                    chunk_index + 1
+                )
+            })?;
 
         if parsed.segments.is_empty() {
-            return Err(format!("The configured LLM returned no segments for chunk {}.", chunk_index + 1));
+            return Err(format!(
+                "The configured LLM returned no segments for chunk {}.",
+                chunk_index + 1
+            ));
         }
 
         if let Some(proper_names) = parsed.proper_names {
@@ -18901,20 +20930,23 @@ async fn process_document_with_ollama(
         }
 
         // Base offset into the full processedContent where this chunk's content begins
-        let base_offset = if processed_content.is_empty() { 0 } else { processed_content.len() + 2 };
+        let base_offset = if processed_content.is_empty() {
+            0
+        } else {
+            processed_content.len() + 2
+        };
         let mut chunk_built = String::new();
 
         for seg in parsed.segments.into_iter() {
             let original_text = seg.text.unwrap_or_default();
             let pieces = split_text_on_inline_speaker_labels(&original_text);
-            if pieces.is_empty() { continue; }
-            let model_speaker_id = seg.speaker_id
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+            if pieces.is_empty() {
+                continue;
+            }
+            let model_speaker_id = seg.speaker_id.unwrap_or_default().trim().to_string();
             let model_segment_type = match seg.segment_type.trim().to_ascii_lowercase().as_str() {
                 "metadata" => "metadata",
-                "question"  => "question",
+                "question" => "question",
                 _ => "answer",
             };
 
@@ -18937,7 +20969,9 @@ async fn process_document_with_ollama(
                         "answer"
                     };
                 }
-                if !chunk_built.is_empty() { chunk_built.push_str("\n\n"); }
+                if !chunk_built.is_empty() {
+                    chunk_built.push_str("\n\n");
+                }
                 let start_offset = base_offset + chunk_built.len();
                 chunk_built.push_str(&text);
                 let end_offset = base_offset + chunk_built.len();
@@ -18996,7 +21030,10 @@ async fn process_document_with_ollama(
     let proper_name_candidates = proper_name_map
         .into_values()
         .map(|text| {
-            let source_type = if merged.iter().any(|seg| seg.speaker_id.trim().eq_ignore_ascii_case(&text)) {
+            let source_type = if merged
+                .iter()
+                .any(|seg| seg.speaker_id.trim().eq_ignore_ascii_case(&text))
+            {
                 "speaker".to_string()
             } else {
                 "text".to_string()
@@ -19089,11 +21126,19 @@ async fn process_document_chunk_with_ollama(
         }
     })?;
     let json_part = extract_json_object(&raw).unwrap_or(&raw);
-    let parsed: OllamaDocumentSegmentsModelResponse = serde_json::from_str(json_part)
-        .map_err(|e| format!("Could not parse the LLM response for chunk {}: {e}", request.chunk_index + 1))?;
+    let parsed: OllamaDocumentSegmentsModelResponse =
+        serde_json::from_str(json_part).map_err(|e| {
+            format!(
+                "Could not parse the LLM response for chunk {}: {e}",
+                request.chunk_index + 1
+            )
+        })?;
 
     if parsed.segments.is_empty() {
-        return Err(format!("The configured LLM returned no segments for chunk {}.", request.chunk_index + 1));
+        return Err(format!(
+            "The configured LLM returned no segments for chunk {}.",
+            request.chunk_index + 1
+        ));
     }
 
     let mut processed_content = String::new();
@@ -19101,11 +21146,10 @@ async fn process_document_chunk_with_ollama(
     for seg in parsed.segments.into_iter() {
         let original_text = seg.text.unwrap_or_default();
         let pieces = split_text_on_inline_speaker_labels(&original_text);
-        if pieces.is_empty() { continue; }
-        let model_speaker_id = seg.speaker_id
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        if pieces.is_empty() {
+            continue;
+        }
+        let model_speaker_id = seg.speaker_id.unwrap_or_default().trim().to_string();
         let model_segment_type = match seg.segment_type.trim().to_ascii_lowercase().as_str() {
             "metadata" => "metadata",
             "question" => "question",
@@ -19131,7 +21175,9 @@ async fn process_document_chunk_with_ollama(
                     "answer"
                 };
             }
-            if !processed_content.is_empty() { processed_content.push_str("\n\n"); }
+            if !processed_content.is_empty() {
+                processed_content.push_str("\n\n");
+            }
             let start_offset = processed_content.len();
             processed_content.push_str(&text);
             let end_offset = processed_content.len();
@@ -19148,7 +21194,10 @@ async fn process_document_chunk_with_ollama(
         }
     }
     if segments.is_empty() {
-        return Err(format!("The configured LLM returned no segments for chunk {}.", request.chunk_index + 1));
+        return Err(format!(
+            "The configured LLM returned no segments for chunk {}.",
+            request.chunk_index + 1
+        ));
     }
 
     let mut proper_name_map: HashMap<String, String> = HashMap::new();
@@ -19172,7 +21221,10 @@ async fn process_document_chunk_with_ollama(
     let proper_name_candidates = proper_name_map
         .into_values()
         .map(|text| {
-            let source_type = if segments.iter().any(|seg| seg.speaker_id.trim().eq_ignore_ascii_case(&text)) {
+            let source_type = if segments
+                .iter()
+                .any(|seg| seg.speaker_id.trim().eq_ignore_ascii_case(&text))
+            {
                 "speaker".to_string()
             } else {
                 "text".to_string()
@@ -19216,13 +21268,30 @@ async fn generate_code_decomposition_with_ollama(
         .build()
         .map_err(|e| e.to_string())?;
 
-    let description = request.code_description.as_deref().map(str::trim).filter(|v| !v.is_empty()).unwrap_or("No description provided");
-    let unique_docs: std::collections::HashSet<&str> = request.annotations.iter().map(|a| a.document_name.as_str()).collect();
+    let description = request
+        .code_description
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("No description provided");
+    let unique_docs: std::collections::HashSet<&str> = request
+        .annotations
+        .iter()
+        .map(|a| a.document_name.as_str())
+        .collect();
 
     let mut annotations_text = String::new();
     for (i, ann) in request.annotations.iter().enumerate() {
-        let line = format!("[{}] [{}] \"{}\"\n", i + 1, ann.document_name.trim(), ann.quote.trim());
-        if annotations_text.len() + line.len() > 16_000 { annotations_text.push_str("... (truncated)\n"); break; }
+        let line = format!(
+            "[{}] [{}] \"{}\"\n",
+            i + 1,
+            ann.document_name.trim(),
+            ann.quote.trim()
+        );
+        if annotations_text.len() + line.len() > 16_000 {
+            annotations_text.push_str("... (truncated)\n");
+            break;
+        }
         annotations_text.push_str(&line);
     }
 
@@ -19259,7 +21328,11 @@ async fn generate_code_decomposition_with_ollama(
     )
     .await?;
 
-    Ok(OllamaCodeSummaryResponse { content, model: request.model, base_url })
+    Ok(OllamaCodeSummaryResponse {
+        content,
+        model: request.model,
+        base_url,
+    })
 }
 
 #[tauri::command]
@@ -19284,21 +21357,48 @@ async fn generate_code_position_with_ollama(
         .build()
         .map_err(|e| e.to_string())?;
 
-    let description = request.code_description.as_deref().map(str::trim).filter(|v| !v.is_empty()).unwrap_or("No description provided");
+    let description = request
+        .code_description
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("No description provided");
 
     let mut annotations_text = String::new();
     for (i, ann) in request.annotations.iter().enumerate() {
-        let line = format!("[{}] [{}] \"{}\"\n", i + 1, ann.document_name.trim(), ann.quote.trim());
-        if annotations_text.len() + line.len() > 8_000 { annotations_text.push_str("... (truncated)\n"); break; }
+        let line = format!(
+            "[{}] [{}] \"{}\"\n",
+            i + 1,
+            ann.document_name.trim(),
+            ann.quote.trim()
+        );
+        if annotations_text.len() + line.len() > 8_000 {
+            annotations_text.push_str("... (truncated)\n");
+            break;
+        }
         annotations_text.push_str(&line);
     }
 
     let mut codebook_text = String::new();
     for entry in &request.codebook {
-        let parent_part = entry.parent_label.as_deref().map(|p| format!(" (child of \"{}\")", p)).unwrap_or_default();
-        let desc_part = entry.description.as_deref().map(str::trim).filter(|v| !v.is_empty())
-            .map(|d| format!(": {}", d)).unwrap_or_default();
-        codebook_text.push_str(&format!("- \"{}\"{}{}\n", entry.label.trim(), parent_part, desc_part));
+        let parent_part = entry
+            .parent_label
+            .as_deref()
+            .map(|p| format!(" (child of \"{}\")", p))
+            .unwrap_or_default();
+        let desc_part = entry
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|d| format!(": {}", d))
+            .unwrap_or_default();
+        codebook_text.push_str(&format!(
+            "- \"{}\"{}{}\n",
+            entry.label.trim(),
+            parent_part,
+            desc_part
+        ));
     }
 
     let system_prompt =
@@ -19334,7 +21434,11 @@ async fn generate_code_position_with_ollama(
     )
     .await?;
 
-    Ok(OllamaCodeSummaryResponse { content, model: request.model, base_url })
+    Ok(OllamaCodeSummaryResponse {
+        content,
+        model: request.model,
+        base_url,
+    })
 }
 
 #[tauri::command]
@@ -19362,13 +21466,23 @@ async fn generate_code_unique_annotations_with_ollama(
         .build()
         .map_err(|e| e.to_string())?;
 
-    let description = request.code_description.as_deref().map(str::trim).filter(|v| !v.is_empty()).unwrap_or("No description provided");
+    let description = request
+        .code_description
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("No description provided");
     let total = request.annotations.len();
     let return_count = total.min(5);
 
     let mut annotations_text = String::new();
     for (i, ann) in request.annotations.iter().enumerate() {
-        let line = format!("[{}] [{}] \"{}\"\n", i + 1, ann.document_name.trim(), ann.quote.trim());
+        let line = format!(
+            "[{}] [{}] \"{}\"\n",
+            i + 1,
+            ann.document_name.trim(),
+            ann.quote.trim()
+        );
         if annotations_text.len() + line.len() > 16_000 {
             annotations_text.push_str("... (truncated)\n");
             break;
@@ -19409,7 +21523,9 @@ async fn generate_code_unique_annotations_with_ollama(
     let json_content = extract_json_object(&content).unwrap_or(&content);
     let parsed = parse_unique_annotations_payload(json_content)?;
 
-    let annotations = parsed.annotations.into_iter()
+    let annotations = parsed
+        .annotations
+        .into_iter()
         .filter(|item| item.index >= 1 && item.index <= total as u64)
         .take(return_count)
         .map(|item| OllamaUniqueAnnotationItem {
@@ -19419,10 +21535,16 @@ async fn generate_code_unique_annotations_with_ollama(
         .collect::<Vec<_>>();
 
     if annotations.is_empty() {
-        return Err("The configured LLM did not return any valid unique annotation indexes.".to_string());
+        return Err(
+            "The configured LLM did not return any valid unique annotation indexes.".to_string(),
+        );
     }
 
-    Ok(OllamaUniqueAnnotationsResponse { annotations, model: request.model, base_url })
+    Ok(OllamaUniqueAnnotationsResponse {
+        annotations,
+        model: request.model,
+        base_url,
+    })
 }
 
 #[tauri::command]
@@ -19441,9 +21563,11 @@ fn delete_project_embedding_store(
     project_id: String,
 ) -> Result<ProjectEmbeddingStoreStatus, String> {
     let client = reqwest::Client::new();
-    let requester = tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
+    let requester =
+        tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
     if requester.app_role != "administrator" {
-        let superuser_token = tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
+        let superuser_token =
+            tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
         let project_role = tauri::async_runtime::block_on(find_project_role_for_user(
             &client,
             &superuser_token,
@@ -19458,7 +21582,10 @@ fn delete_project_embedding_store(
     if (current.phase == "running" || current.phase == "cancelling")
         && current.project_id.as_deref() == Some(project_id.as_str())
     {
-        return Err("This project's embeddings are currently being built. Cancel the build first.".to_string());
+        return Err(
+            "This project's embeddings are currently being built. Cancel the build first."
+                .to_string(),
+        );
     }
 
     let index_dir = project_embedding_index_dir(&app, &project_id)?;
@@ -19482,11 +21609,13 @@ fn cancel_project_embedding_store_build(
     state: tauri::State<'_, ProjectEmbeddingBuildState>,
 ) -> Result<ProjectEmbeddingBuildStatus, String> {
     let client = reqwest::Client::new();
-    let requester = tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
+    let requester =
+        tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
     let current = state.0.lock().unwrap().clone();
     if requester.app_role != "administrator" {
         if let Some(project_id) = current.project_id.clone() {
-            let superuser_token = tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
+            let superuser_token =
+                tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
             let project_role = tauri::async_runtime::block_on(find_project_role_for_user(
                 &client,
                 &superuser_token,
@@ -19494,7 +21623,9 @@ fn cancel_project_embedding_store_build(
                 &requester.user_id,
             ))?;
             if !project_role_allows_embedding_build(project_role.as_deref()) {
-                return Err("You do not have permission to cancel this embedding build.".to_string());
+                return Err(
+                    "You do not have permission to cancel this embedding build.".to_string()
+                );
             }
         }
     }
@@ -19515,9 +21646,11 @@ fn build_project_embedding_store_command(
     request: ProjectEmbeddingBuildRequest,
 ) -> Result<ProjectEmbeddingBuildStatus, String> {
     let client = reqwest::Client::new();
-    let requester = tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
+    let requester =
+        tauri::async_runtime::block_on(authenticate_requesting_user(&client, &auth_token))?;
     if requester.app_role != "administrator" {
-        let superuser_token = tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
+        let superuser_token =
+            tauri::async_runtime::block_on(authenticate_internal_superuser(&app, &client))?;
         let project_role = tauri::async_runtime::block_on(find_project_role_for_user(
             &client,
             &superuser_token,
@@ -19616,9 +21749,9 @@ async fn ping_address(host: String, port: u16) -> Result<u64, String> {
     )
     .await
     {
-        Ok(Ok(_))  => Ok(start.elapsed().as_millis() as u64),
+        Ok(Ok(_)) => Ok(start.elapsed().as_millis() as u64),
         Ok(Err(e)) => Err(e.to_string()),
-        Err(_)     => Err("Timed out".to_string()),
+        Err(_) => Err("Timed out".to_string()),
     }
 }
 
@@ -19641,8 +21774,8 @@ async fn set_network_mode(
     let client = reqwest::Client::new();
     authenticate_requesting_user(&client, &auth_token).await?;
     let bind = match mode.as_str() {
-        "lan"   => "0.0.0.0:8090",
-        _       => "127.0.0.1:8090",
+        "lan" => "0.0.0.0:8090",
+        _ => "127.0.0.1:8090",
     };
 
     // Kill the current PocketBase process
@@ -19732,19 +21865,28 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .manage(PbProcess(Mutex::new(None)))
-        .manage(EmbeddingModelDownloadState(Mutex::new(EmbeddingModelDownloadStatusState::idle())))
-        .manage(ProjectEmbeddingBuildState(Mutex::new(ProjectEmbeddingBuildStatusState::idle())))
+        .manage(EmbeddingModelDownloadState(Mutex::new(
+            EmbeddingModelDownloadStatusState::idle(),
+        )))
+        .manage(ProjectEmbeddingBuildState(Mutex::new(
+            ProjectEmbeddingBuildStatusState::idle(),
+        )))
         .manage(CancelledAttributeSuggestionRuns(Mutex::new(HashSet::new())))
         .manage(NetworkMode(Mutex::new("local".to_string())))
         .manage(PostgresExperimentAuthState(Mutex::new(None)))
-        .manage(PostgresExperimentProjectSchemaCache(Mutex::new(HashSet::new())))
-        .manage(PostgresExperimentConnectionCache(Arc::new(Mutex::new(HashMap::new()))))
+        .manage(PostgresExperimentProjectSchemaCache(Mutex::new(
+            HashSet::new(),
+        )))
+        .manage(PostgresExperimentConnectionCache(Arc::new(Mutex::new(
+            HashMap::new(),
+        ))))
         .setup(|app| {
             create_configured_window(app, "main").expect("could not create main window");
-            create_configured_window(app, "splashscreen").expect("could not create splashscreen window");
+            create_configured_window(app, "splashscreen")
+                .expect("could not create splashscreen window");
 
-            let app_data_dir = kanqual_data_dir(&app.app_handle())
-                .expect("could not resolve app data dir");
+            let app_data_dir =
+                kanqual_data_dir(&app.app_handle()).expect("could not resolve app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
             let handle = app.app_handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -19841,6 +21983,8 @@ pub fn run() {
             create_postgres_experiment_object_type_command,
             update_postgres_experiment_object_type_command,
             save_postgres_experiment_object_type_command,
+            import_postgres_experiment_object_type_image_command,
+            remove_postgres_experiment_object_type_image_command,
             delete_postgres_experiment_object_type_command,
             list_postgres_experiment_relationship_types_command,
             delete_postgres_experiment_relationship_type_command,
@@ -19855,6 +21999,8 @@ pub fn run() {
             create_postgres_experiment_object_command,
             update_postgres_experiment_object_command,
             save_postgres_experiment_object_command,
+            import_postgres_experiment_object_image_command,
+            remove_postgres_experiment_object_image_command,
             delete_postgres_experiment_object_command,
             list_postgres_experiment_relationships_command,
             list_postgres_experiment_relationship_attribute_definitions_command,
@@ -19913,32 +22059,28 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            match event {
-                tauri::RunEvent::Exit => {
-                    let pb_process = app_handle.state::<PbProcess>();
-                    kill_pocketbase_process(&pb_process);
-                }
-                tauri::RunEvent::WindowEvent { label, event, .. } => {
-                    if label == "main" {
-                        if let tauri::WindowEvent::Destroyed = event {
-                            let pb_process = app_handle.state::<PbProcess>();
-                            kill_pocketbase_process(&pb_process);
-                        }
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::Exit => {
+                let pb_process = app_handle.state::<PbProcess>();
+                kill_pocketbase_process(&pb_process);
+            }
+            tauri::RunEvent::WindowEvent { label, event, .. } => {
+                if label == "main" {
+                    if let tauri::WindowEvent::Destroyed = event {
+                        let pb_process = app_handle.state::<PbProcess>();
+                        kill_pocketbase_process(&pb_process);
                     }
                 }
-                _ => {}
             }
+            _ => {}
         });
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        app_role_allows_embedding_model_management,
-        extract_transcript_leading_metadata,
-        normalized_project_role,
-        project_role_allows_embedding_build,
+        app_role_allows_embedding_model_management, extract_transcript_leading_metadata,
+        normalized_project_role, project_role_allows_embedding_build,
     };
 
     #[test]
@@ -19987,4 +22129,3 @@ mod tests {
         assert_eq!(timestamp_text, "[00:01:02-00:01:05]");
     }
 }
-

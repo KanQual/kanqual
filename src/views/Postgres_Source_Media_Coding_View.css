@@ -1028,7 +1028,7 @@
 .media-player-clip-trash-button {
   position: absolute;
   top: 50%;
-  right: 4px;
+  right: -6px;
   width: 24px;
   height: 24px;
   display: inline-flex;

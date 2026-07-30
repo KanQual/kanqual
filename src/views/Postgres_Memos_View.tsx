@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
+import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   POSTGRES_PROJECT_CHANGED_EVENT,
   createPostgresExperimentMemo,
@@ -8,13 +10,25 @@ import {
   type PostgresExperimentAnnotationSummary,
   type PostgresExperimentCode,
   type PostgresExperimentMemo,
-  type PostgresExperimentObject,
   type PostgresExperimentProjectChangeEvent,
   type PostgresExperimentSource,
   updatePostgresExperimentMemo,
 } from "../lib/postgresExperiment";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { orderedCodesWithDepth } from "./Postgres_Source_Coding_Shared";
+
+let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
+
+async function loadPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+      return module;
+    });
+  }
+  return pdfJsPromise;
+}
 
 function formatMemoDate(value: string): string {
   if (!value) return "-";
@@ -31,11 +45,226 @@ function formatMemoDate(value: string): string {
   }
 }
 
-function excerpt(value: string, limit = 180): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized) return "No memo text yet.";
-  if (normalized.length <= limit) return normalized;
-  return `${normalized.slice(0, limit - 3).trimEnd()}...`;
+function formatAnnotationDisplayId(value: number | null | undefined): string {
+  return value == null ? "-" : `A${String(value).padStart(2, "0")}`;
+}
+
+function formatSourceType(value: string | undefined): string {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (!normalized) return "Source";
+  if (normalized === "pdf") return "PDF";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function formatMediaMilliseconds(value: number): string {
+  const totalSeconds = Math.max(0, Math.floor(value / 1000));
+  const milliseconds = Math.max(0, Math.floor(value % 1000));
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const base = hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return `${base}.${String(Math.floor(milliseconds / 100)).padStart(1, "0")}`;
+}
+
+function isAbsoluteStoragePath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("/");
+}
+
+function resolveProjectStoragePath(projectStoragePath: string | undefined, sourceStoragePath: string | undefined): string {
+  const trimmedSourcePath = (sourceStoragePath ?? "").trim();
+  if (!trimmedSourcePath) return "";
+  if (isAbsoluteStoragePath(trimmedSourcePath)) return trimmedSourcePath;
+  const trimmedProjectPath = (projectStoragePath ?? "").trim().replace(/[\\/]+$/, "");
+  if (!trimmedProjectPath) return trimmedSourcePath;
+  const normalizedSourcePath = trimmedSourcePath.replace(/^([\\/])+/, "");
+  return `${trimmedProjectPath}\\${normalizedSourcePath.replace(/\//g, "\\")}`;
+}
+
+function fileExtensionFromPath(path: string): string {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function mediaTypeFromFileExtension(ext: string): string | null {
+  if (ext === "mp3") return "audio/mpeg";
+  if (ext === "wav") return "audio/wav";
+  if (ext === "m4a" || ext === "aac") return "audio/mp4";
+  if (ext === "ogg") return "audio/ogg";
+  if (ext === "flac") return "audio/flac";
+  if (ext === "mp4" || ext === "m4v") return "video/mp4";
+  if (ext === "webm") return "video/webm";
+  if (ext === "ogv") return "video/ogg";
+  if (ext === "mov") return "video/quicktime";
+  return null;
+}
+
+function annotationTooltipContent(annotation: PostgresExperimentAnnotationSummary): { title: string; body: string } {
+  const quote = annotation.quote.trim();
+  if (quote) {
+    return {
+      title: "Annotated Text",
+      body: quote,
+    };
+  }
+
+  if (annotation.sourceKind === "audio" || annotation.sourceKind === "video") {
+    const start = typeof annotation.timeStartMs === "number" ? formatMediaMilliseconds(annotation.timeStartMs) : "-";
+    const end = typeof annotation.timeEndMs === "number" ? formatMediaMilliseconds(annotation.timeEndMs) : "-";
+    return {
+      title: annotation.sourceKind === "audio" ? "Audio Clip" : "Video Clip",
+      body: `${start} - ${end}`,
+    };
+  }
+
+  if ((annotation.sourceKind === "image" || annotation.sourceKind === "pdf") && annotation.imageRegion) {
+    const region = annotation.imageRegion;
+    return {
+      title: annotation.sourceKind === "pdf" ? "PDF Region" : "Image Region",
+      body: `${annotation.sourceKind === "pdf" ? `Page ${region.pageNumber ?? 1} - ` : ""}${Math.round(region.width)} x ${Math.round(region.height)} px`,
+    };
+  }
+
+  return {
+    title: "Annotation",
+    body: "No annotation content is available for this annotation.",
+  };
+}
+
+function MemoAnnotationMediaPreview({
+  annotation,
+  source,
+  projectStoragePath,
+}: {
+  annotation: PostgresExperimentAnnotationSummary;
+  source: PostgresExperimentSource | null;
+  projectStoragePath?: string;
+}) {
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const resolvedPath = resolveProjectStoragePath(projectStoragePath, source?.storagePath);
+  const sourceKind = source?.sourceKind || annotation.sourceKind;
+  const mediaType = mediaTypeFromFileExtension(fileExtensionFromPath(source?.storagePath ?? ""));
+  const region = annotation.imageRegion;
+
+  useEffect(() => {
+    if (!resolvedPath || !["audio", "video", "image", "pdf"].includes(sourceKind)) {
+      setMediaUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      setLoadError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoadError(null);
+
+    async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
+      if (sourceKind !== "pdf") {
+        return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
+      }
+      if (!region) throw new Error("No PDF region is available for this annotation.");
+      const pdfjsLib = await loadPdfJs();
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const safePage = Math.min(Math.max(region.pageNumber ?? 1, 1), pdf.numPages);
+      const page = await pdf.getPage(safePage);
+      const viewport = page.getViewport({ scale: 1.6 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvas, canvasContext: context, viewport }).promise;
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((nextBlob) => {
+          if (nextBlob) resolve(nextBlob);
+          else reject(new Error("Could not render the PDF page preview."));
+        }, "image/png");
+      });
+      return URL.createObjectURL(blob);
+    }
+
+    void readTauriFile(resolvedPath)
+      .then(async (bytes) => {
+        objectUrl = await buildPreviewUrl(bytes);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setMediaUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMediaUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return null;
+        });
+        setLoadError(error instanceof Error ? error.message : "Could not load annotation media.");
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [mediaType, region, resolvedPath, sourceKind]);
+
+  if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
+  if (loadError) return <p className="postgres-memo-annotation-tooltip-error">{loadError}</p>;
+  if (!mediaUrl) return <p className="postgres-memo-annotation-tooltip-loading">Loading media...</p>;
+
+  if (sourceKind === "audio") {
+    return (
+      <audio
+        className="postgres-memo-annotation-tooltip-audio"
+        controls
+        preload="metadata"
+        src={mediaUrl}
+      />
+    );
+  }
+
+  if (sourceKind === "video") {
+    return (
+      <video
+        className="postgres-memo-annotation-tooltip-video"
+        controls
+        preload="metadata"
+        playsInline
+        src={mediaUrl}
+      />
+    );
+  }
+
+  if ((sourceKind === "image" || sourceKind === "pdf") && region) {
+    const safeRegionWidth = Math.max(region.width, 1);
+    const safeRegionHeight = Math.max(region.height, 1);
+    const safeImageWidth = Math.max(region.imageWidth, safeRegionWidth);
+    const safeImageHeight = Math.max(region.imageHeight, safeRegionHeight);
+    return (
+      <div
+        className="postgres-memo-annotation-tooltip-image"
+        style={{ aspectRatio: `${safeRegionWidth} / ${safeRegionHeight}` }}
+      >
+        <img
+          src={mediaUrl}
+          alt="Annotation region"
+          style={{
+            width: `${(safeImageWidth / safeRegionWidth) * 100}%`,
+            height: `${(safeImageHeight / safeRegionHeight) * 100}%`,
+            transform: `translate(-${(Math.max(region.x, 0) / safeImageWidth) * 100}%, -${(Math.max(region.y, 0) / safeImageHeight) * 100}%)`,
+          }}
+        />
+      </div>
+    );
+  }
+
+  return null;
 }
 
 type MemoEditorDraft = {
@@ -79,8 +308,69 @@ function toggleInSet(current: Set<string>, id: string): Set<string> {
   return next;
 }
 
+const MEMO_RTE_TOOLS: { cmd: string; label: string; title: string }[] = [
+  { cmd: "bold", label: "B", title: "Bold" },
+  { cmd: "italic", label: "I", title: "Italic" },
+  { cmd: "underline", label: "U", title: "Underline" },
+  { cmd: "insertUnorderedList", label: "*", title: "Bullet list" },
+  { cmd: "insertOrderedList", label: "1.", title: "Numbered list" },
+];
+
+function MemoRichTextEditor({
+  initialHtml,
+  onChange,
+}: {
+  initialHtml: string;
+  onChange: (html: string) => void;
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const loadedInitialHtmlRef = useRef(false);
+
+  useEffect(() => {
+    if (!loadedInitialHtmlRef.current && editorRef.current) {
+      editorRef.current.innerHTML = initialHtml;
+      loadedInitialHtmlRef.current = true;
+    }
+  }, [initialHtml]);
+
+  function runCommand(command: string) {
+    editorRef.current?.focus();
+    document.execCommand(command, false);
+    onChange(editorRef.current?.innerHTML ?? "");
+  }
+
+  return (
+    <div className="rte rte--grow postgres-memo-rte">
+      <div className="rte-toolbar">
+        {MEMO_RTE_TOOLS.map((tool) => (
+          <button
+            key={tool.cmd}
+            type="button"
+            className="rte-btn"
+            title={tool.title}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              runCommand(tool.cmd);
+            }}
+          >
+            {tool.label}
+          </button>
+        ))}
+      </div>
+      <div
+        ref={editorRef}
+        className="rte-content"
+        contentEditable
+        suppressContentEditableWarning
+        onInput={() => onChange(editorRef.current?.innerHTML ?? "")}
+      />
+    </div>
+  );
+}
+
 export function PostgresMemosView({
   projectId,
+  projectStoragePath,
   canManageMemos,
   initialSourceIds,
   initialAnnotationIds,
@@ -88,6 +378,7 @@ export function PostgresMemosView({
   onInitialDraftHandled,
 }: {
   projectId: string;
+  projectStoragePath?: string;
   canManageMemos: boolean;
   initialSourceIds?: string[] | null;
   initialAnnotationIds?: string[] | null;
@@ -98,12 +389,13 @@ export function PostgresMemosView({
   const [sources, setSources] = useState<PostgresExperimentSource[]>([]);
   const [codes, setCodes] = useState<PostgresExperimentCode[]>([]);
   const [annotations, setAnnotations] = useState<PostgresExperimentAnnotationSummary[]>([]);
-  const [objects, setObjects] = useState<PostgresExperimentObject[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
   const [editorDraft, setEditorDraft] = useState<MemoEditorDraft | null>(null);
+  const [collapsedSelectorCards, setCollapsedSelectorCards] = useState<Set<"codes" | "sources" | "annotations">>(new Set());
+  const [annotationTooltip, setAnnotationTooltip] = useState<{ annotationId: string; x: number; y: number } | null>(null);
+  const annotationTooltipHideTimerRef = useRef<number | null>(null);
   const [deleteMemoId, setDeleteMemoId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -118,12 +410,7 @@ export function PostgresMemosView({
       setSources(snapshot.sources);
       setCodes(snapshot.codes);
       setAnnotations(snapshot.annotations);
-      setObjects(snapshot.objects);
       setMemos(memoRows);
-      setSelectedMemoId((current) => {
-        if (current && memoRows.some((memo) => memo.id === current)) return current;
-        return memoRows[0]?.id ?? null;
-      });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load memos.");
     } finally {
@@ -134,6 +421,14 @@ export function PostgresMemosView({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    return () => {
+      if (annotationTooltipHideTimerRef.current != null) {
+        window.clearTimeout(annotationTooltipHideTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!canManageMemos) return;
@@ -180,20 +475,15 @@ export function PostgresMemosView({
     () => new Map(sources.map((source) => [source.id, source])),
     [sources],
   );
-  const codeById = useMemo(
-    () => new Map(codes.map((code) => [code.id, code])),
-    [codes],
-  );
-  const objectById = useMemo(
-    () => new Map(objects.map((object) => [object.id, object])),
-    [objects],
-  );
   const annotationById = useMemo(
     () => new Map(annotations.map((annotation) => [annotation.id, annotation])),
     [annotations],
   );
 
-  const selectedMemo = memos.find((memo) => memo.id === selectedMemoId) ?? null;
+  const codeTree = useMemo(() => orderedCodesWithDepth(codes), [codes]);
+  const draftSources = editorDraft ? sources.filter((source) => editorDraft.sourceIds.has(source.id)) : [];
+  const draftCodes = editorDraft ? codes.filter((code) => editorDraft.codeIds.has(code.id)) : [];
+  const draftAnnotations = editorDraft ? annotations.filter((annotation) => editorDraft.annotationIds.has(annotation.id)) : [];
 
   async function handleSaveMemo() {
     if (!editorDraft) return;
@@ -223,7 +513,6 @@ export function PostgresMemosView({
           })
         : await createPostgresExperimentMemo(payload);
       setEditorDraft(null);
-      setSelectedMemoId(saved.id);
       setNotice(editorDraft.memoId ? `Updated "${saved.title}".` : `Created "${saved.title}".`);
       await load();
     } catch (saveError) {
@@ -242,7 +531,6 @@ export function PostgresMemosView({
     try {
       await deletePostgresExperimentMemo(projectId, deleteMemoId);
       setDeleteMemoId(null);
-      setSelectedMemoId((current) => (current === deleteMemoId ? null : current));
       setNotice(memo ? `Deleted "${memo.title}".` : "Deleted memo.");
       await load();
     } catch (deleteError) {
@@ -250,6 +538,372 @@ export function PostgresMemosView({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function toggleSelectorCard(card: "codes" | "sources" | "annotations") {
+    setCollapsedSelectorCards((current) => {
+      const next = new Set(current);
+      if (next.has(card)) next.delete(card);
+      else next.add(card);
+      return next;
+    });
+  }
+
+  function showAnnotationTooltip(annotationId: string, anchorElement: HTMLElement) {
+    if (annotationTooltipHideTimerRef.current != null) {
+      window.clearTimeout(annotationTooltipHideTimerRef.current);
+      annotationTooltipHideTimerRef.current = null;
+    }
+    const tableElement = anchorElement.closest(".postgres-memo-annotation-table") as HTMLElement | null;
+    const anchorRect = (tableElement ?? anchorElement).getBoundingClientRect();
+    const rowRect = anchorElement.getBoundingClientRect();
+    const tooltipWidth = 360;
+    const tooltipMaxHeight = 320;
+    setAnnotationTooltip({
+      annotationId,
+      x: Math.max(16, Math.min(anchorRect.right + 12, window.innerWidth - tooltipWidth - 16)),
+      y: Math.max(16, Math.min(rowRect.top, window.innerHeight - tooltipMaxHeight - 16)),
+    });
+  }
+
+  function scheduleHideAnnotationTooltip() {
+    if (annotationTooltipHideTimerRef.current != null) {
+      window.clearTimeout(annotationTooltipHideTimerRef.current);
+    }
+    annotationTooltipHideTimerRef.current = window.setTimeout(() => {
+      setAnnotationTooltip(null);
+      annotationTooltipHideTimerRef.current = null;
+    }, 1000);
+  }
+
+  function removeDraftAffiliation(kind: "codeIds" | "sourceIds" | "annotationIds", id: string) {
+    setEditorDraft((current) => {
+      if (!current) return current;
+      const nextIds = new Set(current[kind]);
+      nextIds.delete(id);
+      return { ...current, [kind]: nextIds };
+    });
+  }
+
+  if (editorDraft) {
+    const codesOpen = !collapsedSelectorCards.has("codes");
+    const sourcesOpen = !collapsedSelectorCards.has("sources");
+    const annotationsOpen = !collapsedSelectorCards.has("annotations");
+    const hoveredAnnotation = annotationTooltip ? annotationById.get(annotationTooltip.annotationId) : null;
+    const hoveredAnnotationSource = hoveredAnnotation ? sourceById.get(hoveredAnnotation.sourceId) : null;
+    const hoveredAnnotationContent = hoveredAnnotation ? annotationTooltipContent(hoveredAnnotation) : null;
+
+    return (
+      <div className="view doc-detail-view postgres-memo-editor-view">
+        <div className="workspace-back-row workspace-back-row--split">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              if (submitting) return;
+              setEditorDraft(null);
+            }}
+            disabled={submitting}
+          >
+            Back to memos
+          </button>
+          <div className="view-header-actions">
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => void handleSaveMemo()}
+              disabled={submitting}
+            >
+              {submitting ? "Saving..." : "Save memo"}
+            </button>
+          </div>
+        </div>
+
+        {error ? <div className="error-banner">{error}</div> : null}
+
+        <div className="annotate-layout code-text-annotate-layout postgres-memo-editor-layout">
+          <div className="annotate-left postgres-memo-editor-left">
+            <div className={`annotate-card postgres-memo-select-card${codesOpen ? "" : " postgres-memo-select-card--collapsed"}`}>
+              <button
+                type="button"
+                className="annotate-card-header postgres-memo-select-header"
+                aria-expanded={codesOpen}
+                onClick={() => toggleSelectorCard("codes")}
+              >
+                <span className="annotate-card-title">Codes</span>
+                <span className="postgres-memo-header-meta">
+                  <span className="postgres-memo-card-count">{draftCodes.length}</span>
+                  <span className="postgres-memo-collapse-indicator">{codesOpen ? "-" : "+"}</span>
+                </span>
+              </button>
+              {codesOpen ? (
+                <div className="postgres-memo-select-list">
+                  {codes.length === 0 ? (
+                    <p className="case-card-empty">No codes yet.</p>
+                  ) : (
+                    codeTree.map(({ code, depth }) => (
+                      <label
+                        key={code.id}
+                        className={`postgres-memo-select-row postgres-memo-select-row--code${editorDraft.codeIds.has(code.id) ? " postgres-memo-select-row--checked" : ""}`}
+                        style={{ "--memo-code-depth": depth } as CSSProperties}
+                      >
+                        <input
+                          type="checkbox"
+                          className="memo-sel-checkbox"
+                          checked={editorDraft.codeIds.has(code.id)}
+                          onChange={() => setEditorDraft((current) => current ? { ...current, codeIds: toggleInSet(current.codeIds, code.id) } : current)}
+                        />
+                        <span className="code-swatch" style={{ background: code.color }} />
+                        <span className="postgres-memo-select-text">{code.label}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            <div className={`annotate-card postgres-memo-select-card${sourcesOpen ? "" : " postgres-memo-select-card--collapsed"}`}>
+              <button
+                type="button"
+                className="annotate-card-header postgres-memo-select-header"
+                aria-expanded={sourcesOpen}
+                onClick={() => toggleSelectorCard("sources")}
+              >
+                <span className="annotate-card-title">Sources</span>
+                <span className="postgres-memo-header-meta">
+                  <span className="postgres-memo-card-count">{draftSources.length}</span>
+                  <span className="postgres-memo-collapse-indicator">{sourcesOpen ? "-" : "+"}</span>
+                </span>
+              </button>
+              {sourcesOpen ? (
+                <div className="postgres-memo-select-list postgres-memo-source-table">
+                  {sources.length === 0 ? (
+                    <p className="case-card-empty">No sources yet.</p>
+                  ) : (
+                    <>
+                      <div className="postgres-memo-source-table-header">
+                        <span />
+                        <span>Source title</span>
+                        <span>Type</span>
+                      </div>
+                      {sources.map((source) => (
+                        <label
+                          key={source.id}
+                          className={`postgres-memo-select-row postgres-memo-source-table-row${editorDraft.sourceIds.has(source.id) ? " postgres-memo-select-row--checked" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="memo-sel-checkbox"
+                            checked={editorDraft.sourceIds.has(source.id)}
+                            onChange={() => setEditorDraft((current) => current ? { ...current, sourceIds: toggleInSet(current.sourceIds, source.id) } : current)}
+                          />
+                          <span className="postgres-memo-source-title">{source.title}</span>
+                          <span className="postgres-memo-source-type">{formatSourceType(source.sourceKind)}</span>
+                        </label>
+                      ))}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            <div className={`annotate-card postgres-memo-select-card${annotationsOpen ? "" : " postgres-memo-select-card--collapsed"}`}>
+              <button
+                type="button"
+                className="annotate-card-header postgres-memo-select-header"
+                aria-expanded={annotationsOpen}
+                onClick={() => toggleSelectorCard("annotations")}
+              >
+                <span className="annotate-card-title">Annotations</span>
+                <span className="postgres-memo-header-meta">
+                  <span className="postgres-memo-card-count">{draftAnnotations.length}</span>
+                  <span className="postgres-memo-collapse-indicator">{annotationsOpen ? "-" : "+"}</span>
+                </span>
+              </button>
+              {annotationsOpen ? (
+                <div className="postgres-memo-select-list postgres-memo-annotation-table">
+                  {annotations.length === 0 ? (
+                    <p className="case-card-empty">No annotations yet.</p>
+                  ) : (
+                    <>
+                      <div className="postgres-memo-annotation-table-header">
+                        <span />
+                        <span>Annotation id</span>
+                        <span>Source title</span>
+                        <span>Source type</span>
+                      </div>
+                      {annotations.map((annotation) => {
+                        const source = sourceById.get(annotation.sourceId);
+                        return (
+                          <label
+                            key={annotation.id}
+                            className={`postgres-memo-select-row postgres-memo-annotation-table-row${editorDraft.annotationIds.has(annotation.id) ? " postgres-memo-select-row--checked" : ""}`}
+                            onMouseEnter={(event) => showAnnotationTooltip(annotation.id, event.currentTarget)}
+                            onMouseLeave={scheduleHideAnnotationTooltip}
+                            onFocus={(event) => showAnnotationTooltip(annotation.id, event.currentTarget)}
+                            onBlur={scheduleHideAnnotationTooltip}
+                          >
+                            <input
+                              type="checkbox"
+                              className="memo-sel-checkbox"
+                              checked={editorDraft.annotationIds.has(annotation.id)}
+                              onChange={() => setEditorDraft((current) => current ? { ...current, annotationIds: toggleInSet(current.annotationIds, annotation.id) } : current)}
+                            />
+                            <span className="postgres-memo-annotation-id">{formatAnnotationDisplayId(annotation.displayId)}</span>
+                            <span className="postgres-memo-annotation-source-title">{source?.title ?? "Source"}</span>
+                            <span className="postgres-memo-annotation-source-type">{formatSourceType(source?.sourceKind)}</span>
+                          </label>
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="annotate-main postgres-memo-editor-main">
+            <div className="annotate-card postgres-memo-title-card">
+              <div className="annotate-card-header">
+                <span className="annotate-card-title">Memo title</span>
+              </div>
+              <input
+                className="memo-editor-title-input"
+                value={editorDraft.title}
+                onChange={(event) => setEditorDraft((current) => current ? { ...current, title: event.target.value } : current)}
+                placeholder="Memo title"
+              />
+            </div>
+
+            <div className="annotate-card postgres-memo-affiliations-card">
+              <div className="annotate-card-header">
+                <span className="annotate-card-title">Affiliations</span>
+              </div>
+              <div className="postgres-memo-affiliation-grid">
+                <div>
+                  <h3>Codes</h3>
+                  {draftCodes.length === 0 ? <p className="case-card-empty">No linked codes.</p> : (
+                    <div className="postgres-memo-chip-list">
+                      {draftCodes.map((code) => (
+                        <span key={code.id} className="postgres-memo-chip">
+                          <button
+                            type="button"
+                            className="postgres-memo-chip-remove"
+                            onClick={() => removeDraftAffiliation("codeIds", code.id)}
+                            title={`Remove ${code.label}`}
+                            aria-label={`Remove ${code.label}`}
+                          >
+                            x
+                          </button>
+                          <span className="code-swatch" style={{ background: code.color }} />
+                          <span className="postgres-memo-chip-label">{code.label}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <h3>Sources</h3>
+                  {draftSources.length === 0 ? <p className="case-card-empty">No linked sources.</p> : (
+                    <div className="postgres-memo-chip-list">
+                      {draftSources.map((source) => (
+                        <span key={source.id} className="postgres-memo-chip">
+                          <button
+                            type="button"
+                            className="postgres-memo-chip-remove"
+                            onClick={() => removeDraftAffiliation("sourceIds", source.id)}
+                            title={`Remove ${source.title}`}
+                            aria-label={`Remove ${source.title}`}
+                          >
+                            x
+                          </button>
+                          <span className="postgres-memo-chip-label">{source.title}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <h3>Annotations</h3>
+                  {draftAnnotations.length === 0 ? <p className="case-card-empty">No linked annotations.</p> : (
+                    <div className="postgres-memo-affiliation-list">
+                      {draftAnnotations.map((annotation) => (
+                        <span
+                          key={annotation.id}
+                          className="postgres-memo-chip"
+                          onMouseEnter={(event) => showAnnotationTooltip(annotation.id, event.currentTarget)}
+                          onMouseLeave={scheduleHideAnnotationTooltip}
+                          onFocus={(event) => showAnnotationTooltip(annotation.id, event.currentTarget)}
+                          onBlur={scheduleHideAnnotationTooltip}
+                        >
+                          <button
+                            type="button"
+                            className="postgres-memo-chip-remove"
+                            onClick={() => removeDraftAffiliation("annotationIds", annotation.id)}
+                            title={`Remove ${formatAnnotationDisplayId(annotation.displayId)}`}
+                            aria-label={`Remove ${formatAnnotationDisplayId(annotation.displayId)}`}
+                          >
+                            x
+                          </button>
+                          <span className="postgres-memo-chip-label">{formatAnnotationDisplayId(annotation.displayId)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="annotate-card annotate-card--grow postgres-memo-body-card">
+              <div className="annotate-card-header">
+                <span className="annotate-card-title">Memo text</span>
+              </div>
+              <MemoRichTextEditor
+                key={editorDraft.memoId ?? "new"}
+                initialHtml={editorDraft.body}
+                onChange={(body) => setEditorDraft((current) => current ? { ...current, body } : current)}
+              />
+            </div>
+          </div>
+        </div>
+        {hoveredAnnotation && hoveredAnnotationContent ? (
+          <div
+            className="postgres-memo-annotation-tooltip"
+            onMouseEnter={() => {
+              if (annotationTooltipHideTimerRef.current != null) {
+                window.clearTimeout(annotationTooltipHideTimerRef.current);
+                annotationTooltipHideTimerRef.current = null;
+              }
+            }}
+            onMouseLeave={scheduleHideAnnotationTooltip}
+            style={{
+              left: annotationTooltip?.x ?? 16,
+              top: annotationTooltip?.y ?? 16,
+            }}
+          >
+            <div className="postgres-memo-annotation-tooltip-header">
+              <strong>{formatAnnotationDisplayId(hoveredAnnotation.displayId)}</strong>
+              <span>{hoveredAnnotationSource?.title ?? "Source"} | {formatSourceType(hoveredAnnotationSource?.sourceKind ?? hoveredAnnotation.sourceKind)}</span>
+            </div>
+            <div className="postgres-memo-annotation-tooltip-card">
+              <span className="postgres-memo-annotation-tooltip-label">{hoveredAnnotationContent.title}</span>
+              <MemoAnnotationMediaPreview
+                annotation={hoveredAnnotation}
+                source={hoveredAnnotationSource ?? null}
+                projectStoragePath={projectStoragePath}
+              />
+              <p>{hoveredAnnotationContent.body}</p>
+            </div>
+            {hoveredAnnotation.note.trim() ? (
+              <div className="postgres-memo-annotation-tooltip-note">
+                <span className="postgres-memo-annotation-tooltip-label">Note</span>
+                <p>{hoveredAnnotation.note}</p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   return (
@@ -281,44 +935,44 @@ export function PostgresMemosView({
       {error ? <div className="error-banner">{error}</div> : null}
       {notice ? <div className="success-banner">{notice}</div> : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 440px) minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
-        <section className="users-table-wrap">
+      <div className="postgres-memo-table-shell">
+        <section className="users-table-wrap postgres-memo-table-wrap">
           <table className="users-table">
             <thead>
               <tr>
-                <th className="users-th">Title</th>
-                <th className="users-th">Links</th>
-                <th className="users-th">Updated</th>
+                <th className="users-th">Memo title</th>
+                <th className="users-th">Affiliations</th>
+                <th className="users-th">Saved</th>
+                <th className="users-th">Created by</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="users-td" colSpan={3}>Loading memos...</td>
+                  <td className="users-td" colSpan={4}>Loading memos...</td>
                 </tr>
               ) : memos.length === 0 ? (
                 <tr>
-                  <td className="users-td" colSpan={3}>No PostgreSQL memos yet.</td>
+                  <td className="users-td" colSpan={4}>No PostgreSQL memos yet.</td>
                 </tr>
               ) : (
                 memos.map((memo) => {
-                  const isSelected = memo.id === selectedMemoId;
-                  const linkCount = memo.sourceIds.length + memo.annotationIds.length + memo.codeIds.length + memo.objectIds.length;
+                  const affiliationCount = memo.sourceIds.length + memo.annotationIds.length + memo.codeIds.length + memo.objectIds.length;
                   return (
                     <tr
                       key={memo.id}
                       className="users-row"
-                      onClick={() => setSelectedMemoId(memo.id)}
-                      style={{ cursor: "pointer", background: isSelected ? "rgba(53, 80, 112, 0.08)" : undefined }}
+                      onClick={() => {
+                        if (canManageMemos) setEditorDraft(draftFromMemo(memo));
+                      }}
+                      style={{ cursor: canManageMemos ? "pointer" : undefined }}
                     >
                       <td className="users-td">
                         <strong>{memo.title}</strong>
-                        <div style={{ color: "var(--text-secondary, #667085)", fontSize: 13, marginTop: 4 }}>
-                          {excerpt(memo.body, 90)}
-                        </div>
                       </td>
-                      <td className="users-td">{linkCount}</td>
+                      <td className="users-td">{affiliationCount}</td>
                       <td className="users-td">{formatMemoDate(memo.updatedAt)}</td>
+                      <td className="users-td">{memo.createdByName || "Unknown author"}</td>
                     </tr>
                   );
                 })
@@ -326,197 +980,7 @@ export function PostgresMemosView({
             </tbody>
           </table>
         </section>
-
-        <section className="case-card">
-          {selectedMemo ? (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                <div>
-                  <h2 style={{ marginTop: 0 }}>{selectedMemo.title}</h2>
-                  <p style={{ marginTop: 0, color: "var(--text-secondary, #667085)" }}>
-                    {selectedMemo.createdByName || "Unknown author"} · {formatMemoDate(selectedMemo.createdAt)}
-                  </p>
-                </div>
-                {canManageMemos ? (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button type="button" className="btn" onClick={() => setEditorDraft(draftFromMemo(selectedMemo))}>
-                      Edit
-                    </button>
-                    <button type="button" className="btn btn--danger" onClick={() => setDeleteMemoId(selectedMemo.id)}>
-                      Delete
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-
-              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, marginBottom: 20 }}>
-                {selectedMemo.body.trim() || "No memo text yet."}
-              </div>
-
-              <div className="form-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 20 }}>
-                <div>
-                  <h3>Sources</h3>
-                  {selectedMemo.sourceIds.length === 0 ? <p className="case-card-empty">No linked sources.</p> : (
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
-                      {selectedMemo.sourceIds.map((sourceId) => (
-                        <li key={sourceId}>{sourceById.get(sourceId)?.title ?? sourceId}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div>
-                  <h3>Objects</h3>
-                  {selectedMemo.objectIds.length === 0 ? <p className="case-card-empty">No linked objects.</p> : (
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
-                      {selectedMemo.objectIds.map((objectId) => (
-                        <li key={objectId}>{objectById.get(objectId)?.title ?? objectId}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div>
-                  <h3>Codes</h3>
-                  {selectedMemo.codeIds.length === 0 ? <p className="case-card-empty">No linked codes.</p> : (
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
-                      {selectedMemo.codeIds.map((codeId) => (
-                        <li key={codeId}>{codeById.get(codeId)?.label ?? codeId}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div>
-                  <h3>Annotations</h3>
-                  {selectedMemo.annotationIds.length === 0 ? <p className="case-card-empty">No linked annotations.</p> : (
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
-                      {selectedMemo.annotationIds.map((annotationId) => {
-                        const annotation = annotationById.get(annotationId);
-                        return (
-                          <li key={annotationId}>
-                            {annotation
-                              ? `${sourceById.get(annotation.sourceId)?.title ?? "Source"}: ${excerpt(annotation.quote, 80)}`
-                              : annotationId}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            <p className="case-card-empty">Select a memo to inspect it.</p>
-          )}
-        </section>
       </div>
-
-      {editorDraft ? (
-        <div className="modal-overlay" onClick={() => !submitting && setEditorDraft(null)}>
-          <div className="modal" style={{ width: "min(1100px, 92vw)", maxHeight: "90vh", overflow: "auto" }} onClick={(event) => event.stopPropagation()}>
-            <h2 style={{ marginTop: 0 }}>{editorDraft.memoId ? "Edit Memo" : "New Memo"}</h2>
-            <div className="form-grid" style={{ gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>
-              <div style={{ display: "grid", gap: 16 }}>
-                <label className="form-field">
-                  <span>Title</span>
-                  <input
-                    value={editorDraft.title}
-                    onChange={(event) => setEditorDraft((current) => current ? { ...current, title: event.target.value } : current)}
-                    placeholder="Memo title"
-                  />
-                </label>
-                <label className="form-field">
-                  <span>Memo text</span>
-                  <textarea
-                    value={editorDraft.body}
-                    onChange={(event) => setEditorDraft((current) => current ? { ...current, body: event.target.value } : current)}
-                    rows={16}
-                    placeholder="Write your analytic memo here..."
-                  />
-                </label>
-              </div>
-
-              <div style={{ display: "grid", gap: 16 }}>
-                <div className="case-card" style={{ padding: 16 }}>
-                  <h3 style={{ marginTop: 0 }}>Sources</h3>
-                  <div style={{ display: "grid", gap: 8, maxHeight: 150, overflow: "auto" }}>
-                    {sources.map((source) => (
-                      <label key={source.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                        <input
-                          type="checkbox"
-                          checked={editorDraft.sourceIds.has(source.id)}
-                          onChange={() => setEditorDraft((current) => current ? { ...current, sourceIds: toggleInSet(current.sourceIds, source.id) } : current)}
-                        />
-                        <span>{source.title}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="case-card" style={{ padding: 16 }}>
-                  <h3 style={{ marginTop: 0 }}>Objects</h3>
-                  <div style={{ display: "grid", gap: 8, maxHeight: 150, overflow: "auto" }}>
-                    {objects.map((object) => (
-                      <label key={object.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                        <input
-                          type="checkbox"
-                          checked={editorDraft.objectIds.has(object.id)}
-                          onChange={() => setEditorDraft((current) => current ? { ...current, objectIds: toggleInSet(current.objectIds, object.id) } : current)}
-                        />
-                        <span>{object.title}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="case-card" style={{ padding: 16 }}>
-                  <h3 style={{ marginTop: 0 }}>Codes</h3>
-                  <div style={{ display: "grid", gap: 8, maxHeight: 150, overflow: "auto" }}>
-                    {codes.map((code) => (
-                      <label key={code.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                        <input
-                          type="checkbox"
-                          checked={editorDraft.codeIds.has(code.id)}
-                          onChange={() => setEditorDraft((current) => current ? { ...current, codeIds: toggleInSet(current.codeIds, code.id) } : current)}
-                        />
-                        <span>{code.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="case-card" style={{ padding: 16 }}>
-                  <h3 style={{ marginTop: 0 }}>Annotations</h3>
-                  <div style={{ display: "grid", gap: 8, maxHeight: 180, overflow: "auto" }}>
-                    {annotations.map((annotation) => (
-                      <label key={annotation.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                        <input
-                          type="checkbox"
-                          checked={editorDraft.annotationIds.has(annotation.id)}
-                          onChange={() => setEditorDraft((current) => current ? { ...current, annotationIds: toggleInSet(current.annotationIds, annotation.id) } : current)}
-                        />
-                        <span>
-                          <strong>{sourceById.get(annotation.sourceId)?.title ?? "Source"}</strong>
-                          <span style={{ display: "block", color: "var(--text-secondary, #667085)" }}>
-                            {excerpt(annotation.quote, 90)}
-                          </span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="form-actions" style={{ marginTop: 20 }}>
-              <button type="button" className="btn" onClick={() => setEditorDraft(null)} disabled={submitting}>
-                Cancel
-              </button>
-              <button type="button" className="btn btn--primary" onClick={() => void handleSaveMemo()} disabled={submitting}>
-                {submitting ? "Saving..." : "Save memo"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {deleteMemoId ? (
         <div className="modal-overlay" onClick={() => !submitting && setDeleteMemoId(null)}>

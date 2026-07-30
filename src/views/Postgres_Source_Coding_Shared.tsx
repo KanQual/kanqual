@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type {
   PostgresExperimentCode,
@@ -470,6 +470,7 @@ export function PostgresSourceAnnotationPanel({
   annotations,
   selectedAnnotationId,
   codesById,
+  renderAnnotationExcerpt,
   onSelectAnnotation,
   onDeleteAnnotation,
   onOpenMemoDraft,
@@ -479,6 +480,7 @@ export function PostgresSourceAnnotationPanel({
   annotations: SourceAnnotationRow[];
   selectedAnnotationId: string | null;
   codesById: Map<string, PostgresExperimentCode>;
+  renderAnnotationExcerpt?: (annotation: SourceAnnotationRow) => ReactNode;
   onSelectAnnotation: (annotationId: string) => void;
   onDeleteAnnotation: (annotationId: string) => void;
   onOpenMemoDraft: (payload: { annotationIds?: string[]; codeIds?: string[] }) => void;
@@ -545,6 +547,7 @@ export function PostgresSourceAnnotationPanel({
                   ) : null}
                 </div>
                 <blockquote className="annotation-quote">"{annotation.quote}"</blockquote>
+                {renderAnnotationExcerpt ? renderAnnotationExcerpt(annotation) : null}
                 {annotation.note ? <p className="annotation-note">{annotation.note}</p> : null}
                 <p className="annotation-meta">
                   <span>{annotation.createdByName || "Unknown"}</span>

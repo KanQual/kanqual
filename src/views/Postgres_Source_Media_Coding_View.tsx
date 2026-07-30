@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import {
   MediaController,
@@ -244,6 +244,82 @@ function formatOpenTimingDetails(details?: Record<string, number | string | bool
   const entries = Object.entries(details).filter(([, value]) => value != null);
   if (entries.length === 0) return "";
   return ` ${entries.map(([key, value]) => `${key}=${String(value)}`).join(" ")}`;
+}
+
+function AnnotationClipPlayer({
+  annotation,
+  mediaKind,
+  previewUrl,
+  mediaType,
+}: {
+  annotation: SourceAnnotationRow;
+  mediaKind: "audio" | "video";
+  previewUrl: string | null;
+  mediaType: string | null;
+}) {
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const startSeconds = Math.max(0, (annotation.timeStartMs ?? 0) / 1000);
+  const endSeconds = Math.max(startSeconds, (annotation.timeEndMs ?? annotation.timeStartMs ?? 0) / 1000);
+  const clipLabel = annotation.timeStartMs != null && annotation.timeEndMs != null
+    ? `${formatMediaTime(annotation.timeStartMs)} - ${formatMediaTime(annotation.timeEndMs)}`
+    : annotation.quote;
+
+  if (!previewUrl || annotation.timeStartMs == null || annotation.timeEndMs == null) {
+    return null;
+  }
+
+  function handleLoadedMetadata() {
+    if (!mediaRef.current) return;
+    mediaRef.current.currentTime = startSeconds;
+  }
+
+  function handlePlay() {
+    if (!mediaRef.current) return;
+    if (mediaRef.current.currentTime < startSeconds || mediaRef.current.currentTime >= endSeconds) {
+      mediaRef.current.currentTime = startSeconds;
+    }
+  }
+
+  function handleTimeUpdate() {
+    if (!mediaRef.current) return;
+    if (mediaRef.current.currentTime >= endSeconds) {
+      mediaRef.current.pause();
+      mediaRef.current.currentTime = startSeconds;
+    }
+  }
+
+  return (
+    <div className="annotation-excerpt annotation-excerpt--clip" onClick={(event) => event.stopPropagation()}>
+      <div className="annotation-excerpt-label">{clipLabel}</div>
+      {mediaKind === "video" ? (
+        <video
+          ref={mediaRef as RefObject<HTMLVideoElement>}
+          controls
+          preload="metadata"
+          onClick={(event) => event.stopPropagation()}
+          onLoadedMetadata={handleLoadedMetadata}
+          onPlay={handlePlay}
+          onTimeUpdate={handleTimeUpdate}
+          className="annotation-excerpt-media annotation-excerpt-media--video"
+        >
+          <source src={previewUrl} type={mediaType ?? undefined} />
+        </video>
+      ) : (
+        <audio
+          ref={mediaRef as RefObject<HTMLAudioElement>}
+          controls
+          preload="metadata"
+          onClick={(event) => event.stopPropagation()}
+          onLoadedMetadata={handleLoadedMetadata}
+          onPlay={handlePlay}
+          onTimeUpdate={handleTimeUpdate}
+          className="annotation-excerpt-media"
+        >
+          <source src={previewUrl} type={mediaType ?? undefined} />
+        </audio>
+      )}
+    </div>
+  );
 }
 
 export function PostgresSourceMediaCodingView({
@@ -1102,6 +1178,14 @@ export function PostgresSourceMediaCodingView({
             annotations={mediaAnnotations}
             selectedAnnotationId={selectedAnnotationId}
             codesById={codesById}
+            renderAnnotationExcerpt={(annotation) => (
+              <AnnotationClipPlayer
+                annotation={annotation}
+                mediaKind={mediaKind}
+                previewUrl={previewUrl}
+                mediaType={mediaTypeFromFileExtension(fileExt)}
+              />
+            )}
             onSelectAnnotation={(annotationId) => {
               setPendingSelection(null);
               setPendingClipCodeIds([]);

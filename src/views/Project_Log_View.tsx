@@ -241,6 +241,10 @@ function formatDetailKey(key: string, t: ReturnType<typeof useI18n>["t"]): strin
     targetKind: "projectLog.fieldLabels.targetKind",
     attributeName: "projectLog.fieldLabels.attributeName",
     codeId: "projectLog.fieldLabels.codeId",
+    annotationId: "projectLog.fieldLabels.annotationId",
+    sourceId: "projectLog.fieldLabels.sourceId",
+    sourceKind: "projectLog.fieldLabels.sourceKind",
+    anchorKind: "projectLog.fieldLabels.anchorKind",
     changedFields: "projectLog.fieldLabels.changedFields",
     changedValueCount: "projectLog.fieldLabels.changedValueCount",
     caseCount: "projectLog.fieldLabels.caseCount",
@@ -259,6 +263,14 @@ function formatDetailKey(key: string, t: ReturnType<typeof useI18n>["t"]): strin
     presence: "projectLog.fieldLabels.presence",
     dataType: "projectLog.fieldLabels.dataType",
     occurredAt: "projectLog.fieldLabels.occurredAt",
+    startOffset: "projectLog.fieldLabels.startOffset",
+    endOffset: "projectLog.fieldLabels.endOffset",
+    timeStartMs: "projectLog.fieldLabels.timeStartMs",
+    timeEndMs: "projectLog.fieldLabels.timeEndMs",
+    imageRegion: "projectLog.fieldLabels.imageRegion",
+    extractedFromVideoSourceId: "projectLog.fieldLabels.extractedFromVideoSourceId",
+    extractedFromVideoTimeMs: "projectLog.fieldLabels.extractedFromVideoTimeMs",
+    createdFromVideoFrame: "projectLog.fieldLabels.createdFromVideoFrame",
   };
   const labelKey = fieldLabelMap[key];
   if (labelKey) return t(labelKey);
@@ -269,6 +281,36 @@ function formatDetailKey(key: string, t: ReturnType<typeof useI18n>["t"]): strin
 
 function isIsoDateTimeString(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+}
+
+function formatMediaMilliseconds(value: number): string {
+  const totalMs = Math.max(0, Math.round(value));
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const ms = totalMs % 1000;
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const base = hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return ms > 0 ? `${base}.${String(ms).padStart(3, "0")}` : base;
+}
+
+function formatImageRegionSummary(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const region = value as Record<string, unknown>;
+  const x = Number(region.x);
+  const y = Number(region.y);
+  const width = Number(region.width);
+  const height = Number(region.height);
+  const imageWidth = Number(region.imageWidth);
+  const imageHeight = Number(region.imageHeight);
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  const bounds = `${Math.round(width)} x ${Math.round(height)} at ${Math.round(x)}, ${Math.round(y)}`;
+  return Number.isFinite(imageWidth) && Number.isFinite(imageHeight)
+    ? `${bounds} of ${Math.round(imageWidth)} x ${Math.round(imageHeight)}`
+    : bounds;
 }
 
 function formatDetailValue(
@@ -284,6 +326,9 @@ function formatDetailValue(
     if (value === "inactive") return { text: t("projectLog.values.presenceInactive"), multiline: false };
     if (value === "active") return { text: t("projectLog.values.presenceActive"), multiline: false };
     if (value === "datetime") return { text: t("projectLog.values.dataTypeDatetime"), multiline: false };
+    if (value === "time_range") return { text: t("projectLog.values.anchorKindTimeRange"), multiline: false };
+    if (value === "image_rect") return { text: t("projectLog.values.anchorKindImageRect"), multiline: false };
+    if (value === "text_span") return { text: t("projectLog.values.anchorKindTextSpan"), multiline: false };
     return { text: value, multiline: value.includes("\n") };
   }
   if (typeof value === "number" || typeof value === "boolean") return { text: String(value), multiline: false };
@@ -298,6 +343,8 @@ function formatDetailValue(
       multiline: value.length > 4,
     };
   }
+  const imageRegionSummary = formatImageRegionSummary(value);
+  if (imageRegionSummary) return { text: imageRegionSummary, multiline: false };
   return { text: JSON.stringify(value, null, 2), multiline: true };
 }
 
@@ -330,6 +377,43 @@ export function summarizeProjectLogDetails(action: string, details: ProjectLogDe
 
   if (typeof details.codeId === "string" && details.codeId) {
     push(t("projectLog.details.codeId", { id: details.codeId }));
+  }
+
+  if (typeof details.sourceKind === "string" && details.sourceKind) {
+    push(t("projectLog.details.sourceKind", { kind: details.sourceKind }));
+  }
+
+  if (typeof details.anchorKind === "string" && details.anchorKind) {
+    push(t("projectLog.details.anchorKind", { kind: formatDetailValue(details.anchorKind, t).text }));
+  }
+
+  if (typeof details.timeStartMs === "number" && typeof details.timeEndMs === "number") {
+    push(t("projectLog.details.mediaTimeRange", {
+      start: formatMediaMilliseconds(details.timeStartMs),
+      end: formatMediaMilliseconds(details.timeEndMs),
+    }));
+  }
+
+  if (typeof details.startOffset === "number" && typeof details.endOffset === "number") {
+    push(t("projectLog.details.textRange", {
+      start: details.startOffset,
+      end: details.endOffset,
+    }));
+  }
+
+  const imageRegionSummary = formatImageRegionSummary(details.imageRegion);
+  if (imageRegionSummary) {
+    push(t("projectLog.details.imageRegion", { region: imageRegionSummary }));
+  }
+
+  if (details.createdFromVideoFrame === true) {
+    push(t("projectLog.details.createdFromVideoFrame"));
+  }
+
+  if (typeof details.extractedFromVideoTimeMs === "number") {
+    push(t("projectLog.details.extractedFromVideoTime", {
+      time: formatMediaMilliseconds(details.extractedFromVideoTimeMs),
+    }));
   }
 
   if (Array.isArray(details.changedFields) && details.changedFields.length > 0) {

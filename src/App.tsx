@@ -1,27 +1,21 @@
 import {
-  type ComponentType,
   lazy,
   Suspense,
   useEffect,
-  useRef,
   useState,
 } from "react";
-import { AuthProvider, useAuth } from "./context/AuthContext";
-import { StoreProvider, useStore } from "./context/StoreContext";
+import { AuthProvider } from "./context/AuthContext";
 import { I18nProvider } from "./i18n";
 import { useI18n } from "./i18n/provider";
 import { readAppSettings, saveAppSettings } from "./lib/appSettings";
-import { getAppRuntimeInfo } from "./lib/dataRoot";
 import {
   bootstrapPostgresExperiment,
   clearPostgresExperimentRememberedAccounts,
   clearPostgresExperimentUserProjectState,
   getPostgresExperimentAuthStatus,
-  getPostgresExperimentDeviceState,
   getPostgresExperimentInstallationSettings,
   logoutPostgresExperimentAppUser,
   getPostgresExperimentStatus,
-  savePostgresExperimentDeviceState,
   getPostgresExperimentUserPreferences,
   type PostgresExperimentAuthSession,
   type PostgresExperimentAuthStatus,
@@ -30,29 +24,13 @@ import {
   type PostgresExperimentStatus,
   type PostgresExperimentUserPreferences,
 } from "./lib/postgresExperiment";
-import { getSmokeTestConfig, updateSmokeTestState } from "./lib/smokeTest";
 import { initTheme, setRuntimeThemePreferences } from "./theme";
-import { Sidebar } from "./components/Sidebar";
-import { AuthView } from "./views/Auth_View";
-import { useAutomaticProjectBackups } from "./hooks/useAutomaticProjectBackups";
+import sidebarMarkLogo from "./assets/logo-mark-no-background.png";
 import sidebarLogo from "./assets/logo-no-background.png";
 import {
   AppErrorBoundaryWithI18n,
-  compareSemver,
-  DocumentProcessingBanner,
-  EmbeddingModelDownloadBanner,
-  fetchLatestRelease,
-  ForcePasswordChangeView,
-  ProjectBackupBanner,
-  ProjectEmbeddingBuildBanner,
-  type ReleaseCheckResult,
-  UpdateAvailableBanner,
 } from "./views/App_Shell_Helpers";
 import "./App.css";
-
-function lazyView<T extends ComponentType<unknown>>(loader: () => Promise<{ default: T }>) {
-  return lazy(loader);
-}
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -108,11 +86,6 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresExperimentUse
   initTheme();
 }
 
-const ProjectsViewLazy = lazyView(() => import("./views/Projects_View").then((m) => ({ default: m.ProjectsView })));
-const HomeViewLazy = lazyView(() => import("./views/Project_Home_View").then((m) => ({ default: m.HomeView })));
-const UsersViewLazy = lazyView(() => import("./views/Project_Users_View").then((m) => ({ default: m.UsersView })));
-const CasesViewLazy = lazyView(() => import("./views/Project_Cases_View").then((m) => ({ default: m.CasesView })));
-const DocumentsViewLazy = lazyView(() => import("./views/Project_Documents_View").then((m) => ({ default: m.DocumentsView })));
 const PostgresProjectsExperimentViewLazy = lazy(
   () => import("./views/Postgres_Projects_Experiment_View").then((m) => ({ default: m.PostgresProjectsExperimentView })),
 );
@@ -128,62 +101,6 @@ const PostgresExperimentAuthViewLazy = lazy(
 const PostgresProjectHomeExperimentViewLazy = lazy(
   () => import("./views/Postgres_Project_Home_Experiment_View").then((m) => ({ default: m.PostgresProjectHomeExperimentView })),
 );
-const CodebookViewLazy = lazy(
-  () => import("./views/Project_Codebook_View").then((m) => ({
-    default: m.CodebookView as ComponentType<import("./views/Project_Codebook_View").CodebookViewProps>,
-  })),
-);
-const AnnotationsViewLazy = lazy(
-  () => import("./views/Project_Annotations_View").then((m) => ({
-    default: m.AnnotationsView as ComponentType<import("./views/Project_Annotations_View").AnnotationsViewProps>,
-  })),
-);
-const ProjectSettingsViewLazy = lazyView(() => import("./views/Project_Settings_View").then((m) => ({ default: m.ProjectSettingsView })));
-const CodeTextViewLazy = lazyView(() => import("./views/Analysis_Code_View").then((m) => ({ default: m.CodeTextView })));
-const MemosViewLazy = lazyView(() => import("./views/Analysis_Memos_View").then((m) => ({ default: m.MemosView })));
-const AIAssistViewLazy = lazyView(() => import("./views/AIAssist_Home_View").then((m) => ({ default: m.AIAssistView })));
-const AIAssistChatViewLazy = lazyView(() => import("./views/AIAssist_Chat_View").then((m) => ({ default: m.AIAssistChatView })));
-const AIAssistProcessDocumentsViewLazy = lazyView(() => import("./views/AIAssist_ProcessDocuments_View").then((m) => ({ default: m.AIAssistProcessDocumentsView })));
-const AIAssistProcessDocumentsReviewViewLazy = lazyView(() => import("./views/AIAssist_ProcessDocuments_Review_View").then((m) => ({ default: m.AIAssistProcessDocumentsReviewView })));
-const AIAssistedCodingViewLazy = lazyView(() => import("./views/AIAssist_Code_View").then((m) => ({ default: m.AIAssistedCodingView })));
-const AIAssistAttributeCaseViewLazy = lazyView(() => import("./views/AIAssist_Attributes_View").then((m) => ({ default: m.AIAssistAttributeCaseView })));
-const AIAssistAttributeDocumentViewLazy = lazyView(() => import("./views/AIAssist_Attributes_View").then((m) => ({ default: m.AIAssistAttributeDocumentView })));
-const AIAnalyzeViewLazy = lazyView(() => import("./views/AIAssist_Analyze_View").then((m) => ({ default: m.AIAnalyzeView })));
-const CodeReportsViewLazy = lazyView(() => import("./views/Reports_Annotations_View").then((m) => ({ default: m.CodeReportsView })));
-const CodesViewLazy = lazyView(() => import("./views/Reports_Codes_View").then((m) => ({ default: m.CodesView })));
-const ReportsUsersViewLazy = lazyView(() => import("./views/Reports_Users_View").then((m) => ({ default: m.ReportsUsersView })));
-const ProjectLogViewLazy = lazyView(() => import("./views/Project_Log_View").then((m) => ({ default: m.ProjectLogView })));
-const UserSettingsViewLazy = lazyView(() => import("./views/User_Settings_View").then((m) => ({ default: m.UserSettingsView })));
-const AppSettingsViewLazy = lazyView(() => import("./views/App_Settings_View").then((m) => ({ default: m.AppSettingsView })));
-
-const VIEW_COMPONENTS = {
-  projects: ProjectsViewLazy,
-  home: HomeViewLazy,
-  users: UsersViewLazy,
-  cases: CasesViewLazy,
-  documents: DocumentsViewLazy,
-  codebook: CodebookViewLazy,
-  annotations: AnnotationsViewLazy,
-  "project-log": ProjectLogViewLazy,
-  "project-settings": ProjectSettingsViewLazy,
-  "code-text": CodeTextViewLazy,
-  memos: MemosViewLazy,
-  "ai-assist": AIAssistViewLazy,
-  "ai-assist-chat": AIAssistChatViewLazy,
-  "ai-assist-process-documents": AIAssistProcessDocumentsViewLazy,
-  "ai-assist-process-documents-review": AIAssistProcessDocumentsReviewViewLazy,
-  "ai-assisted-coding": AIAssistedCodingViewLazy,
-  "ai-assist-case-attributes": AIAssistAttributeCaseViewLazy,
-  "ai-assist-document-attributes": AIAssistAttributeDocumentViewLazy,
-  "ai-analyze": AIAnalyzeViewLazy,
-  "code-reports": CodeReportsViewLazy,
-  coders: ReportsUsersViewLazy,
-  codes: CodesViewLazy,
-  "user-settings": UserSettingsViewLazy,
-  "app-settings": AppSettingsViewLazy,
-} as const;
-
-const ENABLE_LEGACY_POCKETBASE_FALLBACK = false;
 
 function PostgresExperimentSidebar({
   activeScreen,
@@ -234,15 +151,16 @@ function PostgresExperimentSidebar({
   onBackToGate: () => void;
   onSignOut: () => Promise<void>;
 }) {
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const projectItems = [
     { id: "home", label: "Home", disabled: !activeProject, onClick: onShowProjectHome },
     { id: "users", label: "Users", disabled: !activeProject, onClick: onShowProjectUsers },
     { id: "sources", label: "Sources", disabled: !activeProject, onClick: onShowProjectSources },
-    { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
-    { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
-    { id: "project-log", label: "Log", disabled: !activeProject, onClick: onShowProjectLog },
     { id: "objects", label: "Objects", disabled: !activeProject, onClick: onShowProjectObjects },
     { id: "relationships", label: "Relationships", disabled: !activeProject, onClick: onShowProjectRelationships },
+    { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
+    { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
+    { id: "project-log", label: "Log", disabled: !activeProject, onClick: onShowProjectLog },
   ];
   const canvasItems = [
     { id: "free-draw", label: "Free Draw", disabled: !activeProject, onClick: onShowFreeDraw },
@@ -264,9 +182,17 @@ function PostgresExperimentSidebar({
   ];
 
   return (
-    <aside className="sidebar">
+    <aside
+      className={`sidebar ${sidebarExpanded ? "sidebar--expanded" : ""}`}
+      onMouseEnter={() => setSidebarExpanded(true)}
+      onMouseLeave={() => setSidebarExpanded(false)}
+    >
       <div className="sidebar-brand">
         <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
+        <div className="brand-collapsed-lockup" aria-hidden="true">
+          <img src={sidebarMarkLogo} alt="" className="brand-collapsed-logo" />
+          <span className="brand-collapsed-title">Kanqual</span>
+        </div>
       </div>
 
       {activeProject ? (
@@ -392,333 +318,43 @@ function ViewLoadingFallback() {
   );
 }
 
-function SmokeTestAuthRunner() {
-  const { status, user, pb, useLocalServer, register } = useAuth();
-  const runStartedRef = useRef(false);
-  const unmountedRef = useRef(false);
-  const pbRef = useRef(pb);
-
-  useEffect(() => {
-    pbRef.current = pb;
-  }, [pb]);
-
-  useEffect(() => {
-    return () => {
-      unmountedRef.current = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    async function runSmokeAuthFlow() {
-      const config = await getSmokeTestConfig();
-      if (!config.enabled || runStartedRef.current || status === "loading" || user) return;
-
-      const userName = config.userName?.trim();
-      const userEmail = config.userEmail?.trim().toLowerCase();
-      const userPassword = config.userPassword ?? "";
-      if (!userName || !userEmail || !userPassword) {
-        await updateSmokeTestState({
-          phase: "failed",
-          failure: "Smoke test is missing the temporary local account credentials.",
-          success: false,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-        runStartedRef.current = true;
-        return;
-      }
-
-      runStartedRef.current = true;
-
-      try {
-        await updateSmokeTestState({
-          phase: "starting-local-workspace",
-          message: "Launching the local PocketBase workspace.",
-          success: false,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-        await useLocalServer();
-        if (unmountedRef.current) {
-          await updateSmokeTestState({
-            phase: "runner-unmounted-after-local-start",
-            message: "Smoke auth runner unmounted after local startup completed.",
-            success: false,
-            userEmail,
-            appDataDir: config.appDataDir,
-            portableMode: config.portableMode,
-          });
-          return;
-        }
-
-        await updateSmokeTestState({
-          phase: "runner-after-local-start",
-          message: "Smoke auth runner resumed after useLocalServer completed.",
-          success: false,
-          userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-
-        let waitIterations = 0;
-        while (!pbRef.current && waitIterations < 40) {
-          waitIterations += 1;
-          await new Promise((resolve) => window.setTimeout(resolve, 100));
-        }
-        if (!pbRef.current) {
-          throw new Error("Local workspace client did not become ready after startup.");
-        }
-        await updateSmokeTestState({
-          phase: "runner-pb-ready-for-register",
-          message: `Local workspace client became available after ${waitIterations * 100} ms.`,
-          success: false,
-          userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-
-        await updateSmokeTestState({
-          phase: "registering-user",
-          message: `Creating the first local account for ${userEmail}.`,
-          success: false,
-          userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-        await updateSmokeTestState({
-          phase: "runner-before-register-call",
-          message: `Calling register() for ${userEmail}.`,
-          success: false,
-          userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-        await register(userName, userEmail, userPassword);
-        if (unmountedRef.current) {
-          return;
-        }
-        await updateSmokeTestState({
-          phase: "runner-register-complete",
-          message: `register() completed for ${userEmail}.`,
-          success: false,
-          userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-      } catch (error) {
-        if (unmountedRef.current) return;
-        await updateSmokeTestState({
-          phase: "failed",
-          failure: describeUnknownError(error) || "Smoke auth flow failed.",
-          success: false,
-          userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-      }
-    }
-
-    void runSmokeAuthFlow();
-  }, [pb, register, status, useLocalServer, user]);
-
-  return null;
-}
-
-function SmokeTestStoreRunner() {
-  const { projects, projectsLoading, activeProject, createProject, openProject } = useStore();
-  const runStartedRef = useRef(false);
-  const unmountedRef = useRef(false);
-
-  useEffect(() => {
-    return () => {
-      unmountedRef.current = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    async function runSmokeProjectFlow() {
-      const config = await getSmokeTestConfig();
-      if (!config.enabled || runStartedRef.current || projectsLoading) return;
-
-      const projectName = config.projectName?.trim();
-      if (!projectName) {
-        runStartedRef.current = true;
-        await updateSmokeTestState({
-          phase: "failed",
-          failure: "Smoke test is missing the test project name.",
-          success: false,
-          userEmail: config.userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-        return;
-      }
-
-      if (activeProject?.name === projectName) {
-        runStartedRef.current = true;
-        await updateSmokeTestState({
-          phase: "completed",
-          message: `Opened smoke test project "${projectName}".`,
-          success: true,
-          projectId: activeProject.id,
-          userEmail: config.userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-        return;
-      }
-
-      try {
-        runStartedRef.current = true;
-        await updateSmokeTestState({
-          phase: "creating-project",
-          message: `Creating smoke test project "${projectName}".`,
-          success: false,
-          userEmail: config.userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-
-        const existingProject = projects.find((project) => project.name.trim().toLowerCase() === projectName.toLowerCase());
-        const project = existingProject ?? await createProject(projectName, "Packaged runtime smoke test project.");
-        if (unmountedRef.current) return;
-
-        await openProject(project, activeProject);
-        if (unmountedRef.current) return;
-
-        await updateSmokeTestState({
-          phase: "completed",
-          message: `Created and opened smoke test project "${project.name}".`,
-          success: true,
-          projectId: project.id,
-          userEmail: config.userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-      } catch (error) {
-        if (unmountedRef.current) return;
-        await updateSmokeTestState({
-          phase: "failed",
-          failure: describeUnknownError(error) || "Smoke project flow failed.",
-          success: false,
-          userEmail: config.userEmail,
-          appDataDir: config.appDataDir,
-          portableMode: config.portableMode,
-        });
-      }
-    }
-
-    void runSmokeProjectFlow();
-  }, [activeProject, createProject, openProject, projects, projectsLoading]);
-
-  return null;
-}
-
-function AppShell() {
-  const { view } = useStore();
-  const ActiveView = VIEW_COMPONENTS[view as keyof typeof VIEW_COMPONENTS];
-  const [availableUpdate, setAvailableUpdate] = useState<ReleaseCheckResult | null>(null);
-
-  useEffect(() => { initTheme(); }, []);
-  useAutomaticProjectBackups();
-
-  useEffect(() => {
-    function allowNativeContextMenu(target: EventTarget | null): boolean {
-      if (!(target instanceof Element)) return false;
-
-      const editableAncestor = target.closest(
-        [
-          "input",
-          "textarea",
-          "select",
-          "[contenteditable=\"true\"]",
-          "[contenteditable=\"\"]",
-          "[role=\"textbox\"]",
-        ].join(","),
-      );
-
-      if (!editableAncestor) return false;
-      if (editableAncestor instanceof HTMLInputElement) {
-        return !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(
-          editableAncestor.type,
-        );
-      }
-
-      return true;
-    }
-
-    function handleContextMenu(event: MouseEvent) {
-      if (allowNativeContextMenu(event.target)) return;
-      event.preventDefault();
-    }
-
-    window.addEventListener("contextmenu", handleContextMenu);
-    return () => {
-      window.removeEventListener("contextmenu", handleContextMenu);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function checkForAppUpdates() {
-      try {
-        const [installationSettings, deviceState] = await Promise.all([
-          getPostgresExperimentInstallationSettings(),
-          getPostgresExperimentDeviceState(),
-        ]);
-        if (!installationSettings.updatesAutoCheck) return;
-        const runtimeInfo = await getAppRuntimeInfo();
-        const update = await fetchLatestRelease();
-        if (!update) return;
-        if (compareSemver(update.latestVersion, runtimeInfo.appVersion) <= 0) return;
-        const dismissedVersion = deviceState.dismissedUpdateVersion;
-        if (dismissedVersion === update.latestVersion) return;
-        if (!cancelled) setAvailableUpdate(update);
-      } catch (error) {
-        console.warn("Update check failed:", describeUnknownError(error));
-      }
-    }
-
-    void checkForAppUpdates();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function dismissAvailableUpdate() {
-    if (availableUpdate) {
-      try {
-        await savePostgresExperimentDeviceState({
-          dismissedUpdateVersion: availableUpdate.latestVersion,
-        });
-      } catch (error) {
-        console.warn("Could not persist dismissed update version:", describeUnknownError(error));
-      }
-    }
-    setAvailableUpdate(null);
-  }
+function ProjectHomeLoadingShell(props: {
+  project: PostgresExperimentProject;
+  authSession: PostgresExperimentAuthSession;
+  onBack: () => void;
+  onSignOut: () => Promise<void>;
+}) {
+  const { project, authSession, onBack, onSignOut } = props;
 
   return (
     <div className="app-shell">
-      <Sidebar />
+      <PostgresExperimentSidebar
+        activeScreen="home"
+        activeProject={project}
+        authSession={authSession}
+        onShowProjects={onBack}
+        onShowProjectHome={() => undefined}
+        onShowProjectUsers={() => undefined}
+        onShowProjectSources={() => undefined}
+        onShowProjectAnnotations={() => undefined}
+        onShowProjectCodebook={() => undefined}
+        onShowProjectCodeText={() => undefined}
+        onShowProjectMemos={() => undefined}
+        onShowProjectLog={() => undefined}
+        onShowProjectObjects={() => undefined}
+        onShowProjectRelationships={() => undefined}
+        onShowFreeDraw={() => undefined}
+        onShowExplore={() => undefined}
+        onShowConstruct={() => undefined}
+        onShowCanvasView={() => undefined}
+        onShowAppSettings={() => undefined}
+        onShowProjectSettings={() => undefined}
+        onShowUserSettings={() => undefined}
+        onBackToGate={onBack}
+        onSignOut={onSignOut}
+      />
       <main className="app-main">
-        {availableUpdate && (
-          <UpdateAvailableBanner
-            version={availableUpdate.latestVersion}
-            releaseUrl={availableUpdate.releaseUrl}
-            onDismiss={dismissAvailableUpdate}
-          />
-        )}
-        <ProjectBackupBanner />
-        <ProjectEmbeddingBuildBanner />
-        <DocumentProcessingBanner />
-        <EmbeddingModelDownloadBanner />
-        {ActiveView && (
-          <Suspense fallback={<ViewLoadingFallback />}>
-            <ActiveView />
-          </Suspense>
-        )}
+        <ViewLoadingFallback />
       </main>
     </div>
   );
@@ -913,7 +549,16 @@ function AuthGate() {
             />
           )}
           renderProjectHome={(openedProject, helpers) => (
-            <Suspense fallback={<ViewLoadingFallback />}>
+            <Suspense
+              fallback={(
+                <ProjectHomeLoadingShell
+                  project={openedProject}
+                  authSession={postgresAuthStatus.currentSession!}
+                  onBack={helpers.onBack}
+                  onSignOut={signOutPostgresSession}
+                />
+              )}
+            >
               <PostgresProjectHomeExperimentViewLazy
                 project={openedProject}
                 authSession={postgresAuthStatus.currentSession!}
@@ -974,10 +619,6 @@ function AuthGate() {
     );
   }
 
-  if (ENABLE_LEGACY_POCKETBASE_FALLBACK) {
-    return <LegacyPocketBaseWorkspace />;
-  }
-
   return (
     <Suspense fallback={<ViewLoadingFallback />}>
       <PostgresExperimentLaunchViewLazy
@@ -992,30 +633,6 @@ function AuthGate() {
         }}
       />
     </Suspense>
-  );
-}
-
-function LegacyPocketBaseWorkspace() {
-  const { status, pb, user } = useAuth();
-
-  if (status !== "authenticated" || !pb) {
-    return (
-      <>
-        <SmokeTestAuthRunner />
-        <AuthView />
-      </>
-    );
-  }
-
-  if (user?.must_change_password) {
-    return <ForcePasswordChangeView />;
-  }
-
-  return (
-    <StoreProvider pb={pb}>
-      <SmokeTestStoreRunner />
-      <AppShell />
-    </StoreProvider>
   );
 }
 

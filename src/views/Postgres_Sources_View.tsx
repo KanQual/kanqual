@@ -1,7 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import circleFilledShapeSvg from "../assets/object-shapes/circle-filled.svg?raw";
+import circleOutlineShapeSvg from "../assets/object-shapes/circle-outline.svg?raw";
+import rectangleFilledShapeSvg from "../assets/object-shapes/rectangle-filled.svg?raw";
+import rectangleOutlineShapeSvg from "../assets/object-shapes/rectangle-outline.svg?raw";
+import triangleFilledShapeSvg from "../assets/object-shapes/triangle-filled.svg?raw";
+import triangleOutlineShapeSvg from "../assets/object-shapes/triangle-outline.svg?raw";
+import diamondFilledShapeSvg from "../assets/object-shapes/diamond-filled.svg?raw";
+import diamondOutlineShapeSvg from "../assets/object-shapes/diamond-outline.svg?raw";
+import hexagonFilledShapeSvg from "../assets/object-shapes/hexagon-filled.svg?raw";
+import hexagonOutlineShapeSvg from "../assets/object-shapes/hexagon-outline.svg?raw";
+import octagonFilledShapeSvg from "../assets/object-shapes/octagon-filled.svg?raw";
+import octagonOutlineShapeSvg from "../assets/object-shapes/octagon-outline.svg?raw";
+import parallelogramFilledShapeSvg from "../assets/object-shapes/parallelogram-filled.svg?raw";
+import parallelogramOutlineShapeSvg from "../assets/object-shapes/parallelogram-outline.svg?raw";
+import trapezoidFilledShapeSvg from "../assets/object-shapes/trapezoid-filled.svg?raw";
+import trapezoidOutlineShapeSvg from "../assets/object-shapes/trapezoid-outline.svg?raw";
+import tagFilledShapeSvg from "../assets/object-shapes/tag-filled.svg?raw";
+import tagOutlineShapeSvg from "../assets/object-shapes/tag-outline.svg?raw";
+import starFilledShapeSvg from "../assets/object-shapes/star-filled.svg?raw";
+import starOutlineShapeSvg from "../assets/object-shapes/star-outline.svg?raw";
+import sourceTextOutlineShapeSvg from "../assets/object-shapes/source-text-outline.svg?raw";
+import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline.svg?raw";
+import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
+import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
+import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
 import {
   AttributeValuesModal as SharedAttributeValuesModal,
   type SharedAttributeDataType,
@@ -59,6 +84,19 @@ type SourceKindSortCol = "label" | "count";
 type AttributeSortCol = "name" | string;
 type AttributeSortDir = "asc" | "desc";
 type SourceUploadTab = "text" | "pdf" | "image" | "audio" | "video";
+type SourceObjectTypeShape =
+  | "rounded"
+  | "rectangle"
+  | "triangle"
+  | "diamond"
+  | "hexagon"
+  | "octagon"
+  | "parallelogram"
+  | "trapezoid"
+  | "tag"
+  | "star";
+type SourceObjectFill = "filled" | "outline";
+type SourceObjectVisualKey = "source_text" | "source_pdf" | "source_image" | "source_audio" | "source_video";
 
 type SourceUploadDraft = {
   id: string;
@@ -106,6 +144,7 @@ export type SourceAnnotationRow = {
     height: number;
     imageWidth: number;
     imageHeight: number;
+    pageNumber?: number | null;
   } | null;
   startOffset: number | null;
   endOffset: number | null;
@@ -127,6 +166,7 @@ export type PendingSelection = {
     height: number;
     imageWidth: number;
     imageHeight: number;
+    pageNumber?: number | null;
   } | null;
   displayLabel?: string;
 };
@@ -206,6 +246,133 @@ const POSTGRES_SOURCE_KIND_OPTIONS = [
   { value: "audio", label: "Audio" },
   { value: "video", label: "Video" },
 ] as const;
+const SOURCE_OBJECT_TYPE_DEFAULT_COLOR = "#355070";
+
+function buildSvgDataUrl(svgMarkup: string): string {
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}`;
+}
+
+const SOURCE_OBJECT_SHAPE_ASSET_URLS: Record<SourceObjectTypeShape, { filled: string; outline: string }> = {
+  rounded: { filled: buildSvgDataUrl(circleFilledShapeSvg), outline: buildSvgDataUrl(circleOutlineShapeSvg) },
+  rectangle: { filled: buildSvgDataUrl(rectangleFilledShapeSvg), outline: buildSvgDataUrl(rectangleOutlineShapeSvg) },
+  triangle: { filled: buildSvgDataUrl(triangleFilledShapeSvg), outline: buildSvgDataUrl(triangleOutlineShapeSvg) },
+  diamond: { filled: buildSvgDataUrl(diamondFilledShapeSvg), outline: buildSvgDataUrl(diamondOutlineShapeSvg) },
+  hexagon: { filled: buildSvgDataUrl(hexagonFilledShapeSvg), outline: buildSvgDataUrl(hexagonOutlineShapeSvg) },
+  octagon: { filled: buildSvgDataUrl(octagonFilledShapeSvg), outline: buildSvgDataUrl(octagonOutlineShapeSvg) },
+  parallelogram: { filled: buildSvgDataUrl(parallelogramFilledShapeSvg), outline: buildSvgDataUrl(parallelogramOutlineShapeSvg) },
+  trapezoid: { filled: buildSvgDataUrl(trapezoidFilledShapeSvg), outline: buildSvgDataUrl(trapezoidOutlineShapeSvg) },
+  tag: { filled: buildSvgDataUrl(tagFilledShapeSvg), outline: buildSvgDataUrl(tagOutlineShapeSvg) },
+  star: { filled: buildSvgDataUrl(starFilledShapeSvg), outline: buildSvgDataUrl(starOutlineShapeSvg) },
+};
+const SOURCE_OBJECT_VISUAL_ASSET_URLS: Record<SourceObjectVisualKey, string> = {
+  source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
+  source_pdf: buildSvgDataUrl(sourcePdfOutlineShapeSvg),
+  source_image: buildSvgDataUrl(sourceImageOutlineShapeSvg),
+  source_audio: buildSvgDataUrl(sourceAudioOutlineShapeSvg),
+  source_video: buildSvgDataUrl(sourceVideoOutlineShapeSvg),
+};
+
+function normalizeSourceObjectTypeShape(value: string): SourceObjectTypeShape {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "pill" || normalized === "circle") return "rounded";
+  if (
+    normalized === "rectangle"
+    || normalized === "triangle"
+    || normalized === "diamond"
+    || normalized === "hexagon"
+    || normalized === "octagon"
+    || normalized === "parallelogram"
+    || normalized === "trapezoid"
+    || normalized === "tag"
+    || normalized === "star"
+  ) {
+    return normalized;
+  }
+  return "rounded";
+}
+
+function normalizeSourceObjectFill(value: string): SourceObjectFill {
+  return value.trim().toLowerCase() === "outline" ? "outline" : "filled";
+}
+
+function normalizeSourceObjectColor(value: string): string {
+  const normalized = value.trim();
+  return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : SOURCE_OBJECT_TYPE_DEFAULT_COLOR;
+}
+
+function getSourceObjectVisualKey(systemKey: string | null | undefined): SourceObjectVisualKey | null {
+  if (
+    systemKey === "source_text"
+    || systemKey === "source_pdf"
+    || systemKey === "source_image"
+    || systemKey === "source_audio"
+    || systemKey === "source_video"
+  ) {
+    return systemKey;
+  }
+  return null;
+}
+
+function getSourceObjectMaskStyle(url: string): CSSProperties {
+  return {
+    WebkitMaskImage: `url("${url}")`,
+    maskImage: `url("${url}")`,
+    WebkitMaskSize: "contain",
+    maskSize: "contain",
+    WebkitMaskRepeat: "no-repeat",
+    maskRepeat: "no-repeat",
+    WebkitMaskPosition: "center",
+    maskPosition: "center",
+  };
+}
+
+function SourceObjectTypeSwatch(props: {
+  shape: SourceObjectTypeShape;
+  fill: SourceObjectFill;
+  color: string;
+  sourceVisualKey: SourceObjectVisualKey | null;
+}) {
+  const { shape, fill, color, sourceVisualKey } = props;
+  const sourceOutlineAsset = sourceVisualKey ? SOURCE_OBJECT_VISUAL_ASSET_URLS[sourceVisualKey] : null;
+  const shapeAssets = sourceVisualKey ? null : SOURCE_OBJECT_SHAPE_ASSET_URLS[shape];
+  const edgeColor = color;
+  const background = fill === "outline" ? "transparent" : `${color}2e`;
+
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        position: "relative",
+        display: "inline-flex",
+        width: 24,
+        height: 18,
+        overflow: "hidden",
+        flexShrink: 0,
+        verticalAlign: "middle",
+        lineHeight: 0,
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "block",
+          background: sourceOutlineAsset ? "transparent" : background,
+          ...(sourceOutlineAsset ? {} : getSourceObjectMaskStyle(shapeAssets!.filled)),
+        }}
+      />
+      <span
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "block",
+          background: edgeColor,
+          ...getSourceObjectMaskStyle(sourceOutlineAsset ?? shapeAssets!.outline),
+        }}
+      />
+    </span>
+  );
+}
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
@@ -518,6 +685,14 @@ async function readDroppedFile(path: string): Promise<File> {
 
 function valueKey(sourceId: string, attributeDefinitionId: string): string {
   return `${sourceId}:${attributeDefinitionId}`;
+}
+
+function sourceTypeRowLabel(label: string): string {
+  const cleaned = label
+    .replace(/\bsources?\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return cleaned || label;
 }
 
 function describeSourceLock(
@@ -2305,7 +2480,15 @@ export function PostgresSourcesView({
   }, [canManageAnnotations, codingEnabled, projectId, selectedRow]);
 
   const sourceKindSummaries = useMemo(() => {
-    const summaryByKind = new Map<string, { label: string; meta: string; count: number }>();
+    const summaryByKind = new Map<string, {
+      label: string;
+      meta: string;
+      count: number;
+      shape: SourceObjectTypeShape;
+      color: string;
+      fill: SourceObjectFill;
+      systemKey: string | null;
+    }>();
     for (const objectType of objectTypes) {
       const systemKey = objectType.systemKey;
       if (!systemKey || !POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS.includes(systemKey as (typeof POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS)[number])) {
@@ -2315,6 +2498,10 @@ export function PostgresSourcesView({
         label: objectType.name,
         meta: systemKey,
         count: 0,
+        shape: normalizeSourceObjectTypeShape(objectType.shape),
+        color: normalizeSourceObjectColor(objectType.color),
+        fill: normalizeSourceObjectFill(objectType.fill),
+        systemKey,
       });
     }
     for (const row of rows) {
@@ -2327,6 +2514,10 @@ export function PostgresSourcesView({
           label: row.sourceObjectType || row.type || "Source",
           meta: row.sourceObjectTypeSystemKey || row.type || "source",
           count: 1,
+          shape: "rounded",
+          color: SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
+          fill: "filled",
+          systemKey: row.sourceObjectTypeSystemKey,
         });
       }
     }
@@ -2336,6 +2527,10 @@ export function PostgresSourcesView({
         label: summary.label,
         meta: summary.meta,
         count: summary.count,
+        shape: summary.shape,
+        color: summary.color,
+        fill: summary.fill,
+        systemKey: summary.systemKey,
       }))
       .sort((left, right) => {
         let comparison = 0;
@@ -2926,14 +3121,12 @@ export function PostgresSourcesView({
       ? activeSourceLock
       : sourceLockBySourceId.get(selectedRow.id) ?? null)
     : null;
-  const selectedSourceKindLabel = selectedSourceKindFilter === "all"
-    ? "Sources"
-    : sourceKindSummaries.find((summary) => summary.kind === selectedSourceKindFilter)?.label ?? selectedSourceKindFilter;
+  const pageTitle = showAttributesTable ? "Source Attributes" : codingEnabled ? "Code Sources" : "Sources";
 
   if (codingEnabled && selectedRow) {
     const normalizedSourceType = selectedRow.type.trim().toLowerCase();
     const selectedFileExt = selectedRow.filePath ? fileExtensionFromPath(selectedRow.filePath) : "";
-    const isImageCodingSource = SOURCE_IMPORT_IMAGE_EXTS.has(selectedFileExt) || normalizedSourceType === "image";
+    const isImageCodingSource = SOURCE_IMPORT_IMAGE_EXTS.has(selectedFileExt) || normalizedSourceType === "image" || normalizedSourceType === "pdf";
     const isAudioCodingSource = SOURCE_IMPORT_AUDIO_EXTS.has(selectedFileExt) || normalizedSourceType === "audio";
     const isVideoCodingSource = SOURCE_IMPORT_VIDEO_EXTS.has(selectedFileExt) || normalizedSourceType === "video";
 
@@ -3136,7 +3329,7 @@ export function PostgresSourcesView({
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>{selectedSourceKindLabel}</h1>
+          <h1>{pageTitle}</h1>
         </div>
         <div className="view-header-actions">
           <button
@@ -3174,11 +3367,12 @@ export function PostgresSourcesView({
       </p>
 
       <div
+        className="postgres-sources-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
           gap: 20,
-          alignItems: "start",
+          alignItems: "center",
           flex: 1,
           minHeight: 0,
         }}
@@ -3186,7 +3380,7 @@ export function PostgresSourcesView({
         <div
           className="home-primary-column"
           style={{
-            alignSelf: "start",
+            alignSelf: "center",
             justifyContent: "flex-start",
             gap: 16,
             minHeight: 0,
@@ -3274,8 +3468,7 @@ export function PostgresSourcesView({
                       }}
                     >
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span>All sources</span>
-                        <span className="postgres-users-meta">Across every source type</span>
+                        <span>All</span>
                       </div>
                     </td>
                     <td className="users-td users-td--muted">{rows.length}</td>
@@ -3304,8 +3497,16 @@ export function PostgresSourcesView({
                           }
                         }}
                       >
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <span>{summary.label}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, paddingLeft: 18 }}>
+                          <SourceObjectTypeSwatch
+                            shape={summary.shape}
+                            fill={summary.fill}
+                            color={summary.color}
+                            sourceVisualKey={getSourceObjectVisualKey(summary.systemKey)}
+                          />
+                          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {sourceTypeRowLabel(summary.label)}
+                          </span>
                         </div>
                       </td>
                       <td className="users-td users-td--muted">{summary.count}</td>
@@ -3326,7 +3527,7 @@ export function PostgresSourcesView({
           className="users-content"
           style={{
             alignItems: "stretch",
-            justifyContent: "flex-start",
+            justifyContent: "center",
             gap: 16,
             minHeight: 0,
             maxHeight: "100%",
@@ -3498,37 +3699,21 @@ export function PostgresSourcesView({
                 <thead>
                   <tr>
                     <th
-                      style={{ width: "26%" }}
+                      style={{ width: "42%" }}
                       className={`users-th${sortCol === "name" ? " users-th--sorted" : ""}`}
                       onClick={() => handleSort("name")}
                     >
                       {t("projectDocuments.columns.name")}
                       <span className="users-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
                     </th>
-                    <th style={{ width: "15%" }} className="users-th">
+                    <th style={{ width: "18%" }} className="users-th">
                       {t("projectDocuments.columns.type")}
                     </th>
-                    <th style={{ width: "13%" }} className="users-th">
+                    <th style={{ width: "16%" }} className="users-th">
                       Lock
                     </th>
                     <th
-                      style={{ width: "12%" }}
-                      className={`users-th${sortCol === "objects" ? " users-th--sorted" : ""}`}
-                      onClick={() => handleSort("objects")}
-                    >
-                      Objects
-                      <span className="users-sort-icon">{sortCol === "objects" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
-                    </th>
-                    <th
-                      style={{ width: "14%" }}
-                      className={`users-th${sortCol === "annotations" ? " users-th--sorted" : ""}`}
-                      onClick={() => handleSort("annotations")}
-                    >
-                      {t("sidebar.items.annotations")}
-                      <span className="users-sort-icon">{sortCol === "annotations" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
-                    </th>
-                    <th
-                      style={{ width: "20%" }}
+                      style={{ width: "24%" }}
                       className={`users-th${sortCol === "createdAt" ? " users-th--sorted" : ""}`}
                       onClick={() => handleSort("createdAt")}
                     >
@@ -3539,10 +3724,10 @@ export function PostgresSourcesView({
                 </thead>
                 <tbody>
                   {loading && (
-                    <tr><td colSpan={6} className="users-td-msg">{t("projectDocuments.empty.loading")}</td></tr>
+                    <tr><td colSpan={4} className="users-td-msg">{t("projectDocuments.empty.loading")}</td></tr>
                   )}
                   {!loading && sorted.length === 0 && (
-                    <tr><td colSpan={6} className="users-td-msg">No matching sources yet.</td></tr>
+                    <tr><td colSpan={4} className="users-td-msg">No matching sources yet.</td></tr>
                   )}
                   {!loading && sorted.map((row) => {
                     const lock = sourceLockBySourceId.get(row.id) ?? null;
@@ -3562,12 +3747,6 @@ export function PostgresSourcesView({
                         <td className="users-td users-td--name">{row.name}</td>
                         <td className="users-td users-td--muted">{row.type || "source"}</td>
                         <td className="users-td users-td--muted">{lockStatus.label}</td>
-                        <td className="users-td users-td--muted users-td--count">
-                          {row.objectCount > 0 ? row.objectCount : <span className="cases-no-docs">—</span>}
-                        </td>
-                        <td className="users-td users-td--muted users-td--count">
-                          {row.annotationCount > 0 ? row.annotationCount : <span className="cases-no-docs">—</span>}
-                        </td>
                         <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
                       </tr>
                     );

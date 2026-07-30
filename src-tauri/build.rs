@@ -38,7 +38,9 @@ fn create_platform_sidecar_alias(target: &str) -> Result<(), String> {
         fs::copy(&source, &destination).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         {
-            let mut perms = fs::metadata(&destination).map_err(|e| e.to_string())?.permissions();
+            let mut perms = fs::metadata(&destination)
+                .map_err(|e| e.to_string())?
+                .permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&destination, perms).map_err(|e| e.to_string())?;
         }

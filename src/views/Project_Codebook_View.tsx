@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
+import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useOptionalStore, useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
@@ -15,7 +17,19 @@ import {
   updatePostgresExperimentCode,
 } from "../lib/postgresExperiment";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+let codebookPdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
+
+async function loadCodebookPdfJs() {
+  if (!codebookPdfJsPromise) {
+    codebookPdfJsPromise = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+      return module;
+    });
+  }
+  return codebookPdfJsPromise;
+}
+
+// Types
 
 interface CodeRow {
   id: string;
@@ -40,6 +54,19 @@ interface AnnotationRow {
   note: string;
   documentName: string;
   documentId: string;
+  sourceKind?: string;
+  sourcePath?: string;
+  imageRegion?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    imageWidth: number;
+    imageHeight: number;
+    pageNumber?: number | null;
+  } | null;
+  timeStartMs?: number | null;
+  timeEndMs?: number | null;
   createdByName: string;
   createdAt: string;
 }
@@ -47,21 +74,211 @@ interface AnnotationRow {
 type SortCol = "label" | "color" | "createdByName" | "createdAt" | "sourcesCount";
 type SortDir = "asc" | "desc";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 function fmtDate(iso: string): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try {
     return formatCurrentDateTime(iso, {
       year: "numeric", month: "short", day: "numeric",
       hour: "2-digit", minute: "2-digit",
     });
   } catch {
-    return "—";
+    return "-";
   }
 }
 
-// ─── Color utilities ──────────────────────────────────────────────────────────
+// Color utilities
+
+function isAbsoluteStoragePath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("/");
+}
+
+function resolveProjectStoragePath(projectStoragePath: string | undefined, sourceStoragePath: string | undefined): string {
+  const trimmedSourcePath = (sourceStoragePath ?? "").trim();
+  if (!trimmedSourcePath) return "";
+  if (isAbsoluteStoragePath(trimmedSourcePath)) return trimmedSourcePath;
+  const trimmedProjectPath = (projectStoragePath ?? "").trim().replace(/[\\/]+$/, "");
+  if (!trimmedProjectPath) return trimmedSourcePath;
+  const normalizedSourcePath = trimmedSourcePath.replace(/^([\\/])+/, "");
+  return `${trimmedProjectPath}\\${normalizedSourcePath.replace(/\//g, "\\")}`;
+}
+
+function fileExtensionFromPath(path: string): string {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function mediaTypeFromFileExtension(ext: string): string | null {
+  if (ext === "mp3") return "audio/mpeg";
+  if (ext === "wav") return "audio/wav";
+  if (ext === "m4a" || ext === "aac") return "audio/mp4";
+  if (ext === "ogg") return "audio/ogg";
+  if (ext === "flac") return "audio/flac";
+  if (ext === "mp4" || ext === "m4v") return "video/mp4";
+  if (ext === "webm") return "video/webm";
+  if (ext === "ogv") return "video/ogg";
+  if (ext === "mov") return "video/quicktime";
+  return null;
+}
+
+function CodebookAnnotationMediaPreview({
+  annotation,
+  projectStoragePath,
+}: {
+  annotation: AnnotationRow;
+  projectStoragePath?: string;
+}) {
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const resolvedPath = resolveProjectStoragePath(projectStoragePath, annotation.sourcePath);
+  const sourceKind = annotation.sourceKind ?? "";
+  const mediaType = mediaTypeFromFileExtension(fileExtensionFromPath(annotation.sourcePath ?? ""));
+  const region = annotation.imageRegion;
+  const startMs = annotation.timeStartMs ?? null;
+  const endMs = annotation.timeEndMs ?? null;
+
+  useEffect(() => {
+    if (!resolvedPath || !["audio", "video", "image", "pdf"].includes(sourceKind)) {
+      setMediaUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      setLoadError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoadError(null);
+
+    async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
+      if (sourceKind !== "pdf") {
+        return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
+      }
+      if (!region) throw new Error("No PDF region is available for this annotation.");
+      const pdfjsLib = await loadCodebookPdfJs();
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const safePage = Math.min(Math.max(region.pageNumber ?? 1, 1), pdf.numPages);
+      const page = await pdf.getPage(safePage);
+      const viewport = page.getViewport({ scale: 1.6 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvas, canvasContext: context, viewport }).promise;
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((nextBlob) => {
+          if (nextBlob) resolve(nextBlob);
+          else reject(new Error("Could not render the PDF page preview."));
+        }, "image/png");
+      });
+      return URL.createObjectURL(blob);
+    }
+
+    void readTauriFile(resolvedPath)
+      .then(async (bytes) => {
+        objectUrl = await buildPreviewUrl(bytes);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setMediaUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMediaUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return null;
+        });
+        setLoadError(error instanceof Error ? error.message : "Could not load annotation media.");
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [mediaType, region, resolvedPath, sourceKind]);
+
+  if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
+  if (loadError) return <p className="code-ann-media-error">{loadError}</p>;
+  if (!mediaUrl) return <p className="code-ann-media-loading">Loading media...</p>;
+
+  function handleLoadedMetadata() {
+    if (!mediaRef.current || startMs == null) return;
+    mediaRef.current.currentTime = Math.max(0, startMs / 1000);
+  }
+
+  function handleTimeUpdate() {
+    if (!mediaRef.current || endMs == null) return;
+    if (mediaRef.current.currentTime >= Math.max(0, endMs / 1000)) {
+      mediaRef.current.pause();
+    }
+  }
+
+  if (sourceKind === "audio") {
+    return (
+      <div className="code-ann-media" onClick={(event) => event.stopPropagation()}>
+        <audio
+          ref={(element) => { mediaRef.current = element; }}
+          controls
+          preload="metadata"
+          src={mediaUrl}
+          onLoadedMetadata={handleLoadedMetadata}
+          onTimeUpdate={handleTimeUpdate}
+        />
+      </div>
+    );
+  }
+
+  if (sourceKind === "video") {
+    return (
+      <div className="code-ann-media" onClick={(event) => event.stopPropagation()}>
+        <video
+          ref={(element) => { mediaRef.current = element; }}
+          className="code-ann-video"
+          controls
+          preload="metadata"
+          playsInline
+          src={mediaUrl}
+          onLoadedMetadata={handleLoadedMetadata}
+          onTimeUpdate={handleTimeUpdate}
+        />
+      </div>
+    );
+  }
+
+  if ((sourceKind === "image" || sourceKind === "pdf") && region) {
+    const safeRegionWidth = Math.max(region.width, 1);
+    const safeRegionHeight = Math.max(region.height, 1);
+    const safeImageWidth = Math.max(region.imageWidth, safeRegionWidth);
+    const safeImageHeight = Math.max(region.imageHeight, safeRegionHeight);
+    return (
+      <div className="code-ann-media" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="code-ann-image-crop"
+          style={{ aspectRatio: `${safeRegionWidth} / ${safeRegionHeight}` }}
+        >
+          <img
+            src={mediaUrl}
+            alt="Coded annotation region"
+            style={{
+              width: `${(safeImageWidth / safeRegionWidth) * 100}%`,
+              height: `${(safeImageHeight / safeRegionHeight) * 100}%`,
+              transform: `translate(-${(Math.max(region.x, 0) / safeImageWidth) * 100}%, -${(Math.max(region.y, 0) / safeImageHeight) * 100}%)`,
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
 
 function hexToHsl(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
@@ -144,7 +361,7 @@ function getChildSuggestions(parentColor: string, count = 8): string[] {
   ].slice(0, count);
 }
 
-// ─── Tree helpers ─────────────────────────────────────────────────────────────
+// Tree helpers
 
 function buildTree(rows: CodeRow[], sortCol: SortCol, sortDir: SortDir): CodeNode[] {
   const childrenOf: Record<string, CodeRow[]> = {};
@@ -205,16 +422,16 @@ function getVisibleNodes(tree: CodeNode[], collapsed: Set<string>): CodeNode[] {
   return result;
 }
 
-// ─── Column definitions ───────────────────────────────────────────────────────
+// Column definitions
 
 const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "label",         label: "Name",       width: "40%" },
-  { key: "createdByName", label: "Created By", width: "24%" },
-  { key: "createdAt",     label: "Created",    width: "24%" },
-  { key: "sourcesCount",  label: "Sources",    width: "12%" },
+  { key: "label",         label: "Name",       width: "22rem" },
+  { key: "createdByName", label: "Created By", width: "9rem" },
+  { key: "createdAt",     label: "Created",    width: "10rem" },
+  { key: "sourcesCount",  label: "Sources",    width: "5rem" },
 ];
 
-// ─── Color swatch ─────────────────────────────────────────────────────────────
+// Color swatch
 
 function ColorSwatch({ color, size = 14 }: { color: string; size?: number }) {
   return (
@@ -226,7 +443,7 @@ function ColorSwatch({ color, size = 14 }: { color: string; size?: number }) {
   );
 }
 
-// ─── Color suggestion picker ──────────────────────────────────────────────────
+// Color suggestion picker
 
 function ColorSuggestions({
   suggestions,
@@ -254,7 +471,7 @@ function ColorSuggestions({
   );
 }
 
-// ─── Code Detail sub-view ─────────────────────────────────────────────────────
+// Code Detail sub-view
 
 function CodeDetail({
   row: initialRow,
@@ -301,9 +518,9 @@ function CodeDetail({
               id:            a.id,
               quote:         a.quote ?? "",
               note:          a.note  ?? "",
-              documentName:  a.expand?.document?.name || "—",
+              documentName:  a.expand?.document?.name || "-",
               documentId:    a.document ?? "",
-              createdByName: a.expand?.created_by?.name || a.expand?.created_by?.email || "—",
+              createdByName: a.expand?.created_by?.name || a.expand?.created_by?.email || "-",
               createdAt:     a.created,
             })),
           );
@@ -444,7 +661,7 @@ function CodeDetail({
           <dl className="user-detail-meta case-detail-meta">
             <dt>{t("projectCodebook.table.createdBy")}</dt> <dd>{row.createdByName}</dd>
             <dt>{t("projectCodebook.table.created")}</dt>    <dd>{fmtDate(row.createdAt)}</dd>
-            <dt>{t("projectCodebook.detail.parent")}</dt>     <dd>{row.parentLabel || "—"}</dd>
+            <dt>{t("projectCodebook.detail.parent")}</dt>     <dd>{row.parentLabel || "-"}</dd>
           </dl>
 
           <div className="case-card">
@@ -466,7 +683,7 @@ function CodeDetail({
 
         </div>
 
-        {/* Right column (2/3) — annotations */}
+        {/* Right column (2/3) - annotations */}
         <div className="doc-detail-right">
           <div className="case-card doc-content-card">
             <h3 className="case-card-title">
@@ -527,7 +744,7 @@ function CodeDetail({
   );
 }
 
-// ─── New Code modal ───────────────────────────────────────────────────────────
+// New Code modal
 
 function NewCodeModal({
   allCodes,
@@ -659,7 +876,7 @@ function NewCodeModal({
               <option value="">{t("projectCodebook.modal.topLevelOption")}</option>
               {availableCodes.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.parentLabel ? `${c.parentLabel} › ${c.label}` : c.label}
+                  {c.parentLabel ? `${c.parentLabel} > ${c.label}` : c.label}
                 </option>
               ))}
             </select>
@@ -703,10 +920,11 @@ function NewCodeModal({
   );
 }
 
-// ─── Main view ────────────────────────────────────────────────────────────────
+// Main view
 
 export type CodebookViewProps = {
   postgresProjectId?: string | null;
+  postgresProjectStoragePath?: string;
   postgresCanCreateCodes?: boolean;
   postgresCanEditCodes?: boolean;
   postgresCanDeleteCodes?: boolean;
@@ -717,6 +935,7 @@ export type CodebookViewProps = {
 
 export function CodebookView({
   postgresProjectId,
+  postgresProjectStoragePath,
   postgresCanCreateCodes,
   postgresCanEditCodes,
   postgresCanDeleteCodes,
@@ -780,7 +999,7 @@ export function CodebookView({
     { ...COLS[3], label: "Sources" },
   ];
 
-  // ── Load ──────────────────────────────────────────────────────────────────
+  // Load
 
   const loadCodes = useCallback(async () => {
     if (!activeProjectId) return;
@@ -808,7 +1027,7 @@ export function CodebookView({
             description: code.description ?? "",
             parentId: code.parentCodeId ?? "",
             parentLabel: code.parentCodeId ? codeLabelById[code.parentCodeId] ?? "" : "",
-            createdByName: "—",
+            createdByName: "-",
             createdAt: code.createdAt,
             sourcesCount: docsByCode[code.id]?.size ?? 0,
           })),
@@ -846,7 +1065,7 @@ export function CodebookView({
             description:   r.description ?? "",
             parentId,
             parentLabel:   r.expand?.parent?.label ?? "",
-            createdByName: cb?.name || cb?.email || "—",
+            createdByName: cb?.name || cb?.email || "-",
             createdAt:     r.created,
             sourcesCount:  docsByCode[r.id]?.size ?? 0,
           };
@@ -870,7 +1089,7 @@ export function CodebookView({
     setPendingCodeId(null);
   }, [rows, pendingCodeId, setPendingCodeId]);
 
-  // ── Close context menu on outside click / Escape ──────────────────────────
+  // Close context menu on outside click / Escape
 
   useEffect(() => {
     function onPointerDown(e: MouseEvent) {
@@ -886,7 +1105,7 @@ export function CodebookView({
     };
   }, []);
 
-  // ── Tree + visible rows ───────────────────────────────────────────────────
+  // Tree + visible rows
 
   const tree    = useMemo(() => buildTree(rows, sortCol, sortDir), [rows, sortCol, sortDir]);
   const visible = useMemo(() => getVisibleNodes(tree, collapsed), [tree, collapsed]);
@@ -904,7 +1123,7 @@ export function CodebookView({
     else { setSortCol(col); setSortDir("asc"); }
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────────
+  // Delete
 
   async function handleDelete() {
     if (!confirmDelete) return;
@@ -970,10 +1189,14 @@ export function CodebookView({
     }
   }
 
-  // ── Detail / edit ─────────────────────────────────────────────────────────
+  // Detail / edit
 
   const postgresSourceNameById = useMemo(
     () => Object.fromEntries(postgresSources.map((source) => [source.id, source.title])),
+    [postgresSources],
+  );
+  const postgresSourceById = useMemo(
+    () => new Map(postgresSources.map((source) => [source.id, source])),
     [postgresSources],
   );
 
@@ -985,12 +1208,27 @@ export function CodebookView({
         id: annotation.id,
         quote: annotation.quote ?? "",
         note: annotation.note ?? "",
-        documentName: postgresSourceNameById[annotation.sourceId] ?? "—",
+        documentName: postgresSourceNameById[annotation.sourceId] ?? "-",
         documentId: annotation.sourceId,
-        createdByName: annotation.createdByName || "—",
+        createdByName: annotation.createdByName || "-",
         createdAt: annotation.createdAt,
       }));
   }, [postgresAnnotations, postgresSourceNameById, selectedRow]);
+
+  const postgresDetailAnnotationsWithMedia = useMemo(() => (
+    postgresDetailAnnotations.map((row) => {
+      const annotation = postgresAnnotations.find((item) => item.id === row.id);
+      const source = annotation ? postgresSourceById.get(annotation.sourceId) : null;
+      return {
+        ...row,
+        sourceKind: annotation?.sourceKind || source?.sourceKind,
+        sourcePath: source?.storagePath,
+        imageRegion: annotation?.imageRegion ?? null,
+        timeStartMs: annotation?.timeStartMs ?? null,
+        timeEndMs: annotation?.timeEndMs ?? null,
+      };
+    })
+  ), [postgresAnnotations, postgresDetailAnnotations, postgresSourceById]);
 
   if (memoForCode) {
     return (
@@ -1010,7 +1248,8 @@ export function CodebookView({
         <PostgresCodeDetail
           row={detailRow}
           allCodes={rows}
-          annotations={postgresDetailAnnotations}
+          annotations={postgresDetailAnnotationsWithMedia}
+          projectStoragePath={postgresProjectStoragePath}
           startEditing={editStartRow !== null && canEditCodes}
           canEditCode={canEditCodes}
           canDeleteCode={canDeleteCodes}
@@ -1091,7 +1330,7 @@ export function CodebookView({
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // Render
 
   return (
     <div className="view users-view">
@@ -1127,9 +1366,9 @@ export function CodebookView({
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      <div className="users-content">
+      <div className="users-content codebook-table-shell">
       <div
-        className="users-table-wrap"
+        className="users-table-wrap codebook-table-wrap"
         style={{
           maxHeight: 34 + (Math.max(loading || visible.length === 0 ? 1 : visible.length, 1) + 2) * 36,
         }}
@@ -1377,6 +1616,7 @@ function PostgresCodeDetail({
   row: initialRow,
   allCodes,
   annotations,
+  projectStoragePath,
   startEditing,
   canEditCode,
   canDeleteCode,
@@ -1388,6 +1628,7 @@ function PostgresCodeDetail({
   row: CodeRow;
   allCodes: CodeRow[];
   annotations: AnnotationRow[];
+  projectStoragePath?: string;
   startEditing: boolean;
   canEditCode: boolean;
   canDeleteCode: boolean;
@@ -1523,7 +1764,7 @@ function PostgresCodeDetail({
           <dl className="user-detail-meta case-detail-meta">
             <dt>{t("projectCodebook.table.createdBy")}</dt> <dd>{row.createdByName}</dd>
             <dt>{t("projectCodebook.table.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
-            <dt>{t("projectCodebook.detail.parent")}</dt> <dd>{row.parentLabel || "—"}</dd>
+            <dt>{t("projectCodebook.detail.parent")}</dt> <dd>{row.parentLabel || "-"}</dd>
           </dl>
 
           <div className="case-card">
@@ -1553,26 +1794,37 @@ function PostgresCodeDetail({
               <p className="case-card-empty">{t("projectCodebook.detail.noAnnotations")}</p>
             ) : (
               <ul className="code-ann-list">
-                {annotations.map((annotation) => (
-                  <li
-                    key={annotation.id}
-                    className="code-ann-item"
-                    onClick={() => onOpenAnnotation(annotation)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        onOpenAnnotation(annotation);
-                      }
-                    }}
-                  >
-                    <div className="code-ann-doc">{annotation.documentName}</div>
-                    <blockquote className="code-ann-quote">"{annotation.quote}"</blockquote>
-                    {annotation.note && <p className="code-ann-note">{annotation.note}</p>}
-                    <div className="code-ann-meta">{fmtDate(annotation.createdAt)} · {annotation.createdByName}</div>
-                  </li>
-                ))}
+                {annotations.map((annotation) => {
+                  const isMediaAnnotation = ["audio", "video", "image", "pdf"].includes(annotation.sourceKind ?? "");
+                  return (
+                    <li
+                      key={annotation.id}
+                      className="code-ann-item"
+                      onClick={() => onOpenAnnotation(annotation)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onOpenAnnotation(annotation);
+                        }
+                      }}
+                    >
+                      <div className="code-ann-doc">{annotation.documentName}</div>
+                      <CodebookAnnotationMediaPreview
+                        annotation={annotation}
+                        projectStoragePath={projectStoragePath}
+                      />
+                      {!isMediaAnnotation ? (
+                        <>
+                          <blockquote className="code-ann-quote">"{annotation.quote}"</blockquote>
+                          {annotation.note && <p className="code-ann-note">{annotation.note}</p>}
+                        </>
+                      ) : null}
+                      <div className="code-ann-meta">{fmtDate(annotation.createdAt)} · {annotation.createdByName}</div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

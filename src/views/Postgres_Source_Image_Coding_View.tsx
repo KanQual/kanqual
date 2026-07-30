@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
+import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { useI18n } from "../i18n/provider";
 import type { PostgresExperimentCode } from "../lib/postgresExperiment";
@@ -13,6 +14,18 @@ import {
 } from "./Postgres_Source_Coding_Shared";
 
 const SOURCE_IMPORT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+
+let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
+
+async function loadPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+      return module;
+    });
+  }
+  return pdfJsPromise;
+}
 
 type DraftRect = {
   pointerId: number;
@@ -63,6 +76,7 @@ function roundRegionValue(value: number): number {
 function buildSelectionFromDraft(
   draft: DraftRect,
   imageElement: HTMLImageElement,
+  pageNumber?: number | null,
 ): PendingSelection | null {
   const renderedWidth = imageElement.clientWidth;
   const renderedHeight = imageElement.clientHeight;
@@ -93,6 +107,7 @@ function buildSelectionFromDraft(
       height: regionHeight,
       imageWidth: naturalWidth,
       imageHeight: naturalHeight,
+      pageNumber: pageNumber ?? null,
     },
   };
 }
@@ -233,6 +248,9 @@ export function PostgresSourceImageCodingView({
   const [interactionState, setInteractionState] = useState<InteractionState | null>(null);
   const [previewRegions, setPreviewRegions] = useState<Record<string, NonNullable<SourceAnnotationRow["imageRegion"]>>>({});
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [pdfPagePreviewUrls, setPdfPagePreviewUrls] = useState<Record<number, string>>({});
+  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [selectedPdfPage, setSelectedPdfPage] = useState(1);
   const [imagePreviewError, setImagePreviewError] = useState<string | null>(null);
   const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
   const [naturalImageSize, setNaturalImageSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -254,11 +272,17 @@ export function PostgresSourceImageCodingView({
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
   const canDeleteAnnotations = canEditAnnotations;
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
-  const isImageSource = SOURCE_IMPORT_IMAGE_EXTS.has(fileExt) || row.type.trim().toLowerCase() === "image";
+  const normalizedSourceType = row.type.trim().toLowerCase();
+  const isPdfSource = normalizedSourceType === "pdf" || fileExt === "pdf";
+  const isImageSource = SOURCE_IMPORT_IMAGE_EXTS.has(fileExt) || normalizedSourceType === "image" || isPdfSource;
   const resolvedFilePath = resolveProjectStoragePath(projectStoragePath, row.filePath);
   const regionAnnotations = useMemo(
     () => annotations.filter((annotation) => annotation.anchorKind === "image_rect" && annotation.imageRegion),
     [annotations],
+  );
+  const currentPageRegionAnnotations = useMemo(
+    () => regionAnnotations.filter((annotation) => !isPdfSource || (annotation.imageRegion?.pageNumber ?? 1) === selectedPdfPage),
+    [isPdfSource, regionAnnotations, selectedPdfPage],
   );
 
   useEffect(() => {
@@ -309,6 +333,12 @@ export function PostgresSourceImageCodingView({
     setZoom(1);
     setBaseImageSize({ width: 0, height: 0 });
     setNaturalImageSize({ width: 0, height: 0 });
+    setSelectedPdfPage(1);
+    setPdfPageCount(0);
+    setPdfPagePreviewUrls((current) => {
+      Object.values(current).forEach((url) => URL.revokeObjectURL(url));
+      return {};
+    });
   }, [row.id]);
 
   useEffect(() => {
@@ -327,6 +357,57 @@ export function PostgresSourceImageCodingView({
 
     setImagePreviewLoading(true);
     setImagePreviewError(null);
+
+    if (isPdfSource) {
+      void readTauriFile(resolvedFilePath)
+        .then(async (bytes) => {
+          if (cancelled) return;
+          const pdfjsLib = await loadPdfJs();
+          const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+          if (cancelled) return;
+          const safePage = clamp(selectedPdfPage, 1, pdf.numPages);
+          const page = await pdf.getPage(safePage);
+          if (cancelled) return;
+          const viewport = page.getViewport({ scale: 1.6 });
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Could not prepare the PDF page preview.");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          await page.render({ canvas, canvasContext: context, viewport }).promise;
+          if (cancelled) return;
+          const blob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((nextBlob) => {
+              if (nextBlob) resolve(nextBlob);
+              else reject(new Error("Could not render the PDF page preview."));
+            }, "image/png");
+          });
+          objectUrl = URL.createObjectURL(blob);
+          setPdfPageCount(pdf.numPages);
+          setSelectedPdfPage(safePage);
+          setPdfPagePreviewUrls((current) => {
+            const existing = current[safePage];
+            if (existing) URL.revokeObjectURL(existing);
+            return { ...current, [safePage]: objectUrl as string };
+          });
+          setImagePreviewUrl((current) => {
+            if (current && !isPdfSource) URL.revokeObjectURL(current);
+            return objectUrl;
+          });
+        })
+        .catch((loadError) => {
+          if (cancelled) return;
+          setImagePreviewError(loadError instanceof Error ? loadError.message : "Failed to load PDF preview.");
+          setImagePreviewUrl(null);
+        })
+        .finally(() => {
+          if (!cancelled) setImagePreviewLoading(false);
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
 
     void readTauriFile(resolvedFilePath)
       .then((bytes) => {
@@ -353,7 +434,7 @@ export function PostgresSourceImageCodingView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isImageSource, resolvedFilePath]);
+  }, [isImageSource, isPdfSource, resolvedFilePath, selectedPdfPage]);
 
   useEffect(() => {
     const imageElement = imageRef.current;
@@ -467,7 +548,7 @@ export function PostgresSourceImageCodingView({
     }
     const imageElement = imageRef.current;
     if (!imageElement) return;
-    const selection = buildSelectionFromDraft(finalDraft, imageElement);
+    const selection = buildSelectionFromDraft(finalDraft, imageElement, isPdfSource ? selectedPdfPage : null);
     if (selection) setPendingSelection(selection);
   }
 
@@ -506,6 +587,53 @@ export function PostgresSourceImageCodingView({
         return next;
       });
     }
+  }
+
+  function selectRegionAnnotation(annotation: SourceAnnotationRow) {
+    if (isPdfSource && annotation.imageRegion?.pageNumber) {
+      setSelectedPdfPage(annotation.imageRegion.pageNumber);
+    }
+    setSelectedAnnotationId(annotation.id);
+  }
+
+  function renderRegionExcerpt(annotation: SourceAnnotationRow) {
+    const region = annotation.imageRegion;
+    if (!region) return null;
+    const pageNumber = region.pageNumber ?? 1;
+    const previewUrl = isPdfSource ? pdfPagePreviewUrls[pageNumber] : imagePreviewUrl;
+    const label = isPdfSource
+      ? `Page ${pageNumber} section`
+      : "Saved image section";
+
+    if (!previewUrl) {
+      return (
+        <div className="annotation-excerpt annotation-excerpt--region">
+          <div className="annotation-excerpt-label">{label}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="annotation-excerpt annotation-excerpt--region" onClick={(event) => event.stopPropagation()}>
+        <div className="annotation-excerpt-label">{label}</div>
+        <div
+          className="annotation-excerpt-region-frame"
+          style={{
+            aspectRatio: `${Math.max(region.width, 1)} / ${Math.max(region.height, 1)}`,
+          }}
+        >
+          <img
+            src={previewUrl}
+            alt=""
+            style={{
+              width: `${(region.imageWidth / Math.max(region.width, 1)) * 100}%`,
+              height: `${(region.imageHeight / Math.max(region.height, 1)) * 100}%`,
+              transform: `translate(${-region.x / Math.max(region.imageWidth, 1) * 100}%, ${-region.y / Math.max(region.imageHeight, 1) * 100}%)`,
+            }}
+          />
+        </div>
+      </div>
+    );
   }
 
   function startRegionInteraction(
@@ -587,7 +715,7 @@ export function PostgresSourceImageCodingView({
       <div className="workspace-back-row workspace-back-row--split">
         <button className="btn" onClick={onBack}>{t("projectDocuments.detail.backToDocuments")}</button>
         <p className="users-guide-copy" style={{ margin: 0 }}>
-          PostgreSQL image coding workspace
+          PostgreSQL {isPdfSource ? "PDF" : "image"} coding workspace
         </p>
       </div>
 
@@ -633,7 +761,12 @@ export function PostgresSourceImageCodingView({
             annotations={regionAnnotations}
             selectedAnnotationId={selectedAnnotationId}
             codesById={codesById}
-            onSelectAnnotation={setSelectedAnnotationId}
+            renderAnnotationExcerpt={renderRegionExcerpt}
+            onSelectAnnotation={(annotationId) => {
+              const annotation = regionAnnotations.find((entry) => entry.id === annotationId);
+              if (annotation) selectRegionAnnotation(annotation);
+              else setSelectedAnnotationId(annotationId);
+            }}
             onDeleteAnnotation={(annotationId) => {
               void onDeleteAnnotation(annotationId);
             }}
@@ -649,6 +782,29 @@ export function PostgresSourceImageCodingView({
               <span className="doc-name">{row.name}</span>
               {imagePreviewUrl ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {isPdfSource && pdfPageCount > 0 ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--small"
+                        onClick={() => setSelectedPdfPage((current) => Math.max(1, current - 1))}
+                        disabled={selectedPdfPage <= 1 || imagePreviewLoading}
+                      >
+                        Prev
+                      </button>
+                      <span className="users-guide-copy" style={{ margin: 0, whiteSpace: "nowrap" }}>
+                        Page {selectedPdfPage} / {pdfPageCount}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn--small"
+                        onClick={() => setSelectedPdfPage((current) => Math.min(pdfPageCount, current + 1))}
+                        disabled={selectedPdfPage >= pdfPageCount || imagePreviewLoading}
+                      >
+                        Next
+                      </button>
+                    </>
+                  ) : null}
                   <button
                     type="button"
                     className="btn btn--small"
@@ -795,7 +951,7 @@ export function PostgresSourceImageCodingView({
                       onPointerUp={finishDraft}
                       onPointerCancel={() => setDraftRect(null)}
                     >
-                      {regionAnnotations.map((annotation) => {
+                      {currentPageRegionAnnotations.map((annotation) => {
                         const activeRegion = previewRegions[annotation.id] ?? annotation.imageRegion;
                         if (!activeRegion || !imageDisplaySize.width || !imageDisplaySize.height) return null;
                         const isSelected = annotation.id === selectedAnnotationId;
@@ -815,7 +971,7 @@ export function PostgresSourceImageCodingView({
                               title={annotation.codeLabels.join(", ") || "Image annotation"}
                               onClick={(event) => {
                                 event.stopPropagation();
-                                setSelectedAnnotationId(annotation.id);
+                                selectRegionAnnotation(annotation);
                               }}
                               onDoubleClick={(event) => {
                                 event.stopPropagation();
@@ -825,7 +981,7 @@ export function PostgresSourceImageCodingView({
                                 if (!canManageMemos && !canDeleteAnnotations) return;
                                 event.preventDefault();
                                 event.stopPropagation();
-                                setSelectedAnnotationId(annotation.id);
+                                selectRegionAnnotation(annotation);
                                 setAnnotationContextMenu({ x: event.clientX, y: event.clientY, annotation });
                               }}
                               onPointerDown={(event) => startRegionInteraction(event, annotation, "move")}

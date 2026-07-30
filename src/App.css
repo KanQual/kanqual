@@ -26,6 +26,7 @@
   --color-heatmap-low:   #F1DDD7;
   --color-heatmap-high:  #B04A33;
   --sidebar-width: 242px;
+  --sidebar-collapsed-width: 64px;
   --radius: 6px;
   --radius-xs: calc(var(--radius) * 0.35);
   --radius-sm: calc(var(--radius) * 0.65);
@@ -258,13 +259,20 @@ body {
 /* ─── Sidebar ──────────────────────────────────────────────────────────────── */
 
 .sidebar {
-  width: var(--sidebar-width);
+  width: var(--sidebar-collapsed-width);
   background: var(--color-sidebar);
   color: var(--color-sidebar-text);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
+  transition: width 0.18s ease;
+  will-change: width;
+}
+
+.sidebar--expanded,
+.sidebar:hover {
+  width: var(--sidebar-width);
 }
 
 .sidebar-brand {
@@ -279,8 +287,22 @@ body {
   width: 100%;
   background: none;
   text-align: left;
-  padding: 4px 16px;
+  padding: 4px 12px;
   border-bottom: 1px solid #333;
+  transition: padding 0.18s ease;
+}
+
+.sidebar--expanded .sidebar-brand,
+.sidebar:hover .sidebar-brand {
+  padding: 4px 16px;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .sidebar-brand {
+  height: 236px;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 14px 0;
+  border-bottom-color: transparent;
 }
 
 .sidebar-brand--clickable {
@@ -299,13 +321,55 @@ body {
 }
 
 .brand-logo {
-  width: 100%;
+  width: 40px;
   height: auto;
   max-width: 100%;
   max-height: 112px;
   object-fit: contain;
   object-position: left center;
   flex-shrink: 1;
+  pointer-events: none;
+  transition: width 0.18s ease;
+}
+
+.sidebar--expanded .brand-logo,
+.sidebar:hover .brand-logo {
+  width: 100%;
+}
+
+.brand-collapsed-lockup {
+  display: none;
+}
+
+.brand-collapsed-logo {
+  width: 48px;
+  height: 34px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.brand-collapsed-title {
+  font-family: var(--font-brand);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-sidebar-text);
+  white-space: nowrap;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .brand-logo {
+  display: none;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .brand-collapsed-lockup {
+  position: absolute;
+  top: 118px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  transform-origin: center;
   pointer-events: none;
 }
 
@@ -451,17 +515,35 @@ body {
   cursor: default;
 }
 
+.sidebar:not(.sidebar--expanded):not(:hover) .brand-network-badge,
+.sidebar:not(.sidebar--expanded):not(:hover) .brand-ai-badge,
+.sidebar:not(.sidebar--expanded):not(:hover) .brand-collaboration-badge {
+  right: 8px;
+}
+
 @keyframes brand-icon-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
 .sidebar-project-badge {
-  padding: 12px 16px;
+  padding: 12px 10px;
   border-bottom: 1px solid #2a2a28;
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-height: 66px;
+  overflow: hidden;
+  transition: padding 0.18s ease;
+}
+
+.sidebar--expanded .sidebar-project-badge,
+.sidebar:hover .sidebar-project-badge {
+  padding: 12px 16px;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .sidebar-project-badge {
+  border-bottom-color: transparent;
 }
 
 .sidebar-project-badge--empty {
@@ -481,12 +563,14 @@ body {
   font-size: var(--text-2xs);
   letter-spacing: 0.08em;
   color: var(--color-sidebar-muted);
+  transition: opacity 0.12s ease;
 }
 
 .project-badge-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  min-width: 0;
 }
 
 .project-badge-close {
@@ -538,6 +622,7 @@ body {
   line-height: 1.3;
   flex: 1 1 auto;
   min-width: 0;
+  transition: opacity 0.12s ease;
 }
 
 .project-badge-empty-text {
@@ -546,6 +631,17 @@ body {
   color: var(--color-sidebar-muted);
   line-height: 1.3;
   transition: color 0.12s ease;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .project-badge-label,
+.sidebar:not(.sidebar--expanded):not(:hover) .project-badge-name,
+.sidebar:not(.sidebar--expanded):not(:hover) .project-badge-empty-text {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .project-badge-close {
+  display: none;
 }
 
 .role-badge {
@@ -573,6 +669,10 @@ body {
   overflow-y: auto;
   scrollbar-color: color-mix(in srgb, var(--color-sidebar-text) 24%, transparent) var(--color-sidebar-active);
   scrollbar-width: thin;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .sidebar-nav {
+  overflow-y: hidden;
 }
 
 .sidebar-nav::-webkit-scrollbar {
@@ -647,6 +747,8 @@ body {
   text-align: left;
   margin-top: 8px;
   transition: color 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .sidebar-section-header:hover {
@@ -665,6 +767,8 @@ body {
 .sidebar-section-chevron {
   font-size: var(--text-xs);
   opacity: 0.6;
+  flex: 0 0 auto;
+  transition: opacity 0.12s ease;
 }
 
 .sidebar-section-items {
@@ -687,6 +791,12 @@ body {
   width: 100%;
   border-radius: 0;
   transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .sidebar-section {
+  display: none;
 }
 
 .nav-item:hover:not(:disabled) {
@@ -711,6 +821,8 @@ body {
   padding: 12px 16px;
   border-top: 1px solid #2a2a28;
   margin-top: auto;
+  overflow: hidden;
+  transition: padding 0.18s ease;
 }
 
 .sidebar-user-info {
@@ -718,6 +830,7 @@ body {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  transition: opacity 0.12s ease;
 }
 
 .sidebar-user-name {
@@ -725,6 +838,14 @@ body {
   font-weight: 500;
   color: var(--color-sidebar-text);
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user-email {
+  color: var(--color-sidebar-muted);
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -738,6 +859,16 @@ body {
   font-size: var(--text-lg);
   padding: 2px 4px;
   flex-shrink: 0;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .sidebar-user {
+  justify-content: center;
+  padding: 12px 0;
+  border-top-color: transparent;
+}
+
+.sidebar:not(.sidebar--expanded):not(:hover) .sidebar-user-info {
+  display: none;
 }
 
 .sidebar-logout:hover {
@@ -2791,6 +2922,26 @@ body {
   padding: 6px 0;
 }
 
+.codebook-table-shell {
+  display: grid;
+  min-height: calc(100vh - 260px);
+  place-items: center;
+}
+
+.codebook-table-wrap {
+  width: fit-content;
+  max-width: min(760px, calc(100vw - 96px));
+  max-height: min(620px, calc(100vh - 300px));
+  align-self: center;
+  justify-self: center;
+}
+
+.codebook-table-wrap .users-table {
+  width: auto;
+  min-width: 0;
+  table-layout: auto;
+}
+
 .code-list-empty {
   padding: 12px 14px;
   font-size: var(--text-sm);
@@ -3015,6 +3166,158 @@ body {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+}
+
+.annotation-excerpt {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.annotation-excerpt-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.annotation-excerpt-region-frame {
+  position: relative;
+  width: 100%;
+  max-height: 160px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #f4f5f7;
+}
+
+.annotation-excerpt-region-frame img {
+  display: block;
+  max-width: none;
+  transform-origin: top left;
+  user-select: none;
+  pointer-events: none;
+}
+
+.annotation-excerpt-media {
+  width: 100%;
+  max-height: 148px;
+  border-radius: var(--radius-sm);
+  background: #111827;
+}
+
+.annotation-excerpt-media--video {
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+
+.annotation-clip-player {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.annotation-clip-play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+  padding: 0;
+  border: 1px solid rgba(53, 80, 112, 0.22);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 1), rgba(229, 236, 243, 0.98));
+  color: #233142;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  transition: transform 120ms ease, filter 120ms ease, background-color 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.annotation-clip-play-btn:hover {
+  filter: brightness(0.985);
+  background: linear-gradient(180deg, rgba(237, 242, 247, 0.98), rgba(226, 232, 240, 0.98));
+  border-color: rgba(53, 80, 112, 0.18);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px rgba(15, 23, 42, 0.16);
+}
+
+.annotation-clip-play-btn:focus-visible {
+  outline: 2px solid rgba(53, 80, 112, 0.34);
+  outline-offset: 2px;
+}
+
+.annotation-clip-play-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.annotation-video-clip {
+  display: grid;
+  gap: 10px;
+}
+
+.annotation-video-clip-media {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #111827;
+  cursor: pointer;
+}
+
+.annotation-clip-player--video {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.annotation-image-crop {
+  position: relative;
+  width: 100%;
+  max-height: min(62vh, 640px);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #111827;
+}
+
+.annotation-image-crop img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  max-width: none;
+  max-height: none;
+  transform-origin: top left;
+  user-select: none;
+  pointer-events: none;
+}
+
+.annotation-clip-scrubber {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.annotation-clip-scrubber input[type="range"] {
+  width: 100%;
+}
+
+.annotation-clip-time-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
 }
 
 .annotation-note {
@@ -4128,6 +4431,12 @@ body {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
 }
 
+.postgres-sources-grid {
+  width: min(1180px, 100%);
+  margin: auto;
+  justify-content: center;
+}
+
 .postgres-users-name-cell {
   display: flex;
   flex-direction: column;
@@ -4234,7 +4543,19 @@ body {
   align-self: stretch;
 }
 
+.users-table-wrap.codebook-table-wrap {
+  width: fit-content;
+  max-width: min(760px, calc(100vw - 96px));
+  align-self: center;
+  justify-self: center;
+}
+
 @media (max-width: 1024px) {
+  .postgres-sources-grid {
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+    margin: 0;
+  }
 }
 
 .users-table {
@@ -4562,6 +4883,55 @@ body {
 
 .codebook-list-row:hover > td {
   background: color-mix(in srgb, #7c2d12 18%, var(--color-surface-alt)) !important;
+}
+
+.code-ann-media {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.code-ann-media audio,
+.code-ann-video {
+  width: 100%;
+  max-width: 520px;
+}
+
+.code-ann-video {
+  display: block;
+  max-height: 260px;
+  border-radius: var(--radius);
+  background: #000;
+}
+
+.code-ann-image-crop {
+  width: min(520px, 100%);
+  max-height: 280px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-alt);
+}
+
+.code-ann-image-crop img {
+  display: block;
+  max-width: none;
+  object-fit: unset;
+  transform-origin: top left;
+}
+
+.code-ann-media-loading,
+.code-ann-media-error {
+  margin: 8px 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.code-ann-media-error {
+  color: var(--color-danger);
 }
 
 .annotations-list-row:hover > td {
@@ -5122,10 +5492,25 @@ body {
 }
 
 .doc-detail-left .case-detail-meta {
+  grid-template-columns: minmax(64px, 34%) minmax(0, 1fr);
   max-width: none;
+  min-width: 0;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.doc-detail-left .case-detail-meta dt {
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .doc-detail-left .case-detail-meta dd {
+  min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -5140,6 +5525,17 @@ body {
   padding-left: 24px;
 }
 
+.doc-detail-right--annotation {
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+}
+
+.doc-detail-right--annotation > .case-card {
+  width: min(100%, 760px);
+  max-height: 100%;
+}
+
 .doc-content-card {
   flex: 1;
   display: flex;
@@ -5147,6 +5543,23 @@ body {
   min-height: 0;
   max-width: none;
   overflow: hidden;
+}
+
+.doc-content-card--annotation-text {
+  flex: 0 1 auto;
+  align-self: center;
+  width: fit-content;
+  min-width: min(100%, 360px);
+  max-width: min(100%, 860px);
+}
+
+.doc-content-card--annotation-text .doc-content-scroll-shell {
+  flex: 0 1 auto;
+  max-height: min(64vh, 720px);
+}
+
+.doc-content-card--annotation-text .doc-content-body {
+  flex: 0 1 auto;
 }
 
 .doc-content-body {
@@ -9928,6 +10341,457 @@ body {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+}
+
+.postgres-memo-editor-view {
+  overflow: hidden;
+}
+
+.postgres-memo-table-shell {
+  display: grid;
+  min-height: calc(100vh - 260px);
+  place-items: center;
+}
+
+.postgres-memo-table-wrap {
+  width: min(980px, 100%);
+  max-height: min(620px, calc(100vh - 300px));
+  align-self: center;
+}
+
+.postgres-memo-editor-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+.postgres-memo-editor-left {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.postgres-memo-editor-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.postgres-memo-select-card {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.postgres-memo-select-card--collapsed {
+  flex: 0 0 auto;
+}
+
+.postgres-memo-select-header {
+  flex: 0 0 auto;
+  width: 100%;
+  border: 0;
+  margin: 0;
+  padding: 12px 14px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.postgres-memo-select-header:hover {
+  background: var(--color-surface-alt);
+}
+
+.postgres-memo-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.postgres-memo-collapse-indicator {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.postgres-memo-select-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.postgres-memo-card-count {
+  display: inline-flex;
+  min-width: 28px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-alt));
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.postgres-memo-select-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.postgres-memo-select-row:hover {
+  background: var(--color-surface-alt);
+}
+
+.postgres-memo-select-row--checked {
+  background: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface));
+}
+
+.postgres-memo-select-row--code {
+  align-items: center;
+  padding-left: calc(10px + (var(--memo-code-depth, 0) * 18px));
+}
+
+.postgres-memo-select-row--code .code-swatch {
+  margin-top: 0;
+}
+
+.postgres-memo-source-table {
+  gap: 0;
+}
+
+.postgres-memo-source-table-header,
+.postgres-memo-source-table-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(76px, 0.48fr);
+  column-gap: 8px;
+  align-items: center;
+}
+
+.postgres-memo-source-table-header {
+  padding: 4px 10px 6px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.postgres-memo-source-title,
+.postgres-memo-source-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.postgres-memo-source-type {
+  color: var(--color-text-muted);
+}
+
+.postgres-memo-annotation-table {
+  gap: 0;
+}
+
+.postgres-memo-annotation-table-header,
+.postgres-memo-annotation-table-row {
+  display: grid;
+  grid-template-columns: 24px minmax(70px, 0.65fr) minmax(0, 1fr) minmax(76px, 0.55fr);
+  column-gap: 8px;
+  align-items: center;
+}
+
+.postgres-memo-annotation-table-header {
+  padding: 4px 10px 6px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.postgres-memo-annotation-id,
+.postgres-memo-annotation-source-title,
+.postgres-memo-annotation-source-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+.postgres-memo-annotation-id {
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+.postgres-memo-annotation-source-type {
+  color: var(--color-text-muted);
+}
+
+.postgres-memo-annotation-tooltip {
+  position: fixed;
+  z-index: 2500;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(320px, calc(100vh - 32px));
+  overflow: auto;
+  pointer-events: auto;
+  padding: 10px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
+}
+
+.postgres-memo-annotation-tooltip-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.postgres-memo-annotation-tooltip-header strong {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.postgres-memo-annotation-tooltip-header span,
+.postgres-memo-annotation-tooltip-label {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.postgres-memo-annotation-tooltip-card,
+.postgres-memo-annotation-tooltip-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.postgres-memo-annotation-tooltip-note {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.postgres-memo-annotation-tooltip p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: var(--text-sm);
+}
+
+.postgres-memo-annotation-tooltip-audio {
+  width: 100%;
+  height: 34px;
+  margin-bottom: 8px;
+}
+
+.postgres-memo-annotation-tooltip-video,
+.postgres-memo-annotation-tooltip-image {
+  width: 100%;
+  max-height: 180px;
+  margin-bottom: 8px;
+  border-radius: var(--radius);
+  background: #000;
+}
+
+.postgres-memo-annotation-tooltip-video {
+  display: block;
+  object-fit: contain;
+}
+
+.postgres-memo-annotation-tooltip-image {
+  position: relative;
+  overflow: hidden;
+  border: var(--border-width) solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.postgres-memo-annotation-tooltip-image img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  object-fit: fill;
+}
+
+.postgres-memo-annotation-tooltip-loading,
+.postgres-memo-annotation-tooltip-error {
+  margin-bottom: 8px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.postgres-memo-annotation-tooltip-error {
+  color: var(--color-danger);
+}
+
+.postgres-memo-select-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.postgres-memo-select-text > strong,
+.postgres-memo-select-text > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.postgres-memo-select-text > span {
+  color: var(--color-text-muted);
+}
+
+.postgres-memo-title-card,
+.postgres-memo-affiliations-card,
+.postgres-memo-body-card {
+  padding: 16px;
+}
+
+.postgres-memo-title-card .annotate-card-header,
+.postgres-memo-affiliations-card .annotate-card-header,
+.postgres-memo-body-card .annotate-card-header {
+  margin-bottom: 12px;
+}
+
+.postgres-memo-title-card .memo-editor-title-input {
+  font-size: var(--text-xl);
+}
+
+.postgres-memo-affiliation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.postgres-memo-affiliation-grid h3 {
+  margin: 0 0 8px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.postgres-memo-chip-list,
+.postgres-memo-affiliation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.postgres-memo-chip {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  font-size: var(--text-xs);
+  color: var(--color-text);
+}
+
+.postgres-memo-chip-remove {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin: -1px 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.postgres-memo-chip-remove:hover {
+  border-color: color-mix(in srgb, var(--color-danger) 42%, var(--color-border));
+  color: var(--color-danger);
+}
+
+.postgres-memo-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.postgres-memo-affiliation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--color-surface-alt);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.postgres-memo-affiliation-item span {
+  color: var(--color-text-muted);
+}
+
+.postgres-memo-body-card {
+  min-height: 360px;
+}
+
+.postgres-memo-rte {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.postgres-memo-rte .rte-content {
+  padding: 14px;
+  line-height: 1.6;
+  background: var(--color-surface);
+}
+
+@media (max-width: 980px) {
+  .postgres-memo-editor-layout {
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .postgres-memo-affiliation-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ─── Project Log ────────────────────────────────────────────────────────────── */

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Outline PDF source">
+  <path d="M22 12 H70 L86 28 V82 H22 Z" fill="none" stroke="#111111" stroke-width="7" stroke-linejoin="round" />
+  <path d="M70 12 V28 H86" fill="none" stroke="#111111" stroke-width="7" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M14 22 H22 V82 H78 V90 H14 Z" fill="none" stroke="#111111" stroke-width="7" stroke-linejoin="round" />
+  <path d="M32 46 H70" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" />
+  <path d="M32 60 H64" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" />
+  <path d="M32 74 H56" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" />
+</svg>
