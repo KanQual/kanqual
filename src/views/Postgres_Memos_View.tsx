@@ -4,16 +4,16 @@ import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   POSTGRES_PROJECT_CHANGED_EVENT,
-  createPostgresExperimentMemo,
-  deletePostgresExperimentMemo,
-  listPostgresExperimentMemos,
-  type PostgresExperimentAnnotationSummary,
-  type PostgresExperimentCode,
-  type PostgresExperimentMemo,
-  type PostgresExperimentProjectChangeEvent,
-  type PostgresExperimentSource,
-  updatePostgresExperimentMemo,
-} from "../lib/postgresExperiment";
+  createPostgresMemo,
+  deletePostgresMemo,
+  listPostgresMemos,
+  type PostgresAnnotationSummary,
+  type PostgresCode,
+  type PostgresMemo,
+  type PostgresProjectChangeEvent,
+  type PostgresSource,
+  updatePostgresMemo,
+} from "../lib/postgres";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { orderedCodesWithDepth } from "./Postgres_Source_Coding_Shared";
@@ -50,9 +50,10 @@ function formatAnnotationDisplayId(value: number | null | undefined): string {
 }
 
 function formatSourceType(value: string | undefined): string {
-  const normalized = (value ?? "").trim().toLowerCase();
+  const normalized = (value ?? "").trim().toLowerCase().replace(/_/g, " ");
   if (!normalized) return "Source";
   if (normalized === "pdf") return "PDF";
+  if (normalized === "processed transcript") return "Transcript";
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
@@ -100,7 +101,7 @@ function mediaTypeFromFileExtension(ext: string): string | null {
   return null;
 }
 
-function annotationTooltipContent(annotation: PostgresExperimentAnnotationSummary): { title: string; body: string } {
+function annotationTooltipContent(annotation: PostgresAnnotationSummary): { title: string; body: string } {
   const quote = annotation.quote.trim();
   if (quote) {
     return {
@@ -137,8 +138,8 @@ function MemoAnnotationMediaPreview({
   source,
   projectStoragePath,
 }: {
-  annotation: PostgresExperimentAnnotationSummary;
-  source: PostgresExperimentSource | null;
+  annotation: PostgresAnnotationSummary;
+  source: PostgresSource | null;
   projectStoragePath?: string;
 }) {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
@@ -289,7 +290,7 @@ function createEmptyDraft(): MemoEditorDraft {
   };
 }
 
-function draftFromMemo(memo: PostgresExperimentMemo): MemoEditorDraft {
+function draftFromMemo(memo: PostgresMemo): MemoEditorDraft {
   return {
     memoId: memo.id,
     title: memo.title,
@@ -385,10 +386,10 @@ export function PostgresMemosView({
   initialCodeIds?: string[] | null;
   onInitialDraftHandled?: () => void;
 }) {
-  const [memos, setMemos] = useState<PostgresExperimentMemo[]>([]);
-  const [sources, setSources] = useState<PostgresExperimentSource[]>([]);
-  const [codes, setCodes] = useState<PostgresExperimentCode[]>([]);
-  const [annotations, setAnnotations] = useState<PostgresExperimentAnnotationSummary[]>([]);
+  const [memos, setMemos] = useState<PostgresMemo[]>([]);
+  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [codes, setCodes] = useState<PostgresCode[]>([]);
+  const [annotations, setAnnotations] = useState<PostgresAnnotationSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -405,7 +406,7 @@ export function PostgresMemosView({
     try {
       const [snapshot, memoRows] = await Promise.all([
         loadPostgresProjectWorkspaceSnapshot(projectId),
-        listPostgresExperimentMemos(projectId),
+        listPostgresMemos(projectId),
       ]);
       setSources(snapshot.sources);
       setCodes(snapshot.codes);
@@ -456,7 +457,7 @@ export function PostgresMemosView({
     let unlisten: (() => void) | undefined;
 
     async function subscribe() {
-      unlisten = await listen<PostgresExperimentProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
+      unlisten = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
         if (disposed) return;
         if (event.payload.projectId !== projectId) return;
         if (!["memo", "source", "annotation", "code", "object"].includes(event.payload.entityType)) return;
@@ -507,11 +508,11 @@ export function PostgresMemosView({
         objectIds: [...editorDraft.objectIds],
       };
       const saved = editorDraft.memoId
-        ? await updatePostgresExperimentMemo({
+        ? await updatePostgresMemo({
             ...payload,
             memoId: editorDraft.memoId,
           })
-        : await createPostgresExperimentMemo(payload);
+        : await createPostgresMemo(payload);
       setEditorDraft(null);
       setNotice(editorDraft.memoId ? `Updated "${saved.title}".` : `Created "${saved.title}".`);
       await load();
@@ -529,7 +530,7 @@ export function PostgresMemosView({
     setError(null);
     setNotice(null);
     try {
-      await deletePostgresExperimentMemo(projectId, deleteMemoId);
+      await deletePostgresMemo(projectId, deleteMemoId);
       setDeleteMemoId(null);
       setNotice(memo ? `Deleted "${memo.title}".` : "Deleted memo.");
       await load();
@@ -614,7 +615,7 @@ export function PostgresMemosView({
               onClick={() => void handleSaveMemo()}
               disabled={submitting}
             >
-              {submitting ? "Saving..." : "Save memo"}
+              {submitting ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
@@ -630,11 +631,8 @@ export function PostgresMemosView({
                 aria-expanded={codesOpen}
                 onClick={() => toggleSelectorCard("codes")}
               >
-                <span className="annotate-card-title">Codes</span>
-                <span className="postgres-memo-header-meta">
-                  <span className="postgres-memo-card-count">{draftCodes.length}</span>
-                  <span className="postgres-memo-collapse-indicator">{codesOpen ? "-" : "+"}</span>
-                </span>
+                <span className="annotate-card-title">Codes{draftCodes.length > 0 ? ` (${draftCodes.length})` : ""}</span>
+                <span className="postgres-memo-collapse-indicator">{codesOpen ? "▼" : "▶"}</span>
               </button>
               {codesOpen ? (
                 <div className="postgres-memo-select-list">
@@ -669,11 +667,8 @@ export function PostgresMemosView({
                 aria-expanded={sourcesOpen}
                 onClick={() => toggleSelectorCard("sources")}
               >
-                <span className="annotate-card-title">Sources</span>
-                <span className="postgres-memo-header-meta">
-                  <span className="postgres-memo-card-count">{draftSources.length}</span>
-                  <span className="postgres-memo-collapse-indicator">{sourcesOpen ? "-" : "+"}</span>
-                </span>
+                <span className="annotate-card-title">Sources{draftSources.length > 0 ? ` (${draftSources.length})` : ""}</span>
+                <span className="postgres-memo-collapse-indicator">{sourcesOpen ? "▼" : "▶"}</span>
               </button>
               {sourcesOpen ? (
                 <div className="postgres-memo-select-list postgres-memo-source-table">
@@ -714,11 +709,8 @@ export function PostgresMemosView({
                 aria-expanded={annotationsOpen}
                 onClick={() => toggleSelectorCard("annotations")}
               >
-                <span className="annotate-card-title">Annotations</span>
-                <span className="postgres-memo-header-meta">
-                  <span className="postgres-memo-card-count">{draftAnnotations.length}</span>
-                  <span className="postgres-memo-collapse-indicator">{annotationsOpen ? "-" : "+"}</span>
-                </span>
+                <span className="annotate-card-title">Annotations{draftAnnotations.length > 0 ? ` (${draftAnnotations.length})` : ""}</span>
+                <span className="postgres-memo-collapse-indicator">{annotationsOpen ? "▼" : "▶"}</span>
               </button>
               {annotationsOpen ? (
                 <div className="postgres-memo-select-list postgres-memo-annotation-table">
@@ -728,9 +720,9 @@ export function PostgresMemosView({
                     <>
                       <div className="postgres-memo-annotation-table-header">
                         <span />
-                        <span>Annotation id</span>
-                        <span>Source title</span>
-                        <span>Source type</span>
+                        <span>ID</span>
+                        <span>Source</span>
+                        <span>Type</span>
                       </div>
                       {annotations.map((annotation) => {
                         const source = sourceById.get(annotation.sourceId);
@@ -911,22 +903,19 @@ export function PostgresMemosView({
       <header className="view-header">
         <div className="users-title-wrap">
           <h1>Memos</h1>
-          <p className="view-subtitle">
-            PostgreSQL memos can now connect sources, annotations, codes, and objects in the same project workspace.
-          </p>
         </div>
         {canManageMemos ? (
           <div className="view-header-actions">
             <button
               type="button"
-              className="btn"
+              className="btn btn--primary"
               onClick={() => {
                 setError(null);
                 setNotice(null);
                 setEditorDraft(createEmptyDraft());
               }}
             >
-              New memo
+              New Memo
             </button>
           </div>
         ) : null}

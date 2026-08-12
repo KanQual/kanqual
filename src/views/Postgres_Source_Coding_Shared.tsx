@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type {
-  PostgresExperimentCode,
-  PostgresExperimentSourceLock,
-} from "../lib/postgresExperiment";
+  PostgresCode,
+  PostgresSourceLock,
+} from "../lib/postgres";
 import type {
   CodeOption,
   PendingSelection,
@@ -12,7 +12,7 @@ import type {
 } from "./Postgres_Sources_View";
 
 type CodeTreeNode = {
-  code: PostgresExperimentCode;
+  code: PostgresCode;
   depth: number;
   hasChildren: boolean;
 };
@@ -58,20 +58,26 @@ export const SOURCE_TEXT_SIZE_MAX_PX = 24;
 export const SOURCE_TEXT_SIZE_STEP_PX = 1;
 
 export type PostgresSourceCodingViewProps = {
+  projectId: string;
   row: SourceRow;
-  codes: PostgresExperimentCode[];
+  codes: PostgresCode[];
   annotations: SourceAnnotationRow[];
   codeOptions: CodeOption[];
   currentUserId: string;
-  sourceLock: PostgresExperimentSourceLock | null;
-  sourceLockConflict: PostgresExperimentSourceLock | null;
+  sourceLock: PostgresSourceLock | null;
+  sourceLockConflict: PostgresSourceLock | null;
   lockSyncing: boolean;
   canKickSourceLocks: boolean;
   canManageAnnotations: boolean;
   canManageMemos: boolean;
+  canCreateCodes?: boolean;
   initialSelectedAnnotationId: string | null;
+  initialTextSegment: { startOffset: number; endOffset: number } | null;
   saving: boolean;
   error: string | null;
+  onCreateCode?: (payload: { label: string; color: string; description: string; parentCodeId?: string | null }) => Promise<PostgresCode>;
+  onUpdateCode?: (codeId: string, payload: { label: string; color: string; description: string; parentCodeId?: string | null }) => Promise<PostgresCode>;
+  onDeleteCode?: (codeId: string) => Promise<void>;
   onCreateAnnotation: (sourceId: string, selection: PendingSelection, payload: { codeIds: string[]; note: string }) => Promise<void>;
   onUpdateAnnotation: (
     annotation: SourceAnnotationRow,
@@ -88,7 +94,7 @@ export type PostgresSourceCodingViewProps = {
     },
   ) => Promise<void>;
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
-  onKickSourceLock: (lock: PostgresExperimentSourceLock) => Promise<void>;
+  onKickSourceLock: (lock: PostgresSourceLock) => Promise<void>;
   onOpenMemoDraft: (payload: { sourceIds?: string[]; annotationIds?: string[]; codeIds?: string[] }) => void;
   onUpdateSourceWaveform: (sourceId: string, waveformPeaksJson: string) => Promise<void>;
   onUpdateSourceVideoFrameIndex?: (sourceId: string, videoFrameIndexJson: string) => Promise<void>;
@@ -157,8 +163,8 @@ export function buildMultiAnnotationBackground(colors: string[], isSelected: boo
   return `repeating-linear-gradient(135deg, ${stops.join(", ")})`;
 }
 
-export function orderedCodesWithDepth(codes: PostgresExperimentCode[]): CodeTreeNode[] {
-  const children = new Map<string | null, PostgresExperimentCode[]>();
+export function orderedCodesWithDepth(codes: PostgresCode[]): CodeTreeNode[] {
+  const children = new Map<string | null, PostgresCode[]>();
   codes.forEach((code) => {
     const parentId = code.parentCodeId || null;
     const list = children.get(parentId) ?? [];
@@ -192,6 +198,194 @@ export function visibleCodeNodes(tree: CodeTreeNode[], collapsed: Set<string>): 
     }
   });
   return visible;
+}
+
+export function PostgresSourceCodebookCard({
+  codes,
+  selectedCodeId,
+  annotationCountByCodeId,
+  canCreateCodes = false,
+  canManageMemos = false,
+  canSelectCodes = true,
+  isAnnotatable = false,
+  selectionHint,
+  saving = false,
+  className = "annotate-card",
+  style,
+  onSelectCode,
+  onNewCode,
+  onEditCode,
+  onAddChildCode,
+  onDeleteCode,
+  onOpenMemoDraft,
+}: {
+  codes: PostgresCode[];
+  selectedCodeId: string | null;
+  annotationCountByCodeId: Map<string, number>;
+  canCreateCodes?: boolean;
+  canManageMemos?: boolean;
+  canSelectCodes?: boolean;
+  isAnnotatable?: boolean;
+  selectionHint?: string | null;
+  saving?: boolean;
+  className?: string;
+  style?: CSSProperties;
+  onSelectCode: (codeId: string) => void | Promise<void>;
+  onNewCode?: () => void;
+  onEditCode?: (codeId: string) => void;
+  onAddChildCode?: (codeId: string) => void;
+  onDeleteCode?: (codeId: string) => void;
+  onOpenMemoDraft?: (payload: { codeIds?: string[] }) => void;
+}) {
+  const [collapsedCodeIds, setCollapsedCodeIds] = useState<Set<string>>(new Set());
+  const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresCode } | null>(null);
+  const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
+  const codeTree = useMemo(() => orderedCodesWithDepth(codes), [codes]);
+  const visibleCodes = useMemo(() => visibleCodeNodes(codeTree, collapsedCodeIds), [collapsedCodeIds, codeTree]);
+  const hasContextMenu = (canCreateCodes && (onEditCode || onAddChildCode || onDeleteCode)) || (canManageMemos && onOpenMemoDraft);
+
+  useEffect(() => {
+    function onPointerDown(event: MouseEvent) {
+      if (codeContextMenuRef.current && !codeContextMenuRef.current.contains(event.target as Node)) {
+        setCodeContextMenu(null);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setCodeContextMenu(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  function toggleCollapsedCode(codeId: string) {
+    setCollapsedCodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(codeId)) next.delete(codeId);
+      else next.add(codeId);
+      return next;
+    });
+  }
+
+  return (
+    <>
+      <div className={className} style={style}>
+        <div className="annotate-card-header">
+          <span className="annotate-card-title">Codebook</span>
+          {onNewCode ? (
+            <button
+              type="button"
+              className="codebook-icon-action"
+              onClick={onNewCode}
+              disabled={!canCreateCodes || saving}
+              aria-label="New code"
+              title={canCreateCodes ? "New code" : "You do not have permission to create codes."}
+            >
+              +
+            </button>
+          ) : null}
+        </div>
+        {selectionHint ? <div className="codebook-selection-hint">{selectionHint}</div> : null}
+        <ul className="code-list">
+          {codes.length === 0 ? (
+            <li className="code-list-empty">No codes yet.</li>
+          ) : (
+            visibleCodes.map(({ code, depth, hasChildren }) => (
+              <li
+                key={code.id}
+                className={`code-item${isAnnotatable ? " code-item--annotatable" : ""}${selectedCodeId === code.id ? " code-item--selected" : ""}`}
+                style={{ paddingLeft: 6 + depth * 16 }}
+                onMouseDown={(event) => {
+                  if (isAnnotatable) event.preventDefault();
+                }}
+                onClick={() => {
+                  if (!canSelectCodes) return;
+                  void onSelectCode(code.id);
+                }}
+                onContextMenu={(event) => {
+                  if (!hasContextMenu) return;
+                  event.preventDefault();
+                  setCodeContextMenu({ x: event.clientX, y: event.clientY, code });
+                }}
+              >
+                {hasChildren ? (
+                  <button
+                    type="button"
+                    className="code-collapse-btn"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleCollapsedCode(code.id);
+                    }}
+                    title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
+                  >
+                    {collapsedCodeIds.has(code.id) ? "\u25b6" : "\u25bc"}
+                  </button>
+                ) : (
+                  <span className="code-collapse-spacer" />
+                )}
+                <span className="code-swatch" style={{ background: code.color }} />
+                <span className="code-label">{code.label}</span>
+                <span className="code-ann-count">{annotationCountByCodeId.get(code.id) ?? 0}</span>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
+
+      {codeContextMenu ? (
+        <div ref={codeContextMenuRef} className="context-menu" style={codeContextMenuStyle}>
+          {canCreateCodes && onEditCode ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                onEditCode(codeContextMenu.code.id);
+                setCodeContextMenu(null);
+              }}
+            >
+              Edit code
+            </button>
+          ) : null}
+          {canManageMemos && onOpenMemoDraft ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                onOpenMemoDraft({ codeIds: [codeContextMenu.code.id] });
+                setCodeContextMenu(null);
+              }}
+            >
+              Memo about code
+            </button>
+          ) : null}
+          {canCreateCodes && onAddChildCode ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                onAddChildCode(codeContextMenu.code.id);
+                setCodeContextMenu(null);
+              }}
+            >
+              Add child code
+            </button>
+          ) : null}
+          {canCreateCodes && onDeleteCode ? (
+            <button
+              className="context-menu-item context-menu-item--danger"
+              onClick={() => {
+                onDeleteCode(codeContextMenu.code.id);
+                setCodeContextMenu(null);
+              }}
+            >
+              Delete code
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 export function getFloatingTooltipStyle(x: number, y: number, tooltipWidth = 280, tooltipHeight = 180) {
@@ -350,7 +544,7 @@ export function PostgresSourceCodingFiltersModal({
   onClearCodes,
   onClose,
 }: {
-  codes: PostgresExperimentCode[];
+  codes: PostgresCode[];
   annotations: SourceAnnotationRow[];
   hiddenUserIds: Set<string>;
   hiddenCodeIds: Set<string>;
@@ -479,7 +673,7 @@ export function PostgresSourceAnnotationPanel({
 }: {
   annotations: SourceAnnotationRow[];
   selectedAnnotationId: string | null;
-  codesById: Map<string, PostgresExperimentCode>;
+  codesById: Map<string, PostgresCode>;
   renderAnnotationExcerpt?: (annotation: SourceAnnotationRow) => ReactNode;
   onSelectAnnotation: (annotationId: string) => void;
   onDeleteAnnotation: (annotationId: string) => void;

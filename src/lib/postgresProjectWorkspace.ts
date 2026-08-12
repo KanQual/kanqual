@@ -1,35 +1,50 @@
 import type { Annotation, Case, Code, Document } from "../types";
 import {
-  listPostgresExperimentAnnotationSummaries,
-  listPostgresExperimentCodes,
-  listPostgresExperimentObjects,
-  listPostgresExperimentObjectTypes,
-  listPostgresExperimentSourceAttributeDefinitions,
-  listPostgresExperimentSourceAttributeValues,
-  listPostgresExperimentSourceLocks,
-  listPostgresExperimentSourceObjectLinks,
-  listPostgresExperimentSources,
-  type PostgresExperimentAnnotationSummary,
-  type PostgresExperimentCode,
-  type PostgresExperimentObject,
-  type PostgresExperimentObjectType,
-  type PostgresExperimentSource,
-  type PostgresExperimentSourceAttributeDefinition,
-  type PostgresExperimentSourceAttributeValue,
-  type PostgresExperimentSourceLock,
-  type PostgresExperimentSourceObjectLink,
-} from "./postgresExperiment";
+  listPostgresAnnotationSummaries,
+  listPostgresCodes,
+  listPostgresMemos,
+  listPostgresObjectAttributeDefinitions,
+  listPostgresObjects,
+  listPostgresObjectTypes,
+  listPostgresRelationships,
+  listPostgresRelationshipAttributeDefinitions,
+  listPostgresRelationshipTypes,
+  listPostgresSourceAttributeDefinitions,
+  listPostgresSourceAttributeValues,
+  listPostgresSourceLocks,
+  listPostgresSourceObjectLinks,
+  listPostgresSources,
+  type PostgresAnnotationSummary,
+  type PostgresCode,
+  type PostgresMemo,
+  type PostgresObject,
+  type PostgresObjectAttributeDefinition,
+  type PostgresObjectType,
+  type PostgresRelationship,
+  type PostgresRelationshipAttributeDefinition,
+  type PostgresRelationshipType,
+  type PostgresSource,
+  type PostgresSourceAttributeDefinition,
+  type PostgresSourceAttributeValue,
+  type PostgresSourceLock,
+  type PostgresSourceObjectLink,
+} from "./postgres";
 
 export type PostgresProjectWorkspaceSnapshot = {
-  sources: PostgresExperimentSource[];
-  codes: PostgresExperimentCode[];
-  annotations: PostgresExperimentAnnotationSummary[];
-  objects: PostgresExperimentObject[];
-  objectTypes: PostgresExperimentObjectType[];
-  sourceLocks: PostgresExperimentSourceLock[];
-  sourceObjectLinks: PostgresExperimentSourceObjectLink[];
-  sourceAttributeDefinitions: PostgresExperimentSourceAttributeDefinition[];
-  sourceAttributeValues: PostgresExperimentSourceAttributeValue[];
+  sources: PostgresSource[];
+  codes: PostgresCode[];
+  annotations: PostgresAnnotationSummary[];
+  memos: PostgresMemo[];
+  objects: PostgresObject[];
+  objectTypes: PostgresObjectType[];
+  objectAttributeDefinitions: PostgresObjectAttributeDefinition[];
+  relationships: PostgresRelationship[];
+  relationshipTypes: PostgresRelationshipType[];
+  relationshipAttributeDefinitions: PostgresRelationshipAttributeDefinition[];
+  sourceLocks: PostgresSourceLock[];
+  sourceObjectLinks: PostgresSourceObjectLink[];
+  sourceAttributeDefinitions: PostgresSourceAttributeDefinition[];
+  sourceAttributeValues: PostgresSourceAttributeValue[];
 };
 
 export type PostgresProjectWorkspaceLegacySnapshot = {
@@ -43,7 +58,7 @@ export type PostgresProjectWorkspaceLegacySnapshot = {
   }>;
 };
 
-function mapSourceToLegacyDocument(source: PostgresExperimentSource): Document {
+function mapSourceToLegacyDocument(source: PostgresSource): Document {
   return {
     id: source.id,
     projectId: source.projectId,
@@ -56,7 +71,7 @@ function mapSourceToLegacyDocument(source: PostgresExperimentSource): Document {
   };
 }
 
-function mapCodeToLegacyCode(code: PostgresExperimentCode): Code {
+function mapCodeToLegacyCode(code: PostgresCode): Code {
   return {
     id: code.id,
     projectId: code.projectId,
@@ -68,7 +83,7 @@ function mapCodeToLegacyCode(code: PostgresExperimentCode): Code {
   };
 }
 
-function mapAnnotationToLegacyAnnotation(annotation: PostgresExperimentAnnotationSummary): Annotation {
+function mapAnnotationToLegacyAnnotation(annotation: PostgresAnnotationSummary): Annotation {
   return {
     id: annotation.id,
     documentId: annotation.sourceId,
@@ -86,24 +101,34 @@ function mapAnnotationToLegacyAnnotation(annotation: PostgresExperimentAnnotatio
 export async function loadPostgresProjectWorkspaceSnapshot(
   projectId: string,
 ): Promise<PostgresProjectWorkspaceSnapshot> {
-  const [sources, codes, annotations, objects, objectTypes, sourceLocks, sourceObjectLinks, sourceAttributeDefinitions, sourceAttributeValues] = await Promise.all([
-    listPostgresExperimentSources(projectId),
-    listPostgresExperimentCodes(projectId),
-    listPostgresExperimentAnnotationSummaries(projectId),
-    listPostgresExperimentObjects(projectId),
-    listPostgresExperimentObjectTypes(projectId),
-    listPostgresExperimentSourceLocks(projectId),
-    listPostgresExperimentSourceObjectLinks(projectId),
-    listPostgresExperimentSourceAttributeDefinitions(projectId),
-    listPostgresExperimentSourceAttributeValues(projectId),
+  const [sources, codes, annotations, memos, objects, objectTypes, objectAttributeDefinitions, relationships, relationshipTypes, relationshipAttributeDefinitions, sourceLocks, sourceObjectLinks, sourceAttributeDefinitions, sourceAttributeValues] = await Promise.all([
+    listPostgresSources(projectId),
+    listPostgresCodes(projectId),
+    listPostgresAnnotationSummaries(projectId),
+    listPostgresMemos(projectId),
+    listPostgresObjects(projectId),
+    listPostgresObjectTypes(projectId),
+    listPostgresObjectAttributeDefinitions(projectId),
+    listPostgresRelationships(projectId),
+    listPostgresRelationshipTypes(projectId),
+    listPostgresRelationshipAttributeDefinitions(projectId),
+    listPostgresSourceLocks(projectId),
+    listPostgresSourceObjectLinks(projectId),
+    listPostgresSourceAttributeDefinitions(projectId),
+    listPostgresSourceAttributeValues(projectId),
   ]);
 
   return {
     sources,
     codes,
     annotations,
+    memos,
     objects,
     objectTypes,
+    objectAttributeDefinitions,
+    relationships,
+    relationshipTypes,
+    relationshipAttributeDefinitions,
     sourceLocks,
     sourceObjectLinks,
     sourceAttributeDefinitions,

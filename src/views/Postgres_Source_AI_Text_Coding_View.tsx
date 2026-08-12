@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { FilterIcon } from "../components/FilterIcon";
 import {
   ProcessedTranscriptView,
@@ -6,6 +7,9 @@ import {
 } from "../components/ProcessedTranscriptView";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { useI18n } from "../i18n/provider";
+import { readAppSettings } from "../lib/appSettings";
+import type { RelevantSegmentsAiJobResult } from "../lib/aiJobs";
+import { buildLlmInvokeRequestFields } from "../lib/llmRuntime";
 import { NewCodeModal, type CodeRow } from "./Project_Codebook_View";
 import type { SourceAnnotationRow } from "./Postgres_Sources_View";
 import {
@@ -14,6 +18,7 @@ import {
   getFloatingTooltipStyle,
   PostgresSourceAnnotationContextMenu,
   type AnnotationContextMenuState,
+  PostgresSourceCodebookCard,
   type PostgresSourceCodingViewProps,
   PostgresSourceAnnotationPanel,
   PostgresSourceCodingFiltersModal,
@@ -22,17 +27,45 @@ import {
   SOURCE_TEXT_SIZE_MIN_PX,
   SOURCE_TEXT_SIZE_STEP_PX,
   TextSizeControls,
-  orderedCodesWithDepth,
   tooltipExcerpt,
   type AnnotationHover,
   type StripeBar,
   type StripeHover,
-  visibleCodeNodes,
 } from "./Postgres_Source_Coding_Shared";
 
 const STRIPE_LANE_WIDTH = 8;
 const STRIPE_GUTTER_BASE = 24;
 const TRANSCRIPT_OUTLINE_PREVIEW_LIMIT = 88;
+const RELEVANT_SEGMENTS_SEARCH_TIMEOUT_MS = 60 * 1000;
+
+type PostgresRelevantSegment = RelevantSegmentsAiJobResult["segments"][number];
+
+function resolveRelevantSegmentRange(
+  documentText: string,
+  segment: PostgresRelevantSegment,
+): { startOffset: number; endOffset: number; quote: string } | null {
+  const startOffset = typeof segment.startOffset === "number" ? segment.startOffset : null;
+  const endOffset = typeof segment.endOffset === "number" ? segment.endOffset : null;
+  if (startOffset != null && endOffset != null && endOffset > startOffset) {
+    const start = Math.max(0, Math.min(startOffset, documentText.length));
+    const end = Math.max(start, Math.min(endOffset, documentText.length));
+    if (end > start) return { startOffset: start, endOffset: end, quote: documentText.slice(start, end) };
+  }
+
+  const matchText = (segment.matchText || segment.preview || "").trim();
+  if (!matchText) return null;
+  const index = documentText.indexOf(matchText);
+  if (index === -1) return null;
+  return { startOffset: index, endOffset: index + matchText.length, quote: matchText };
+}
+
+function formatRuntime(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
+}
 
 function scrollViewerTargetToStart(viewer: HTMLElement, target: HTMLElement) {
   const viewerRect = viewer.getBoundingClientRect();
@@ -57,7 +90,8 @@ function truncateTranscriptOutlineText(text: string): string {
   return `${normalized.slice(0, TRANSCRIPT_OUTLINE_PREVIEW_LIMIT - 1).trimEnd()}...`;
 }
 
-export function PostgresSourceTextCodingView({
+export function PostgresSourceAiTextCodingView({
+  projectId,
   row,
   codes,
   annotations,
@@ -97,32 +131,34 @@ export function PostgresSourceTextCodingView({
   const [scrollToAnnotationId, setScrollToAnnotationId] = useState<string | null>(null);
   const [selectedTextSegment, setSelectedTextSegment] = useState<{ startOffset: number; endOffset: number } | null>(null);
   const [scrollToTextSegment, setScrollToTextSegment] = useState(false);
+  const [selectedCodeId, setSelectedCodeId] = useState<string | null>(null);
   const [newCodeOpen, setNewCodeOpen] = useState(false);
   const [editingCodeId, setEditingCodeId] = useState<string | null>(null);
   const [childCodeParentId, setChildCodeParentId] = useState<string | null>(null);
   const [deletingCodeId, setDeletingCodeId] = useState<string | null>(null);
   const [deletingCode, setDeletingCode] = useState(false);
   const [deleteCodeError, setDeleteCodeError] = useState("");
-  const [collapsedCodeIds, setCollapsedCodeIds] = useState<Set<string>>(new Set());
+  const [relevantSegmentsOpen, setRelevantSegmentsOpen] = useState(false);
+  const [relevantSegmentsSearching, setRelevantSegmentsSearching] = useState(false);
+  const [relevantSegmentsStartedAt, setRelevantSegmentsStartedAt] = useState<number | null>(null);
+  const [relevantSegmentsRuntimeMs, setRelevantSegmentsRuntimeMs] = useState(0);
+  const [relevantSegmentsError, setRelevantSegmentsError] = useState("");
+  const [relevantSegmentsNotice, setRelevantSegmentsNotice] = useState("");
+  const [relevantSegmentsModel, setRelevantSegmentsModel] = useState("");
+  const [relevantSegments, setRelevantSegments] = useState<PostgresRelevantSegment[]>([]);
+  const [activeRelevantSegmentId, setActiveRelevantSegmentId] = useState<string | null>(null);
   const [hiddenUserIds, setHiddenUserIds] = useState<Set<string>>(new Set());
   const [hiddenCodeIds, setHiddenCodeIds] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
-  const [textSearchOpen, setTextSearchOpen] = useState(false);
-  const [textSearchQuery, setTextSearchQuery] = useState("");
-  const [activeTextSearchIndex, setActiveTextSearchIndex] = useState<number | null>(null);
   const [stripeBars, setStripeBars] = useState<StripeBar[]>([]);
   const [stripeHover, setStripeHover] = useState<StripeHover | null>(null);
   const [annotationHover, setAnnotationHover] = useState<AnnotationHover | null>(null);
   const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
-  const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: (typeof codes)[number] } | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const contentSelectionRef = useRef<HTMLDivElement | null>(null);
-  const textSearchInputRef = useRef<HTMLInputElement | null>(null);
   const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
-  const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const annotationContextMenuStyle = useViewportContextMenuStyle(annotationContextMenu, annotationContextMenuRef);
-  const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
 
   const normalizedSourceType = row.type.trim().toLowerCase().replace(/_/g, " ");
   const isProcessedTranscriptSource = normalizedSourceType === "processed transcript"
@@ -141,32 +177,9 @@ export function PostgresSourceTextCodingView({
     })),
     [processedTranscriptSegments],
   );
-  const activeTextSearchQuery = textSearchOpen ? textSearchQuery.trim() : "";
-  const textSearchMatches = useMemo(() => {
-    if (!activeTextSearchQuery) return [];
-    const matches: Array<{ startOffset: number; endOffset: number }> = [];
-    const wildcardPattern = activeTextSearchQuery.replace(/\*/g, "")
-      ? activeTextSearchQuery
-        .split("*")
-        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-        .join("\\S*?")
-      : "\\S+";
-    const searchRegex = new RegExp(wildcardPattern, "giu");
-    let match: RegExpExecArray | null;
-    while ((match = searchRegex.exec(row.content)) != null) {
-      const startOffset = match.index;
-      const endOffset = startOffset + match[0].length;
-      matches.push({ startOffset, endOffset });
-      if (match[0].length === 0) {
-        searchRegex.lastIndex += 1;
-      }
-    }
-    return matches;
-  }, [activeTextSearchQuery, row.content]);
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
-  const codeTree = useMemo(() => orderedCodesWithDepth(codes), [codes]);
-  const visibleCodes = useMemo(() => visibleCodeNodes(codeTree, collapsedCodeIds), [collapsedCodeIds, codeTree]);
   const codesById = useMemo(() => new Map(codes.map((code) => [code.id, code])), [codes]);
+  const selectedCode = selectedCodeId ? codesById.get(selectedCodeId) ?? null : null;
   const codebookRows = useMemo<CodeRow[]>(() => codes.map((code) => {
     const parentCode = code.parentCodeId ? codesById.get(code.parentCodeId) : null;
     return {
@@ -262,14 +275,10 @@ export function PostgresSourceTextCodingView({
       if (annotationContextMenuRef.current && !annotationContextMenuRef.current.contains(event.target as Node)) {
         setAnnotationContextMenu(null);
       }
-      if (codeContextMenuRef.current && !codeContextMenuRef.current.contains(event.target as Node)) {
-        setCodeContextMenu(null);
-      }
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setAnnotationContextMenu(null);
-        setCodeContextMenu(null);
       }
     }
     document.addEventListener("pointerdown", onPointerDown);
@@ -281,35 +290,20 @@ export function PostgresSourceTextCodingView({
   }, []);
 
   useEffect(() => {
-    if (textSearchOpen) {
-      window.setTimeout(() => textSearchInputRef.current?.focus(), 0);
-    }
-  }, [textSearchOpen]);
-
-  useEffect(() => {
-    if (textSearchMatches.length === 0) {
-      setActiveTextSearchIndex(null);
-      return;
-    }
-    setActiveTextSearchIndex(0);
-  }, [activeTextSearchQuery, row.id, textSearchMatches.length]);
-
-  useEffect(() => {
-    if (activeTextSearchIndex == null || !viewerRef.current) return;
-    const target = viewerRef.current.querySelector<HTMLElement>("[data-source-search-active='true']");
-    if (!target) return;
-    target.scrollIntoView({ block: "center", behavior: "smooth" });
-    target.classList.add("source-search-match-flash");
-    const timer = window.setTimeout(() => target.classList.remove("source-search-match-flash"), 1100);
-    return () => window.clearTimeout(timer);
-  }, [activeTextSearchIndex, textSearchMatches]);
-
-  useEffect(() => {
     if (selectedOutlineSortOrder == null || !viewerRef.current) return;
     const target = viewerRef.current.querySelector<HTMLElement>(`[data-transcript-sort-order="${selectedOutlineSortOrder}"]`);
     if (!target) return;
     target.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [selectedOutlineSortOrder]);
+
+  useEffect(() => {
+    if (!relevantSegmentsSearching || relevantSegmentsStartedAt == null) return;
+    setRelevantSegmentsRuntimeMs(Date.now() - relevantSegmentsStartedAt);
+    const timer = window.setInterval(() => {
+      setRelevantSegmentsRuntimeMs(Date.now() - relevantSegmentsStartedAt);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [relevantSegmentsSearching, relevantSegmentsStartedAt]);
 
   useEffect(() => {
     if (!scrollToAnnotationId || !viewerRef.current) return;
@@ -423,15 +417,6 @@ export function PostgresSourceTextCodingView({
     setPendingSelection({ startOffset, endOffset, quote });
   }
 
-  function toggleCollapsedCode(codeId: string) {
-    setCollapsedCodeIds((current) => {
-      const next = new Set(current);
-      if (next.has(codeId)) next.delete(codeId);
-      else next.add(codeId);
-      return next;
-    });
-  }
-
   function decreaseTextSize() {
     setTextSizePx((current) => Math.max(SOURCE_TEXT_SIZE_MIN_PX, current - SOURCE_TEXT_SIZE_STEP_PX));
   }
@@ -440,26 +425,12 @@ export function PostgresSourceTextCodingView({
     setTextSizePx((current) => Math.min(SOURCE_TEXT_SIZE_MAX_PX, current + SOURCE_TEXT_SIZE_STEP_PX));
   }
 
-  function goToPreviousTextSearchMatch() {
-    if (textSearchMatches.length === 0) return;
-    setActiveTextSearchIndex((current) => {
-      const currentIndex = current ?? 0;
-      return (currentIndex - 1 + textSearchMatches.length) % textSearchMatches.length;
-    });
-  }
-
-  function goToNextTextSearchMatch() {
-    if (textSearchMatches.length === 0) return;
-    setActiveTextSearchIndex((current) => {
-      const currentIndex = current ?? -1;
-      return (currentIndex + 1) % textSearchMatches.length;
-    });
-  }
-
   async function handleQuickCode(codeId: string) {
+    setSelectedCodeId(codeId);
     if (!pendingSelection || !canEditAnnotations || saving) return;
     await onCreateAnnotation(row.id, pendingSelection, { codeIds: [codeId], note: "" });
     setPendingSelection(null);
+    setActiveRelevantSegmentId(null);
   }
 
   async function handleConfirmDeleteCode() {
@@ -468,12 +439,98 @@ export function PostgresSourceTextCodingView({
     setDeleteCodeError("");
     try {
       await onDeleteCode(deletingCodeId);
+      if (selectedCodeId === deletingCodeId) setSelectedCodeId(null);
       setDeletingCodeId(null);
     } catch (deleteError) {
       setDeleteCodeError(deleteError instanceof Error ? deleteError.message : "Failed to delete code.");
     } finally {
       setDeletingCode(false);
     }
+  }
+
+  function openRelevantSegment(segment: PostgresRelevantSegment) {
+    setActiveRelevantSegmentId(segment.id);
+    if (segment.annotationId) {
+      const annotation = filteredAnnotations.find((entry) => entry.id === segment.annotationId);
+      if (annotation) {
+        setSelectedAnnotationId(annotation.id);
+        setSelectedTextSegment(null);
+        setScrollToAnnotationId(annotation.id);
+        return;
+      }
+    }
+    const range = resolveRelevantSegmentRange(row.content, segment);
+    if (!range) return;
+    setSelectedAnnotationId(null);
+    setSelectedTextSegment({ startOffset: range.startOffset, endOffset: range.endOffset });
+    setScrollToTextSegment(true);
+  }
+
+  async function applyRelevantSegment(segment: PostgresRelevantSegment) {
+    if (!selectedCode || !canEditAnnotations || saving) return;
+    const range = resolveRelevantSegmentRange(row.content, segment);
+    if (!range) {
+      setRelevantSegmentsError("Could not locate this segment in the current source.");
+      return;
+    }
+    await onCreateAnnotation(row.id, range, { codeIds: [selectedCode.id], note: "" });
+    setActiveRelevantSegmentId(null);
+    setSelectedTextSegment(null);
+  }
+
+  async function searchRelevantSegments() {
+    if (!selectedCode) {
+      setRelevantSegmentsError("Select one code before searching.");
+      return;
+    }
+    setRelevantSegmentsOpen(true);
+    setRelevantSegmentsSearching(true);
+    const startedAt = Date.now();
+    setRelevantSegmentsStartedAt(startedAt);
+    setRelevantSegmentsRuntimeMs(0);
+    setRelevantSegmentsError("");
+    setRelevantSegmentsNotice("");
+    try {
+      const llmSettings = readAppSettings().llm;
+      const result = await invoke<RelevantSegmentsAiJobResult>("find_relevant_project_segments_with_ollama", {
+        request: {
+          projectId,
+          activeDocumentId: row.id,
+          codeId: selectedCode.id,
+          codeLabel: selectedCode.label,
+          codeDescription: selectedCode.description || null,
+          ...buildLlmInvokeRequestFields(llmSettings),
+          timeoutSeconds: Math.floor(RELEVANT_SEGMENTS_SEARCH_TIMEOUT_MS / 1000),
+          candidateLimit: llmSettings.ollamaRelevantSegmentsCandidateLimit,
+          maxResults: llmSettings.ollamaRelevantSegmentsMaxResults,
+          prefixQueries: llmSettings.prefixQueries,
+        },
+      });
+      const sourceSegments = result.segments.filter((segment) => (segment.sourceId ?? segment.documentId ?? row.id) === row.id);
+      setRelevantSegments(sourceSegments);
+      setRelevantSegmentsModel(result.model);
+      setRelevantSegmentsNotice(
+        sourceSegments.length === 0
+          ? `${result.model} reviewed ${result.searchedItems} indexed candidates but did not identify any strong matches yet.`
+          : "",
+      );
+    } catch (error) {
+      console.error("PostgreSQL relevant segment search failed:", error);
+      setRelevantSegmentsError(error instanceof Error ? error.message : "Relevant segment search failed.");
+    } finally {
+      setRelevantSegmentsSearching(false);
+    }
+  }
+
+  function clearRelevantSegments() {
+    setRelevantSegments([]);
+    setRelevantSegmentsError("");
+    setRelevantSegmentsNotice("");
+    setRelevantSegmentsModel("");
+    setRelevantSegmentsStartedAt(null);
+    setRelevantSegmentsRuntimeMs(0);
+    setActiveRelevantSegmentId(null);
+    setSelectedTextSegment(null);
   }
 
   function renderAnnotatedTextRange(
@@ -503,153 +560,109 @@ export function PostgresSourceTextCodingView({
         boundaries.add(selectedTextSegment.endOffset);
       }
     }
-    const overlappingSearchMatches = textSearchMatches
-      .map((match, index) => ({ ...match, index }))
-      .filter((match) => match.startOffset < absoluteEndOffset && match.endOffset > absoluteStartOffset);
-    for (const match of overlappingSearchMatches) {
-      if (match.startOffset > absoluteStartOffset && match.startOffset < absoluteEndOffset) {
-        boundaries.add(match.startOffset);
-      }
-      if (match.endOffset > absoluteStartOffset && match.endOffset < absoluteEndOffset) {
-        boundaries.add(match.endOffset);
-      }
-    }
 
     const orderedBoundaries = [...boundaries].sort((left, right) => left - right);
 
     return orderedBoundaries.slice(0, -1).map((start, index) => {
-      const end = orderedBoundaries[index + 1];
-      const rangeText = text.slice(start - absoluteStartOffset, end - absoluteStartOffset);
-      const covering = rangedAnnotations.filter((annotation) => annotation.startOffset < end && annotation.endOffset > start);
-      const searchMatch = overlappingSearchMatches.find((match) => match.startOffset <= start && match.endOffset >= end) ?? null;
-      const isSearchMatch = searchMatch != null;
-      const isActiveSearchMatch = searchMatch?.index === activeTextSearchIndex;
-      const isTextSegmentSelected = selectedTextSegment != null
-        && selectedTextSegment.startOffset < end
-        && selectedTextSegment.endOffset > start;
-      const isTextSegmentStart = isTextSegmentSelected && selectedTextSegment != null && start === selectedTextSegment.startOffset;
-      const isTextSegmentEnd = isTextSegmentSelected && selectedTextSegment != null && end === selectedTextSegment.endOffset;
-      if (covering.length === 0) {
-        if (isSearchMatch) {
+          const end = orderedBoundaries[index + 1];
+          const rangeText = text.slice(start - absoluteStartOffset, end - absoluteStartOffset);
+          const covering = rangedAnnotations.filter((annotation) => annotation.startOffset < end && annotation.endOffset > start);
+          const isTextSegmentSelected = selectedTextSegment != null
+            && selectedTextSegment.startOffset < end
+            && selectedTextSegment.endOffset > start;
+          const isTextSegmentStart = isTextSegmentSelected && selectedTextSegment != null && start === selectedTextSegment.startOffset;
+          const isTextSegmentEnd = isTextSegmentSelected && selectedTextSegment != null && end === selectedTextSegment.endOffset;
+          if (covering.length === 0) {
+            return (
+              <span
+                key={`${keyPrefix}-${start}-${end}`}
+                data-text-segment-citation={isTextSegmentSelected ? "true" : undefined}
+                className={isTextSegmentSelected ? "text-segment-citation-highlight" : undefined}
+                style={{
+                  borderTopLeftRadius: isTextSegmentStart ? 4 : undefined,
+                  borderBottomLeftRadius: isTextSegmentStart ? 4 : undefined,
+                  borderTopRightRadius: isTextSegmentEnd ? 4 : undefined,
+                  borderBottomRightRadius: isTextSegmentEnd ? 4 : undefined,
+                }}
+              >
+                {rangeText}
+              </span>
+            );
+          }
+          const isSelected = selectedAnnotation != null
+            && selectedAnnotation.startOffset < end
+            && selectedAnnotation.endOffset > start;
+          const isSelectedStart = isSelected && selectedAnnotation != null && start === selectedAnnotation.startOffset;
+          const isSelectedEnd = isSelected && selectedAnnotation != null && end === selectedAnnotation.endOffset;
+          const firstId = covering[0].id;
+          const selectionOutlineParts = isSelected
+            ? [
+                "inset 0 2px 0 0 currentColor",
+                "inset 0 -2px 0 0 currentColor",
+                isSelectedStart ? "inset 2px 0 0 0 currentColor" : null,
+                isSelectedEnd ? "inset -2px 0 0 0 currentColor" : null,
+              ].filter((part): part is string => part != null)
+            : [];
           return (
             <mark
               key={`${keyPrefix}-${start}-${end}`}
-              data-source-search-active={isActiveSearchMatch ? "true" : undefined}
+              data-anns={covering.map((annotation) => annotation.id).join(" ")}
               data-text-segment-citation={isTextSegmentSelected ? "true" : undefined}
-              className={`source-search-match${isActiveSearchMatch ? " source-search-match--active" : ""}${isTextSegmentSelected ? " text-segment-citation-highlight" : ""}`}
+              className={`annotation-highlight${covering.length > 1 ? " annotation-highlight--multi" : ""}${isSelected ? " annotation-highlight--selected" : ""}${isTextSegmentSelected ? " text-segment-citation-highlight" : ""}`}
               style={{
-                borderTopLeftRadius: isTextSegmentStart ? 4 : undefined,
-                borderBottomLeftRadius: isTextSegmentStart ? 4 : undefined,
-                borderTopRightRadius: isTextSegmentEnd ? 4 : undefined,
-                borderBottomRightRadius: isTextSegmentEnd ? 4 : undefined,
+                background: buildMultiAnnotationBackground(covering.flatMap((annotation) => annotation.codeColors), isSelected),
+                boxShadow: selectionOutlineParts.length > 0 ? selectionOutlineParts.join(", ") : undefined,
+                borderRadius: isSelected ? 0 : undefined,
+                borderTopLeftRadius: isSelectedStart ? 4 : undefined,
+                borderBottomLeftRadius: isSelectedStart ? 4 : undefined,
+                borderTopRightRadius: isSelectedEnd ? 4 : undefined,
+                borderBottomRightRadius: isSelectedEnd ? 4 : undefined,
               }}
+              onClick={() => {
+                setSelectedAnnotationId(firstId);
+                setSelectedTextSegment(null);
+                setScrollToAnnotationId(firstId);
+              }}
+              onDoubleClick={() => {
+                const annotation = filteredAnnotations.find((entry) => entry.id === firstId) ?? null;
+                if (annotation && canEditAnnotations) setEditingAnnotation(annotation);
+              }}
+              onContextMenu={(event) => {
+                if (!canManageMemos && !canEditAnnotations) return;
+                const annotation = filteredAnnotations.find((entry) => entry.id === firstId) ?? null;
+                if (!annotation) return;
+                event.preventDefault();
+                setSelectedAnnotationId(annotation.id);
+                setAnnotationHover(null);
+                setAnnotationContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  annotation,
+                });
+              }}
+              onMouseEnter={(event) => {
+                if (annotationContextMenu) return;
+                setAnnotationHover({
+                  x: event.clientX,
+                  y: event.clientY,
+                  items: covering.map((annotation) => ({
+                    annotationId: annotation.id,
+                    label: annotation.codeLabels.join(", ") || "Annotation",
+                    color: annotation.codeColors[0] || "#355070",
+                    quote: annotation.quote,
+                  })),
+                });
+              }}
+              onMouseMove={(event) => {
+                if (annotationContextMenu) return;
+                setAnnotationHover((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current);
+              }}
+              onMouseLeave={() => setAnnotationHover(null)}
             >
               {rangeText}
             </mark>
           );
-        }
-        return (
-          <span
-            key={`${keyPrefix}-${start}-${end}`}
-            data-text-segment-citation={isTextSegmentSelected ? "true" : undefined}
-            className={isTextSegmentSelected ? "text-segment-citation-highlight" : undefined}
-            style={{
-              borderTopLeftRadius: isTextSegmentStart ? 4 : undefined,
-              borderBottomLeftRadius: isTextSegmentStart ? 4 : undefined,
-              borderTopRightRadius: isTextSegmentEnd ? 4 : undefined,
-              borderBottomRightRadius: isTextSegmentEnd ? 4 : undefined,
-            }}
-          >
-            {rangeText}
-          </span>
-        );
-      }
-
-      const isSelected = selectedAnnotation != null
-        && selectedAnnotation.startOffset < end
-        && selectedAnnotation.endOffset > start;
-      const isSelectedStart = isSelected && selectedAnnotation != null && start === selectedAnnotation.startOffset;
-      const isSelectedEnd = isSelected && selectedAnnotation != null && end === selectedAnnotation.endOffset;
-      const firstId = covering[0].id;
-      const selectionOutlineParts = isSelected
-        ? [
-            "inset 0 2px 0 0 currentColor",
-            "inset 0 -2px 0 0 currentColor",
-            isSelectedStart ? "inset 2px 0 0 0 currentColor" : null,
-            isSelectedEnd ? "inset -2px 0 0 0 currentColor" : null,
-          ].filter((part): part is string => part != null)
-        : [];
-      const searchOutlineParts = isSearchMatch
-        ? [
-            "inset 0 2px 0 0 #f59e0b",
-            "inset 0 -2px 0 0 #f59e0b",
-            searchMatch.startOffset === start ? "inset 2px 0 0 0 #f59e0b" : null,
-            searchMatch.endOffset === end ? "inset -2px 0 0 0 #f59e0b" : null,
-            isActiveSearchMatch ? "0 0 0 2px color-mix(in srgb, #f59e0b 38%, transparent)" : null,
-          ].filter((part): part is string => part != null)
-        : [];
-      const shadowParts = [...selectionOutlineParts, ...searchOutlineParts];
-      return (
-        <mark
-          key={`${keyPrefix}-${start}-${end}`}
-          data-anns={covering.map((annotation) => annotation.id).join(" ")}
-          data-source-search-active={isActiveSearchMatch ? "true" : undefined}
-          data-text-segment-citation={isTextSegmentSelected ? "true" : undefined}
-          className={`annotation-highlight${covering.length > 1 ? " annotation-highlight--multi" : ""}${isSelected ? " annotation-highlight--selected" : ""}${isSearchMatch ? " annotation-highlight--search-match" : ""}${isActiveSearchMatch ? " annotation-highlight--search-active" : ""}${isTextSegmentSelected ? " text-segment-citation-highlight" : ""}`}
-          style={{
-            background: buildMultiAnnotationBackground(covering.flatMap((annotation) => annotation.codeColors), isSelected),
-            boxShadow: shadowParts.length > 0 ? shadowParts.join(", ") : undefined,
-            borderRadius: isSelected ? 0 : undefined,
-            borderTopLeftRadius: isSelectedStart ? 4 : undefined,
-            borderBottomLeftRadius: isSelectedStart ? 4 : undefined,
-            borderTopRightRadius: isSelectedEnd ? 4 : undefined,
-            borderBottomRightRadius: isSelectedEnd ? 4 : undefined,
-          }}
-          onClick={() => {
-            setSelectedAnnotationId(firstId);
-            setSelectedTextSegment(null);
-            setScrollToAnnotationId(firstId);
-          }}
-          onDoubleClick={() => {
-            const annotation = filteredAnnotations.find((entry) => entry.id === firstId) ?? null;
-            if (annotation && canEditAnnotations) setEditingAnnotation(annotation);
-          }}
-          onContextMenu={(event) => {
-            if (!canManageMemos && !canEditAnnotations) return;
-            const annotation = filteredAnnotations.find((entry) => entry.id === firstId) ?? null;
-            if (!annotation) return;
-            event.preventDefault();
-            setSelectedAnnotationId(annotation.id);
-            setAnnotationHover(null);
-            setAnnotationContextMenu({
-              x: event.clientX,
-              y: event.clientY,
-              annotation,
-            });
-          }}
-          onMouseEnter={(event) => {
-            if (annotationContextMenu) return;
-            setAnnotationHover({
-              x: event.clientX,
-              y: event.clientY,
-              items: covering.map((annotation) => ({
-                annotationId: annotation.id,
-                label: annotation.codeLabels.join(", ") || "Annotation",
-                color: annotation.codeColors[0] || "#355070",
-                quote: annotation.quote,
-              })),
-            });
-          }}
-          onMouseMove={(event) => {
-            if (annotationContextMenu) return;
-            setAnnotationHover((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current);
-          }}
-          onMouseLeave={() => setAnnotationHover(null)}
-        >
-          {rangeText}
-        </mark>
-      );
-    });
+        });
   }
 
   function renderCodingContent() {
@@ -685,69 +698,34 @@ export function PostgresSourceTextCodingView({
 
       <div className="annotate-layout code-text-annotate-layout" style={{ minHeight: 0 }}>
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header">
-              <span className="annotate-card-title">Codebook</span>
-              <button
-                type="button"
-                className="codebook-icon-action"
-                onClick={() => {
-                  setNewCodeOpen(true);
-                }}
-                disabled={!canCreateCodes || !onCreateCode || saving}
-                aria-label="New code"
-                title={canCreateCodes && onCreateCode ? "New code" : "You do not have permission to create codes."}
-              >
-                +
-              </button>
-            </div>
-            {pendingSelection ? (
-              <div className="codebook-selection-hint">
-                Select a code to apply it to the current text selection.
-              </div>
-            ) : null}
-            <ul className="code-list">
-              {codes.length === 0 ? (
-                <li className="code-list-empty">No codes yet.</li>
-              ) : (
-                visibleCodes.map(({ code, depth, hasChildren }) => (
-                  <li
-                    key={code.id}
-                    className={`code-item${pendingSelection && canEditAnnotations ? " code-item--annotatable" : ""}`}
-                    style={{ paddingLeft: 6 + depth * 16 }}
-                    onMouseDown={(event) => {
-                      if (pendingSelection) event.preventDefault();
-                    }}
-                    onClick={() => void handleQuickCode(code.id)}
-                    onContextMenu={(event) => {
-                      if (!canManageMemos && !canCreateCodes && !onUpdateCode && !onDeleteCode) return;
-                      event.preventDefault();
-                      setCodeContextMenu({ x: event.clientX, y: event.clientY, code });
-                    }}
-                  >
-                    {hasChildren ? (
-                      <button
-                        type="button"
-                        className="code-collapse-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleCollapsedCode(code.id);
-                        }}
-                        title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
-                      >
-                        {collapsedCodeIds.has(code.id) ? "\u25b6" : "\u25bc"}
-                      </button>
-                    ) : (
-                      <span className="code-collapse-spacer" />
-                    )}
-                    <span className="code-swatch" style={{ background: code.color }} />
-                    <span className="code-label">{code.label}</span>
-                    <span className="code-ann-count">{annotationCountByCodeId.get(code.id) ?? 0}</span>
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
+          <PostgresSourceCodebookCard
+            codes={codes}
+            selectedCodeId={selectedCodeId}
+            annotationCountByCodeId={annotationCountByCodeId}
+            canCreateCodes={canCreateCodes && !!onCreateCode}
+            canManageMemos={canManageMemos}
+            isAnnotatable={!!pendingSelection && canEditAnnotations}
+            selectionHint={pendingSelection ? "Select a code to apply it to the current text selection." : null}
+            saving={saving}
+            style={{ flexShrink: 0 }}
+            onSelectCode={handleQuickCode}
+            onNewCode={() => setNewCodeOpen(true)}
+            onEditCode={onUpdateCode ? (codeId) => {
+              setEditingCodeId(codeId);
+              setNewCodeOpen(false);
+              setChildCodeParentId(null);
+            } : undefined}
+            onOpenMemoDraft={onOpenMemoDraft}
+            onAddChildCode={onCreateCode ? (codeId) => {
+              setChildCodeParentId(codeId);
+              setNewCodeOpen(false);
+              setEditingCodeId(null);
+            } : undefined}
+            onDeleteCode={onDeleteCode ? (codeId) => {
+              setDeletingCodeId(codeId);
+              setDeleteCodeError("");
+            } : undefined}
+          />
 
           <PostgresSourceAnnotationPanel
             annotations={filteredAnnotations}
@@ -812,59 +790,6 @@ export function PostgresSourceTextCodingView({
                 ) : null}
               </span>
               <div className="doc-toolbar-actions">
-                <div className="source-content-search">
-                  {textSearchOpen ? (
-                    <>
-                      <input
-                        ref={textSearchInputRef}
-                        className="source-content-search-input"
-                        value={textSearchQuery}
-                        onChange={(event) => setTextSearchQuery(event.target.value)}
-                        placeholder="Search text"
-                        aria-label="Search source text"
-                      />
-                      <span className="source-content-search-count">
-                        {activeTextSearchQuery
-                          ? textSearchMatches.length > 0 && activeTextSearchIndex != null
-                            ? `${activeTextSearchIndex + 1}/${textSearchMatches.length}`
-                            : "0/0"
-                          : ""}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn--small source-content-search-nav"
-                        onClick={goToPreviousTextSearchMatch}
-                        disabled={textSearchMatches.length === 0}
-                        aria-label="Previous search match"
-                        title="Previous"
-                      >
-                        {"\u2191"}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--small source-content-search-nav"
-                        onClick={goToNextTextSearchMatch}
-                        disabled={textSearchMatches.length === 0}
-                        aria-label="Next search match"
-                        title="Next"
-                      >
-                        {"\u2193"}
-                      </button>
-                    </>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn btn--small source-content-search-toggle"
-                    onClick={() => setTextSearchOpen((open) => !open)}
-                    aria-label={textSearchOpen ? "Close text search" : "Search source text"}
-                    title={textSearchOpen ? "Close search" : "Search"}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <circle cx="11" cy="11" r="6" />
-                      <path d="M16 16l4 4" />
-                    </svg>
-                  </button>
-                </div>
                 <TextSizeControls
                   fontSizePx={textSizePx}
                   onDecrease={decreaseTextSize}
@@ -907,6 +832,100 @@ export function PostgresSourceTextCodingView({
                 <p className="users-guide-copy" style={{ margin: 0 }}>
                   {lockSyncing ? "Claiming the source lock for annotation..." : "This source is currently read-only in the coding workspace."}
                 </p>
+              )}
+            </div>
+
+            <div className="doc-viewer-inline-section ai-segments-embedded">
+              <div className="doc-inline-section-header">
+                <button
+                  type="button"
+                  className={`doc-inline-disclosure${relevantSegmentsOpen ? " doc-inline-disclosure--open" : ""}`}
+                  aria-expanded={relevantSegmentsOpen}
+                  onClick={() => setRelevantSegmentsOpen((open) => !open)}
+                >
+                  <span className="doc-inline-disclosure-chevron" aria-hidden="true">
+                    {relevantSegmentsOpen ? "\u25be" : "\u25b8"}
+                  </span>
+                  <span className="doc-inline-disclosure-label">Relevant Segments</span>
+                  <span className="ai-segments-inline-badge">AI Suggested</span>
+                </button>
+                <div className="ai-segments-header-actions">
+                  {(relevantSegments.length > 0 || relevantSegmentsError || relevantSegmentsNotice) && (
+                    <button type="button" className="btn btn--small" onClick={clearRelevantSegments} disabled={relevantSegmentsSearching}>
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn--small btn--primary"
+                    onClick={() => void searchRelevantSegments()}
+                    disabled={!selectedCode || relevantSegmentsSearching}
+                  >
+                    {relevantSegmentsSearching ? "Searching" : relevantSegments.length > 0 ? "Run Again" : "Search"}
+                  </button>
+                </div>
+              </div>
+              {relevantSegmentsOpen && (
+                <div className="doc-viewer-inline-section-body" style={{ maxHeight: 260 }}>
+                  <div className="ai-segments-summary">
+                    {selectedCode ? (
+                      <>
+                        <span className="ai-segments-summary-label">Selected code</span>
+                        <span className="ai-segments-summary-value">{selectedCode.label}</span>
+                      </>
+                    ) : (
+                      <span className="annotation-list-empty">Select one code before searching.</span>
+                    )}
+                  </div>
+                  {relevantSegmentsSearching && (
+                    <div className="ai-segments-search-state">
+                      <div className="ai-segments-progress" aria-hidden="true">
+                        <span className="ai-segments-progress-bar" />
+                      </div>
+                      <div className="ai-segments-runtime">Runtime: {formatRuntime(relevantSegmentsRuntimeMs)}</div>
+                      <div className="ai-segments-search-copy">Searching project text for relevant segments...</div>
+                    </div>
+                  )}
+                  {relevantSegmentsError && <div className="form-error project-settings-error">{relevantSegmentsError}</div>}
+                  {relevantSegmentsNotice && !relevantSegmentsError && <div className="settings-success project-settings-success">{relevantSegmentsNotice}</div>}
+                  {relevantSegmentsModel && !relevantSegmentsSearching && (
+                    <p className="ai-segments-model-note">Latest search model: <code>{relevantSegmentsModel}</code></p>
+                  )}
+                  <ul className="annotation-list">
+                    {!relevantSegmentsSearching && relevantSegments.length === 0 && selectedCode && !relevantSegmentsError && (
+                      <li className="annotation-list-empty">Run a search to find project text that may fit this code.</li>
+                    )}
+                    {relevantSegments.map((segment) => (
+                      <li key={segment.id} className="annotation-item ai-segments-item">
+                        <button
+                          type="button"
+                          className={`ai-segments-result-button${activeRelevantSegmentId === segment.id ? " ai-segments-result-button--active" : ""}`}
+                          onClick={() => openRelevantSegment(segment)}
+                        >
+                          <div className="annotation-item-header">
+                            <span className="annotation-code-badge ai-segments-badge">
+                              {segment.itemType === "annotation" ? "Annotation" : "Text Segment"}
+                            </span>
+                            <span className="ai-segments-score">{Math.round(segment.similarity * 100)}%</span>
+                          </div>
+                          <p className="ai-segments-title">{segment.title}</p>
+                          <blockquote className="annotation-quote">"{segment.preview}"</blockquote>
+                          {segment.reason && <p className="annotation-note">{segment.reason}</p>}
+                        </button>
+                        {canEditAnnotations && selectedCode && (
+                          <button
+                            type="button"
+                            className="btn btn--small"
+                            onClick={() => void applyRelevantSegment(segment)}
+                            disabled={saving}
+                          >
+                            Apply Code
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
 
@@ -959,60 +978,6 @@ export function PostgresSourceTextCodingView({
         </div>
       </div>
 
-      {codeContextMenu ? (
-        <div ref={codeContextMenuRef} className="context-menu" style={codeContextMenuStyle}>
-          {canCreateCodes && onUpdateCode ? (
-            <button
-              className="context-menu-item"
-              onClick={() => {
-                setEditingCodeId(codeContextMenu.code.id);
-                setNewCodeOpen(false);
-                setChildCodeParentId(null);
-                setCodeContextMenu(null);
-              }}
-            >
-              Edit code
-            </button>
-          ) : null}
-          {canManageMemos ? (
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              onOpenMemoDraft({ codeIds: [codeContextMenu.code.id] });
-              setCodeContextMenu(null);
-            }}
-          >
-            Memo about code
-          </button>
-          ) : null}
-          {canCreateCodes && onCreateCode ? (
-            <button
-              className="context-menu-item"
-              onClick={() => {
-                setChildCodeParentId(codeContextMenu.code.id);
-                setNewCodeOpen(false);
-                setEditingCodeId(null);
-                setCodeContextMenu(null);
-              }}
-            >
-              Add child code
-            </button>
-          ) : null}
-          {canCreateCodes && onDeleteCode ? (
-            <button
-              className="context-menu-item context-menu-item--danger"
-              onClick={() => {
-                setDeletingCodeId(codeContextMenu.code.id);
-                setDeleteCodeError("");
-                setCodeContextMenu(null);
-              }}
-          >
-            Delete code
-          </button>
-          ) : null}
-        </div>
-      ) : null}
-
       <PostgresSourceAnnotationContextMenu
         contextMenu={annotationContextMenu}
         contextMenuRef={annotationContextMenuRef}
@@ -1061,12 +1026,13 @@ export function PostgresSourceTextCodingView({
           allCodes={codebookRows}
           onSubmit={async (payload) => {
             if (!onCreateCode || !canCreateCodes) return;
-            await onCreateCode({
+            const createdCode = await onCreateCode({
               label: payload.label,
               color: payload.color,
               description: payload.description,
               parentCodeId: payload.parentId ?? null,
             });
+            setSelectedCodeId(createdCode.id);
           }}
           onDone={() => setNewCodeOpen(false)}
           onClose={() => setNewCodeOpen(false)}
@@ -1081,12 +1047,13 @@ export function PostgresSourceTextCodingView({
           initialParentId={childCodeParentRow.id}
           onSubmit={async (payload) => {
             if (!onCreateCode || !canCreateCodes) return;
-            await onCreateCode({
+            const createdCode = await onCreateCode({
               label: payload.label,
               color: payload.color,
               description: payload.description,
               parentCodeId: payload.parentId ?? childCodeParentRow.id,
             });
+            setSelectedCodeId(createdCode.id);
           }}
           onDone={() => setChildCodeParentId(null)}
           onClose={() => setChildCodeParentId(null)}
@@ -1105,12 +1072,13 @@ export function PostgresSourceTextCodingView({
           excludeCodeId={editingCodeRow.id}
           onSubmit={async (payload) => {
             if (!onUpdateCode || !canCreateCodes) return;
-            await onUpdateCode(editingCodeRow.id, {
+            const updatedCode = await onUpdateCode(editingCodeRow.id, {
               label: payload.label,
               color: payload.color,
               description: payload.description,
               parentCodeId: payload.parentId ?? null,
             });
+            setSelectedCodeId(updatedCode.id);
           }}
           onDone={() => setEditingCodeId(null)}
           onClose={() => setEditingCodeId(null)}

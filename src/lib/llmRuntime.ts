@@ -1,8 +1,8 @@
-import type { CloudLlmProvider, LlmSettings } from "./appSettings";
+import type { CloudLlmProvider, LlmSettings, LocalLlmProvider } from "./appSettings";
 
 export type ActiveLlmRuntime = {
   mode: "local" | "cloud";
-  provider: CloudLlmProvider;
+  provider: CloudLlmProvider | LocalLlmProvider;
   providerLabel: string;
   model: string;
   sourceTag: string;
@@ -13,6 +13,7 @@ export type LlmInvokeRequestFields = {
   connectionMode: "local" | "cloud";
   cloudProvider?: CloudLlmProvider;
   cloudApiSecret?: string;
+  localProvider?: LocalLlmProvider;
   protocol: "http" | "https";
   host: string;
   port: number;
@@ -37,6 +38,18 @@ function providerLabel(provider: CloudLlmProvider): string {
       return "Ollama";
     default:
       return "LLM";
+  }
+}
+
+function localProviderLabel(provider: LocalLlmProvider): string {
+  switch (provider) {
+    case "llamacpp":
+      return "llama.cpp";
+    case "custom":
+      return "Custom";
+    case "ollama":
+    default:
+      return "Ollama";
   }
 }
 
@@ -66,13 +79,13 @@ export function getActiveLlmRuntime(settings: LlmSettings): ActiveLlmRuntime | n
     };
   }
 
-  if (!settings.ollamaEnabled || !settings.ollamaSelectedModel.trim()) return null;
+  if (!settings.ollamaEnabled || !settings.ollamaHost.trim() || settings.ollamaPort <= 0 || !settings.ollamaSelectedModel.trim()) return null;
   return {
     mode: "local",
-    provider: "ollama",
-    providerLabel: "Ollama",
+    provider: settings.localProvider,
+    providerLabel: localProviderLabel(settings.localProvider),
     model: settings.ollamaSelectedModel.trim(),
-    sourceTag: "ollama",
+    sourceTag: settings.localProvider,
     baseUrl: `${settings.ollamaProtocol}://${settings.ollamaHost}:${settings.ollamaPort}`,
   };
 }
@@ -110,13 +123,16 @@ export function assertActiveLlmRuntime(settings: LlmSettings, taskLabel: string)
   if (!settings.ollamaSelectedModel.trim()) {
     throw new Error(`Choose a local model in AI Assist Settings before ${taskLabel}.`);
   }
+  if (!settings.ollamaHost.trim() || settings.ollamaPort <= 0) {
+    throw new Error(`Enter a local provider host and port in AI Assist Settings before ${taskLabel}.`);
+  }
 
   return {
     mode: "local",
-    provider: "ollama",
-    providerLabel: "Ollama",
+    provider: settings.localProvider,
+    providerLabel: localProviderLabel(settings.localProvider),
     model: settings.ollamaSelectedModel.trim(),
-    sourceTag: "ollama",
+    sourceTag: settings.localProvider,
     baseUrl: `${settings.ollamaProtocol}://${settings.ollamaHost}:${settings.ollamaPort}`,
   };
 }
@@ -125,8 +141,9 @@ export function buildLlmInvokeRequestFields(settings: LlmSettings): LlmInvokeReq
   const runtime = assertActiveLlmRuntime(settings, "using AI Assist");
   return {
     connectionMode: runtime.mode,
-    cloudProvider: runtime.mode === "cloud" ? runtime.provider : undefined,
+    cloudProvider: runtime.mode === "cloud" ? settings.cloudProvider : undefined,
     cloudApiSecret: runtime.mode === "cloud" ? settings.cloudApiSecret.trim() : undefined,
+    localProvider: runtime.mode === "local" ? settings.localProvider : undefined,
     protocol: settings.ollamaProtocol,
     host: settings.ollamaHost,
     port: settings.ollamaPort,

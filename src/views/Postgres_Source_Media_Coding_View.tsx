@@ -9,7 +9,7 @@ import {
   MediaSeekForwardButton,
   MediaVolumeRange,
 } from "media-chrome/react";
-import type { PostgresExperimentCode } from "../lib/postgresExperiment";
+import type { PostgresCode } from "../lib/postgres";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import {
   createMediaWaveformCache,
@@ -35,6 +35,7 @@ import {
   type PostgresSourceMediaTimelineHandle,
   type PostgresSourceMediaTimelineZoomUiState,
 } from "./Postgres_Source_Media_Timeline";
+import { NewCodeModal, type CodeRow } from "./Project_Codebook_View";
 import "./Postgres_Source_Media_Coding_View.css";
 
 function fileExtensionFromPath(path: string): string {
@@ -334,6 +335,7 @@ export function PostgresSourceMediaCodingView({
   canKickSourceLocks,
   canManageAnnotations,
   canManageMemos,
+  canCreateCodes,
   initialSelectedAnnotationId,
   projectStoragePath,
   mediaKind,
@@ -345,6 +347,9 @@ export function PostgresSourceMediaCodingView({
   onKickSourceLock,
   onOpenMemoDraft,
   onUpdateSourceWaveform,
+  onCreateCode,
+  onUpdateCode,
+  onDeleteCode,
   onBack,
 }: PostgresSourceCodingViewProps & {
   projectStoragePath: string;
@@ -378,7 +383,13 @@ export function PostgresSourceMediaCodingView({
   const [volumeControlOpen, setVolumeControlOpen] = useState(false);
   const [zoomControlOpen, setZoomControlOpen] = useState(false);
   const [speedControlOpen, setSpeedControlOpen] = useState(false);
-  const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
+  const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresCode } | null>(null);
+  const [newCodeOpen, setNewCodeOpen] = useState(false);
+  const [editingCodeId, setEditingCodeId] = useState<string | null>(null);
+  const [childCodeParentId, setChildCodeParentId] = useState<string | null>(null);
+  const [deletingCodeId, setDeletingCodeId] = useState<string | null>(null);
+  const [deletingCode, setDeletingCode] = useState(false);
+  const [deleteCodeError, setDeleteCodeError] = useState("");
   const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const [clipDeleteConfirmation, setClipDeleteConfirmation] = useState<SourceAnnotationRow | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -412,6 +423,23 @@ export function PostgresSourceMediaCodingView({
     [annotations],
   );
   const codesById = useMemo(() => new Map(codes.map((code) => [code.id, code])), [codes]);
+  const codebookRows = useMemo<CodeRow[]>(() => codes.map((code) => {
+    const parentCode = code.parentCodeId ? codesById.get(code.parentCodeId) : null;
+    return {
+      id: code.id,
+      label: code.label,
+      color: code.color,
+      description: code.description,
+      parentId: code.parentCodeId,
+      parentLabel: parentCode?.label ?? "",
+      createdByName: "",
+      createdAt: code.createdAt,
+      sourcesCount: 0,
+    };
+  }), [codes, codesById]);
+  const editingCodeRow = editingCodeId ? codebookRows.find((code) => code.id === editingCodeId) ?? null : null;
+  const childCodeParentRow = childCodeParentId ? codebookRows.find((code) => code.id === childCodeParentId) ?? null : null;
+  const deletingCodeRow = deletingCodeId ? codebookRows.find((code) => code.id === deletingCodeId) ?? null : null;
   const codeTree = useMemo(() => orderedCodesWithDepth(codes), [codes]);
   const visibleCodes = useMemo(() => visibleCodeNodes(codeTree, collapsedCodeIds), [collapsedCodeIds, codeTree]);
   const annotationCountByCodeId = useMemo(() => {
@@ -443,7 +471,7 @@ export function PostgresSourceMediaCodingView({
       ? selectedClipDraft.codeIds
       : selectedAnnotation?.codeIds ?? [];
   const activeClipHasCodes = activeClipCodeIds.length > 0;
-  const activeClipCodes = activeClipCodeIds.map((codeId) => codesById.get(codeId)).filter((code): code is PostgresExperimentCode => !!code);
+  const activeClipCodes = activeClipCodeIds.map((codeId) => codesById.get(codeId)).filter((code): code is PostgresCode => !!code);
   const pendingClipCodeColors = useMemo(
     () => pendingClipCodeIds.map((codeId) => codesById.get(codeId)?.color ?? "#888888"),
     [codesById, pendingClipCodeIds],
@@ -983,6 +1011,24 @@ export function PostgresSourceMediaCodingView({
     }
   }
 
+  async function handleConfirmDeleteCode() {
+    if (!deletingCodeId || !onDeleteCode) return;
+    setDeletingCode(true);
+    setDeleteCodeError("");
+    try {
+      await onDeleteCode(deletingCodeId);
+      setPendingClipCodeIds((current) => current.filter((codeId) => codeId !== deletingCodeId));
+      setSelectedClipDraft((current) => current
+        ? { ...current, codeIds: current.codeIds.filter((codeId) => codeId !== deletingCodeId) }
+        : current);
+      setDeletingCodeId(null);
+    } catch (deleteError) {
+      setDeleteCodeError(deleteError instanceof Error ? deleteError.message : "Failed to delete code.");
+    } finally {
+      setDeletingCode(false);
+    }
+  }
+
   async function confirmClipAnnotationDelete() {
     if (!clipDeleteConfirmation || saving) return;
     await onDeleteAnnotation(clipDeleteConfirmation.id);
@@ -1123,6 +1169,16 @@ export function PostgresSourceMediaCodingView({
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
               <span className="annotate-card-title">Codebook</span>
+              <button
+                type="button"
+                className="codebook-icon-action"
+                onClick={() => setNewCodeOpen(true)}
+                disabled={!canCreateCodes || !onCreateCode || saving}
+                aria-label="New code"
+                title={canCreateCodes && onCreateCode ? "New code" : "You do not have permission to create codes."}
+              >
+                +
+              </button>
             </div>
             {pendingSelection ? (
               <div className="codebook-selection-hint">
@@ -1145,7 +1201,7 @@ export function PostgresSourceMediaCodingView({
                     }}
                     onClick={() => handleCodebookCodeClick(code.id)}
                     onContextMenu={(event) => {
-                      if (!canManageMemos) return;
+                      if (!canManageMemos && !canCreateCodes && !onUpdateCode && !onDeleteCode) return;
                       event.preventDefault();
                       setCodeContextMenu({ x: event.clientX, y: event.clientY, code });
                     }}
@@ -1660,17 +1716,143 @@ export function PostgresSourceMediaCodingView({
         </div>
       </div>
 
-      {codeContextMenu && canManageMemos ? (
+      {codeContextMenu ? (
         <div ref={codeContextMenuRef} className="context-menu" style={codeContextMenuStyle}>
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              onOpenMemoDraft({ codeIds: [codeContextMenu.code.id] });
-              setCodeContextMenu(null);
-            }}
-          >
-            Memo about code
-          </button>
+          {canCreateCodes && onUpdateCode ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                setEditingCodeId(codeContextMenu.code.id);
+                setNewCodeOpen(false);
+                setChildCodeParentId(null);
+                setCodeContextMenu(null);
+              }}
+            >
+              Edit code
+            </button>
+          ) : null}
+          {canManageMemos ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                onOpenMemoDraft({ codeIds: [codeContextMenu.code.id] });
+                setCodeContextMenu(null);
+              }}
+            >
+              Memo about code
+            </button>
+          ) : null}
+          {canCreateCodes && onCreateCode ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                setChildCodeParentId(codeContextMenu.code.id);
+                setNewCodeOpen(false);
+                setEditingCodeId(null);
+                setCodeContextMenu(null);
+              }}
+            >
+              Add child code
+            </button>
+          ) : null}
+          {canCreateCodes && onDeleteCode ? (
+            <button
+              className="context-menu-item context-menu-item--danger"
+              onClick={() => {
+                setDeletingCodeId(codeContextMenu.code.id);
+                setDeleteCodeError("");
+                setCodeContextMenu(null);
+              }}
+            >
+              Delete code
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {newCodeOpen ? (
+        <NewCodeModal
+          allCodes={codebookRows}
+          onSubmit={async (payload) => {
+            if (!onCreateCode || !canCreateCodes) return;
+            const createdCode = await onCreateCode({
+              label: payload.label,
+              color: payload.color,
+              description: payload.description,
+              parentCodeId: payload.parentId ?? null,
+            });
+            if (pendingSelection) setPendingClipCodeIds((current) => current.includes(createdCode.id) ? current : [...current, createdCode.id]);
+          }}
+          onDone={() => setNewCodeOpen(false)}
+          onClose={() => setNewCodeOpen(false)}
+        />
+      ) : null}
+
+      {childCodeParentRow ? (
+        <NewCodeModal
+          allCodes={codebookRows}
+          title="Add Child Code"
+          submitLabel="Create Code"
+          initialParentId={childCodeParentRow.id}
+          onSubmit={async (payload) => {
+            if (!onCreateCode || !canCreateCodes) return;
+            const createdCode = await onCreateCode({
+              label: payload.label,
+              color: payload.color,
+              description: payload.description,
+              parentCodeId: payload.parentId ?? childCodeParentRow.id,
+            });
+            if (pendingSelection) setPendingClipCodeIds((current) => current.includes(createdCode.id) ? current : [...current, createdCode.id]);
+          }}
+          onDone={() => setChildCodeParentId(null)}
+          onClose={() => setChildCodeParentId(null)}
+        />
+      ) : null}
+
+      {editingCodeRow ? (
+        <NewCodeModal
+          allCodes={codebookRows}
+          title="Edit Code"
+          submitLabel="Save Changes"
+          initialLabel={editingCodeRow.label}
+          initialDescription={editingCodeRow.description}
+          initialColor={editingCodeRow.color}
+          initialParentId={editingCodeRow.parentId}
+          excludeCodeId={editingCodeRow.id}
+          onSubmit={async (payload) => {
+            if (!onUpdateCode || !canCreateCodes) return;
+            await onUpdateCode(editingCodeRow.id, {
+              label: payload.label,
+              color: payload.color,
+              description: payload.description,
+              parentCodeId: payload.parentId ?? null,
+            });
+          }}
+          onDone={() => setEditingCodeId(null)}
+          onClose={() => setEditingCodeId(null)}
+        />
+      ) : null}
+
+      {deletingCodeRow ? (
+        <div className="modal-overlay" onClick={() => !deletingCode && setDeletingCodeId(null)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-code-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="delete-code-title">Delete Code</h2>
+            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+              Delete <strong>{deletingCodeRow.label}</strong>?
+            </p>
+            <p className="modal-warning-text">
+              This removes the code from the codebook and clears it from existing annotations.
+            </p>
+            {deleteCodeError ? <p className="auth-error">{deleteCodeError}</p> : null}
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
+                {deletingCode ? "Deleting..." : "Delete Code"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 

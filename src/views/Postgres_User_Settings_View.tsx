@@ -3,17 +3,17 @@ import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
 import {
-  changePostgresExperimentAppUserPassword,
-  clearPostgresExperimentUserProjectState,
-  getPostgresExperimentUserPreferences,
-  getPostgresExperimentUserProjectState,
-  renamePostgresExperimentRememberedAccount,
-  savePostgresExperimentUserPreferences,
-  updatePostgresExperimentAppUserProfile,
-  type PostgresExperimentAuthSession,
-  type PostgresExperimentRecentProject,
-  type PostgresExperimentUserPreferences,
-} from "../lib/postgresExperiment";
+  changePostgresAppUserPassword,
+  clearPostgresUserProjectState,
+  getPostgresUserPreferences,
+  getPostgresUserProjectState,
+  renamePostgresRememberedAccount,
+  savePostgresUserPreferences,
+  updatePostgresAppUserProfile,
+  type PostgresAuthSession,
+  type PostgresRecentProject,
+  type PostgresUserPreferences,
+} from "../lib/postgres";
 import {
   applyDensity,
   applyFontSize,
@@ -28,9 +28,9 @@ import {
   type Theme,
 } from "../theme";
 
-export type PostgresUserSettingsExperimentViewProps = {
-  authSession: PostgresExperimentAuthSession;
-  onAuthSessionUpdated: (session: PostgresExperimentAuthSession) => void;
+export type PostgresUserSettingsViewProps = {
+  authSession: PostgresAuthSession;
+  onAuthSessionUpdated: (session: PostgresAuthSession) => void;
   onAuthSessionInvalidated: () => void;
 };
 
@@ -44,7 +44,7 @@ function describeUnknownError(error: unknown): string {
   }
 }
 
-function applyPostgresRuntimeThemePreferences(preferences: PostgresExperimentUserPreferences): void {
+function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferences): void {
   setRuntimeThemePreferences({
     theme: preferences.theme,
     density: preferences.density,
@@ -54,7 +54,7 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresExperimentUse
   initTheme();
 }
 
-function formatPostgresExperimentDateTime(iso: string): string {
+function formatPostgresDateTime(iso: string): string {
   if (!iso) return "-";
   try {
     return new Intl.DateTimeFormat([], {
@@ -69,11 +69,11 @@ function formatPostgresExperimentDateTime(iso: string): string {
   }
 }
 
-export function PostgresUserSettingsExperimentView({
+export function PostgresUserSettingsView({
   authSession,
   onAuthSessionUpdated,
   onAuthSessionInvalidated,
-}: PostgresUserSettingsExperimentViewProps) {
+}: PostgresUserSettingsViewProps) {
   const { locale, setLocale } = useI18n();
   const [activeModal, setActiveModal] = useState<"profile" | "password" | "appearance" | "recent" | "account" | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
@@ -89,7 +89,7 @@ export function PostgresUserSettingsExperimentView({
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
-  const [recentProjects, setRecentProjects] = useState<PostgresExperimentRecentProject[]>([]);
+  const [recentProjects, setRecentProjects] = useState<PostgresRecentProject[]>([]);
 
   useEffect(() => {
     setName(authSession.user.name);
@@ -102,8 +102,8 @@ export function PostgresUserSettingsExperimentView({
     async function loadUserPreferences() {
       try {
         const [nextPreferences, projectState] = await Promise.all([
-          getPostgresExperimentUserPreferences(),
-          getPostgresExperimentUserProjectState(),
+          getPostgresUserPreferences(),
+          getPostgresUserProjectState(),
         ]);
         if (cancelled) return;
         setTheme(nextPreferences.theme);
@@ -130,10 +130,10 @@ export function PostgresUserSettingsExperimentView({
   }, [authSession.authKind, authSession.user.id, locale, setLocale]);
 
   const persistUserPreferences = useCallback(async (
-    next: PostgresExperimentUserPreferences,
+    next: PostgresUserPreferences,
     successMessage?: string,
   ) => {
-    const saved = await savePostgresExperimentUserPreferences(next);
+    const saved = await savePostgresUserPreferences(next);
     setTheme(saved.theme);
     setDensity(saved.density);
     setFontSize(saved.fontSize);
@@ -159,11 +159,11 @@ export function PostgresUserSettingsExperimentView({
     setSubmitting("profile");
     try {
       const previousEmail = authSession.user.email;
-      const updatedUser = await updatePostgresExperimentAppUserProfile({
+      const updatedUser = await updatePostgresAppUserProfile({
         name: name.trim(),
         email: email.trim(),
       });
-      await renamePostgresExperimentRememberedAccount(previousEmail, updatedUser.email, updatedUser.name);
+      await renamePostgresRememberedAccount(previousEmail, updatedUser.email, updatedUser.name);
       onAuthSessionUpdated({
         ...authSession,
         user: updatedUser,
@@ -200,7 +200,7 @@ export function PostgresUserSettingsExperimentView({
 
     setSubmitting("password");
     try {
-      await changePostgresExperimentAppUserPassword({
+      await changePostgresAppUserPassword({
         currentPassword,
         newPassword,
       });
@@ -314,7 +314,7 @@ export function PostgresUserSettingsExperimentView({
                   <h3>{authSession.authKind === "app_user" ? "Profile" : "Local Administrator"}</h3>
                   <p>
                     {authSession.authKind === "app_user"
-                      ? "Update your PostgreSQL experiment display name and email."
+                      ? "Update your PostgreSQL display name and email."
                       : "Review the built-in PostgreSQL administrator account for this device."}
                   </p>
                 </button>
@@ -326,7 +326,7 @@ export function PostgresUserSettingsExperimentView({
                   <h3>Password</h3>
                   <p>
                     {authSession.authKind === "app_user"
-                      ? "Change your PostgreSQL experiment account password."
+                      ? "Change your PostgreSQL account password."
                       : "Administrator password changes are handled through PostgreSQL setup."}
                   </p>
                 </button>
@@ -586,7 +586,7 @@ export function PostgresUserSettingsExperimentView({
                       </select>
                     </div>
                     {recentProjects.length === 0 ? (
-                      <p className="auth-hint">No recent PostgreSQL experiment projects are currently remembered for this account.</p>
+                      <p className="auth-hint">No recent PostgreSQL projects are currently remembered for this account.</p>
                     ) : (
                       <div className="users-table-wrap postgres-users-table-wrap" style={{ marginTop: 16, maxHeight: 280 }}>
                         <table className="users-table">
@@ -596,7 +596,7 @@ export function PostgresUserSettingsExperimentView({
                               <tr key={project.id} className="users-row">
                                 <td className="users-td users-td--name">{project.name}</td>
                                 <td className="users-td users-td--muted">{project.description || "-"}</td>
-                                <td className="users-td users-td--muted">{formatPostgresExperimentDateTime(project.openedAt)}</td>
+                                <td className="users-td users-td--muted">{formatPostgresDateTime(project.openedAt)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -611,7 +611,7 @@ export function PostgresUserSettingsExperimentView({
                         onClick={() => {
                           void (async () => {
                             try {
-                              await clearPostgresExperimentUserProjectState();
+                              await clearPostgresUserProjectState();
                               setRecentProjects([]);
                               setNotice("Recent PostgreSQL project history cleared.");
                               setError("");

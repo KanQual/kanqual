@@ -9,10 +9,10 @@ import {
 } from "react";
 import { readAppSettings, saveAppSettings } from "../lib/appSettings";
 import {
-  getPostgresExperimentAuthStatus,
-  getPostgresExperimentUserPreferences,
-  savePostgresExperimentUserPreferences,
-} from "../lib/postgresExperiment";
+  getPostgresAuthStatus,
+  getPostgresUserPreferences,
+  savePostgresUserPreferences,
+} from "../lib/postgres";
 import {
   formatDate,
   formatDateTime,
@@ -102,15 +102,15 @@ export function I18nProvider({ children, initialLocale }: I18nProviderProps) {
 
     async function loadPostgresLocalePreference() {
       try {
-        const authStatus = await getPostgresExperimentAuthStatus();
+        const authStatus = await getPostgresAuthStatus();
         if (!authStatus.currentSession) return;
-        const preferences = await getPostgresExperimentUserPreferences();
+        const preferences = await getPostgresUserPreferences();
         const nextLocale = resolveSupportedLocale(preferences.locale);
         if (!cancelled && nextLocale && nextLocale !== locale) {
           setLocaleState(nextLocale);
         }
       } catch {
-        // Fall back to the legacy frontend setting when PostgreSQL experiment auth is unavailable.
+        // Fall back to the legacy frontend setting when PostgreSQL auth is unavailable.
       }
     }
 
@@ -158,16 +158,16 @@ export function I18nProvider({ children, initialLocale }: I18nProviderProps) {
     }
     void (async () => {
       try {
-        const authStatus = await getPostgresExperimentAuthStatus();
+        const authStatus = await getPostgresAuthStatus();
         if (!authStatus.currentSession) return;
-        const preferences = await getPostgresExperimentUserPreferences();
+        const preferences = await getPostgresUserPreferences();
         if (preferences.locale === localeCode) return;
-        await savePostgresExperimentUserPreferences({
+        await savePostgresUserPreferences({
           ...preferences,
           locale: localeCode,
         });
       } catch {
-        // Keep locale switching resilient when PostgreSQL experiment auth is not active.
+        // Keep locale switching resilient when PostgreSQL auth is not active.
       }
     })();
   }

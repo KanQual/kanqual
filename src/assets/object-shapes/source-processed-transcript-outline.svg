@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Outline processed transcript source">
+  <path d="M12 8 H64 L88 32 V88 H12 Z" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" />
+  <path d="M64 8 V32 H88" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M50 39 V31 M50 69 V61 M61 50 H69 M31 50 H39 M58 42 L64 36 M36 64 L42 58 M58 58 L64 64 M36 36 L42 42" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" />
+  <circle cx="50" cy="50" r="12" fill="none" stroke="#111111" stroke-width="7" />
+  <circle cx="50" cy="50" r="3.5" fill="#111111" />
+</svg>

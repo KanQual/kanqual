@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -23,15 +23,20 @@ import tagOutlineShapeSvg from "../assets/object-shapes/tag-outline.svg?raw";
 import starFilledShapeSvg from "../assets/object-shapes/star-filled.svg?raw";
 import starOutlineShapeSvg from "../assets/object-shapes/star-outline.svg?raw";
 import sourceTextOutlineShapeSvg from "../assets/object-shapes/source-text-outline.svg?raw";
+import sourceProcessedTranscriptOutlineShapeSvg from "../assets/object-shapes/source-processed-transcript-outline.svg?raw";
 import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline.svg?raw";
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
+import { type SharedAttributeDataType, type SharedAttributeDraft } from "../components/AttributeValuesModal";
 import {
-  AttributeValuesModal as SharedAttributeValuesModal,
-  type SharedAttributeDataType,
-  type SharedAttributeDraft,
-} from "../components/AttributeValuesModal";
+  PostgresAttributeValueHistoryModal,
+  type PostgresAttributeValueHistoryTarget,
+} from "../components/PostgresAttributeValueHistoryModal";
+import {
+  PostgresRelationshipModal,
+  type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
+} from "../components/PostgresRelationshipModal";
 import { ProcessedTranscriptView, getProcessedTranscriptQuestionOutline, parseProcessedTranscriptSegments } from "../components/ProcessedTranscriptView";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -41,29 +46,37 @@ import { createMediaWaveformCache, serializeMediaWaveformCache } from "../lib/me
 import { createMediaVideoFrameIndexCache, serializeMediaVideoFrameIndexCache } from "../lib/mediaVideoFrameIndex";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import {
-  acquirePostgresExperimentSourceLock,
-  createPostgresExperimentAnnotation,
-  deletePostgresExperimentAnnotation,
-  type PostgresExperimentCode,
-  type PostgresExperimentAnnotationSummary,
-  type PostgresExperimentObject,
-  type PostgresExperimentObjectType,
-  type PostgresExperimentSourceAttributeDefinition,
-  type PostgresExperimentSourceAttributeValue,
-  type PostgresExperimentSourceLock,
-  type PostgresExperimentSourceObjectLink,
-  createPostgresExperimentSource,
-  deletePostgresExperimentSource,
-  getPostgresExperimentProjectDocumentImportSettings,
-  importPostgresExperimentSourceFile,
-  kickPostgresExperimentSourceLock,
-  listPostgresExperimentProjects,
-  releasePostgresExperimentSourceLock,
-  savePostgresExperimentSourceAttribute,
-  setPostgresExperimentSourceObjects,
-  updatePostgresExperimentAnnotation,
-  updatePostgresExperimentSource,
-} from "../lib/postgresExperiment";
+  acquirePostgresSourceLock,
+  createPostgresAnnotation,
+  createPostgresCode,
+  deletePostgresAnnotation,
+  deletePostgresCode,
+  type PostgresCode,
+  type PostgresAnnotationSummary,
+  type PostgresObject,
+  type PostgresObjectType,
+  type PostgresRelationship,
+  type PostgresRelationshipAttributeDefinition,
+  type PostgresRelationshipType,
+  type PostgresSourceAttributeDefinition,
+  type PostgresSourceAttributeValue,
+  type PostgresSourceLock,
+  type PostgresSourceObjectLink,
+  createPostgresSource,
+  deletePostgresSource,
+  getPostgresProjectDocumentImportSettings,
+  importPostgresSourceFile,
+  kickPostgresSourceLock,
+  listPostgresProjects,
+  releasePostgresSourceLock,
+  savePostgresSourceAttribute,
+  savePostgresRelationship,
+  savePostgresRelationshipType,
+  setPostgresSourceObjects,
+  updatePostgresAnnotation,
+  updatePostgresCode,
+  updatePostgresSource,
+} from "../lib/postgres";
 import { PostgresSourceAudioCodingView } from "./Postgres_Source_Audio_Coding_View";
 import { PostgresSourceImageCodingView } from "./Postgres_Source_Image_Coding_View";
 import {
@@ -75,6 +88,7 @@ import {
   TextSizeControls,
 } from "./Postgres_Source_Coding_Shared";
 import { formatMediaTime } from "./Postgres_Source_Media_Timeline";
+import { PostgresSourceAiTextCodingView } from "./Postgres_Source_AI_Text_Coding_View";
 import { PostgresSourceTextCodingView } from "./Postgres_Source_Text_Coding_View";
 import { PostgresSourceVideoCodingView } from "./Postgres_Source_Video_Coding_View";
 
@@ -96,7 +110,7 @@ type SourceObjectTypeShape =
   | "tag"
   | "star";
 type SourceObjectFill = "filled" | "outline";
-type SourceObjectVisualKey = "source_text" | "source_pdf" | "source_image" | "source_audio" | "source_video";
+type SourceObjectVisualKey = "source_text" | "source_processed_transcript" | "source_pdf" | "source_image" | "source_audio" | "source_video";
 
 type SourceUploadDraft = {
   id: string;
@@ -126,6 +140,20 @@ export type SourceRow = {
   objectCount: number;
   createdAt: string;
 };
+
+function normalizeSourceKindFilterValue(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/^source_/, "").replace(/_/g, " ");
+  return normalized === "processed transcript" ? "transcript" : normalized;
+}
+
+function sourceRowMatchesAllowedKinds(row: SourceRow, allowedKinds: Set<string> | null): boolean {
+  if (!allowedKinds) return true;
+  return [
+    row.type,
+    row.sourceObjectType,
+    row.sourceObjectTypeSystemKey ?? "",
+  ].some((value) => allowedKinds.has(normalizeSourceKindFilterValue(value)));
+}
 
 export type SourceAnnotationRow = {
   id: string;
@@ -182,7 +210,14 @@ type SourceObjectRow = {
   title: string;
   objectType: string;
   objectTypeSystemKey: string | null;
-  sourceId: string | null;
+};
+
+type SourceRelationshipRow = {
+  id: string;
+  relationshipType: string;
+  otherEndpointName: string;
+  otherEndpointType: string;
+  description: string;
 };
 
 type SourceAttributeDefinitionRow = {
@@ -191,7 +226,12 @@ type SourceAttributeDefinitionRow = {
   dataType: SharedAttributeDataType;
   description: string;
   options: string[];
+  sourceKinds: string[];
   sortOrder: number;
+};
+
+type SourceAttributeDraft = SharedAttributeDraft & {
+  sourceKinds: string[];
 };
 
 type SourceAttributeValueRow = {
@@ -234,6 +274,7 @@ const SOURCE_IMPORT_AUDIO_EXTS = new Set(["mp3", "wav", "m4a", "aac", "ogg", "fl
 const SOURCE_IMPORT_VIDEO_EXTS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
 const POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS = [
   "source_text",
+  "source_processed_transcript",
   "source_pdf",
   "source_image",
   "source_audio",
@@ -241,11 +282,20 @@ const POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS = [
 ] as const;
 const POSTGRES_SOURCE_KIND_OPTIONS = [
   { value: "text", label: "Text" },
+  { value: "Transcript", label: "Transcript" },
   { value: "pdf", label: "PDF" },
   { value: "image", label: "Image" },
   { value: "audio", label: "Audio" },
   { value: "video", label: "Video" },
 ] as const;
+const POSTGRES_SOURCE_KIND_VISUALS: Record<string, { label: string; color: string; systemKey: SourceObjectVisualKey }> = {
+  text: { label: "Text", color: "#355070", systemKey: "source_text" },
+  transcript: { label: "Transcript", color: "#2a9d8f", systemKey: "source_processed_transcript" },
+  pdf: { label: "PDF", color: "#7f5539", systemKey: "source_pdf" },
+  image: { label: "Image", color: "#6d597a", systemKey: "source_image" },
+  audio: { label: "Audio", color: "#b56576", systemKey: "source_audio" },
+  video: { label: "Video", color: "#457b9d", systemKey: "source_video" },
+};
 const SOURCE_OBJECT_TYPE_DEFAULT_COLOR = "#355070";
 
 function buildSvgDataUrl(svgMarkup: string): string {
@@ -266,6 +316,7 @@ const SOURCE_OBJECT_SHAPE_ASSET_URLS: Record<SourceObjectTypeShape, { filled: st
 };
 const SOURCE_OBJECT_VISUAL_ASSET_URLS: Record<SourceObjectVisualKey, string> = {
   source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
+  source_processed_transcript: buildSvgDataUrl(sourceProcessedTranscriptOutlineShapeSvg),
   source_pdf: buildSvgDataUrl(sourcePdfOutlineShapeSvg),
   source_image: buildSvgDataUrl(sourceImageOutlineShapeSvg),
   source_audio: buildSvgDataUrl(sourceAudioOutlineShapeSvg),
@@ -303,6 +354,7 @@ function normalizeSourceObjectColor(value: string): string {
 function getSourceObjectVisualKey(systemKey: string | null | undefined): SourceObjectVisualKey | null {
   if (
     systemKey === "source_text"
+    || systemKey === "source_processed_transcript"
     || systemKey === "source_pdf"
     || systemKey === "source_image"
     || systemKey === "source_audio"
@@ -311,6 +363,11 @@ function getSourceObjectVisualKey(systemKey: string | null | undefined): SourceO
     return systemKey;
   }
   return null;
+}
+
+function getSourceKindVisual(sourceKind: string | null | undefined): { label: string; color: string; systemKey: SourceObjectVisualKey } | null {
+  const normalized = normalizeSourceKindFilterValue(sourceKind ?? "");
+  return POSTGRES_SOURCE_KIND_VISUALS[normalized] ?? null;
 }
 
 function getSourceObjectMaskStyle(url: string): CSSProperties {
@@ -695,8 +752,167 @@ function sourceTypeRowLabel(label: string): string {
   return cleaned || label;
 }
 
+function sourceKindFromFilterValue(value: string): string | null {
+  const normalized = normalizeSourceKindFilterValue(value);
+  const visualEntry = Object.entries(POSTGRES_SOURCE_KIND_VISUALS)
+    .find(([, visual]) => visual.systemKey === normalized);
+  if (visualEntry) return visualEntry[1].label;
+  const option = POSTGRES_SOURCE_KIND_OPTIONS.find((entry) => entry.value === normalized || entry.label.toLowerCase() === normalized);
+  return option?.label ?? null;
+}
+
+function sourceTypeOptionLabel(kind: string, fallbackLabel?: string): string {
+  return sourceTypeRowLabel(
+    fallbackLabel
+      || POSTGRES_SOURCE_KIND_VISUALS[kind.toLowerCase()]?.label
+      || POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.value === kind || option.label === kind)?.label
+      || kind,
+  );
+}
+
+function sourceKindDisplayLabel(kind: string, fallbackLabel?: string): string {
+  return fallbackLabel || kind || "Source";
+}
+
+function normalizeAttributeOptions(options: string[]): string[] {
+  return options.map((option) => option.trim()).filter(Boolean);
+}
+
+function normalizeSourceAttributeKinds(sourceKinds: string[]): string[] {
+  const normalized = new Set(sourceKinds);
+  if (normalized.has("Text") || normalized.has("text")) {
+    normalized.add("Transcript");
+  }
+  return Array.from(normalized);
+}
+
+function SourceAttributeTypesModal({
+  draft,
+  sourceTypeOptions,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  draft: SourceAttributeDraft;
+  sourceTypeOptions: Array<{ kind: string; label: string; count: number }>;
+  saving: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSave: (draft: SourceAttributeDraft) => void;
+}) {
+  const { t } = useI18n();
+  const [name, setName] = useState(draft.name);
+  const [dataType, setDataType] = useState<SharedAttributeDataType>(draft.dataType);
+  const [description, setDescription] = useState(draft.description);
+  const [options, setOptions] = useState<string[]>(draft.options.length > 0 ? draft.options : ["", ""]);
+  const [sourceKinds, setSourceKinds] = useState<string[]>(draft.sourceKinds);
+  const typeOptions: Array<{ value: SharedAttributeDataType; label: string }> = [
+    { value: "text", label: t("attributeModal.types.text") },
+    { value: "number", label: t("attributeModal.types.number") },
+    { value: "datetime", label: t("attributeModal.types.datetime") },
+    { value: "categorical", label: t("attributeModal.types.categorical") },
+  ];
+  const normalizedOptions = normalizeAttributeOptions(options);
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
+        <h2>{draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}</h2>
+        <div className="attribute-values-details">
+          <label className="form-group">
+            <span className="form-label">{t("attributeModal.attributeName")}</span>
+            <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div className="form-group attribute-details-span">
+            <span className="form-label">{t("attributeModal.dataType")}</span>
+            <div className="attribute-type-picker">
+              {typeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
+                  onClick={() => setDataType(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="form-group attribute-details-span">
+            <span className="form-label">{t("attributeModal.description")}</span>
+            <textarea
+              className="form-input attribute-description-input"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={4}
+            />
+          </label>
+          {dataType === "categorical" ? (
+            <div className="form-group attribute-details-span">
+              <span className="form-label">{t("attributeModal.categories")}</span>
+              <div className="attribute-category-list">
+                {options.map((option, index) => (
+                  <input
+                    key={index}
+                    className="form-input"
+                    value={option}
+                    onChange={(event) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)))}
+                    placeholder={t("attributeModal.categoryPlaceholder", { index: index + 1 })}
+                  />
+                ))}
+              </div>
+              <button type="button" className="btn btn--small" onClick={() => setOptions((current) => [...current, ""])}>
+                {t("attributeModal.addMore")}
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="attribute-values-list">
+          {sourceTypeOptions.length === 0 ? (
+            <p className="case-card-empty">No source types yet.</p>
+          ) : (
+            sourceTypeOptions.map((option) => (
+              <label key={option.kind} className="attribute-value-row">
+                <span>{option.label}</span>
+                <input
+                  type="checkbox"
+                  checked={sourceKinds.includes(option.kind)}
+                  onChange={(event) => {
+                    setSourceKinds((current) => event.target.checked
+                      ? [...current, option.kind]
+                      : current.filter((kind) => kind !== option.kind));
+                  }}
+                />
+              </label>
+            ))
+          )}
+        </div>
+        {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
+        <div className="form-actions" style={{ marginTop: 20 }}>
+          <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
+          <button
+            className="btn btn--primary"
+            onClick={() => onSave({
+              ...draft,
+              name: name.trim(),
+              dataType,
+              description: description.trim(),
+              options: normalizedOptions,
+              sourceKinds,
+            })}
+            disabled={saving || !name.trim() || sourceKinds.length === 0 || (dataType === "categorical" && normalizedOptions.length < 2)}
+          >
+            {saving ? t("attributeModal.saving") : t("attributeModal.save")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function describeSourceLock(
-  lock: PostgresExperimentSourceLock | null | undefined,
+  lock: PostgresSourceLock | null | undefined,
   currentUserId: string,
 ): { label: string; title: string } {
   if (!lock) {
@@ -735,9 +951,43 @@ function formatAttributeDisplay(value: string, dataType: SharedAttributeDataType
   return value;
 }
 
-function buildCodeOptions(codes: PostgresExperimentCode[]): CodeOption[] {
-  const childrenOf = new Map<string, PostgresExperimentCode[]>();
-  const roots: PostgresExperimentCode[] = [];
+function relationshipTypeAllowsSourceEndpoint(
+  relationshipType: PostgresRelationshipType,
+  endpoint: "from" | "to",
+  sourceKind: string,
+): boolean {
+  const objectTypeIds = endpoint === "from" ? relationshipType.fromObjectTypeIds : relationshipType.toObjectTypeIds;
+  const sourceKinds = endpoint === "from" ? relationshipType.fromSourceKinds : relationshipType.toSourceKinds;
+  const normalizedSourceKinds = new Set(sourceKinds.map(normalizeSourceKindFilterValue));
+  const normalizedSourceKind = normalizeSourceKindFilterValue(sourceKind);
+  if (normalizedSourceKinds.size > 0) return normalizedSourceKinds.has(normalizedSourceKind);
+  return objectTypeIds.length === 0;
+}
+
+function relationshipTypeAllowsObjectEndpoint(
+  relationshipType: PostgresRelationshipType,
+  endpoint: "from" | "to",
+  objectTypeId: string,
+): boolean {
+  const objectTypeIds = endpoint === "from" ? relationshipType.fromObjectTypeIds : relationshipType.toObjectTypeIds;
+  const sourceKinds = endpoint === "from" ? relationshipType.fromSourceKinds : relationshipType.toSourceKinds;
+  if (objectTypeIds.length > 0) return objectTypeIds.includes(objectTypeId);
+  return sourceKinds.length === 0;
+}
+
+function toRelationshipAttributePayload(
+  definitions: PostgresRelationshipAttributeDefinition[],
+  valuesByDefinitionId: Record<string, string>,
+) {
+  return definitions.map((definition) => ({
+    attributeDefinitionId: definition.id,
+    value: valuesByDefinitionId[definition.id] ?? "",
+  }));
+}
+
+function buildCodeOptions(codes: PostgresCode[]): CodeOption[] {
+  const childrenOf = new Map<string, PostgresCode[]>();
+  const roots: PostgresCode[] = [];
   for (const code of codes) {
     if (code.parentCodeId) {
       const group = childrenOf.get(code.parentCodeId) ?? [];
@@ -747,7 +997,7 @@ function buildCodeOptions(codes: PostgresExperimentCode[]): CodeOption[] {
       roots.push(code);
     }
   }
-  const sortGroup = (group: PostgresExperimentCode[]) => {
+  const sortGroup = (group: PostgresCode[]) => {
     group.sort((left, right) => {
       if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
       return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
@@ -757,7 +1007,7 @@ function buildCodeOptions(codes: PostgresExperimentCode[]): CodeOption[] {
   for (const group of childrenOf.values()) sortGroup(group);
 
   const result: CodeOption[] = [];
-  const visit = (group: PostgresExperimentCode[], depth: number) => {
+  const visit = (group: PostgresCode[], depth: number) => {
     for (const code of group) {
       result.push({
         id: code.id,
@@ -1331,6 +1581,8 @@ function SourceImportModal({
 function SourceEditorModal({
   title,
   initialRow,
+  attributeDefinitions,
+  attributeValuesByDefinitionId,
   saving,
   error,
   onCancel,
@@ -1338,6 +1590,8 @@ function SourceEditorModal({
 }: {
   title: string;
   initialRow?: SourceRow | null;
+  attributeDefinitions: PostgresSourceAttributeDefinition[];
+  attributeValuesByDefinitionId: Record<string, string>;
   saving: boolean;
   error: string | null;
   onCancel: () => void;
@@ -1346,47 +1600,121 @@ function SourceEditorModal({
     name: string;
     notes: string;
     content: string;
+    attributeValuesByDefinitionId: Record<string, string>;
   }) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<"details" | "attributes">("details");
   const [sourceKind, setSourceKind] = useState(normalizeSourceKindSelection(initialRow?.type));
   const [name, setName] = useState(initialRow?.name || "");
   const [notes, setNotes] = useState(initialRow?.notes || "");
   const [content, setContent] = useState(initialRow?.content || "");
+  const [attributeDraftValues, setAttributeDraftValues] = useState<Record<string, string>>(() => ({
+    ...attributeValuesByDefinitionId,
+  }));
+
+  function updateAttributeValue(attributeDefinitionId: string, value: string) {
+    setAttributeDraftValues((current) => ({
+      ...current,
+      [attributeDefinitionId]: value,
+    }));
+  }
 
   return (
     <div className="modal-overlay" onClick={() => !saving && onCancel()}>
       <div className="modal modal--wide assoc-doc-modal" onClick={(event) => event.stopPropagation()}>
         <h2>{title}</h2>
+        <div className="auth-tabs" role="tablist" aria-label="Source editor tabs">
+          <button
+            type="button"
+            className={activeTab === "details" ? "auth-tab auth-tab--active" : "auth-tab"}
+            onClick={() => setActiveTab("details")}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            className={activeTab === "attributes" ? "auth-tab auth-tab--active" : "auth-tab"}
+            onClick={() => setActiveTab("attributes")}
+          >
+            Attributes
+          </button>
+        </div>
         <div className="form">
-          <label className="form-label">
-            Source Type
-            <select className="form-input" value={sourceKind} onChange={(event) => setSourceKind(event.target.value)}>
-              {POSTGRES_SOURCE_KIND_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-label">
-            Title
-            <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
-          </label>
-          <label className="form-label">
-            Notes
-            <textarea className="form-input" rows={5} value={notes} onChange={(event) => setNotes(event.target.value)} />
-          </label>
-          <label className="form-label">
-            Content
-            <textarea className="form-input" rows={14} value={content} onChange={(event) => setContent(event.target.value)} />
-          </label>
+          {activeTab === "details" ? (
+            <>
+              <label className="form-label">
+                Source Type
+                <select className="form-input" value={sourceKind} onChange={(event) => setSourceKind(event.target.value)}>
+                  {POSTGRES_SOURCE_KIND_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-label">
+                Title
+                <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+              </label>
+              <label className="form-label">
+                Notes
+                <textarea className="form-input" rows={5} value={notes} onChange={(event) => setNotes(event.target.value)} />
+              </label>
+              <label className="form-label">
+                Content
+                <textarea className="form-input" rows={14} value={content} onChange={(event) => setContent(event.target.value)} />
+              </label>
+            </>
+          ) : attributeDefinitions.length === 0 ? (
+            <p className="case-card-empty">No source attributes have been created yet.</p>
+          ) : (
+            <div className="case-detail-attributes-table-wrap">
+              <table className="case-detail-attributes-table">
+                <thead>
+                  <tr>
+                    <th className="case-detail-attributes-label" scope="col">Attribute</th>
+                    <th className="case-detail-attributes-value" scope="col">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attributeDefinitions.map((definition) => (
+                    <tr key={definition.id}>
+                      <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                      <td className="case-detail-attributes-value">
+                        {definition.dataType === "categorical" ? (
+                          <select
+                            className="form-input"
+                            value={attributeDraftValues[definition.id] ?? ""}
+                            onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                          >
+                            <option value="">-</option>
+                            {definition.options.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={definition.dataType === "number" ? "number" : definition.dataType === "datetime" ? "datetime-local" : "text"}
+                            step={definition.dataType === "number" ? "any" : undefined}
+                            value={attributeDraftValues[definition.id] ?? ""}
+                            onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
         {error && <p className="auth-error">{error}</p>}
         <div className="form-actions">
           <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
           <button
             className="btn btn--primary"
-            onClick={() => onSave({ sourceKind, name, notes, content })}
+            onClick={() => onSave({ sourceKind, name, notes, content, attributeValuesByDefinitionId: attributeDraftValues })}
             disabled={saving || !name.trim()}
           >
             {saving ? "Saving..." : "Save"}
@@ -1485,17 +1813,318 @@ function SourceObjectsModal({
   );
 }
 
+function CreateSourceRelationshipModal({
+  source,
+  projectId,
+  sources,
+  objects,
+  relationshipTypes,
+  relationshipAttributeDefinitions,
+  saving,
+  error,
+  onCancel,
+  onRelationshipTypeCreated,
+  onSave,
+}: {
+  source: SourceRow;
+  projectId: string;
+  sources: SourceRow[];
+  objects: PostgresObject[];
+  relationshipTypes: PostgresRelationshipType[];
+  relationshipAttributeDefinitions: PostgresRelationshipAttributeDefinition[];
+  saving: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onRelationshipTypeCreated: (
+    relationshipType: PostgresRelationshipType,
+    attributeDefinitions: PostgresRelationshipAttributeDefinition[],
+  ) => void;
+  onSave: (payload: {
+    relationshipTypeId: string;
+    fromEntityType: "object" | "source";
+    fromEntityId: string;
+    toEntityType: "object" | "source";
+    toEntityId: string;
+    description: string;
+    lineShapeOverride?: string | null;
+    lineWeightOverride?: number | null;
+    arrowheadOverride?: string | null;
+    colorOverride?: string | null;
+    attributeValues: Array<{ attributeDefinitionId: string; value: string }>;
+  }) => Promise<void>;
+}) {
+  const availableRelationshipTypes = useMemo(
+    () => [...relationshipTypes].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [relationshipTypes],
+  );
+  const [relationshipTypeId, setRelationshipTypeId] = useState(availableRelationshipTypes[0]?.id ?? "");
+  const selectedRelationshipType = relationshipTypes.find((relationshipType) => relationshipType.id === relationshipTypeId) ?? null;
+  const [fromEntityType, setFromEntityType] = useState<"object" | "source">("source");
+  const [fromEntityId, setFromEntityId] = useState(source.id);
+  const [toEntityType, setToEntityType] = useState<"object" | "source">("object");
+  const [toEntityId, setToEntityId] = useState("");
+  const [modalTab, setModalTab] = useState<"details" | "graphics" | "attributes">("details");
+  const [description, setDescription] = useState("");
+  const [lineShapeOverride, setLineShapeOverride] = useState("");
+  const [lineWeightOverride, setLineWeightOverride] = useState<number | null>(null);
+  const [arrowheadOverride, setArrowheadOverride] = useState("");
+  const [colorOverride, setColorOverride] = useState("");
+  const [attributeValues, setAttributeValues] = useState<Record<string, string>>({});
+  const [newTypeOpen, setNewTypeOpen] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
+  const [newTypeError, setNewTypeError] = useState("");
+  const [newTypeSaving, setNewTypeSaving] = useState(false);
+
+  const fromEndpointOptions = useMemo<SharedPostgresRelationshipEndpointOption[]>(() => {
+    if (!selectedRelationshipType) return [];
+    return [
+      ...objects
+        .filter((object) => relationshipTypeAllowsObjectEndpoint(selectedRelationshipType, "from", object.objectTypeId))
+        .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }))
+        .map((object) => ({
+          key: `object:${object.id}`,
+          entityType: "object" as const,
+          entityId: object.id,
+          name: object.title,
+          type: object.objectType || "Object",
+        })),
+      ...sources
+        .filter((candidate) => relationshipTypeAllowsSourceEndpoint(selectedRelationshipType, "from", candidate.type))
+        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+        .map((candidate) => ({
+          key: `source:${candidate.id}`,
+          entityType: "source" as const,
+          entityId: candidate.id,
+          name: candidate.name,
+          type: candidate.sourceObjectType || candidate.type || "Source",
+        })),
+    ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  }, [objects, selectedRelationshipType, sources]);
+
+  const toEndpointOptions = useMemo<SharedPostgresRelationshipEndpointOption[]>(() => {
+    if (!selectedRelationshipType) return [];
+    const fromKey = `${fromEntityType}:${fromEntityId}`;
+    return [
+      ...objects
+        .filter((object) => relationshipTypeAllowsObjectEndpoint(selectedRelationshipType, "to", object.objectTypeId))
+        .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }))
+        .map((object) => ({
+          key: `object:${object.id}`,
+          entityType: "object" as const,
+          entityId: object.id,
+          name: object.title,
+          type: object.objectType || "Object",
+        })),
+      ...sources
+        .filter((candidate) => relationshipTypeAllowsSourceEndpoint(selectedRelationshipType, "to", candidate.type))
+        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+        .map((candidate) => ({
+          key: `source:${candidate.id}`,
+          entityType: "source" as const,
+          entityId: candidate.id,
+          name: candidate.name,
+          type: candidate.sourceObjectType || candidate.type || "Source",
+        })),
+    ].filter((option) => option.key !== fromKey)
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  }, [fromEntityId, fromEntityType, objects, selectedRelationshipType, sources]);
+
+  const attributeDefinitionsForType = useMemo(
+    () => relationshipAttributeDefinitions
+      .filter((definition) => definition.relationshipTypeId === relationshipTypeId)
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [relationshipAttributeDefinitions, relationshipTypeId],
+  );
+  useEffect(() => {
+    if (relationshipTypeId && availableRelationshipTypes.some((relationshipType) => relationshipType.id === relationshipTypeId)) return;
+    setRelationshipTypeId(availableRelationshipTypes[0]?.id ?? "");
+  }, [availableRelationshipTypes, relationshipTypeId]);
+
+  useEffect(() => {
+    if (fromEntityId && fromEndpointOptions.some((option) => option.entityType === fromEntityType && option.entityId === fromEntityId)) return;
+    const preferredSource = fromEndpointOptions.find((option) => option.entityType === "source" && option.entityId === source.id);
+    const nextOption = preferredSource ?? fromEndpointOptions[0] ?? null;
+    setFromEntityType(nextOption?.entityType ?? "source");
+    setFromEntityId(nextOption?.entityId ?? "");
+  }, [fromEndpointOptions, fromEntityId, fromEntityType, source.id]);
+
+  useEffect(() => {
+    if (toEntityId && toEndpointOptions.some((option) => option.entityType === toEntityType && option.entityId === toEntityId)) return;
+    const nextOption = toEndpointOptions[0] ?? null;
+    setToEntityType(nextOption?.entityType ?? "object");
+    setToEntityId(nextOption?.entityId ?? "");
+  }, [toEndpointOptions, toEntityId, toEntityType]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!relationshipTypeId || !fromEntityId || !toEntityId) return;
+    void onSave({
+      relationshipTypeId,
+      fromEntityType,
+      fromEntityId,
+      toEntityType,
+      toEntityId,
+      description: description.trim(),
+      lineShapeOverride: lineShapeOverride.trim() || null,
+      lineWeightOverride,
+      arrowheadOverride: arrowheadOverride.trim() || null,
+      colorOverride: colorOverride.trim() || null,
+      attributeValues: toRelationshipAttributePayload(attributeDefinitionsForType, attributeValues),
+    });
+  }
+
+  async function handleCreateRelationshipType(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextName = newTypeName.trim();
+    setNewTypeError("");
+    if (!nextName) {
+      setNewTypeError("Enter a relationship type name.");
+      return;
+    }
+    const existingType = relationshipTypes.find((relationshipType) => relationshipType.name.toLowerCase() === nextName.toLowerCase());
+    if (existingType) {
+      setRelationshipTypeId(existingType.id);
+      setAttributeValues({});
+      setNewTypeName("");
+      setNewTypeOpen(false);
+      return;
+    }
+
+    setNewTypeSaving(true);
+    try {
+      const saved = await savePostgresRelationshipType({
+        projectId,
+        relationshipTypeId: null,
+        name: nextName,
+        description: "",
+        lineShape: "solid",
+        lineWeight: 2,
+        arrowhead: "one_sided",
+        color: "#355070",
+        fromObjectTypeIds: [],
+        toObjectTypeIds: [],
+        fromSourceKinds: [],
+        toSourceKinds: [],
+        attributes: [],
+      });
+      onRelationshipTypeCreated(saved.relationshipType, saved.attributeDefinitions);
+      setRelationshipTypeId(saved.relationshipType.id);
+      setAttributeValues({});
+      setNewTypeName("");
+      setNewTypeOpen(false);
+    } catch (createError) {
+      setNewTypeError(createError instanceof Error ? createError.message : "Failed to create relationship type.");
+    } finally {
+      setNewTypeSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <PostgresRelationshipModal
+        title="Create relationship"
+        ariaLabel="Create relationship tabs"
+        tab={modalTab}
+        setTab={setModalTab}
+        submitLabel="Create relationship"
+        relationshipTypes={availableRelationshipTypes}
+        relationshipTypeId={relationshipTypeId}
+        setRelationshipTypeId={setRelationshipTypeId}
+        selectedType={selectedRelationshipType}
+        fromEndpointKey={fromEntityId ? `${fromEntityType}:${fromEntityId}` : ""}
+        setFromEndpointKey={(key) => {
+          if (typeof key !== "string") return;
+          const [nextEntityType, ...nextIdParts] = key.split(":");
+          const nextEntityId = nextIdParts.join(":");
+          if ((nextEntityType === "object" || nextEntityType === "source") && nextEntityId) {
+            setFromEntityType(nextEntityType);
+            setFromEntityId(nextEntityId);
+          }
+        }}
+        toEndpointKey={toEntityId ? `${toEntityType}:${toEntityId}` : ""}
+        setToEndpointKey={(key) => {
+          if (typeof key !== "string") return;
+          const [nextEntityType, ...nextIdParts] = key.split(":");
+          const nextEntityId = nextIdParts.join(":");
+          if ((nextEntityType === "object" || nextEntityType === "source") && nextEntityId) {
+            setToEntityType(nextEntityType);
+            setToEntityId(nextEntityId);
+          }
+        }}
+        availableFromEndpoints={fromEndpointOptions}
+        availableToEndpoints={toEndpointOptions}
+        description={description}
+        setDescription={setDescription}
+        lineShapeOverride={lineShapeOverride}
+        setLineShapeOverride={setLineShapeOverride}
+        lineWeightOverride={lineWeightOverride}
+        setLineWeightOverride={setLineWeightOverride}
+        arrowheadOverride={arrowheadOverride}
+        setArrowheadOverride={setArrowheadOverride}
+        colorOverride={colorOverride}
+        setColorOverride={setColorOverride}
+        attributeDefinitions={attributeDefinitionsForType}
+        attributeValues={attributeValues}
+        setAttributeValues={setAttributeValues}
+        submitting={saving}
+        error={availableRelationshipTypes.length === 0
+          ? "No relationship types are available."
+          : fromEndpointOptions.length === 0 && relationshipTypeId
+            ? "No from endpoints match this relationship type."
+            : toEndpointOptions.length === 0 && relationshipTypeId
+              ? "No endpoints match this relationship type."
+              : error}
+        submitDisabled={!relationshipTypeId || !fromEntityId || !toEntityId}
+        onClose={onCancel}
+        onSubmit={handleSubmit}
+        onNewRelationshipType={() => {
+          setNewTypeError("");
+          setNewTypeOpen(true);
+        }}
+      />
+      {newTypeOpen ? (
+        <div className="modal-overlay" style={{ zIndex: 120 }} onClick={() => !newTypeSaving && setNewTypeOpen(false)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Add relationship type</h2>
+            <form className="form" onSubmit={handleCreateRelationshipType}>
+              <label className="form-label">
+                Relationship type name
+                <input
+                  className="form-input"
+                  value={newTypeName}
+                  onChange={(event) => setNewTypeName(event.target.value)}
+                  autoFocus
+                />
+              </label>
+              {newTypeError ? <p className="auth-error">{newTypeError}</p> : null}
+              <div className="form-actions">
+                <button type="button" className="btn" onClick={() => setNewTypeOpen(false)} disabled={newTypeSaving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={newTypeSaving || !newTypeName.trim()}>
+                  {newTypeSaving ? "Saving..." : "Add relationship type"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+
+}
+
 function PostgresSourceDetail({
   row,
   codeOptions,
   linkedObjects,
+  relationships,
   attributeValues,
   availableObjects,
   currentUserId,
   sourceLock,
   sourceLockConflict,
   lockSyncing,
-  canManageSourceObjects,
   canKickSourceLocks,
   canManageAnnotations,
   saving,
@@ -1504,9 +2133,11 @@ function PostgresSourceDetail({
   onUpdateAnnotation,
   onDeleteAnnotation,
   onKickSourceLock,
+  onCreateRelationship,
   onSaveSourceObjects,
   canManageSourceRecord,
   projectStoragePath,
+  onOpenAttributeHistory,
   onEditSource,
   onDeleteSource,
   onBack,
@@ -1514,13 +2145,13 @@ function PostgresSourceDetail({
   row: SourceRow;
   codeOptions: CodeOption[];
   linkedObjects: SourceObjectRow[];
-  attributeValues: Array<{ name: string; dataType: SharedAttributeDataType; value: string }>;
+  relationships: SourceRelationshipRow[];
+  attributeValues: Array<SharedAttributeDraft & { value: string }>;
   availableObjects: SourceObjectRow[];
   currentUserId: string;
-  sourceLock: PostgresExperimentSourceLock | null;
-  sourceLockConflict: PostgresExperimentSourceLock | null;
+  sourceLock: PostgresSourceLock | null;
+  sourceLockConflict: PostgresSourceLock | null;
   lockSyncing: boolean;
-  canManageSourceObjects: boolean;
   canKickSourceLocks: boolean;
   canManageAnnotations: boolean;
   saving: boolean;
@@ -1528,10 +2159,12 @@ function PostgresSourceDetail({
   onCreateAnnotation: (sourceId: string, selection: PendingSelection, payload: { codeIds: string[]; note: string }) => Promise<void>;
   onUpdateAnnotation: (annotation: SourceAnnotationRow, payload: { codeIds: string[]; note: string }) => Promise<void>;
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
-  onKickSourceLock: (lock: PostgresExperimentSourceLock) => Promise<void>;
+  onKickSourceLock: (lock: PostgresSourceLock) => Promise<void>;
+  onCreateRelationship: () => void;
   onSaveSourceObjects: (sourceId: string, objectIds: string[]) => Promise<void>;
   canManageSourceRecord: boolean;
   projectStoragePath: string;
+  onOpenAttributeHistory: (attribute: SharedAttributeDraft) => void;
   onEditSource: () => void;
   onDeleteSource: () => void;
   onBack: () => void;
@@ -1558,8 +2191,12 @@ function PostgresSourceDetail({
   const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
   const [videoPreviewLoading, setVideoPreviewLoading] = useState(false);
   const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
+  const [textSearchOpen, setTextSearchOpen] = useState(false);
+  const [textSearchQuery, setTextSearchQuery] = useState("");
+  const [activeTextSearchIndex, setActiveTextSearchIndex] = useState<number | null>(null);
+  const textSearchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const normalizedSourceType = row.type.trim().toLowerCase();
+  const normalizedSourceType = normalizeSourceKindFilterValue(row.type);
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
   const isPdfSource = normalizedSourceType === "pdf";
   const isImageSource = SOURCE_IMPORT_IMAGE_EXTS.has(fileExt) || row.type.toLowerCase() === "image";
@@ -1567,12 +2204,65 @@ function PostgresSourceDetail({
   const isVideoSource = SOURCE_IMPORT_VIDEO_EXTS.has(fileExt) || row.type.toLowerCase() === "video";
   const resolvedFilePath = resolveProjectStoragePath(projectStoragePath, row.filePath);
   const processedTranscriptSegments =
-    row.type === "Processed Transcript"
+    normalizedSourceType === "transcript"
       ? parseProcessedTranscriptSegments(row.structuredContentJson)
       : [];
   const questionOutline = getProcessedTranscriptQuestionOutline(processedTranscriptSegments);
+  const isSearchableTextSource = Boolean(row.content)
+    && (
+      normalizedSourceType === "text"
+      || normalizedSourceType === "transcript"
+    );
+  const activeTextSearchQuery = textSearchOpen ? textSearchQuery.trim() : "";
+  const textSearchMatches = useMemo(() => {
+    if (!activeTextSearchQuery) return [];
+    const matches: Array<{ startOffset: number; endOffset: number }> = [];
+    const wildcardPattern = activeTextSearchQuery.replace(/\*/g, "")
+      ? activeTextSearchQuery
+        .split("*")
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("\\S*?")
+      : "\\S+";
+    const searchRegex = new RegExp(wildcardPattern, "giu");
+    let match: RegExpExecArray | null;
+    while ((match = searchRegex.exec(row.content)) != null) {
+      const startOffset = match.index;
+      const endOffset = startOffset + match[0].length;
+      matches.push({ startOffset, endOffset });
+      if (match[0].length === 0) {
+        searchRegex.lastIndex += 1;
+      }
+    }
+    return matches;
+  }, [activeTextSearchQuery, row.content]);
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
   const lockStatus = describeSourceLock(sourceLock, currentUserId);
+
+  useEffect(() => {
+    if (textSearchOpen) {
+      window.setTimeout(() => textSearchInputRef.current?.focus(), 0);
+    }
+  }, [textSearchOpen]);
+
+  useEffect(() => {
+    if (textSearchMatches.length === 0) {
+      setActiveTextSearchIndex(null);
+      return;
+    }
+    setActiveTextSearchIndex(0);
+  }, [activeTextSearchQuery, row.id, textSearchMatches.length]);
+
+  useEffect(() => {
+    if (activeTextSearchIndex == null) return;
+    const container = transcriptViewerRef.current ?? contentSelectionRef.current;
+    if (!container) return;
+    const target = container.querySelector<HTMLElement>("[data-source-search-active='true']");
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.add("source-search-match-flash");
+    const timer = window.setTimeout(() => target.classList.remove("source-search-match-flash"), 1100);
+    return () => window.clearTimeout(timer);
+  }, [activeTextSearchIndex, textSearchMatches]);
 
   useEffect(() => {
     if (selectedOutlineSortOrder == null || !transcriptViewerRef.current) return;
@@ -1785,6 +2475,54 @@ function PostgresSourceDetail({
     setTextSizePx((current) => Math.min(SOURCE_TEXT_SIZE_MAX_PX, current + SOURCE_TEXT_SIZE_STEP_PX));
   }
 
+  function goToPreviousTextSearchMatch() {
+    if (textSearchMatches.length === 0) return;
+    setActiveTextSearchIndex((current) => {
+      const currentIndex = current ?? 0;
+      return (currentIndex - 1 + textSearchMatches.length) % textSearchMatches.length;
+    });
+  }
+
+  function goToNextTextSearchMatch() {
+    if (textSearchMatches.length === 0) return;
+    setActiveTextSearchIndex((current) => {
+      const currentIndex = current ?? -1;
+      return (currentIndex + 1) % textSearchMatches.length;
+    });
+  }
+
+  function renderSearchHighlightedText(text: string, absoluteStartOffset: number, keyPrefix: string) {
+    if (textSearchMatches.length === 0) return text;
+    const absoluteEndOffset = absoluteStartOffset + text.length;
+    const overlappingMatches = textSearchMatches
+      .map((match, index) => ({ ...match, index }))
+      .filter((match) => match.startOffset < absoluteEndOffset && match.endOffset > absoluteStartOffset);
+    if (overlappingMatches.length === 0) return text;
+
+    const boundaries = new Set<number>([absoluteStartOffset, absoluteEndOffset]);
+    for (const match of overlappingMatches) {
+      boundaries.add(Math.max(absoluteStartOffset, match.startOffset));
+      boundaries.add(Math.min(absoluteEndOffset, match.endOffset));
+    }
+    const orderedBoundaries = Array.from(boundaries).sort((left, right) => left - right);
+    return orderedBoundaries.slice(0, -1).map((startOffset, partIndex) => {
+      const endOffset = orderedBoundaries[partIndex + 1];
+      const match = overlappingMatches.find((item) => item.startOffset <= startOffset && item.endOffset >= endOffset);
+      const partText = text.slice(startOffset - absoluteStartOffset, endOffset - absoluteStartOffset);
+      if (!match) return <span key={`${keyPrefix}-${startOffset}-${endOffset}`}>{partText}</span>;
+      const isActive = match.index === activeTextSearchIndex;
+      return (
+        <mark
+          key={`${keyPrefix}-${startOffset}-${endOffset}`}
+          className={`source-search-match${isActive ? " source-search-match--active" : ""}`}
+          data-source-search-active={isActive ? "true" : undefined}
+        >
+          {partText}
+        </mark>
+      );
+    });
+  }
+
   return (
     <div className="view doc-detail-view">
       <div className="workspace-back-row workspace-back-row--split">
@@ -1814,7 +2552,7 @@ function PostgresSourceDetail({
           </div>
 
           <dl className="user-detail-meta case-detail-meta">
-            <dt>{t("projectDocuments.columns.type")}</dt> <dd>{row.type || "Source"}</dd>
+            <dt>{t("projectDocuments.columns.type")}</dt> <dd>{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType)}</dd>
             <dt>{t("projectDocuments.columns.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
             <dt>File Name</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
             <dt>Extension</dt> <dd>{fileExt ? `.${fileExt}` : "—"}</dd>
@@ -1842,38 +2580,68 @@ function PostgresSourceDetail({
             {attributeValues.length === 0 ? (
               <p className="case-card-empty">No source attributes are set for this source yet.</p>
             ) : (
-              <dl className="user-detail-meta case-detail-meta">
+              <div className="case-detail-attributes-table-wrap">
+                <table className="case-detail-attributes-table">
+                  <thead>
+                    <tr>
+                      <th className="case-detail-attributes-label" scope="col">Attribute</th>
+                      <th className="case-detail-attributes-value" scope="col">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                 {attributeValues.map((attribute) => (
-                  <div key={attribute.name} style={{ display: "contents" }}>
+                  <tr key={attribute.id ?? attribute.name}>
+                    <th className="case-detail-attributes-label" scope="row">{attribute.name}</th>
+                    <td className="case-detail-attributes-value">
+                      <button
+                        type="button"
+                        className="case-detail-attribute-value-button"
+                        onClick={() => onOpenAttributeHistory(attribute)}
+                        title="View attribute value history"
+                      >
+                        {formatAttributeDisplay(attribute.value, attribute.dataType) || "-"}
+                      </button>
+                    </td>
+                    {/*
                     <dt>{attribute.name}</dt> <dd>{formatAttributeDisplay(attribute.value, attribute.dataType) || "—"}</dd>
-                  </div>
+                    */}
+                  </tr>
                 ))}
-              </dl>
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
           <div className="case-card">
             <div className="case-card-header">
-              <h3 className="case-card-title">Research Objects</h3>
-              {canManageSourceObjects ? (
+              <h3 className="case-card-title">Relationships</h3>
+              {canManageSourceRecord ? (
                 <button
                   type="button"
-                  className="btn"
-                  onClick={() => setEditingSourceObjects(true)}
-                  disabled={saving}
+                  className="codebook-icon-action"
+                  onClick={onCreateRelationship}
+                  aria-label="Create relationship from this source"
+                  title="Create relationship"
                 >
-                  Associate Objects
+                  +
                 </button>
               ) : null}
             </div>
-            {linkedObjects.length === 0 ? (
-              <p className="case-card-empty">No research objects are linked to this source yet.</p>
+            {relationships.length === 0 ? (
+              <p className="case-card-empty">No relationships are connected to this source yet.</p>
             ) : (
               <ul className="code-ann-list">
-                {linkedObjects.map((object) => (
-                  <li key={object.id} className="code-ann-item">
-                    <div className="code-ann-doc">{object.title}</div>
-                    <div className="code-ann-meta">{object.objectType || "Object"}</div>
+                {relationships.map((relationship) => (
+                  <li key={relationship.id} className="code-ann-item">
+                    <div className="code-ann-doc">{relationship.relationshipType || "Relationship"}</div>
+                    <div className="code-ann-meta">
+                      {relationship.otherEndpointName}
+                      {relationship.otherEndpointType ? ` (${relationship.otherEndpointType})` : ""}
+                    </div>
+                    {relationship.description.trim() ? (
+                      <div className="code-ann-meta">{relationship.description}</div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -1921,13 +2689,70 @@ function PostgresSourceDetail({
                   )}
                 </div>
               </div>
-              {!isPdfSource && !isImageSource && !isAudioSource && !isVideoSource && row.content ? (
-                <TextSizeControls
-                  fontSizePx={textSizePx}
-                  onDecrease={decreaseTextSize}
-                  onIncrease={increaseTextSize}
-                />
-              ) : null}
+              <div className="source-content-header-actions">
+                {isSearchableTextSource ? (
+                  <div className="source-content-search">
+                    {textSearchOpen ? (
+                      <>
+                        <input
+                          ref={textSearchInputRef}
+                          className="source-content-search-input"
+                          value={textSearchQuery}
+                          onChange={(event) => setTextSearchQuery(event.target.value)}
+                          placeholder="Search text"
+                          aria-label="Search source text"
+                        />
+                        <span className="source-content-search-count">
+                          {activeTextSearchQuery
+                            ? textSearchMatches.length > 0 && activeTextSearchIndex != null
+                              ? `${activeTextSearchIndex + 1}/${textSearchMatches.length}`
+                              : "0/0"
+                            : ""}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn--small source-content-search-nav"
+                          onClick={goToPreviousTextSearchMatch}
+                          disabled={textSearchMatches.length === 0}
+                          aria-label="Previous search match"
+                          title="Previous"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--small source-content-search-nav"
+                          onClick={goToNextTextSearchMatch}
+                          disabled={textSearchMatches.length === 0}
+                          aria-label="Next search match"
+                          title="Next"
+                        >
+                          ↓
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="btn btn--small source-content-search-toggle"
+                      onClick={() => setTextSearchOpen((open) => !open)}
+                      aria-label={textSearchOpen ? "Close text search" : "Search source text"}
+                      title={textSearchOpen ? "Close search" : "Search"}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="11" cy="11" r="6" />
+                        <path d="M16 16l4 4" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : null}
+                {!isPdfSource && !isImageSource && !isAudioSource && !isVideoSource && row.content ? (
+                  <TextSizeControls
+                    fontSizePx={textSizePx}
+                    onDecrease={decreaseTextSize}
+                    onIncrease={increaseTextSize}
+                  />
+                ) : null}
+              </div>
             </div>
             {isPdfSource ? (
               pdfPreviewLoading ? (
@@ -2020,7 +2845,7 @@ function PostgresSourceDetail({
                 <p className="case-card-empty">No video preview is available for this source.</p>
               )
             ) : row.content ? (
-              row.type === "Processed Transcript" && processedTranscriptSegments.length > 0 ? (
+              normalizedSourceType === "transcript" && processedTranscriptSegments.length > 0 ? (
                 <div
                   ref={transcriptViewerRef}
                   className="doc-content-body doc-content-body--structured text-source-content-sized"
@@ -2028,7 +2853,11 @@ function PostgresSourceDetail({
                 >
                   <ProcessedTranscriptView
                     segments={processedTranscriptSegments}
-                    renderSegmentText={(segment) => segment.text}
+                    renderSegmentText={(segment) => renderSearchHighlightedText(
+                      segment.text,
+                      segment.startOffset,
+                      `processed-transcript-search-${segment.sortOrder}`,
+                    )}
                     selectedSortOrder={selectedOutlineSortOrder}
                   />
                 </div>
@@ -2042,7 +2871,7 @@ function PostgresSourceDetail({
                     className="doc-content-body"
                     style={{ fontSize: textSizePx, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                   >
-                    {row.content}
+                    {renderSearchHighlightedText(row.content, 0, "source-text-search")}
                   </pre>
                 </div>
               )
@@ -2184,9 +3013,14 @@ export type PostgresSourcesViewProps = {
   canKickSourceLocks: boolean;
   canManageAnnotations: boolean;
   canManageMemos: boolean;
+  canCreateCodes?: boolean;
   codingEnabled?: boolean;
+  textCodingMode?: "analysis" | "ai-assisted";
+  pageTitleOverride?: string;
+  allowedSourceKinds?: string[];
   initialSourceId?: string | null;
   initialAnnotationId?: string | null;
+  initialTextSegment?: { startOffset: number; endOffset: number } | null;
   onInitialNavigationHandled?: () => void;
   onOpenPostgresMemoDraft: (payload: { sourceIds?: string[]; annotationIds?: string[]; codeIds?: string[] }) => void;
 };
@@ -2198,34 +3032,46 @@ export function PostgresSourcesView({
   canKickSourceLocks,
   canManageAnnotations,
   canManageMemos,
+  canCreateCodes,
   codingEnabled = false,
+  textCodingMode = "analysis",
+  pageTitleOverride,
+  allowedSourceKinds,
   initialSourceId,
   initialAnnotationId,
+  initialTextSegment,
   onInitialNavigationHandled,
   onOpenPostgresMemoDraft,
 }: PostgresSourcesViewProps) {
   const { t } = useI18n();
   const [rows, setRows] = useState<SourceRow[]>([]);
-  const [codes, setCodes] = useState<PostgresExperimentCode[]>([]);
-  const [annotations, setAnnotations] = useState<PostgresExperimentAnnotationSummary[]>([]);
-  const [objects, setObjects] = useState<PostgresExperimentObject[]>([]);
-  const [objectTypes, setObjectTypes] = useState<PostgresExperimentObjectType[]>([]);
-  const [sourceLocks, setSourceLocks] = useState<PostgresExperimentSourceLock[]>([]);
-  const [sourceObjectLinks, setSourceObjectLinks] = useState<PostgresExperimentSourceObjectLink[]>([]);
-  const [sourceAttributeDefinitions, setSourceAttributeDefinitions] = useState<PostgresExperimentSourceAttributeDefinition[]>([]);
-  const [sourceAttributeValues, setSourceAttributeValues] = useState<PostgresExperimentSourceAttributeValue[]>([]);
+  const [codes, setCodes] = useState<PostgresCode[]>([]);
+  const [annotations, setAnnotations] = useState<PostgresAnnotationSummary[]>([]);
+  const [objects, setObjects] = useState<PostgresObject[]>([]);
+  const [objectTypes, setObjectTypes] = useState<PostgresObjectType[]>([]);
+  const [relationships, setRelationships] = useState<PostgresRelationship[]>([]);
+  const [relationshipTypes, setRelationshipTypes] = useState<PostgresRelationshipType[]>([]);
+  const [relationshipAttributeDefinitions, setRelationshipAttributeDefinitions] = useState<PostgresRelationshipAttributeDefinition[]>([]);
+  const [sourceLocks, setSourceLocks] = useState<PostgresSourceLock[]>([]);
+  const [sourceObjectLinks, setSourceObjectLinks] = useState<PostgresSourceObjectLink[]>([]);
+  const [sourceAttributeDefinitions, setSourceAttributeDefinitions] = useState<PostgresSourceAttributeDefinition[]>([]);
+  const [sourceAttributeValues, setSourceAttributeValues] = useState<PostgresSourceAttributeValue[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRow, setSelectedRow] = useState<SourceRow | null>(null);
   const [sortCol, setSortCol] = useState<SortCol>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [showAttributesTable, setShowAttributesTable] = useState(false);
-  const [selectedSourceKindFilter, setSelectedSourceKindFilter] = useState<string>("all");
+  const [selectedSourceKindFilter, setSelectedSourceKindFilter] = useState<string>(
+    textCodingMode === "ai-assisted" ? "source_text" : "all",
+  );
   const [sourceKindSortCol, setSourceKindSortCol] = useState<SourceKindSortCol>("label");
   const [sourceKindSortDir, setSourceKindSortDir] = useState<SortDir>("asc");
   const [attributeSortCol, setAttributeSortCol] = useState<AttributeSortCol>("name");
   const [attributeSortDir, setAttributeSortDir] = useState<AttributeSortDir>("asc");
-  const [attributeDraft, setAttributeDraft] = useState<SharedAttributeDraft | null>(null);
+  const [attributeDraft, setAttributeDraft] = useState<SourceAttributeDraft | null>(null);
+  const [attributeHistoryTarget, setAttributeHistoryTarget] = useState<PostgresAttributeValueHistoryTarget | null>(null);
+  const [activeAttributeHistoryCell, setActiveAttributeHistoryCell] = useState<{ sourceId: string; attributeDefinitionId: string } | null>(null);
   const [attributeSaving, setAttributeSaving] = useState(false);
   const [attributeError, setAttributeError] = useState<string | null>(null);
   const [sourceImportSettings, setSourceImportSettings] = useState({
@@ -2236,13 +3082,14 @@ export function PostgresSourcesView({
     storeOriginalFileName: true,
   });
   const [newSourceOpen, setNewSourceOpen] = useState(false);
+  const [newRelationshipSource, setNewRelationshipSource] = useState<SourceRow | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<SourceRow | null>(null);
   const [deleteRow, setDeleteRow] = useState<SourceRow | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [activeSourceLock, setActiveSourceLock] = useState<PostgresExperimentSourceLock | null>(null);
-  const [sourceLockConflict, setSourceLockConflict] = useState<PostgresExperimentSourceLock | null>(null);
+  const [activeSourceLock, setActiveSourceLock] = useState<PostgresSourceLock | null>(null);
+  const [sourceLockConflict, setSourceLockConflict] = useState<PostgresSourceLock | null>(null);
   const [sourceLockSyncing, setSourceLockSyncing] = useState(false);
   const [projectStoragePath, setProjectStoragePath] = useState("");
   const [sourceContextMenu, setSourceContextMenu] = useState<{ x: number; y: number; row: SourceRow } | null>(null);
@@ -2255,13 +3102,16 @@ export function PostgresSourcesView({
     try {
       const [snapshot, projects] = await Promise.all([
         loadPostgresProjectWorkspaceSnapshot(projectId),
-        listPostgresExperimentProjects(),
+        listPostgresProjects(),
       ]);
       setProjectStoragePath(projects.find((project) => project.id === projectId)?.storagePath ?? "");
       setCodes(snapshot.codes);
       setAnnotations(snapshot.annotations);
       setObjects(snapshot.objects);
       setObjectTypes(snapshot.objectTypes);
+      setRelationships(snapshot.relationships);
+      setRelationshipTypes(snapshot.relationshipTypes);
+      setRelationshipAttributeDefinitions(snapshot.relationshipAttributeDefinitions);
       setSourceLocks(snapshot.sourceLocks);
       setSourceObjectLinks(snapshot.sourceObjectLinks);
       setSourceAttributeDefinitions(snapshot.sourceAttributeDefinitions);
@@ -2281,21 +3131,15 @@ export function PostgresSourcesView({
         );
       }
 
-      const sourceObjectBySourceId = new Map(
-        snapshot.objects
-          .filter((object) => object.sourceId)
-          .map((object) => [object.sourceId!, object] as const),
-      );
-
       setRows(
         snapshot.sources.map((source) => {
-          const backingObject = sourceObjectBySourceId.get(source.id) ?? null;
+          const sourceVisual = getSourceKindVisual(source.sourceKind);
           return {
             id: source.id,
             name: source.title,
             type: source.sourceKind || "source",
-            sourceObjectType: backingObject?.objectType || source.sourceKind || "Source",
-            sourceObjectTypeSystemKey: backingObject?.objectTypeSystemKey ?? null,
+            sourceObjectType: sourceVisual?.label ?? source.sourceKind ?? "Source",
+            sourceObjectTypeSystemKey: sourceVisual?.systemKey ?? null,
             notes: source.notes ?? "",
             content: source.textContent,
             structuredContentJson: source.structuredContentJson,
@@ -2325,7 +3169,7 @@ export function PostgresSourcesView({
     let cancelled = false;
     async function loadImportSettings() {
       try {
-        const projectSettings = await getPostgresExperimentProjectDocumentImportSettings(projectId);
+        const projectSettings = await getPostgresProjectDocumentImportSettings(projectId);
         if (cancelled) return;
         const appSettings = readAppSettings().documentImport;
         setSourceImportSettings({
@@ -2374,17 +3218,29 @@ export function PostgresSourcesView({
     };
   }, [sourceContextMenu]);
 
+  const allowedSourceKindSet = useMemo(() => {
+    if (!allowedSourceKinds || allowedSourceKinds.length === 0) return null;
+    return new Set(allowedSourceKinds.map(normalizeSourceKindFilterValue));
+  }, [allowedSourceKinds]);
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => sourceRowMatchesAllowedKinds(row, allowedSourceKindSet)),
+    [allowedSourceKindSet, rows],
+  );
+
   useEffect(() => {
-    if (!initialSourceId || rows.length === 0 || selectedRow?.id === initialSourceId) return;
-    const matchingRow = rows.find((row) => row.id === initialSourceId);
+    if (!initialSourceId || visibleRows.length === 0) return;
+    if (selectedRow?.id === initialSourceId) {
+      return;
+    }
+    const matchingRow = visibleRows.find((row) => row.id === initialSourceId);
     if (!matchingRow) return;
     setSelectedRow(matchingRow);
-    onInitialNavigationHandled?.();
-  }, [initialSourceId, onInitialNavigationHandled, rows, selectedRow?.id]);
+  }, [initialSourceId, selectedRow?.id, visibleRows]);
 
   useEffect(() => {
     if (!selectedRow) return;
-    const nextSelectedRow = rows.find((row) => row.id === selectedRow.id) ?? null;
+    const nextSelectedRow = visibleRows.find((row) => row.id === selectedRow.id) ?? null;
     if (!nextSelectedRow) {
       setSelectedRow(null);
       return;
@@ -2392,14 +3248,15 @@ export function PostgresSourcesView({
     if (nextSelectedRow !== selectedRow) {
       setSelectedRow(nextSelectedRow);
     }
-  }, [rows, selectedRow]);
+  }, [selectedRow, visibleRows]);
 
   useEffect(() => {
+    if (showAttributesTable) return;
     if (selectedSourceKindFilter === "all") return;
-    if (!rows.some((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)) {
+    if (!visibleRows.some((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)) {
       setSelectedSourceKindFilter("all");
     }
-  }, [rows, selectedSourceKindFilter]);
+  }, [selectedSourceKindFilter, showAttributesTable, visibleRows]);
 
   useEffect(() => {
     if (!selectedRow || selectedSourceKindFilter === "all") return;
@@ -2412,7 +3269,7 @@ export function PostgresSourcesView({
     if (!selectedRow || !canManageAnnotations || !codingEnabled) {
       setSourceLockConflict(null);
       if (activeSourceLock) {
-        void releasePostgresExperimentSourceLock(projectId, activeSourceLock.id);
+        void releasePostgresSourceLock(projectId, activeSourceLock.id);
         setSourceLocks((current) => current.filter((lock) => lock.id !== activeSourceLock.id));
       }
       setActiveSourceLock(null);
@@ -2426,7 +3283,7 @@ export function PostgresSourcesView({
     const syncSourceLock = async () => {
       setSourceLockSyncing(true);
       try {
-        const result = await acquirePostgresExperimentSourceLock({
+        const result = await acquirePostgresSourceLock({
           projectId,
           sourceId: selectedRow.id,
         });
@@ -2472,7 +3329,7 @@ export function PostgresSourcesView({
       cancelled = true;
       if (heartbeatId) clearInterval(heartbeatId);
       if (heldLockId) {
-        void releasePostgresExperimentSourceLock(projectId, heldLockId);
+        void releasePostgresSourceLock(projectId, heldLockId);
         setSourceLocks((current) => current.filter((lock) => lock.id !== heldLockId));
       }
       setActiveSourceLock(null);
@@ -2494,6 +3351,12 @@ export function PostgresSourcesView({
       if (!systemKey || !POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS.includes(systemKey as (typeof POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS)[number])) {
         continue;
       }
+      if (allowedSourceKindSet && ![
+        systemKey,
+        objectType.name,
+      ].some((value) => allowedSourceKindSet.has(normalizeSourceKindFilterValue(value)))) {
+        continue;
+      }
       summaryByKind.set(systemKey, {
         label: objectType.name,
         meta: systemKey,
@@ -2504,20 +3367,21 @@ export function PostgresSourcesView({
         systemKey,
       });
     }
-    for (const row of rows) {
+    for (const row of visibleRows) {
       const kindKey = row.sourceObjectTypeSystemKey || row.sourceObjectType || row.type || "source";
       const current = summaryByKind.get(kindKey);
       if (current) {
         current.count += 1;
       } else {
+        const sourceVisual = getSourceKindVisual(row.type);
         summaryByKind.set(kindKey, {
-          label: row.sourceObjectType || row.type || "Source",
+          label: sourceVisual?.label ?? row.sourceObjectType ?? row.type ?? "Source",
           meta: row.sourceObjectTypeSystemKey || row.type || "source",
           count: 1,
           shape: "rounded",
-          color: SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
-          fill: "filled",
-          systemKey: row.sourceObjectTypeSystemKey,
+          color: sourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
+          fill: "outline",
+          systemKey: row.sourceObjectTypeSystemKey ?? sourceVisual?.systemKey ?? null,
         });
       }
     }
@@ -2544,15 +3408,31 @@ export function PostgresSourcesView({
         }
         return sourceKindSortDir === "asc" ? comparison : -comparison;
       });
-  }, [objectTypes, rows, sourceKindSortCol, sourceKindSortDir]);
+  }, [allowedSourceKindSet, objectTypes, sourceKindSortCol, sourceKindSortDir, visibleRows]);
+  const sourceTypeOptions = useMemo(
+    () => sourceKindSummaries
+      .map((summary) => {
+        const kind = sourceKindFromFilterValue(summary.kind);
+        return kind
+          ? {
+              kind,
+              label: sourceTypeOptionLabel(kind, summary.label),
+              count: summary.count,
+            }
+          : null;
+      })
+      .filter((option): option is { kind: string; label: string; count: number } => option !== null),
+    [sourceKindSummaries],
+  );
+  const selectedSourceKind = sourceKindFromFilterValue(selectedSourceKindFilter);
 
   const filteredRows = useMemo(
     () => (
       selectedSourceKindFilter === "all"
-        ? rows
-        : rows.filter((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)
+        ? visibleRows
+        : visibleRows.filter((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)
     ),
-    [rows, selectedSourceKindFilter],
+    [selectedSourceKindFilter, visibleRows],
   );
 
   const sorted = [...filteredRows].sort((a, b) => {
@@ -2589,17 +3469,24 @@ export function PostgresSourcesView({
     }
   }
 
+  function handleSelectSourceKind(kind: string) {
+    setSelectedSourceKindFilter(kind);
+    setSelectedRow(null);
+  }
+
   async function handleSaveSource(payload: {
     sourceKind: string;
     name: string;
     notes: string;
     content: string;
+    attributeValuesByDefinitionId: Record<string, string>;
   }) {
     setSubmitting(true);
     setSubmitError(null);
     try {
+      let savedSourceId = editingRow?.id ?? "";
       if (editingRow) {
-        await updatePostgresExperimentSource({
+        const saved = await updatePostgresSource({
           projectId,
           sourceId: editingRow.id,
           sourceKind: payload.sourceKind.trim(),
@@ -2614,8 +3501,9 @@ export function PostgresSourcesView({
           originalFileName: editingRow.filePath,
           storagePath: editingRow.filePath,
         });
+        savedSourceId = saved.id;
       } else {
-        await createPostgresExperimentSource({
+        const saved = await createPostgresSource({
           projectId,
           sourceKind: payload.sourceKind.trim(),
           title: payload.name.trim(),
@@ -2628,6 +3516,34 @@ export function PostgresSourcesView({
           extractedFromVideoTimeMs: null,
           originalFileName: "",
           storagePath: "",
+        });
+        savedSourceId = saved.id;
+      }
+
+      for (const definition of sourceAttributeDefinitions) {
+        const previousValue = savedSourceId
+          ? sourceAttributeValues.find((value) =>
+              value.sourceId === savedSourceId && value.attributeDefinitionId === definition.id
+            )?.value ?? ""
+          : "";
+        const nextValue = payload.attributeValuesByDefinitionId[definition.id] ?? "";
+        if (nextValue === previousValue) continue;
+        await savePostgresSourceAttribute({
+          projectId,
+          attributeDefinitionId: definition.id,
+          name: definition.name,
+          dataType: definition.dataType,
+          description: definition.description,
+          options: definition.options,
+          values: rows
+            .filter((row) => row.id !== savedSourceId)
+            .map((row) => ({
+              sourceId: row.id,
+              value: sourceAttributeValues.find((value) =>
+                value.sourceId === row.id && value.attributeDefinitionId === definition.id
+              )?.value ?? "",
+            }))
+            .concat({ sourceId: savedSourceId, value: nextValue }),
         });
       }
       setEditorOpen(false);
@@ -2662,7 +3578,7 @@ export function PostgresSourcesView({
     setSubmitError(null);
     try {
       if (payload.mode === "paste") {
-        await createPostgresExperimentSource({
+        await createPostgresSource({
           projectId,
           sourceKind: payload.sourceKind,
           title: payload.title,
@@ -2685,7 +3601,7 @@ export function PostgresSourcesView({
           const videoFrameIndexJson = item.sourceKind === "video"
             ? serializeMediaVideoFrameIndexCache(await createMediaVideoFrameIndexCache(bytes))
             : "";
-          await importPostgresExperimentSourceFile({
+          await importPostgresSourceFile({
             projectId,
             sourceKind: item.sourceKind,
             title: item.title,
@@ -2716,7 +3632,7 @@ export function PostgresSourcesView({
     setSubmitError(null);
     try {
       const bytes = new Uint8Array(await payload.file.arrayBuffer());
-      await importPostgresExperimentSourceFile({
+      await importPostgresSourceFile({
         projectId,
         sourceKind: "image",
         title: payload.title.trim() || preliminarySourceTitleFromFileName(payload.file.name),
@@ -2745,7 +3661,7 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await deletePostgresExperimentSource(projectId, deleteRow.id);
+      await deletePostgresSource(projectId, deleteRow.id);
       if (selectedRow?.id === deleteRow.id) setSelectedRow(null);
       setDeleteRow(null);
       await loadSources();
@@ -2767,7 +3683,7 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const createdAnnotation = await createPostgresExperimentAnnotation({
+      const createdAnnotation = await createPostgresAnnotation({
         projectId,
         sourceId,
         codeIds: payload.codeIds,
@@ -2814,7 +3730,7 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const updatedAnnotation = await updatePostgresExperimentAnnotation({
+      const updatedAnnotation = await updatePostgresAnnotation({
         projectId,
         annotationId: annotation.id,
         codeIds: payload.codeIds,
@@ -2845,7 +3761,7 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await deletePostgresExperimentAnnotation(projectId, annotationId);
+      await deletePostgresAnnotation(projectId, annotationId);
       await loadSources();
     } catch (annotationError) {
       setSubmitError(annotationError instanceof Error ? annotationError.message : "Failed to delete annotation.");
@@ -2859,7 +3775,7 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await setPostgresExperimentSourceObjects({
+      await setPostgresSourceObjects({
         projectId,
         sourceId,
         objectIds,
@@ -2873,17 +3789,59 @@ export function PostgresSourcesView({
     }
   }
 
-  async function handleKickSourceLock(lock: PostgresExperimentSourceLock) {
+  async function handleCreateSourceRelationship(payload: {
+    relationshipTypeId: string;
+    fromEntityType: "object" | "source";
+    fromEntityId: string;
+    toEntityType: "object" | "source";
+    toEntityId: string;
+    description: string;
+    lineShapeOverride?: string | null;
+    lineWeightOverride?: number | null;
+    arrowheadOverride?: string | null;
+    colorOverride?: string | null;
+    attributeValues: Array<{ attributeDefinitionId: string; value: string }>;
+  }) {
+    if (!newRelationshipSource) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await savePostgresRelationship({
+        projectId,
+        relationshipId: null,
+        fromEntityType: payload.fromEntityType,
+        fromEntityId: payload.fromEntityId,
+        toEntityType: payload.toEntityType,
+        toEntityId: payload.toEntityId,
+        relationshipTypeId: payload.relationshipTypeId,
+        description: payload.description,
+        lineShapeOverride: payload.lineShapeOverride ?? null,
+        lineWeightOverride: payload.lineWeightOverride ?? null,
+        arrowheadOverride: payload.arrowheadOverride ?? null,
+        colorOverride: payload.colorOverride ?? null,
+        attributeValues: payload.attributeValues,
+      });
+      setNewRelationshipSource(null);
+      await loadSources();
+    } catch (relationshipError) {
+      setSubmitError(relationshipError instanceof Error ? relationshipError.message : "Failed to create relationship.");
+      throw relationshipError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleKickSourceLock(lock: PostgresSourceLock) {
     setSourceLockSyncing(true);
     setSubmitError(null);
     try {
-      await kickPostgresExperimentSourceLock({
+      await kickPostgresSourceLock({
         projectId,
         sourceId: lock.sourceId,
         lockId: lock.id,
       });
       setSourceLocks((current) => current.filter((entry) => entry.id !== lock.id));
-      const result = await acquirePostgresExperimentSourceLock({
+      const result = await acquirePostgresSourceLock({
         projectId,
         sourceId: lock.sourceId,
       });
@@ -2914,23 +3872,27 @@ export function PostgresSourcesView({
   }
 
   async function handleSaveAttribute(
-    draft: SharedAttributeDraft,
+    draft: SourceAttributeDraft,
     valuesBySource: Record<string, string>,
   ) {
     setAttributeSaving(true);
     setAttributeError(null);
     try {
-      await savePostgresExperimentSourceAttribute({
+      const normalizedSourceKinds = normalizeSourceAttributeKinds(draft.sourceKinds);
+      await savePostgresSourceAttribute({
         projectId,
         attributeDefinitionId: draft.id ?? null,
         name: draft.name.trim(),
         dataType: draft.dataType,
         description: draft.description,
         options: draft.options,
-        values: rows.map((row) => ({
-          sourceId: row.id,
-          value: valuesBySource[row.id] ?? "",
-        })),
+        sourceKinds: normalizedSourceKinds,
+        values: rows
+          .filter((row) => normalizedSourceKinds.length === 0 || normalizedSourceKinds.includes(row.type))
+          .map((row) => ({
+            sourceId: row.id,
+            value: valuesBySource[row.id] ?? "",
+          })),
       });
       setAttributeDraft(null);
       await loadSources();
@@ -2941,11 +3903,71 @@ export function PostgresSourcesView({
     }
   }
 
+  async function handleCreateCode(payload: { label: string; color: string; description: string; parentCodeId?: string | null }) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const createdCode = await createPostgresCode({
+        projectId,
+        label: payload.label,
+        color: payload.color,
+        description: payload.description,
+        parentCodeId: payload.parentCodeId ?? null,
+      });
+      setCodes((current) => [...current, createdCode]);
+      return createdCode;
+    } catch (createError) {
+      setSubmitError(createError instanceof Error ? createError.message : "Failed to create code.");
+      throw createError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleUpdateCode(codeId: string, payload: { label: string; color: string; description: string; parentCodeId?: string | null }) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const updatedCode = await updatePostgresCode({
+        projectId,
+        codeId,
+        label: payload.label,
+        color: payload.color,
+        description: payload.description,
+        parentCodeId: payload.parentCodeId ?? null,
+        shortcut: "",
+      });
+      setCodes((current) => current.map((code) => (code.id === updatedCode.id ? updatedCode : code)));
+      return updatedCode;
+    } catch (updateError) {
+      setSubmitError(updateError instanceof Error ? updateError.message : "Failed to update code.");
+      throw updateError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteCode(codeId: string) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await deletePostgresCode(projectId, codeId);
+      setCodes((current) => current
+        .filter((code) => code.id !== codeId)
+        .map((code) => (code.parentCodeId === codeId ? { ...code, parentCodeId: "" } : code)));
+    } catch (deleteError) {
+      setSubmitError(deleteError instanceof Error ? deleteError.message : "Failed to delete code.");
+      throw deleteError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleUpdateSourceWaveform(sourceId: string, waveformPeaksJson: string) {
     const sourceRow = rows.find((entry) => entry.id === sourceId);
     if (!sourceRow) return;
 
-    await updatePostgresExperimentSource({
+    await updatePostgresSource({
       projectId,
       sourceId: sourceRow.id,
       sourceKind: sourceRow.type.trim(),
@@ -2977,7 +3999,7 @@ export function PostgresSourcesView({
     const sourceRow = rows.find((entry) => entry.id === sourceId);
     if (!sourceRow) return;
 
-    await updatePostgresExperimentSource({
+    await updatePostgresSource({
       projectId,
       sourceId: sourceRow.id,
       sourceKind: sourceRow.type.trim(),
@@ -3006,18 +4028,26 @@ export function PostgresSourcesView({
   }
 
   const codeOptions = useMemo(() => buildCodeOptions(codes), [codes]);
-  const attributeDefs = useMemo<SourceAttributeDefinitionRow[]>(
+  const sourceAttributeDefinitionsForEditor = useMemo(
     () => [...sourceAttributeDefinitions]
-      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [sourceAttributeDefinitions],
+  );
+  const attributeDefs = useMemo<SourceAttributeDefinitionRow[]>(
+    () => sourceAttributeDefinitionsForEditor
+      .filter((definition) => !selectedSourceKind
+        || (definition.sourceKinds ?? []).length === 0
+        || (definition.sourceKinds ?? []).includes(selectedSourceKind))
       .map((definition) => ({
         id: definition.id,
         name: definition.name,
         dataType: definition.dataType,
         description: definition.description,
         options: definition.options,
+        sourceKinds: definition.sourceKinds ?? [],
         sortOrder: definition.sortOrder,
       })),
-    [sourceAttributeDefinitions],
+    [selectedSourceKind, sourceAttributeDefinitionsForEditor],
   );
   const attributeValues = useMemo<Record<string, SourceAttributeValueRow>>(
     () => Object.fromEntries(
@@ -3033,6 +4063,18 @@ export function PostgresSourcesView({
     ),
     [sourceAttributeValues],
   );
+
+  function sourceAttributeDraftValuesFor(row: SourceRow | null | undefined): Record<string, string> {
+    if (!row) return {};
+    return Object.fromEntries(
+      sourceAttributeDefinitionsForEditor.map((definition) => [
+        definition.id,
+        sourceAttributeValues.find((value) =>
+          value.sourceId === row.id && value.attributeDefinitionId === definition.id
+        )?.value ?? "",
+      ]),
+    );
+  }
   const availableObjects = useMemo<SourceObjectRow[]>(
     () => [...objects]
       .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }))
@@ -3041,7 +4083,6 @@ export function PostgresSourcesView({
         title: object.title,
         objectType: object.objectType,
         objectTypeSystemKey: object.objectTypeSystemKey,
-        sourceId: object.sourceId,
       })),
     [objects],
   );
@@ -3068,6 +4109,12 @@ export function PostgresSourcesView({
       }))
       .sort((left, right) => (left.startOffset ?? 0) - (right.startOffset ?? 0) || left.createdAt.localeCompare(right.createdAt));
   }, [annotations, codes, selectedRow]);
+
+  useEffect(() => {
+    if (!initialSourceId || selectedRow?.id !== initialSourceId) return;
+    if (initialAnnotationId && !selectedSourceAnnotations.some((annotation) => annotation.id === initialAnnotationId)) return;
+    onInitialNavigationHandled?.();
+  }, [initialAnnotationId, initialSourceId, onInitialNavigationHandled, selectedRow?.id, selectedSourceAnnotations]);
   const selectedSourceObjects = useMemo<SourceObjectRow[]>(() => {
     if (!selectedRow) return [];
     const objectById = new Map(availableObjects.map((object) => [object.id, object]));
@@ -3077,23 +4124,68 @@ export function PostgresSourcesView({
       .filter((object): object is SourceObjectRow => object != null)
       .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }));
   }, [availableObjects, selectedRow, sourceObjectLinks]);
+  const selectedSourceRelationships = useMemo<SourceRelationshipRow[]>(() => {
+    if (!selectedRow) return [];
+    const objectById = new Map(objects.map((object) => [object.id, object]));
+    const sourceById = new Map(rows.map((source) => [source.id, source]));
+    function endpointLabel(entityType: string, entityId: string, fallbackName: string): { name: string; type: string } {
+      if (entityType === "object") {
+        const object = objectById.get(entityId);
+        return {
+          name: object?.title || fallbackName || entityId,
+          type: object?.objectType || "Object",
+        };
+      }
+      if (entityType === "source") {
+        const source = sourceById.get(entityId);
+        return {
+          name: source?.name || fallbackName || entityId,
+          type: source?.sourceObjectType || source?.type || "Source",
+        };
+      }
+      return { name: fallbackName || entityId, type: entityType || "Endpoint" };
+    }
+    return relationships
+      .filter((relationship) =>
+        (relationship.fromEntityType === "source" && relationship.fromEntityId === selectedRow.id)
+        || (relationship.toEntityType === "source" && relationship.toEntityId === selectedRow.id)
+      )
+      .map((relationship) => {
+        const selectedIsFrom = relationship.fromEntityType === "source" && relationship.fromEntityId === selectedRow.id;
+        const other = selectedIsFrom
+          ? endpointLabel(relationship.toEntityType, relationship.toEntityId, relationship.toEntityName)
+          : endpointLabel(relationship.fromEntityType, relationship.fromEntityId, relationship.fromEntityName);
+        return {
+          id: relationship.id,
+          relationshipType: relationship.relationshipType,
+          otherEndpointName: other.name,
+          otherEndpointType: other.type,
+          description: relationship.description,
+        };
+      })
+      .sort((left, right) =>
+        left.relationshipType.localeCompare(right.relationshipType, undefined, { sensitivity: "base" })
+        || left.otherEndpointName.localeCompare(right.otherEndpointName, undefined, { sensitivity: "base" })
+      );
+  }, [objects, relationships, rows, selectedRow]);
   const availableObjectsForSelectedSource = useMemo(
-    () => availableObjects.filter((object) => object.sourceId !== selectedRow?.id),
-    [availableObjects, selectedRow?.id],
+    () => availableObjects,
+    [availableObjects],
   );
-  const selectedSourceAttributeValues = useMemo<Array<{ name: string; dataType: SharedAttributeDataType; value: string }>>(() => {
+  const selectedSourceAttributeValues = useMemo<Array<SharedAttributeDraft & { value: string }>>(() => {
     if (!selectedRow) return [];
     return attributeDefs
       .map((definition) => {
         const value = attributeValues[valueKey(selectedRow.id, definition.id)]?.value ?? "";
-        if (!value) return null;
         return {
+          id: definition.id,
           name: definition.name,
           dataType: definition.dataType,
+          description: definition.description,
+          options: definition.options,
           value,
         };
-      })
-      .filter((value): value is { name: string; dataType: SharedAttributeDataType; value: string } => value != null);
+      });
   }, [attributeDefs, attributeValues, selectedRow]);
   const sortedAttributeRows = useMemo(() => {
     const nextRows = [...filteredRows];
@@ -3121,7 +4213,9 @@ export function PostgresSourcesView({
       ? activeSourceLock
       : sourceLockBySourceId.get(selectedRow.id) ?? null)
     : null;
-  const pageTitle = showAttributesTable ? "Source Attributes" : codingEnabled ? "Code Sources" : "Sources";
+  const pageTitle = showAttributesTable
+    ? "Source Attributes"
+    : pageTitleOverride ?? (codingEnabled ? "Code Sources" : "Sources");
 
   if (codingEnabled && selectedRow) {
     const normalizedSourceType = selectedRow.type.trim().toLowerCase();
@@ -3129,10 +4223,12 @@ export function PostgresSourcesView({
     const isImageCodingSource = SOURCE_IMPORT_IMAGE_EXTS.has(selectedFileExt) || normalizedSourceType === "image" || normalizedSourceType === "pdf";
     const isAudioCodingSource = SOURCE_IMPORT_AUDIO_EXTS.has(selectedFileExt) || normalizedSourceType === "audio";
     const isVideoCodingSource = SOURCE_IMPORT_VIDEO_EXTS.has(selectedFileExt) || normalizedSourceType === "video";
+    const TextCodingView = textCodingMode === "ai-assisted" ? PostgresSourceAiTextCodingView : PostgresSourceTextCodingView;
 
     return (
       isImageCodingSource ? (
         <PostgresSourceImageCodingView
+          projectId={projectId}
           row={selectedRow}
           codes={codes}
           annotations={selectedSourceAnnotations}
@@ -3144,11 +4240,16 @@ export function PostgresSourcesView({
           canKickSourceLocks={canKickSourceLocks}
           canManageAnnotations={canManageAnnotations && codingEnabled}
           canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
           initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={null}
           projectStoragePath={projectStoragePath}
           saving={submitting}
           error={submitError}
           onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
           onUpdateAnnotation={handleUpdateAnnotation}
           onDeleteAnnotation={handleDeleteAnnotation}
           onKickSourceLock={handleKickSourceLock}
@@ -3162,6 +4263,7 @@ export function PostgresSourcesView({
         />
       ) : isAudioCodingSource ? (
         <PostgresSourceAudioCodingView
+          projectId={projectId}
           row={selectedRow}
           codes={codes}
           annotations={selectedSourceAnnotations}
@@ -3173,11 +4275,16 @@ export function PostgresSourcesView({
           canKickSourceLocks={canKickSourceLocks}
           canManageAnnotations={canManageAnnotations && codingEnabled}
           canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
           initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={null}
           projectStoragePath={projectStoragePath}
           saving={submitting}
           error={submitError}
           onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
           onUpdateAnnotation={handleUpdateAnnotation}
           onDeleteAnnotation={handleDeleteAnnotation}
           onKickSourceLock={handleKickSourceLock}
@@ -3191,6 +4298,7 @@ export function PostgresSourcesView({
         />
       ) : isVideoCodingSource ? (
         <PostgresSourceVideoCodingView
+          projectId={projectId}
           row={selectedRow}
           codes={codes}
           annotations={selectedSourceAnnotations}
@@ -3202,11 +4310,16 @@ export function PostgresSourcesView({
           canKickSourceLocks={canKickSourceLocks}
           canManageAnnotations={canManageAnnotations && codingEnabled}
           canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
           initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={null}
           projectStoragePath={projectStoragePath}
           saving={submitting}
           error={submitError}
           onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
           onUpdateAnnotation={handleUpdateAnnotation}
           onDeleteAnnotation={handleDeleteAnnotation}
           onKickSourceLock={handleKickSourceLock}
@@ -3220,7 +4333,8 @@ export function PostgresSourcesView({
           }}
         />
       ) : (
-        <PostgresSourceTextCodingView
+        <TextCodingView
+          projectId={projectId}
           row={selectedRow}
           codes={codes}
           annotations={selectedSourceAnnotations}
@@ -3232,10 +4346,15 @@ export function PostgresSourcesView({
           canKickSourceLocks={canKickSourceLocks}
           canManageAnnotations={canManageAnnotations && codingEnabled}
           canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
           initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={initialTextSegment ?? null}
           saving={submitting}
           error={submitError}
           onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
           onUpdateAnnotation={handleUpdateAnnotation}
           onDeleteAnnotation={handleDeleteAnnotation}
           onKickSourceLock={handleKickSourceLock}
@@ -3257,13 +4376,13 @@ export function PostgresSourcesView({
           row={selectedRow}
           codeOptions={codeOptions}
           linkedObjects={selectedSourceObjects}
+          relationships={selectedSourceRelationships}
           attributeValues={selectedSourceAttributeValues}
           availableObjects={availableObjectsForSelectedSource}
           currentUserId={currentUserId}
           sourceLock={selectedSourceLock}
           sourceLockConflict={sourceLockConflict}
           lockSyncing={sourceLockSyncing}
-          canManageSourceObjects={canManageSources}
           canKickSourceLocks={canKickSourceLocks}
           canManageAnnotations={false}
           saving={submitting}
@@ -3272,9 +4391,24 @@ export function PostgresSourcesView({
           onUpdateAnnotation={handleUpdateAnnotation}
           onDeleteAnnotation={handleDeleteAnnotation}
           onKickSourceLock={handleKickSourceLock}
+          onCreateRelationship={() => {
+            setNewRelationshipSource(selectedRow);
+            setSubmitError(null);
+          }}
           onSaveSourceObjects={handleSaveSourceObjects}
           canManageSourceRecord={canManageSources}
           projectStoragePath={projectStoragePath}
+          onOpenAttributeHistory={(attribute) => {
+            if (!attribute.id) return;
+            setAttributeHistoryTarget({
+              projectId,
+              ownerKind: "source",
+              ownerId: selectedRow.id,
+              ownerName: selectedRow.name,
+              attributeDefinitionId: attribute.id,
+              attributeName: attribute.name,
+            });
+          }}
           onEditSource={() => {
             setEditingRow(selectedRow);
             setEditorOpen(true);
@@ -3293,6 +4427,8 @@ export function PostgresSourcesView({
           <SourceEditorModal
             title={editingRow ? "Edit Source" : "New Source"}
             initialRow={editingRow}
+            attributeDefinitions={sourceAttributeDefinitionsForEditor}
+            attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
             saving={submitting}
             error={submitError}
             onCancel={() => {
@@ -3321,6 +4457,37 @@ export function PostgresSourcesView({
             </div>
           </div>
         ) : null}
+        {newRelationshipSource ? (
+          <CreateSourceRelationshipModal
+            source={newRelationshipSource}
+            projectId={projectId}
+            sources={rows}
+            objects={objects}
+            relationshipTypes={relationshipTypes}
+            relationshipAttributeDefinitions={relationshipAttributeDefinitions}
+            saving={submitting}
+            error={submitError}
+            onCancel={() => {
+              if (submitting) return;
+              setNewRelationshipSource(null);
+              setSubmitError(null);
+            }}
+            onRelationshipTypeCreated={(relationshipType, attributeDefinitions) => {
+              setRelationshipTypes((current) => [...current.filter((entry) => entry.id !== relationshipType.id), relationshipType]);
+              setRelationshipAttributeDefinitions((current) => [
+                ...current.filter((definition) => definition.relationshipTypeId !== relationshipType.id),
+                ...attributeDefinitions,
+              ]);
+            }}
+            onSave={handleCreateSourceRelationship}
+          />
+        ) : null}
+        {attributeHistoryTarget ? (
+          <PostgresAttributeValueHistoryModal
+            target={attributeHistoryTarget}
+            onClose={() => setAttributeHistoryTarget(null)}
+          />
+        ) : null}
       </div>
     );
   }
@@ -3332,39 +4499,50 @@ export function PostgresSourcesView({
           <h1>{pageTitle}</h1>
         </div>
         <div className="view-header-actions">
-          <button
-            className="btn btn--primary"
-            onClick={() => {
-              if (showAttributesTable) {
+          {showAttributesTable && selectedSourceKindFilter !== "all" ? (
+            <button
+              className="btn btn--primary"
+              onClick={() => {
+                const activeKind = sourceKindFromFilterValue(selectedSourceKindFilter);
                 setAttributeDraft({
                   name: "",
                   dataType: "text",
                   description: "",
                   options: [],
+                  sourceKinds: activeKind ? [activeKind] : [],
                 });
                 setAttributeError(null);
-                return;
-              }
-              setNewSourceOpen(true);
-              setSubmitError(null);
-            }}
-            disabled={!canManageSources}
-            title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : undefined}
-          >
-            {showAttributesTable ? "Add Attribute" : "New Source"}
-          </button>
+              }}
+              disabled={!canManageSources}
+              title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : undefined}
+            >
+              Add Attribute
+            </button>
+          ) : !showAttributesTable ? (
+            <button
+              className="btn btn--primary"
+              onClick={() => {
+                setNewSourceOpen(true);
+                setSubmitError(null);
+              }}
+              disabled={!canManageSources}
+              title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : undefined}
+            >
+              New Source
+            </button>
+          ) : null}
         </div>
       </header>
 
       {error && <p className="users-error">{error}</p>}
       {attributeError && <p className="users-error">{attributeError}</p>}
-      <p className="users-guide-copy" style={{ marginBottom: 16 }}>
-        {showAttributesTable
-          ? "Source attributes are stored directly in the PostgreSQL workspace. Define shared source metadata here and compare it across sources."
-          : codingEnabled
-            ? "Sources are loaded directly from the PostgreSQL workspace. This coding workspace supports source locks, annotations, and code assignment."
+      {(showAttributesTable || !codingEnabled) && (
+        <p className="users-guide-copy" style={{ marginBottom: 16 }}>
+          {showAttributesTable
+            ? "Source attributes are stored directly in the PostgreSQL workspace. Define shared source metadata here and compare it across sources."
             : "Sources are loaded directly from the PostgreSQL workspace. This project view is read-only for source coding; use Analysis > Code Text to annotate."}
-      </p>
+        </p>
+      )}
 
       <div
         className="postgres-sources-grid"
@@ -3412,8 +4590,15 @@ export function PostgresSourcesView({
                 borderBottom: "1px solid rgba(53, 80, 112, 0.08)",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 18 }}>Source object types</h2>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>Source object types</h2>
+                  {textCodingMode === "ai-assisted" ? (
+                    <p className="users-guide-copy" style={{ margin: 0, fontSize: 12 }}>
+                      Text and Transcripts only
+                    </p>
+                  ) : null}
+                </div>
                 <span className="home-restricted-value">{sourceKindSummaries.length}</span>
               </div>
             </div>
@@ -3449,21 +4634,18 @@ export function PostgresSourcesView({
                     className="users-row"
                     style={{
                       background: selectedSourceKindFilter === "all" ? "rgba(53, 80, 112, 0.10)" : undefined,
+                      cursor: "pointer",
                     }}
+                    onClick={() => handleSelectSourceKind("all")}
                   >
                     <td
                       className="users-td users-td--name"
                       role="button"
                       tabIndex={0}
-                      onClick={() => {
-                        setSelectedSourceKindFilter("all");
-                        setSelectedRow(null);
-                      }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setSelectedSourceKindFilter("all");
-                          setSelectedRow(null);
+                          handleSelectSourceKind("all");
                         }
                       }}
                     >
@@ -3471,7 +4653,7 @@ export function PostgresSourcesView({
                         <span>All</span>
                       </div>
                     </td>
-                    <td className="users-td users-td--muted">{rows.length}</td>
+                    <td className="users-td users-td--muted">{visibleRows.length}</td>
                   </tr>
                   {sourceKindSummaries.map((summary) => (
                     <tr
@@ -3479,21 +4661,18 @@ export function PostgresSourcesView({
                       className="users-row"
                       style={{
                         background: selectedSourceKindFilter === summary.kind ? "rgba(53, 80, 112, 0.10)" : undefined,
+                        cursor: "pointer",
                       }}
+                      onClick={() => handleSelectSourceKind(summary.kind)}
                     >
                       <td
                         className="users-td users-td--name"
                         role="button"
                         tabIndex={0}
-                        onClick={() => {
-                          setSelectedSourceKindFilter(summary.kind);
-                          setSelectedRow(null);
-                        }}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            setSelectedSourceKindFilter(summary.kind);
-                            setSelectedRow(null);
+                            handleSelectSourceKind(summary.kind);
                           }
                         }}
                       >
@@ -3601,15 +4780,49 @@ export function PostgresSourcesView({
                       <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No matching sources yet.</td></tr>
                     )}
                     {!loading && sortedAttributeRows.map((row) => (
-                      <tr key={row.id} className="users-row">
+                      <tr key={row.id} className="case-attributes-row">
                         <td className="users-td users-td--name case-attributes-case-cell">{row.name}</td>
-                        {attributeDefs.map((attribute) => (
-                          <td key={attribute.id} className="users-td case-attributes-value-cell">
+                        {attributeDefs.map((attribute) => {
+                          const cellActive = activeAttributeHistoryCell?.sourceId === row.id
+                            && activeAttributeHistoryCell.attributeDefinitionId === attribute.id;
+                          return (
+                          <td
+                            key={attribute.id}
+                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}`}
+                            role="button"
+                            tabIndex={0}
+                            title="View attribute value history"
+                            onClick={() => {
+                              setActiveAttributeHistoryCell({ sourceId: row.id, attributeDefinitionId: attribute.id });
+                              setAttributeHistoryTarget({
+                                projectId,
+                                ownerKind: "source",
+                                ownerId: row.id,
+                                ownerName: row.name,
+                                attributeDefinitionId: attribute.id,
+                                attributeName: attribute.name,
+                              });
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") return;
+                              event.preventDefault();
+                              setActiveAttributeHistoryCell({ sourceId: row.id, attributeDefinitionId: attribute.id });
+                              setAttributeHistoryTarget({
+                                projectId,
+                                ownerKind: "source",
+                                ownerId: row.id,
+                                ownerName: row.name,
+                                attributeDefinitionId: attribute.id,
+                                attributeName: attribute.name,
+                              });
+                            }}
+                          >
                             {attributeValues[valueKey(row.id, attribute.id)]?.value
                               ? formatAttributeDisplay(attributeValues[valueKey(row.id, attribute.id)]!.value, attribute.dataType)
                               : <span className="cases-no-docs">—</span>}
                           </td>
-                        ))}
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
@@ -3623,13 +4836,13 @@ export function PostgresSourcesView({
                 row={selectedRow}
                 codeOptions={codeOptions}
                 linkedObjects={selectedSourceObjects}
+                relationships={selectedSourceRelationships}
                 attributeValues={selectedSourceAttributeValues}
                 availableObjects={availableObjectsForSelectedSource}
                 currentUserId={currentUserId}
                 sourceLock={selectedSourceLock}
                 sourceLockConflict={sourceLockConflict}
                 lockSyncing={sourceLockSyncing}
-                canManageSourceObjects={canManageSources}
                 canKickSourceLocks={canKickSourceLocks}
                 canManageAnnotations={canManageAnnotations && codingEnabled}
                 saving={submitting}
@@ -3638,9 +4851,24 @@ export function PostgresSourcesView({
                 onUpdateAnnotation={handleUpdateAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
                 onKickSourceLock={handleKickSourceLock}
+                onCreateRelationship={() => {
+                  setNewRelationshipSource(selectedRow);
+                  setSubmitError(null);
+                }}
                 onSaveSourceObjects={handleSaveSourceObjects}
                 canManageSourceRecord={canManageSources && !codingEnabled}
                 projectStoragePath={projectStoragePath}
+                onOpenAttributeHistory={(attribute) => {
+                  if (!attribute.id) return;
+                  setAttributeHistoryTarget({
+                    projectId,
+                    ownerKind: "source",
+                    ownerId: selectedRow.id,
+                    ownerName: selectedRow.name,
+                    attributeDefinitionId: attribute.id,
+                    attributeName: attribute.name,
+                  });
+                }}
                 onEditSource={() => {
                   setEditingRow(selectedRow);
                   setEditorOpen(true);
@@ -3659,6 +4887,8 @@ export function PostgresSourcesView({
                 <SourceEditorModal
                   title={editingRow ? "Edit Source" : "New Source"}
                   initialRow={editingRow}
+                  attributeDefinitions={sourceAttributeDefinitionsForEditor}
+                  attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
                   saving={submitting}
                   error={submitError}
                   onCancel={() => {
@@ -3745,7 +4975,7 @@ export function PostgresSourcesView({
                         title={lockStatus.title}
                       >
                         <td className="users-td users-td--name">{row.name}</td>
-                        <td className="users-td users-td--muted">{row.type || "source"}</td>
+                        <td className="users-td users-td--muted">{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType)}</td>
                         <td className="users-td users-td--muted">{lockStatus.label}</td>
                         <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
                       </tr>
@@ -3799,10 +5029,37 @@ export function PostgresSourcesView({
           onSave={handleCreateImportedSource}
         />
       )}
+      {newRelationshipSource ? (
+        <CreateSourceRelationshipModal
+          source={newRelationshipSource}
+          projectId={projectId}
+          sources={rows}
+          objects={objects}
+          relationshipTypes={relationshipTypes}
+          relationshipAttributeDefinitions={relationshipAttributeDefinitions}
+          saving={submitting}
+          error={submitError}
+          onCancel={() => {
+            if (submitting) return;
+            setNewRelationshipSource(null);
+            setSubmitError(null);
+          }}
+          onRelationshipTypeCreated={(relationshipType, attributeDefinitions) => {
+            setRelationshipTypes((current) => [...current.filter((entry) => entry.id !== relationshipType.id), relationshipType]);
+            setRelationshipAttributeDefinitions((current) => [
+              ...current.filter((definition) => definition.relationshipTypeId !== relationshipType.id),
+              ...attributeDefinitions,
+            ]);
+          }}
+          onSave={handleCreateSourceRelationship}
+        />
+      ) : null}
       {editorOpen && !selectedRow && (
         <SourceEditorModal
           title={editingRow ? "Edit Source" : "New Source"}
           initialRow={editingRow}
+          attributeDefinitions={sourceAttributeDefinitionsForEditor}
+          attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
           saving={submitting}
           error={submitError}
           onCancel={() => {
@@ -3832,15 +5089,9 @@ export function PostgresSourcesView({
         </div>
       )}
       {attributeDraft ? (
-        <SharedAttributeValuesModal
+        <SourceAttributeTypesModal
           draft={attributeDraft}
-          rows={rows.map((row) => ({ id: row.id, name: row.name }))}
-          initialValuesByOwner={Object.fromEntries(
-            rows.map((row) => [
-              row.id,
-              attributeDraft.id ? attributeValues[valueKey(row.id, attributeDraft.id)]?.value ?? "" : "",
-            ]),
-          )}
+          sourceTypeOptions={sourceTypeOptions}
           saving={attributeSaving}
           error={attributeError ?? undefined}
           onCancel={() => {
@@ -3848,8 +5099,13 @@ export function PostgresSourcesView({
             setAttributeDraft(null);
             setAttributeError(null);
           }}
-          onSave={handleSaveAttribute}
-          emptyStateLabel="No sources yet."
+          onSave={(draft) => void handleSaveAttribute(draft, {})}
+        />
+      ) : null}
+      {attributeHistoryTarget ? (
+        <PostgresAttributeValueHistoryModal
+          target={attributeHistoryTarget}
+          onClose={() => setAttributeHistoryTarget(null)}
         />
       ) : null}
     </div>

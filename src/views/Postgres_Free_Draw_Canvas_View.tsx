@@ -5,26 +5,26 @@ import gridGuide from "cytoscape-grid-guide";
 import { CanvasRichTextEditor } from "../components/CanvasRichTextEditor";
 import { normalizeCanvasTextHtml } from "../lib/canvasTextHtml";
 import {
-  buildPostgresExperimentCanvasCytoscapeElements,
-  POSTGRES_EXPERIMENT_CYTOSCAPE_STYLESHEET,
-} from "../lib/postgresExperimentCanvasGraph";
+  buildPostgresCanvasCytoscapeElements,
+  POSTGRES_CYTOSCAPE_STYLESHEET,
+} from "../lib/postgresCanvasGraph";
 import type {
-  PostgresExperimentCanvasDisplayShape,
-  PostgresExperimentCanvasNodeState,
-  PostgresExperimentCanvasPoint,
-  PostgresExperimentCanvasShape,
-  PostgresExperimentObject,
-  PostgresExperimentObjectAttributeDefinition,
-  PostgresExperimentObjectType,
-  PostgresExperimentRelationship,
-  PostgresExperimentRelationshipAttributeDefinition,
-  PostgresExperimentRelationshipType,
-} from "../lib/postgresExperiment";
-import { savePostgresExperimentRelationship } from "../lib/postgresExperiment";
+  PostgresCanvasDisplayShape,
+  PostgresCanvasNodeState,
+  PostgresCanvasPoint,
+  PostgresCanvasShape,
+  PostgresObject,
+  PostgresObjectAttributeDefinition,
+  PostgresObjectType,
+  PostgresRelationship,
+  PostgresRelationshipAttributeDefinition,
+  PostgresRelationshipType,
+} from "../lib/postgres";
+import { savePostgresRelationship } from "../lib/postgres";
 
 gridGuide(cytoscape);
 
-type PostgresExperimentObjectTypeShape =
+type PostgresObjectTypeShape =
   | "rounded"
   | "rectangle"
   | "triangle"
@@ -35,25 +35,26 @@ type PostgresExperimentObjectTypeShape =
   | "trapezoid"
   | "tag"
   | "star";
-type PostgresExperimentSourceObjectVisualKey =
+type PostgresSourceObjectVisualKey =
   | "source_text"
+  | "source_processed_transcript"
   | "source_pdf"
   | "source_image"
   | "source_audio"
   | "source_video";
-type PostgresExperimentObjectFill = "filled" | "outline";
-type PostgresExperimentRelationshipLineShape = "solid" | "dashed" | "dotted";
-type PostgresExperimentRelationshipArrowhead = "one_sided" | "double_sided" | "none";
-type PostgresExperimentCanvasTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
+type PostgresObjectFill = "filled" | "outline";
+type PostgresRelationshipLineShape = "solid" | "dashed" | "dotted";
+type PostgresRelationshipArrowhead = "one_sided" | "double_sided" | "none";
+type PostgresCanvasTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
 
-type PostgresExperimentSavedCanvasSession = {
+type PostgresSavedCanvasSession = {
   id: string;
   name: string;
   canvasKind: "free_draw" | "explore" | "construct";
   mode: "view" | "edit";
 };
 
-function formatCanvasToolLabel(tool: PostgresExperimentCanvasTool): string {
+function formatCanvasToolLabel(tool: PostgresCanvasTool): string {
   switch (tool) {
     case "select":
       return "Select";
@@ -74,7 +75,7 @@ function formatCanvasToolLabel(tool: PostgresExperimentCanvasTool): string {
   }
 }
 
-function getCanvasToolButtonMeta(tool: PostgresExperimentCanvasTool): {
+function getCanvasToolButtonMeta(tool: PostgresCanvasTool): {
   icon: string;
   label: string;
   hint: string;
@@ -100,29 +101,29 @@ function getCanvasToolButtonMeta(tool: PostgresExperimentCanvasTool): {
 }
 
 type ObjectShapeSwatchProps = {
-  shape: PostgresExperimentObjectTypeShape;
-  fill: PostgresExperimentObjectFill;
+  shape: PostgresObjectTypeShape;
+  fill: PostgresObjectFill;
   color: string;
-  sourceVisualKey?: PostgresExperimentSourceObjectVisualKey | null;
+  sourceVisualKey?: PostgresSourceObjectVisualKey | null;
   width: number;
   minHeight: number;
   selected?: boolean;
   style?: CSSProperties;
 };
 
-type ShapeOption = { value: PostgresExperimentObjectTypeShape; label: string };
-type FillOption = { value: PostgresExperimentObjectFill; label: string };
-type LineShapeOption = { value: PostgresExperimentRelationshipLineShape; label: string };
+type ShapeOption = { value: PostgresObjectTypeShape; label: string };
+type FillOption = { value: PostgresObjectFill; label: string };
+type LineShapeOption = { value: PostgresRelationshipLineShape; label: string };
 type LineWeightOption = { value: number; label: string };
 type RelationshipLineShapePickerProps = {
-  value: PostgresExperimentRelationshipLineShape | "";
-  onChange: (value: PostgresExperimentRelationshipLineShape | "") => void;
+  value: PostgresRelationshipLineShape | "";
+  onChange: (value: PostgresRelationshipLineShape | "") => void;
   previewColor: string;
   allowInherit?: boolean;
   inheritLabel?: string;
 };
 
-export function PostgresExperimentCanvasView({
+export function PostgresCanvasView({
   projectId,
   objectTypes,
   objectAttributeDefinitions,
@@ -158,16 +159,16 @@ export function PostgresExperimentCanvasView({
   onEditRelationship,
   onDeleteRelationship,
   ObjectShapeSwatchComponent,
-  getPostgresExperimentObjectAppearance,
-  getPostgresExperimentObjectSurfaceStyle,
+  getPostgresObjectAppearance,
+  getPostgresObjectSurfaceStyle,
   getCanvasNodeDefaultDimensions,
   getCanvasNodeRenderedDimensions,
-  getPostgresExperimentRelationshipAppearance,
-  getPostgresExperimentRelationshipStrokeWidth,
-  normalizePostgresExperimentObjectTypeColor,
-  normalizePostgresExperimentRelationshipLineShape,
-  normalizePostgresExperimentObjectTypeShape,
-  normalizePostgresExperimentObjectFill,
+  getPostgresRelationshipAppearance,
+  getPostgresRelationshipStrokeWidth,
+  normalizePostgresObjectTypeColor,
+  normalizePostgresRelationshipLineShape,
+  normalizePostgresObjectTypeShape,
+  normalizePostgresObjectFill,
   hexToRgba,
   translateCanvasShape,
   resizeCanvasBoxShape,
@@ -178,14 +179,14 @@ export function PostgresExperimentCanvasView({
   getCanvasSketchShapeType,
   getCanvasSketchShapeFill,
   getCanvasSketchLineStyle,
-  getPostgresExperimentRelationshipStrokeDasharray,
-  formatPostgresExperimentObjectShapeLabel,
-  formatPostgresExperimentObjectFillLabel,
-  formatPostgresExperimentRelationshipLineShapeLabel,
-  formatPostgresExperimentRelationshipLineWeightLabel,
-  formatPostgresExperimentRelationshipArrowheadLabel,
+  getPostgresRelationshipStrokeDasharray,
+  formatPostgresObjectShapeLabel,
+  formatPostgresObjectFillLabel,
+  formatPostgresRelationshipLineShapeLabel,
+  formatPostgresRelationshipLineWeightLabel,
+  formatPostgresRelationshipArrowheadLabel,
   formatCanvasSketchShapeLabel,
-  postgreRelationshipLineShapePickerComponent: PostgresExperimentRelationshipLineShapePickerComponent,
+  postgreRelationshipLineShapePickerComponent: PostgresRelationshipLineShapePickerComponent,
   objectTypeShapeOptions,
   objectFillOptions,
   relationshipLineShapeOptions,
@@ -193,55 +194,55 @@ export function PostgresExperimentCanvasView({
   formatRelationshipTypeConstraintSummary,
 }: {
   projectId: string;
-  objectTypes: PostgresExperimentObjectType[];
-  objectAttributeDefinitions: PostgresExperimentObjectAttributeDefinition[];
-  objects: PostgresExperimentObject[];
-  relationships: PostgresExperimentRelationship[];
-  relationshipTypes: PostgresExperimentRelationshipType[];
-  relationshipAttributeDefinitions: PostgresExperimentRelationshipAttributeDefinition[];
-  setRelationships: Dispatch<SetStateAction<PostgresExperimentRelationship[]>>;
-  canvasNodes: Record<string, PostgresExperimentCanvasNodeState>;
-  setCanvasNodes: Dispatch<SetStateAction<Record<string, PostgresExperimentCanvasNodeState>>>;
-  canvasShapes: PostgresExperimentCanvasShape[];
-  setCanvasShapes: Dispatch<SetStateAction<PostgresExperimentCanvasShape[]>>;
+  objectTypes: PostgresObjectType[];
+  objectAttributeDefinitions: PostgresObjectAttributeDefinition[];
+  objects: PostgresObject[];
+  relationships: PostgresRelationship[];
+  relationshipTypes: PostgresRelationshipType[];
+  relationshipAttributeDefinitions: PostgresRelationshipAttributeDefinition[];
+  setRelationships: Dispatch<SetStateAction<PostgresRelationship[]>>;
+  canvasNodes: Record<string, PostgresCanvasNodeState>;
+  setCanvasNodes: Dispatch<SetStateAction<Record<string, PostgresCanvasNodeState>>>;
+  canvasShapes: PostgresCanvasShape[];
+  setCanvasShapes: Dispatch<SetStateAction<PostgresCanvasShape[]>>;
   hiddenCanvasRelationshipIds: string[];
   setHiddenCanvasRelationshipIds: Dispatch<SetStateAction<string[]>>;
-  canvasTool: PostgresExperimentCanvasTool;
-  setCanvasTool: Dispatch<SetStateAction<PostgresExperimentCanvasTool>>;
+  canvasTool: PostgresCanvasTool;
+  setCanvasTool: Dispatch<SetStateAction<PostgresCanvasTool>>;
   canvasScale: number;
   setCanvasScale: Dispatch<SetStateAction<number>>;
-  canvasOffset: PostgresExperimentCanvasPoint;
-  setCanvasOffset: Dispatch<SetStateAction<PostgresExperimentCanvasPoint>>;
+  canvasOffset: PostgresCanvasPoint;
+  setCanvasOffset: Dispatch<SetStateAction<PostgresCanvasPoint>>;
   canvasRelationshipTypeId: string;
   setCanvasRelationshipTypeId: Dispatch<SetStateAction<string>>;
   freeDrawSaveNotice: string;
   freeDrawSaving: boolean;
   canvasSaveError: string;
-  savedCanvasSession: PostgresExperimentSavedCanvasSession | null;
+  savedCanvasSession: PostgresSavedCanvasSession | null;
   onSaveDrawing: () => Promise<void>;
-  onCreateObjectAt: (prefilledTypeId?: string, preferredPosition?: PostgresExperimentCanvasPoint) => void;
+  onCreateObjectAt: (prefilledTypeId?: string, preferredPosition?: PostgresCanvasPoint) => void;
   onOpenCreateObjectType: () => void;
   onOpenCreateRelationshipType: () => void;
-  onEditObject: (object: PostgresExperimentObject) => void;
+  onEditObject: (object: PostgresObject) => void;
   onDeleteObject: (objectId: string) => void;
-  onEditRelationship: (relationship: PostgresExperimentRelationship) => void;
+  onEditRelationship: (relationship: PostgresRelationship) => void;
   onDeleteRelationship: (relationshipId: string) => void;
   ObjectShapeSwatchComponent: ComponentType<ObjectShapeSwatchProps>;
-  getPostgresExperimentObjectAppearance: (
-    object: PostgresExperimentObject,
-    objectTypeRecord: PostgresExperimentObjectType | null,
+  getPostgresObjectAppearance: (
+    object: PostgresObject,
+    objectTypeRecord: PostgresObjectType | null,
   ) => {
-    shape: PostgresExperimentObjectTypeShape;
+    shape: PostgresObjectTypeShape;
     color: string;
-    fill: PostgresExperimentObjectFill;
-    sourceVisualKey?: PostgresExperimentSourceObjectVisualKey | null;
+    fill: PostgresObjectFill;
+    sourceVisualKey?: PostgresSourceObjectVisualKey | null;
     hasShapeOverride?: boolean;
     hasColorOverride?: boolean;
     hasFillOverride?: boolean;
   };
-  getPostgresExperimentObjectSurfaceStyle: (
+  getPostgresObjectSurfaceStyle: (
     color: string,
-    fill: PostgresExperimentObjectFill,
+    fill: PostgresObjectFill,
     selected?: boolean,
   ) => {
     background: string;
@@ -249,55 +250,55 @@ export function PostgresExperimentCanvasView({
     edgeColor: string;
     textColor: string;
   };
-  getCanvasNodeDefaultDimensions: (shape: PostgresExperimentObjectTypeShape) => { width: number; height: number };
+  getCanvasNodeDefaultDimensions: (shape: PostgresObjectTypeShape) => { width: number; height: number };
   getCanvasNodeRenderedDimensions: (
-    shape: PostgresExperimentObjectTypeShape,
-    nodeState?: Pick<PostgresExperimentCanvasNodeState, "width" | "height"> | null,
+    shape: PostgresObjectTypeShape,
+    nodeState?: Pick<PostgresCanvasNodeState, "width" | "height"> | null,
   ) => { width: number; height: number };
-  getPostgresExperimentRelationshipAppearance: (
-    relationship: PostgresExperimentRelationship,
-    relationshipTypeRecord: PostgresExperimentRelationshipType | null,
+  getPostgresRelationshipAppearance: (
+    relationship: PostgresRelationship,
+    relationshipTypeRecord: PostgresRelationshipType | null,
   ) => {
-    lineShape: PostgresExperimentRelationshipLineShape;
+    lineShape: PostgresRelationshipLineShape;
     lineWeight: number;
-    arrowhead: PostgresExperimentRelationshipArrowhead;
+    arrowhead: PostgresRelationshipArrowhead;
     color: string;
     hasLineShapeOverride?: boolean;
     hasLineWeightOverride?: boolean;
     hasArrowheadOverride?: boolean;
     hasColorOverride?: boolean;
   };
-  getPostgresExperimentRelationshipStrokeWidth: (lineWeight: number) => number;
-  normalizePostgresExperimentObjectTypeColor: (value: string) => string;
-  normalizePostgresExperimentRelationshipLineShape: (value: string) => PostgresExperimentRelationshipLineShape;
-  normalizePostgresExperimentObjectTypeShape: (value: string) => PostgresExperimentObjectTypeShape;
-  normalizePostgresExperimentObjectFill: (value: string) => PostgresExperimentObjectFill;
+  getPostgresRelationshipStrokeWidth: (lineWeight: number) => number;
+  normalizePostgresObjectTypeColor: (value: string) => string;
+  normalizePostgresRelationshipLineShape: (value: string) => PostgresRelationshipLineShape;
+  normalizePostgresObjectTypeShape: (value: string) => PostgresObjectTypeShape;
+  normalizePostgresObjectFill: (value: string) => PostgresObjectFill;
   hexToRgba: (hex: string, alpha: number) => string;
-  translateCanvasShape: (shape: PostgresExperimentCanvasShape, deltaX: number, deltaY: number) => PostgresExperimentCanvasShape;
+  translateCanvasShape: (shape: PostgresCanvasShape, deltaX: number, deltaY: number) => PostgresCanvasShape;
   resizeCanvasBoxShape: (
     shape: any,
     handle: "nw" | "ne" | "sw" | "se",
     nextWorldX: number,
     nextWorldY: number,
-  ) => PostgresExperimentCanvasShape;
-  isWorldPointInsideCanvasShape: (shape: any, world: PostgresExperimentCanvasPoint) => boolean;
+  ) => PostgresCanvasShape;
+  isWorldPointInsideCanvasShape: (shape: any, world: PostgresCanvasPoint) => boolean;
   getCanvasShapeBounds: (shape: any) => { x: number; y: number; width: number; height: number };
   getCanvasNodeBoundaryPoint: (
-    shape: PostgresExperimentObjectTypeShape,
+    shape: PostgresObjectTypeShape,
     bounds: { x: number; y: number; width: number; height: number },
-    toward: PostgresExperimentCanvasPoint,
-  ) => PostgresExperimentCanvasPoint;
+    toward: PostgresCanvasPoint,
+  ) => PostgresCanvasPoint;
   renderCanvasSketchShapeElement: (shape: any, selected: boolean) => ReactNode;
-  getCanvasSketchShapeType: (shape: any) => PostgresExperimentCanvasDisplayShape;
-  getCanvasSketchShapeFill: (shape: any) => PostgresExperimentObjectFill;
-  getCanvasSketchLineStyle: (shape: any) => PostgresExperimentRelationshipLineShape;
-  getPostgresExperimentRelationshipStrokeDasharray: (lineShape: PostgresExperimentRelationshipLineShape) => string | undefined;
-  formatPostgresExperimentObjectShapeLabel: (shape: PostgresExperimentObjectTypeShape) => string;
-  formatPostgresExperimentObjectFillLabel: (fill: PostgresExperimentObjectFill) => string;
-  formatPostgresExperimentRelationshipLineShapeLabel: (lineShape: PostgresExperimentRelationshipLineShape) => string;
-  formatPostgresExperimentRelationshipLineWeightLabel: (lineWeight: number) => string;
-  formatPostgresExperimentRelationshipArrowheadLabel: (arrowhead: PostgresExperimentRelationshipArrowhead) => string;
-  formatCanvasSketchShapeLabel: (shape: PostgresExperimentCanvasDisplayShape) => string;
+  getCanvasSketchShapeType: (shape: any) => PostgresCanvasDisplayShape;
+  getCanvasSketchShapeFill: (shape: any) => PostgresObjectFill;
+  getCanvasSketchLineStyle: (shape: any) => PostgresRelationshipLineShape;
+  getPostgresRelationshipStrokeDasharray: (lineShape: PostgresRelationshipLineShape) => string | undefined;
+  formatPostgresObjectShapeLabel: (shape: PostgresObjectTypeShape) => string;
+  formatPostgresObjectFillLabel: (fill: PostgresObjectFill) => string;
+  formatPostgresRelationshipLineShapeLabel: (lineShape: PostgresRelationshipLineShape) => string;
+  formatPostgresRelationshipLineWeightLabel: (lineWeight: number) => string;
+  formatPostgresRelationshipArrowheadLabel: (arrowhead: PostgresRelationshipArrowhead) => string;
+  formatCanvasSketchShapeLabel: (shape: PostgresCanvasDisplayShape) => string;
   postgreRelationshipLineShapePickerComponent: ComponentType<RelationshipLineShapePickerProps>;
   objectTypeShapeOptions: readonly ShapeOption[];
   objectFillOptions: readonly FillOption[];
@@ -311,7 +312,7 @@ export function PostgresExperimentCanvasView({
   }) => string;
 }) {
   const ObjectShapeSwatch = ObjectShapeSwatchComponent;
-  const PostgresExperimentRelationshipLineShapePicker = PostgresExperimentRelationshipLineShapePickerComponent;
+  const PostgresRelationshipLineShapePicker = PostgresRelationshipLineShapePickerComponent;
   const isReadOnly = savedCanvasSession?.mode === "view";
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const cyContainerRef = useRef<HTMLDivElement | null>(null);
@@ -323,11 +324,11 @@ export function PostgresExperimentCanvasView({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [pendingConnectionSourceId, setPendingConnectionSourceId] = useState<string | null>(null);
-  const [connectPreviewWorld, setConnectPreviewWorld] = useState<PostgresExperimentCanvasPoint | null>(null);
+  const [connectPreviewWorld, setConnectPreviewWorld] = useState<PostgresCanvasPoint | null>(null);
   const [hoveredConnectTargetId, setHoveredConnectTargetId] = useState<string | null>(null);
-  const [canvasSketchShape, setCanvasSketchShape] = useState<PostgresExperimentCanvasDisplayShape>("rectangle");
+  const [canvasSketchShape, setCanvasSketchShape] = useState<PostgresCanvasDisplayShape>("rectangle");
   const [canvasSketchColor, setCanvasSketchColor] = useState("#355070");
-  const [canvasSketchLineStyle, setCanvasSketchLineStyle] = useState<PostgresExperimentRelationshipLineShape>("solid");
+  const [canvasSketchLineStyle, setCanvasSketchLineStyle] = useState<PostgresRelationshipLineShape>("solid");
   const [canvasSketchLineWeight, setCanvasSketchLineWeight] = useState<number>(2);
   const [canvasSketchColorMenuOpen, setCanvasSketchColorMenuOpen] = useState(false);
   const [canvasSketchLineStyleMenuOpen, setCanvasSketchLineStyleMenuOpen] = useState(false);
@@ -354,7 +355,7 @@ export function PostgresExperimentCanvasView({
     startWorldX: number;
     startWorldY: number;
     shapeId: string | null;
-    initialShape: PostgresExperimentCanvasShape | null;
+    initialShape: PostgresCanvasShape | null;
     resizeHandle: "nw" | "ne" | "sw" | "se" | null;
   }>({
     mode: "idle",
@@ -388,18 +389,18 @@ export function PostgresExperimentCanvasView({
     [canvasRelationshipTypeId, relationshipTypes],
   );
   const graphElements = useMemo(
-    () => buildPostgresExperimentCanvasCytoscapeElements({
+    () => buildPostgresCanvasCytoscapeElements({
       objects,
       nodeStates: canvasNodes,
       objectTypeById,
       relationships,
       relationshipTypes,
       hiddenRelationshipIds: hiddenCanvasRelationshipIds,
-      getObjectAppearance: getPostgresExperimentObjectAppearance,
-      getObjectSurfaceStyle: getPostgresExperimentObjectSurfaceStyle,
+      getObjectAppearance: getPostgresObjectAppearance,
+      getObjectSurfaceStyle: getPostgresObjectSurfaceStyle,
       getNodeRenderedDimensions: getCanvasNodeRenderedDimensions,
-      getRelationshipAppearance: getPostgresExperimentRelationshipAppearance,
-      getRelationshipStrokeWidth: getPostgresExperimentRelationshipStrokeWidth,
+      getRelationshipAppearance: getPostgresRelationshipAppearance,
+      getRelationshipStrokeWidth: getPostgresRelationshipStrokeWidth,
     }),
     [canvasNodes, hiddenCanvasRelationshipIds, objectTypeById, objects, relationshipTypes, relationships],
   );
@@ -518,7 +519,7 @@ export function PostgresExperimentCanvasView({
     const cy = cytoscape({
       container: cyContainerRef.current,
       elements: graphElements,
-      style: POSTGRES_EXPERIMENT_CYTOSCAPE_STYLESHEET,
+      style: POSTGRES_CYTOSCAPE_STYLESHEET,
       layout: { name: "preset" },
       minZoom: 0.4,
       maxZoom: 2.4,
@@ -873,7 +874,7 @@ export function PostgresExperimentCanvasView({
     });
   }
 
-  function getCanvasCenterWorld(): PostgresExperimentCanvasPoint {
+  function getCanvasCenterWorld(): PostgresCanvasPoint {
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return { x: 120, y: 120 };
     return {
@@ -882,10 +883,10 @@ export function PostgresExperimentCanvasView({
     };
   }
 
-  function addExistingObjectToCanvas(object: PostgresExperimentObject, preferredPosition?: PostgresExperimentCanvasPoint) {
+  function addExistingObjectToCanvas(object: PostgresObject, preferredPosition?: PostgresCanvasPoint) {
     const targetPosition = preferredPosition ?? getCanvasCenterWorld();
     const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
-    const shape = getPostgresExperimentObjectAppearance(object, objectTypeRecord).shape;
+    const shape = getPostgresObjectAppearance(object, objectTypeRecord).shape;
     const defaultDimensions = getCanvasNodeDefaultDimensions(shape);
     setCanvasNodes((current) => ({
       ...current,
@@ -905,8 +906,8 @@ export function PostgresExperimentCanvasView({
   }
 
   function addExistingRelationshipToCanvas(
-    relationship: PostgresExperimentRelationship,
-    preferredPosition?: PostgresExperimentCanvasPoint,
+    relationship: PostgresRelationship,
+    preferredPosition?: PostgresCanvasPoint,
   ) {
     const center = preferredPosition ?? getCanvasCenterWorld();
     const sourceObject = objectById.get(relationship.fromObjectId) ?? null;
@@ -915,14 +916,14 @@ export function PostgresExperimentCanvasView({
       const next = { ...current };
 
       const placeObject = (
-        object: PostgresExperimentObject | null,
+        object: PostgresObject | null,
         objectId: string,
         fallbackX: number,
         fallbackY: number,
       ) => {
         if (!object || next[objectId]) return;
         const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
-        const shape = getPostgresExperimentObjectAppearance(object, objectTypeRecord).shape;
+        const shape = getPostgresObjectAppearance(object, objectTypeRecord).shape;
         const defaultDimensions = getCanvasNodeDefaultDimensions(shape);
         next[objectId] = {
           id: objectId,
@@ -952,7 +953,7 @@ export function PostgresExperimentCanvasView({
     );
   }
 
-  function updateCanvasTextShape(shapeId: string, updater: (shape: Extract<PostgresExperimentCanvasShape, { kind: "text" }>) => Extract<PostgresExperimentCanvasShape, { kind: "text" }>) {
+  function updateCanvasTextShape(shapeId: string, updater: (shape: Extract<PostgresCanvasShape, { kind: "text" }>) => Extract<PostgresCanvasShape, { kind: "text" }>) {
     setCanvasShapes((current) => current.map((shape) => (
       shape.id === shapeId && shape.kind === "text" ? updater(shape) : shape
     )));
@@ -1013,7 +1014,7 @@ export function PostgresExperimentCanvasView({
           points: [world],
           color: canvasSketchColor,
           lineStyle: canvasSketchLineStyle,
-          strokeWidth: getPostgresExperimentRelationshipStrokeWidth(canvasSketchLineWeight),
+          strokeWidth: getPostgresRelationshipStrokeWidth(canvasSketchLineWeight),
         },
       ]);
       interactionRef.current = {
@@ -1047,7 +1048,7 @@ export function PostgresExperimentCanvasView({
           color: canvasSketchColor,
           fill: "filled",
           lineStyle: canvasSketchLineStyle,
-          strokeWidth: getPostgresExperimentRelationshipStrokeWidth(canvasSketchLineWeight),
+          strokeWidth: getPostgresRelationshipStrokeWidth(canvasSketchLineWeight),
         },
       ]);
       interactionRef.current = {
@@ -1140,7 +1141,7 @@ export function PostgresExperimentCanvasView({
       const deltaY = world.y - interaction.startWorldY;
       setCanvasShapes((current) =>
         current.map((shape) =>
-          shape.id === interaction.shapeId ? translateCanvasShape(interaction.initialShape as PostgresExperimentCanvasShape, deltaX, deltaY) : shape,
+          shape.id === interaction.shapeId ? translateCanvasShape(interaction.initialShape as PostgresCanvasShape, deltaX, deltaY) : shape,
         ),
       );
       return;
@@ -1203,7 +1204,7 @@ export function PostgresExperimentCanvasView({
 
   function beginCanvasShapeMove(
     event: React.PointerEvent<Element>,
-    shape: PostgresExperimentCanvasShape,
+    shape: PostgresCanvasShape,
   ) {
     if (isReadOnly || canvasTool !== "select") return;
     event.preventDefault();
@@ -1230,7 +1231,7 @@ export function PostgresExperimentCanvasView({
 
   function beginCanvasShapeResize(
     event: React.PointerEvent<SVGCircleElement>,
-    shape: Extract<PostgresExperimentCanvasShape, { kind: "rectangle" | "shape" | "text" }>,
+    shape: Extract<PostgresCanvasShape, { kind: "rectangle" | "shape" | "text" }>,
     resizeHandle: "nw" | "ne" | "sw" | "se",
   ) {
     if (isReadOnly || canvasTool !== "select") return;
@@ -1302,12 +1303,12 @@ export function PostgresExperimentCanvasView({
   }
 
   function buildUpdatedCanvasNodes(
-    current: Record<string, PostgresExperimentCanvasNodeState>,
+    current: Record<string, PostgresCanvasNodeState>,
     node: { id: string; position: { x: number; y: number } },
   ) {
     const object = objectById.get(node.id) ?? null;
     const objectTypeRecord = object ? objectTypeById.get(object.objectTypeId) ?? null : null;
-    const shape = object ? getPostgresExperimentObjectAppearance(object, objectTypeRecord).shape : "rectangle";
+    const shape = object ? getPostgresObjectAppearance(object, objectTypeRecord).shape : "rectangle";
     const defaultDimensions = getCanvasNodeDefaultDimensions(shape);
     return {
       ...current,
@@ -1363,7 +1364,7 @@ export function PostgresExperimentCanvasView({
     }
 
     try {
-      const created = await savePostgresExperimentRelationship({
+      const created = await savePostgresRelationship({
         projectId,
         relationshipId: null,
         fromObjectId: sourceId,
@@ -1493,7 +1494,7 @@ export function PostgresExperimentCanvasView({
                         canvasScale={canvasScale}
                         isReadOnly={isReadOnly}
                         canvasTool={canvasTool}
-                        normalizeColor={normalizePostgresExperimentObjectTypeColor}
+                        normalizeColor={normalizePostgresObjectTypeColor}
                         onBeginMove={beginCanvasShapeMove}
                         onBeginEditing={beginEditingCanvasText}
                         onDelete={deleteCanvasShape}
@@ -1630,7 +1631,7 @@ export function PostgresExperimentCanvasView({
                             aria-label="Text color hex value"
                             onMouseDown={(event) => event.stopPropagation()}
                             onChange={(event) => {
-                              const nextColor = normalizePostgresExperimentObjectTypeColor(event.target.value);
+                              const nextColor = normalizePostgresObjectTypeColor(event.target.value);
                               updateCanvasTextShape(shape.id, (current) => ({ ...current, color: nextColor }));
                               applyCanvasTextCommand("foreColor", nextColor);
                             }}
@@ -1778,7 +1779,7 @@ export function PostgresExperimentCanvasView({
                       !isReadOnly ? "shape" : null,
                       !isReadOnly ? "text" : null,
                       !isReadOnly ? "eraser" : null,
-                    ].filter(Boolean) as Array<PostgresExperimentCanvasTool | "create-object">).map((tool) => {
+                    ].filter(Boolean) as Array<PostgresCanvasTool | "create-object">).map((tool) => {
                     if (tool === "create-object") {
                       return (
                         <div
@@ -2364,7 +2365,7 @@ export function PostgresExperimentCanvasView({
                                   <input
                                     className="form-input"
                                     value={canvasSketchColor}
-                                    onChange={(event) => setCanvasSketchColor(normalizePostgresExperimentObjectTypeColor(event.target.value))}
+                                    onChange={(event) => setCanvasSketchColor(normalizePostgresObjectTypeColor(event.target.value))}
                                     aria-label="Sketch color hex value"
                                     style={{ width: 118, fontFamily: "monospace" }}
                                   />
@@ -2423,7 +2424,7 @@ export function PostgresExperimentCanvasView({
                                   stroke="currentColor"
                                   strokeWidth="2.4"
                                   strokeLinecap="round"
-                                  strokeDasharray={getPostgresExperimentRelationshipStrokeDasharray(canvasSketchLineStyle)}
+                                  strokeDasharray={getPostgresRelationshipStrokeDasharray(canvasSketchLineStyle)}
                                 />
                                 <line
                                   x1="2.5"
@@ -2497,7 +2498,7 @@ export function PostgresExperimentCanvasView({
                                           stroke="currentColor"
                                           strokeWidth="2.4"
                                           strokeLinecap="round"
-                                          strokeDasharray={getPostgresExperimentRelationshipStrokeDasharray(option.value)}
+                                          strokeDasharray={getPostgresRelationshipStrokeDasharray(option.value)}
                                         />
                                       </svg>
                                     </button>
@@ -2564,7 +2565,7 @@ export function PostgresExperimentCanvasView({
                                   x2="16"
                                   y2="15"
                                   stroke="currentColor"
-                                  strokeWidth={getPostgresExperimentRelationshipStrokeWidth(canvasSketchLineWeight)}
+                                  strokeWidth={getPostgresRelationshipStrokeWidth(canvasSketchLineWeight)}
                                   strokeLinecap="round"
                                 />
                               </svg>
@@ -2628,7 +2629,7 @@ export function PostgresExperimentCanvasView({
                                           x2="19"
                                           y2="11"
                                           stroke="currentColor"
-                                          strokeWidth={getPostgresExperimentRelationshipStrokeWidth(option.value)}
+                                          strokeWidth={getPostgresRelationshipStrokeWidth(option.value)}
                                           strokeLinecap="round"
                                         />
                                       </svg>
@@ -2772,7 +2773,7 @@ export function PostgresExperimentCanvasView({
                     {selectedObject ? (
                       (() => {
                         const objectTypeRecord = objectTypeById.get(selectedObject.objectTypeId) ?? null;
-                        const appearance = getPostgresExperimentObjectAppearance(selectedObject, objectTypeRecord);
+                        const appearance = getPostgresObjectAppearance(selectedObject, objectTypeRecord);
                         return (
                           <>
                         <div className="auth-hint" style={{ marginBottom: 14 }}>Selected object</div>
@@ -2797,7 +2798,7 @@ export function PostgresExperimentCanvasView({
                                 width={22}
                                 minHeight={16}
                               />
-                              <span>{`${formatPostgresExperimentObjectShapeLabel(appearance.shape)} / ${formatPostgresExperimentObjectFillLabel(appearance.fill)}`}</span>
+                              <span>{`${formatPostgresObjectShapeLabel(appearance.shape)} / ${formatPostgresObjectFillLabel(appearance.fill)}`}</span>
                             </span>
                           </div>
                           <div className="home-restricted-item">
@@ -2877,7 +2878,7 @@ export function PostgresExperimentCanvasView({
                           const relationshipTypeRecord = relationshipTypes.find(
                             (relationshipType) => relationshipType.id === selectedRelationship.relationshipTypeId,
                           ) ?? null;
-                          const appearance = getPostgresExperimentRelationshipAppearance(selectedRelationship, relationshipTypeRecord);
+                          const appearance = getPostgresRelationshipAppearance(selectedRelationship, relationshipTypeRecord);
                           return (
                             <>
                         <div className="auth-hint" style={{ marginBottom: 14 }}>Selected relationship</div>
@@ -2903,13 +2904,13 @@ export function PostgresExperimentCanvasView({
                                   x2="38"
                                   y2="7"
                                   stroke={appearance.color}
-                                  strokeWidth={getPostgresExperimentRelationshipStrokeWidth(appearance.lineWeight)}
-                                  strokeDasharray={getPostgresExperimentRelationshipStrokeDasharray(appearance.lineShape)}
+                                  strokeWidth={getPostgresRelationshipStrokeWidth(appearance.lineWeight)}
+                                  strokeDasharray={getPostgresRelationshipStrokeDasharray(appearance.lineShape)}
                                   markerEnd={appearance.arrowhead === "none" ? undefined : "url(#canvas-selected-relationship-end)"}
                                   markerStart={appearance.arrowhead === "double_sided" ? "url(#canvas-selected-relationship-start)" : undefined}
                                 />
                               </svg>
-                              <span>{`${formatPostgresExperimentRelationshipLineShapeLabel(appearance.lineShape)} | ${formatPostgresExperimentRelationshipLineWeightLabel(appearance.lineWeight)} | ${formatPostgresExperimentRelationshipArrowheadLabel(appearance.arrowhead)}`}</span>
+                              <span>{`${formatPostgresRelationshipLineShapeLabel(appearance.lineShape)} | ${formatPostgresRelationshipLineWeightLabel(appearance.lineWeight)} | ${formatPostgresRelationshipArrowheadLabel(appearance.arrowhead)}`}</span>
                             </span>
                           </div>
                           <div className="home-restricted-item">
@@ -3004,7 +3005,7 @@ export function PostgresExperimentCanvasView({
                                   className="input"
                                   value={selectedShape.shape}
                                   onChange={(event) => {
-                                    const nextShape = normalizePostgresExperimentObjectTypeShape(event.target.value);
+                                    const nextShape = normalizePostgresObjectTypeShape(event.target.value);
                                     setCanvasShapes((current) => current.map((shape) => (
                                       shape.id === selectedShape.id && shape.kind === "shape" ? { ...shape, shape: nextShape } : shape
                                     )));
@@ -3023,7 +3024,7 @@ export function PostgresExperimentCanvasView({
                                   className="input"
                                   value={getCanvasSketchShapeFill(selectedShape)}
                                   onChange={(event) => {
-                                    const nextFill = normalizePostgresExperimentObjectFill(event.target.value);
+                                    const nextFill = normalizePostgresObjectFill(event.target.value);
                                     setCanvasShapes((current) => current.map((shape) => (
                                       shape.id === selectedShape.id && (shape.kind === "shape" || shape.kind === "rectangle")
                                         ? { ...shape, fill: nextFill }
@@ -3054,10 +3055,10 @@ export function PostgresExperimentCanvasView({
                             {selectedShape.kind !== "text" ? (
                               <label style={{ display: "grid", gap: 6 }}>
                                 <span className="auth-hint" style={{ margin: 0 }}>Line style</span>
-                                <PostgresExperimentRelationshipLineShapePicker
+                                <PostgresRelationshipLineShapePicker
                                   value={getCanvasSketchLineStyle(selectedShape)}
                                   onChange={(value) => {
-                                    const nextLineStyle = normalizePostgresExperimentRelationshipLineShape(value || "");
+                                    const nextLineStyle = normalizePostgresRelationshipLineShape(value || "");
                                     setCanvasShapes((current) => current.map((shape) => (
                                       shape.id === selectedShape.id && shape.kind !== "text"
                                         ? { ...shape, lineStyle: nextLineStyle }
@@ -3195,14 +3196,14 @@ export function PostgresExperimentCanvasView({
                 {canvasTool === "connect" && connectPreviewSourceNode && connectPreviewWorld && connectPreviewSourceObject ? (
                   (() => {
                     const sourceObjectType = objectTypeById.get(connectPreviewSourceObject.objectTypeId) ?? null;
-                    const sourceShape = getPostgresExperimentObjectAppearance(connectPreviewSourceObject, sourceObjectType).shape;
+                    const sourceShape = getPostgresObjectAppearance(connectPreviewSourceObject, sourceObjectType).shape;
                     const sourceCenter = {
                       x: connectPreviewSourceNode.x + connectPreviewSourceNode.width / 2,
                       y: connectPreviewSourceNode.y + connectPreviewSourceNode.height / 2,
                     };
                     if (connectPreviewTargetNode && connectPreviewTargetObject) {
                       const targetObjectType = objectTypeById.get(connectPreviewTargetObject.objectTypeId) ?? null;
-                      const targetShape = getPostgresExperimentObjectAppearance(connectPreviewTargetObject, targetObjectType).shape;
+                      const targetShape = getPostgresObjectAppearance(connectPreviewTargetObject, targetObjectType).shape;
                       const targetCenter = {
                         x: connectPreviewTargetNode.x + connectPreviewTargetNode.width / 2,
                         y: connectPreviewTargetNode.y + connectPreviewTargetNode.height / 2,
@@ -3268,7 +3269,7 @@ export function PostgresExperimentCanvasView({
                 {canvasShapes.map((shape) => {
                   if (shape.kind === "pen") {
                     const bounds = getCanvasShapeBounds(shape);
-                    const strokeDasharray = getPostgresExperimentRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
+                    const strokeDasharray = getPostgresRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
                     return (
                       <g key={shape.id}>
                         <polyline
@@ -3371,7 +3372,7 @@ export function PostgresExperimentCanvasView({
                               strokeWidth={2}
                               pointerEvents="all"
                               style={{ cursor: handle.cursor }}
-                              onPointerDown={(event) => beginCanvasShapeResize(event, shape as Extract<PostgresExperimentCanvasShape, { kind: "rectangle" | "shape" | "text" }>, handle.key)}
+                              onPointerDown={(event) => beginCanvasShapeResize(event, shape as Extract<PostgresCanvasShape, { kind: "rectangle" | "shape" | "text" }>, handle.key)}
                             />
                           ))}
                         </>
@@ -3409,7 +3410,7 @@ export function PostgresExperimentCanvasView({
                     .sort((left, right) => left.title.localeCompare(right.title))
                     .map((object) => {
                       const objectType = objectTypeById.get(object.objectTypeId) ?? null;
-                      const appearance = getPostgresExperimentObjectAppearance(object, objectType);
+                      const appearance = getPostgresObjectAppearance(object, objectType);
                       const isOnCanvas = !!canvasNodes[object.id];
                       return (
                         <button

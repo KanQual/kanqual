@@ -1,16 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   completePostgresAdminHandoff,
-  listPostgresExperimentRememberedAccounts,
-  loginPostgresExperimentAdmin,
-  loginPostgresExperimentAppUser,
-  rememberPostgresExperimentAccount,
-  registerPostgresExperimentAppUser,
-  type PostgresExperimentAuthSession,
-  type PostgresExperimentAuthStatus,
-  type PostgresExperimentRememberedAccount,
-  type PostgresExperimentStatus,
-} from "../lib/postgresExperiment";
+  listPostgresRememberedAccounts,
+  loginPostgresAdmin,
+  loginPostgresAppUser,
+  rememberPostgresAccount,
+  registerPostgresAppUser,
+  type PostgresAuthSession,
+  type PostgresAuthStatus,
+  type PostgresRememberedAccount,
+  type PostgresStatus,
+} from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
 
 function describeUnknownError(error: unknown): string {
@@ -44,8 +44,8 @@ function accountInitials(name: string): string {
 }
 
 export type PostgresAdminHandoffViewProps = {
-  status: PostgresExperimentStatus;
-  onComplete: (nextStatus: PostgresExperimentStatus) => void | Promise<void>;
+  status: PostgresStatus;
+  onComplete: (nextStatus: PostgresStatus) => void | Promise<void>;
 };
 
 export function PostgresAdminHandoffView({
@@ -99,7 +99,6 @@ export function PostgresAdminHandoffView({
     <div className="auth-screen">
       <div className="auth-card" style={{ maxWidth: 760 }}>
         <div className="auth-brand">Kanqual</div>
-        <p className="auth-tagline">PostgreSQL Experiment</p>
         <form onSubmit={handleSubmit} className="form">
           <h2 className="auth-panel-title">Finish local database admin setup</h2>
           <p className="auth-hint">
@@ -154,21 +153,21 @@ export function PostgresAdminHandoffView({
   );
 }
 
-export type PostgresExperimentLaunchViewProps = {
-  status: PostgresExperimentStatus | null;
+export type PostgresLaunchViewProps = {
+  status: PostgresStatus | null;
   loading: boolean;
   onRefresh: () => void;
   onBootstrap: (superuserPassword: string) => Promise<void>;
   onOpenPostgresProjects: () => void;
 };
 
-export function PostgresExperimentLaunchView({
+export function PostgresLaunchView({
   status,
   loading,
   onRefresh,
   onBootstrap,
   onOpenPostgresProjects,
-}: PostgresExperimentLaunchViewProps) {
+}: PostgresLaunchViewProps) {
   const [superuserPassword, setSuperuserPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -183,7 +182,7 @@ export function PostgresExperimentLaunchView({
     setError("");
     setNotice("");
     if (!superuserPassword) {
-      setError("Enter the current PostgreSQL superuser password to bootstrap the experiment.");
+      setError("Enter the current PostgreSQL superuser password to bootstrap PostgreSQL.");
       return;
     }
 
@@ -203,9 +202,8 @@ export function PostgresExperimentLaunchView({
     <div className="auth-screen">
       <div className="auth-card" style={{ maxWidth: 820 }}>
         <div className="auth-brand">Kanqual</div>
-        <p className="auth-tagline">PostgreSQL Experiment</p>
         <div className="form">
-          <h2 className="auth-panel-title">Local database experiment launch check</h2>
+          <h2 className="auth-panel-title">Local database launch check</h2>
           <p className="auth-hint">
             PostgreSQL can now be bootstrapped and checked before the project workspace opens.
           </p>
@@ -217,7 +215,7 @@ export function PostgresExperimentLaunchView({
               ? (status.serviceReachable
                 ? `PostgreSQL is reachable at ${status.host}:${status.port}.`
                 : `PostgreSQL is not reachable at ${status.host}:${status.port}.`)
-              : "Loading PostgreSQL experiment status..."}
+              : "Loading PostgreSQL status..."}
             <br />
             {status
               ? `App role: ${status.appRoleName} on database ${status.appDatabase}.`
@@ -227,7 +225,7 @@ export function PostgresExperimentLaunchView({
           {!bootstrapApplied && (
             <form onSubmit={handleBootstrapSubmit} className="form">
               <div className="settings-warning settings-warning--danger">
-                Bootstrap has not been applied yet. Enter the current PostgreSQL superuser password to create the restricted app role and experiment database.
+                Bootstrap has not been applied yet. Enter the current PostgreSQL superuser password to create the restricted app role and database.
               </div>
               <label className="form-label">
                 Current PostgreSQL superuser password
@@ -245,7 +243,7 @@ export function PostgresExperimentLaunchView({
                   Refresh status
                 </button>
                 <button type="submit" className="btn btn--primary" disabled={loading || submitting}>
-                  {submitting ? "Bootstrapping..." : "Bootstrap PostgreSQL experiment"}
+                  {submitting ? "Bootstrapping..." : "Bootstrap PostgreSQL"}
                 </button>
               </div>
             </form>
@@ -254,7 +252,7 @@ export function PostgresExperimentLaunchView({
           {bootstrapApplied && !adminHandoffCompleted && (
             <>
               <div className="settings-warning settings-warning--danger">
-                Bootstrap is complete, but the PostgreSQL admin password handoff still needs to be finalized before this experiment is considered ready.
+                Bootstrap is complete, but the PostgreSQL admin password handoff still needs to be finalized before setup is ready.
               </div>
               <div className="form-actions">
                 <button type="button" className="btn" onClick={onRefresh} disabled={loading}>
@@ -267,7 +265,7 @@ export function PostgresExperimentLaunchView({
           {appRoleReady && (
             <>
               <div className="settings-warning">
-                <strong>Experiment ready</strong>
+                <strong>Ready</strong>
                 <br />
                 The PostgreSQL bootstrap and admin handoff are complete. Continue into PostgreSQL projects to sign in and open a workspace.
               </div>
@@ -296,22 +294,22 @@ export function PostgresExperimentLaunchView({
   );
 }
 
-export type PostgresExperimentAuthViewProps = {
-  authStatus: PostgresExperimentAuthStatus | null;
+export type PostgresAuthViewProps = {
+  authStatus: PostgresAuthStatus | null;
   onRefresh: () => Promise<void>;
-  onAuthenticated: (session: PostgresExperimentAuthSession) => void;
+  onAuthenticated: (session: PostgresAuthSession) => void;
 };
 
-export function PostgresExperimentAuthView({
+export function PostgresAuthView({
   authStatus,
   onRefresh,
   onAuthenticated,
-}: PostgresExperimentAuthViewProps) {
+}: PostgresAuthViewProps) {
   const [mode, setMode] = useState<"admin" | "login" | "register">("admin");
   const [name, setName] = useState("");
   const [adminUsername, setAdminUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [recentAccounts, setRecentAccounts] = useState<PostgresExperimentRememberedAccount[]>([]);
+  const [recentAccounts, setRecentAccounts] = useState<PostgresRememberedAccount[]>([]);
   const [selectedRecentEmail, setSelectedRecentEmail] = useState("");
   const [showManualEmailEntry, setShowManualEmailEntry] = useState(false);
   const [password, setPassword] = useState("");
@@ -329,7 +327,7 @@ export function PostgresExperimentAuthView({
 
     async function loadRecentAccounts() {
       try {
-        const nextAccounts = await listPostgresExperimentRememberedAccounts();
+        const nextAccounts = await listPostgresRememberedAccounts();
         if (!cancelled) {
           setRecentAccounts(nextAccounts);
         }
@@ -361,7 +359,7 @@ export function PostgresExperimentAuthView({
       }
       setSubmitting(true);
       try {
-        const session = await loginPostgresExperimentAdmin({
+        const session = await loginPostgresAdmin({
           username: adminUsername.trim(),
           password,
           rememberSession: false,
@@ -393,19 +391,19 @@ export function PostgresExperimentAuthView({
     setSubmitting(true);
     try {
       const session = effectiveMode === "register"
-        ? await registerPostgresExperimentAppUser({
+        ? await registerPostgresAppUser({
             name: name.trim(),
             email: trimmedEmail,
             password,
             rememberSession: false,
           })
-        : await loginPostgresExperimentAppUser({
+        : await loginPostgresAppUser({
             email: trimmedEmail,
             password,
             rememberSession: false,
           });
-      await rememberPostgresExperimentAccount(trimmedEmail, session.user.name || name.trim() || trimmedEmail);
-      setRecentAccounts(await listPostgresExperimentRememberedAccounts());
+      await rememberPostgresAccount(trimmedEmail, session.user.name || name.trim() || trimmedEmail);
+      setRecentAccounts(await listPostgresRememberedAccounts());
       setPassword("");
       onAuthenticated(session);
     } catch (authError) {
@@ -419,8 +417,6 @@ export function PostgresExperimentAuthView({
     <div className="auth-screen">
       <div className="auth-card" style={{ maxWidth: 720 }}>
         <div className="auth-brand">Kanqual</div>
-        <p className="auth-tagline">PostgreSQL Experiment</p>
-
         <form onSubmit={handleSubmit} className="form">
           <h2 className="auth-panel-title">Sign in to the PostgreSQL workspace</h2>
           <p className="auth-hint">

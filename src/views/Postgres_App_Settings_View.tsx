@@ -3,20 +3,20 @@ import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { useI18n } from "../i18n/provider";
 import { readAppSettings, saveAppSettings } from "../lib/appSettings";
 import {
-  getPostgresExperimentAuthStatus,
-  getPostgresExperimentInstallationSettings,
-  getPostgresExperimentStatus,
-  getPostgresExperimentUserPreferences,
-  listPostgresExperimentProjects,
-  savePostgresExperimentInstallationSettings,
-  savePostgresExperimentUserPreferences,
-  type PostgresExperimentAuthSession,
-  type PostgresExperimentAuthStatus,
-  type PostgresExperimentInstallationSettings,
-  type PostgresExperimentProject,
-  type PostgresExperimentStatus,
-  type PostgresExperimentUserPreferences,
-} from "../lib/postgresExperiment";
+  getPostgresAuthStatus,
+  getPostgresInstallationSettings,
+  getPostgresStatus,
+  getPostgresUserPreferences,
+  listPostgresProjects,
+  savePostgresInstallationSettings,
+  savePostgresUserPreferences,
+  type PostgresAuthSession,
+  type PostgresAuthStatus,
+  type PostgresInstallationSettings,
+  type PostgresProject,
+  type PostgresStatus,
+  type PostgresUserPreferences,
+} from "../lib/postgres";
 import {
   applyDensity,
   applyFontSize,
@@ -31,8 +31,8 @@ import {
   type Theme,
 } from "../theme";
 
-export type PostgresAppSettingsExperimentViewProps = {
-  authSession: PostgresExperimentAuthSession;
+export type PostgresAppSettingsViewProps = {
+  authSession: PostgresAuthSession;
 };
 
 function describeUnknownError(error: unknown): string {
@@ -51,7 +51,7 @@ function clampIntegerValue(value: number, min: number, max: number): number {
 }
 
 function syncLegacyAppSettingsFromPostgresInstallationSettings(
-  installationSettings: PostgresExperimentInstallationSettings,
+  installationSettings: PostgresInstallationSettings,
 ): void {
   const current = readAppSettings();
   saveAppSettings({
@@ -84,7 +84,7 @@ function syncLegacyAppSettingsFromPostgresInstallationSettings(
   });
 }
 
-function applyPostgresRuntimeThemePreferences(preferences: PostgresExperimentUserPreferences): void {
+function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferences): void {
   setRuntimeThemePreferences({
     theme: preferences.theme,
     density: preferences.density,
@@ -94,7 +94,7 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresExperimentUse
   initTheme();
 }
 
-function formatPostgresExperimentDateTime(iso: string): string {
+function formatPostgresDateTime(iso: string): string {
   if (!iso) return "-";
   try {
     return new Intl.DateTimeFormat([], {
@@ -109,16 +109,16 @@ function formatPostgresExperimentDateTime(iso: string): string {
   }
 }
 
-export function PostgresAppSettingsExperimentView({
+export function PostgresAppSettingsView({
   authSession,
-}: PostgresAppSettingsExperimentViewProps) {
+}: PostgresAppSettingsViewProps) {
   const { locale } = useI18n();
   const [activeModal, setActiveModal] = useState<"startup" | "import" | "privacy" | "updates" | "llm" | "postgres" | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
-  const [installationSettings, setInstallationSettings] = useState<PostgresExperimentInstallationSettings | null>(null);
-  const [status, setStatus] = useState<PostgresExperimentStatus | null>(null);
-  const [authStatus, setAuthStatus] = useState<PostgresExperimentAuthStatus | null>(null);
-  const [projects, setProjects] = useState<PostgresExperimentProject[]>([]);
+  const [installationSettings, setInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
+  const [status, setStatus] = useState<PostgresStatus | null>(null);
+  const [authStatus, setAuthStatus] = useState<PostgresAuthStatus | null>(null);
+  const [projects, setProjects] = useState<PostgresProject[]>([]);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -128,10 +128,10 @@ export function PostgresAppSettingsExperimentView({
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
 
   const persistInstallationSettings = useCallback(async (
-    next: PostgresExperimentInstallationSettings,
+    next: PostgresInstallationSettings,
     successMessage: string,
   ) => {
-    const saved = await savePostgresExperimentInstallationSettings(next);
+    const saved = await savePostgresInstallationSettings(next);
     setInstallationSettings(saved);
     syncLegacyAppSettingsFromPostgresInstallationSettings(saved);
     setNotice(successMessage);
@@ -139,10 +139,10 @@ export function PostgresAppSettingsExperimentView({
   }, []);
 
   const persistUserPreferences = useCallback(async (
-    next: PostgresExperimentUserPreferences,
+    next: PostgresUserPreferences,
     successMessage?: string,
   ) => {
-    const saved = await savePostgresExperimentUserPreferences(next);
+    const saved = await savePostgresUserPreferences(next);
     setTheme(saved.theme);
     setDensity(saved.density);
     setFontSize(saved.fontSize);
@@ -163,11 +163,11 @@ export function PostgresAppSettingsExperimentView({
         nextInstallationSettings,
         nextUserPreferences,
       ] = await Promise.all([
-        getPostgresExperimentStatus(),
-        getPostgresExperimentAuthStatus(),
-        listPostgresExperimentProjects(),
-        getPostgresExperimentInstallationSettings(),
-        getPostgresExperimentUserPreferences(),
+        getPostgresStatus(),
+        getPostgresAuthStatus(),
+        listPostgresProjects(),
+        getPostgresInstallationSettings(),
+        getPostgresUserPreferences(),
       ]);
       setStatus(nextStatus);
       setAuthStatus(nextAuthStatus);
@@ -281,10 +281,10 @@ export function PostgresAppSettingsExperimentView({
                 </button>
                 <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("llm")}>
                   <h3>AI Assist Runtime</h3>
-                  <p>Persist local and cloud LLM defaults for the PostgreSQL experiment in PostgreSQL.</p>
+                  <p>Persist local and cloud LLM defaults for the PostgreSQL in PostgreSQL.</p>
                 </button>
                 <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("postgres")}>
-                  <h3>PostgreSQL Experiment</h3>
+                  <h3>PostgreSQL</h3>
                   <p>Review local PostgreSQL status, registered users, and project databases.</p>
                 </button>
               </div>
@@ -488,7 +488,7 @@ export function PostgresAppSettingsExperimentView({
                     <label className="settings-toggle-row">
                       <span>
                         <strong>Forget remembered login identities on sign-out</strong>
-                        <small>Remove stored account shortcuts when you sign out of the experiment.</small>
+                        <small>Remove stored account shortcuts when you sign out.</small>
                       </span>
                       <input
                         type="checkbox"
@@ -648,7 +648,7 @@ export function PostgresAppSettingsExperimentView({
                       Provider
                       <input className="form-input" value={installationSettings?.llm.cloudProvider ?? ""} onChange={(event) => {
                         if (!installationSettings) return;
-                        const nextProvider = event.target.value as PostgresExperimentInstallationSettings["llm"]["cloudProvider"];
+                        const nextProvider = event.target.value as PostgresInstallationSettings["llm"]["cloudProvider"];
                         void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, cloudProvider: nextProvider } }, "LLM settings saved.");
                       }} />
                     </label>
@@ -786,7 +786,7 @@ export function PostgresAppSettingsExperimentView({
         <div className="modal-overlay" onClick={() => setActiveModal(null)}>
           <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
             <div className="settings-section-header">
-              <div><h2 className="settings-section-title">PostgreSQL Experiment</h2></div>
+              <div><h2 className="settings-section-title">PostgreSQL</h2></div>
               <button type="button" className="btn" onClick={() => void refreshPostgresDetails()} disabled={loading}>
                 {loading ? "Refreshing..." : "Refresh"}
               </button>
@@ -799,7 +799,7 @@ export function PostgresAppSettingsExperimentView({
                     <div className="home-restricted-list">
                       <div className="home-restricted-item"><span className="home-restricted-label">Signed in as</span><span className="home-restricted-value">{authSession.user.name}</span></div>
                       <div className="home-restricted-item"><span className="home-restricted-label">Role</span><span className="home-restricted-value">{authSession.authKind === "postgres_admin" ? "Local administrator" : authSession.user.role}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Session started</span><span className="home-restricted-value">{formatPostgresExperimentDateTime(new Date(authSession.startedAtMs).toISOString())}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">Session started</span><span className="home-restricted-value">{formatPostgresDateTime(new Date(authSession.startedAtMs).toISOString())}</span></div>
                     </div>
                   </div>
                 </section>
@@ -831,7 +831,7 @@ export function PostgresAppSettingsExperimentView({
                               <tr key={project.id} className="users-row">
                                 <td className="users-td users-td--name">{project.name}</td>
                                 <td className="users-td users-td--muted">{project.databaseName}</td>
-                                <td className="users-td users-td--muted">{formatPostgresExperimentDateTime(project.updatedAt)}</td>
+                                <td className="users-td users-td--muted">{formatPostgresDateTime(project.updatedAt)}</td>
                               </tr>
                             ))}
                           </tbody>

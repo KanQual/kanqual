@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { useI18n } from "../i18n/provider";
 import type { SharedAttributeDataType, SharedAttributeDraft } from "./AttributeValuesModal";
 
@@ -11,6 +11,7 @@ export function AttributeDefinitionModal({
   saving,
   error,
   title,
+  overlayStyle,
   onCancel,
   onSave,
 }: {
@@ -18,6 +19,7 @@ export function AttributeDefinitionModal({
   saving: boolean;
   error?: string;
   title: string;
+  overlayStyle?: CSSProperties;
   onCancel: () => void;
   onSave: (draft: SharedAttributeDraft) => void;
 }) {
@@ -35,9 +37,23 @@ export function AttributeDefinitionModal({
   ];
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
+    <div className="modal-overlay" style={overlayStyle} onClick={onCancel}>
       <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <h2>{title}</h2>
+        <div className="modal-title-bar">
+          <div>
+            <h2>{title}</h2>
+          </div>
+          <button
+            type="button"
+            className="modal-icon-close"
+            onClick={onCancel}
+            disabled={saving}
+            aria-label={t("common.cancel")}
+            title={t("common.cancel")}
+          >
+            x
+          </button>
+        </div>
         <div className="attribute-values-details">
           <label className="form-group">
             <span className="form-label">{t("attributeModal.attributeName")}</span>
@@ -101,8 +117,7 @@ export function AttributeDefinitionModal({
           ) : null}
         </div>
         {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
+        <div className="modal-actions">
           <button
             className="btn btn--primary"
             onClick={() =>

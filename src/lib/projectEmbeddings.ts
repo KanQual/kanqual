@@ -1,16 +1,21 @@
 import { readAppSettings, type LlmSettings } from "./appSettings";
 import { htmlToPlainText } from "./htmlText";
-import type { Annotation, Case, Code, Document, Memo } from "../types";
+import {
+  loadPostgresProjectWorkspaceSnapshot,
+  type PostgresProjectWorkspaceSnapshot,
+} from "./postgresProjectWorkspace";
 
 export type ProjectEmbeddingBuildItem = {
   id: string;
   itemType: string;
-  sourceId: string;
+  sourceId?: string;
   title: string;
   text: string;
   contentHash: string;
   documentId?: string;
   caseId?: string;
+  relationshipId?: string;
+  objectId?: string;
   codeId?: string;
   annotationId?: string;
   memoId?: string;
@@ -19,7 +24,18 @@ export type ProjectEmbeddingBuildItem = {
 };
 
 export type ProjectEmbeddingBuildSource = {
-  sourceType: "document" | "case" | "code" | "annotation" | "memo";
+  sourceType:
+    | "source"
+    | "object"
+    | "relationship"
+    | "code"
+    | "annotation"
+    | "memo"
+    | "source-attribute-definition"
+    | "object-attribute-definition"
+    | "relationship-attribute-definition"
+    | "object-type"
+    | "relationship-type";
   sourceId: string;
   title: string;
   sourceHash: string;
@@ -32,6 +48,7 @@ export type ProjectEmbeddingStoreStatus = {
   itemCount: number;
   modelRepoId?: string | null;
   modelDisplayName?: string | null;
+  contentFingerprint?: string | null;
 };
 
 export type ProjectEmbeddingBuildStatus = {
@@ -39,6 +56,8 @@ export type ProjectEmbeddingBuildStatus = {
   projectId: string | null;
   totalItems: number;
   completedItems: number;
+  totalSources?: number;
+  currentSourceIndex?: number | null;
   progressPercent: number | null;
   startedAtMs?: number | null;
   currentLabel: string | null;
@@ -57,6 +76,7 @@ export type ProjectEmbeddingBuildPreflight = {
 };
 
 const EMBEDDING_CHUNK_TOKEN_LIMIT = 448;
+const PROJECT_EMBEDDING_CHUNKING_VERSION = 2;
 const CJK_CHARACTER = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/u;
 const TOKEN_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]|[\p{L}\p{N}]+(?:['_-][\p{L}\p{N}]+)*|[^\s]/gu;
 
@@ -71,6 +91,29 @@ function hashEmbeddingText(text: string): string {
     hash = Math.imul(hash, 0x01000193);
   }
   return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function projectEmbeddingSettingsHash(llmSettings: LlmSettings): string {
+  return hashEmbeddingText(
+    `chunk:${llmSettings.chunkSize}|overlap:${llmSettings.overlapSize}|prefix:${llmSettings.prefixPassages}|normalize:${llmSettings.normalizeWhitespace}|chunking:${PROJECT_EMBEDDING_CHUNKING_VERSION}`,
+  );
+}
+
+export function buildPostgresProjectEmbeddingSourcesFingerprint(
+  sources: ProjectEmbeddingBuildSource[],
+  llmSettings: LlmSettings = readAppSettings().llm,
+): string {
+  const sourceLines = sources
+    .map((source) => `source|${source.sourceType}|${source.sourceId}|${source.sourceHash}|${source.items.length}`)
+    .sort();
+  const itemLines = sources
+    .flatMap((source) => source.items.map((item) => `item|${source.sourceType}|${source.sourceId}|${item.id}|${item.contentHash}`))
+    .sort();
+  return hashEmbeddingText([
+    `settings|${projectEmbeddingSettingsHash(llmSettings)}`,
+    ...sourceLines,
+    ...itemLines,
+  ].join("\n"));
 }
 
 type ChunkingToken = {
@@ -174,24 +217,58 @@ function chunkDocumentText(text: string, chunkSize: number, overlapSize: number)
   return chunks;
 }
 
-function buildDocumentSource(document: Document, llmSettings: LlmSettings): ProjectEmbeddingBuildSource | null {
-  const chunks = chunkDocumentText(document.content || "", llmSettings.chunkSize, llmSettings.overlapSize);
+function buildPostgresSourceSource(
+  source: PostgresProjectWorkspaceSnapshot["sources"][number],
+  sourceAttributeValues: PostgresProjectWorkspaceSnapshot["sourceAttributeValues"],
+  llmSettings: LlmSettings,
+): ProjectEmbeddingBuildSource | null {
+  const attributeLines = formatPostgresAttributeValues(sourceAttributeValues);
+  const sourceTextExcerpt = normalizeEmbeddingText(source.textContent, llmSettings.normalizeWhitespace)
+    .slice(0, Math.max(0, Math.min(llmSettings.chunkSize, 1800)))
+    .trim();
+  const sourceLevelBody = [
+    source.title ? `Source: ${source.title}` : "",
+    source.sourceKind ? `Source type: ${source.sourceKind}` : "",
+    source.notes ? `Notes: ${htmlToPlainText(source.notes)}` : "",
+    attributeLines.length > 0 ? `Attributes:\n${attributeLines.join("\n")}` : "",
+    sourceTextExcerpt ? `Source text excerpt:\n${sourceTextExcerpt}` : "",
+  ].filter(Boolean).join("\n\n");
+  const body = [
+    source.title ? `Source: ${source.title}` : "",
+    source.sourceKind ? `Source type: ${source.sourceKind}` : "",
+    source.textContent,
+    source.notes ? `Notes: ${htmlToPlainText(source.notes)}` : "",
+    attributeLines.length > 0 ? `Attributes:\n${attributeLines.join("\n")}` : "",
+  ].filter(Boolean).join("\n\n");
+  const chunks = chunkDocumentText(body, llmSettings.chunkSize, llmSettings.overlapSize);
   const normalizeWhitespace = llmSettings.normalizeWhitespace;
   const passagePrefix = llmSettings.prefixPassages ? "passage: " : "";
   const items: ProjectEmbeddingBuildItem[] = [];
+  const normalizedSourceLevelBody = normalizeEmbeddingText(sourceLevelBody, normalizeWhitespace);
+
+  if (normalizedSourceLevelBody) {
+    const embeddingText = `${passagePrefix}${normalizedSourceLevelBody}`;
+    items.push({
+      id: `source::${source.id}`,
+      itemType: "source",
+      sourceId: source.id,
+      title: source.title,
+      text: embeddingText,
+      contentHash: hashEmbeddingText(embeddingText),
+    });
+  }
 
   chunks.forEach((chunk, index) => {
     const normalizedChunk = normalizeEmbeddingText(chunk.text, normalizeWhitespace);
     if (!normalizedChunk) return;
     const embeddingText = `${passagePrefix}${normalizedChunk}`;
     items.push({
-      id: `${document.id}::chunk-${index + 1}`,
-      itemType: "document",
-      sourceId: document.id,
-      title: `${document.name} (chunk ${index + 1})`,
+      id: `source::${source.id}::chunk-${index + 1}`,
+      itemType: "text-segment",
+      sourceId: source.id,
+      title: `${source.title} (chunk ${index + 1})`,
       text: embeddingText,
       contentHash: hashEmbeddingText(embeddingText),
-      documentId: document.id,
       startOffset: chunk.startOffset,
       endOffset: chunk.endOffset,
     });
@@ -200,64 +277,271 @@ function buildDocumentSource(document: Document, llmSettings: LlmSettings): Proj
   if (items.length === 0) return null;
 
   return {
-    sourceType: "document",
-    sourceId: document.id,
-    title: document.name,
+    sourceType: "source",
+    sourceId: source.id,
+    title: source.title,
     sourceHash: hashEmbeddingText(
-      `document\n${document.name}\n${normalizeEmbeddingText(document.content || "", normalizeWhitespace)}`,
+      `source\n${source.title}\n${source.sourceKind}\n${normalizeEmbeddingText(body, normalizeWhitespace)}`,
     ),
     items,
   };
 }
 
-export function buildProjectEmbeddingSources(
-  documents: Document[],
-  cases: Case[],
-  codes: Code[],
-  annotations: Annotation[],
-  memos: Memo[],
+function formatPostgresAttributeValues(
+  values: Array<{ attributeName: string; value: string }>,
+): string[] {
+  return values
+    .filter((value) => value.attributeName.trim() && value.value.trim())
+    .sort((left, right) => left.attributeName.localeCompare(right.attributeName))
+    .map((value) => `${value.attributeName}: ${value.value}`);
+}
+
+function formatOptions(options: string[]): string {
+  return options.map((option) => option.trim()).filter(Boolean).join(", ");
+}
+
+function buildSingleEmbeddingSource(
+  sourceType: ProjectEmbeddingBuildSource["sourceType"],
+  sourceId: string,
+  title: string,
+  textParts: string[],
+  normalizeWhitespace: boolean,
+  passagePrefix: string,
+  hashPrefix: string,
+  itemFields: Partial<ProjectEmbeddingBuildItem> = {},
+): ProjectEmbeddingBuildSource | null {
+  const itemText = normalizeEmbeddingText(textParts.filter(Boolean).join("\n\n"), normalizeWhitespace);
+  if (!itemText) return null;
+  const embeddingText = `${passagePrefix}${itemText}`;
+  return {
+    sourceType,
+    sourceId,
+    title,
+    sourceHash: hashEmbeddingText(`${hashPrefix}\n${sourceId}\n${itemText}`),
+    items: [{
+      id: `${sourceType}::${sourceId}`,
+      itemType: sourceType,
+      title,
+      text: embeddingText,
+      contentHash: hashEmbeddingText(embeddingText),
+      ...itemFields,
+    }],
+  };
+}
+
+export function buildPostgresProjectEmbeddingSources(
+  snapshot: PostgresProjectWorkspaceSnapshot,
   llmSettings: LlmSettings = readAppSettings().llm,
 ): ProjectEmbeddingBuildSource[] {
   const normalizeWhitespace = llmSettings.normalizeWhitespace;
   const passagePrefix = llmSettings.prefixPassages ? "passage: " : "";
-  const codeById = new Map(codes.map((code) => [code.id, code]));
-  const annotationById = new Map(annotations.map((annotation) => [annotation.id, annotation]));
-  const documentById = new Map(documents.map((document) => [document.id, document]));
+  const codeById = new Map(snapshot.codes.map((code) => [code.id, code]));
+  const sourceById = new Map(snapshot.sources.map((source) => [source.id, source]));
+  const objectById = new Map(snapshot.objects.map((object) => [object.id, object]));
+  const annotationById = new Map(snapshot.annotations.map((annotation) => [annotation.id, annotation]));
+  const sourceAttributeValuesBySourceId = new Map<string, PostgresProjectWorkspaceSnapshot["sourceAttributeValues"]>();
+  const sourceObjectIdsBySourceId = new Map<string, string[]>();
   const sources: ProjectEmbeddingBuildSource[] = [];
 
-  for (const document of documents) {
-    const source = buildDocumentSource(document, llmSettings);
-    if (source) sources.push(source);
+  for (const value of snapshot.sourceAttributeValues) {
+    sourceAttributeValuesBySourceId.set(value.sourceId, [
+      ...(sourceAttributeValuesBySourceId.get(value.sourceId) ?? []),
+      value,
+    ]);
   }
 
-  for (const caseItem of cases) {
-    const caseText = normalizeEmbeddingText(
+  for (const link of snapshot.sourceObjectLinks) {
+    sourceObjectIdsBySourceId.set(link.sourceId, [
+      ...(sourceObjectIdsBySourceId.get(link.sourceId) ?? []),
+      link.objectId,
+    ]);
+  }
+
+  for (const source of snapshot.sources) {
+    const builtSource = buildPostgresSourceSource(source, sourceAttributeValuesBySourceId.get(source.id) ?? [], llmSettings);
+    if (builtSource) sources.push(builtSource);
+  }
+
+  for (const definition of snapshot.sourceAttributeDefinitions) {
+    const title = `Source attribute: ${definition.name}`;
+    const builtSource = buildSingleEmbeddingSource(
+      "source-attribute-definition",
+      definition.id,
+      title,
       [
-        caseItem.name ? `Case: ${caseItem.name}` : "",
-        caseItem.notes ? `Description: ${htmlToPlainText(caseItem.notes)}` : "",
+        `Source attribute: ${definition.name}`,
+        `Data type: ${definition.dataType}`,
+        definition.description ? `Description: ${htmlToPlainText(definition.description)}` : "",
+        definition.sourceKinds.length > 0 ? `Applies to source types: ${definition.sourceKinds.join(", ")}` : "",
+        definition.options.length > 0 ? `Options: ${formatOptions(definition.options)}` : "",
+      ],
+      normalizeWhitespace,
+      passagePrefix,
+      "source-attribute-definition",
+    );
+    if (builtSource) sources.push(builtSource);
+  }
+
+  for (const definition of snapshot.objectAttributeDefinitions) {
+    const title = `Object attribute: ${definition.name}`;
+    const builtSource = buildSingleEmbeddingSource(
+      "object-attribute-definition",
+      definition.id,
+      title,
+      [
+        `Object attribute: ${definition.name}`,
+        definition.objectType ? `Object type: ${definition.objectType}` : "",
+        `Data type: ${definition.dataType}`,
+        definition.description ? `Description: ${htmlToPlainText(definition.description)}` : "",
+        definition.options.length > 0 ? `Options: ${formatOptions(definition.options)}` : "",
+      ],
+      normalizeWhitespace,
+      passagePrefix,
+      "object-attribute-definition",
+    );
+    if (builtSource) sources.push(builtSource);
+  }
+
+  for (const definition of snapshot.relationshipAttributeDefinitions) {
+    const title = `Relationship attribute: ${definition.name}`;
+    const builtSource = buildSingleEmbeddingSource(
+      "relationship-attribute-definition",
+      definition.id,
+      title,
+      [
+        `Relationship attribute: ${definition.name}`,
+        definition.relationshipType ? `Relationship type: ${definition.relationshipType}` : "",
+        `Data type: ${definition.dataType}`,
+        definition.description ? `Description: ${htmlToPlainText(definition.description)}` : "",
+        definition.options.length > 0 ? `Options: ${formatOptions(definition.options)}` : "",
+      ],
+      normalizeWhitespace,
+      passagePrefix,
+      "relationship-attribute-definition",
+    );
+    if (builtSource) sources.push(builtSource);
+  }
+
+  for (const objectType of snapshot.objectTypes) {
+    const title = `Object type: ${objectType.name}`;
+    const builtSource = buildSingleEmbeddingSource(
+      "object-type",
+      objectType.id,
+      title,
+      [
+        `Object type: ${objectType.name}`,
+        objectType.description ? `Description: ${htmlToPlainText(objectType.description)}` : "",
+        objectType.shape ? `Shape: ${objectType.shape}` : "",
+        objectType.color ? `Color: ${objectType.color}` : "",
+        objectType.fill ? `Fill: ${objectType.fill}` : "",
+      ],
+      normalizeWhitespace,
+      passagePrefix,
+      "object-type",
+    );
+    if (builtSource) sources.push(builtSource);
+  }
+
+  for (const relationshipType of snapshot.relationshipTypes) {
+    const title = `Relationship type: ${relationshipType.name}`;
+    const builtSource = buildSingleEmbeddingSource(
+      "relationship-type",
+      relationshipType.id,
+      title,
+      [
+        `Relationship type: ${relationshipType.name}`,
+        relationshipType.description ? `Description: ${htmlToPlainText(relationshipType.description)}` : "",
+        relationshipType.fromObjectTypes.length > 0 ? `From object types: ${relationshipType.fromObjectTypes.join(", ")}` : "",
+        relationshipType.toObjectTypes.length > 0 ? `To object types: ${relationshipType.toObjectTypes.join(", ")}` : "",
+        relationshipType.fromSourceKinds.length > 0 ? `From source types: ${relationshipType.fromSourceKinds.join(", ")}` : "",
+        relationshipType.toSourceKinds.length > 0 ? `To source types: ${relationshipType.toSourceKinds.join(", ")}` : "",
+        relationshipType.lineShape ? `Line shape: ${relationshipType.lineShape}` : "",
+        relationshipType.arrowhead ? `Arrowhead: ${relationshipType.arrowhead}` : "",
+        relationshipType.color ? `Color: ${relationshipType.color}` : "",
+      ],
+      normalizeWhitespace,
+      passagePrefix,
+      "relationship-type",
+    );
+    if (builtSource) sources.push(builtSource);
+  }
+
+  for (const object of snapshot.objects) {
+    const linkedSources = snapshot.sourceObjectLinks
+      .filter((link) => link.objectId === object.id)
+      .map((link) => sourceById.get(link.sourceId)?.title)
+      .filter((title): title is string => Boolean(title));
+    const attributeLines = formatPostgresAttributeValues(object.attributeValues);
+    const objectText = normalizeEmbeddingText(
+      [
+        object.objectType ? `Object type: ${object.objectType}` : "",
+        object.title ? `Object: ${object.title}` : "",
+        object.description ? `Description: ${htmlToPlainText(object.description)}` : "",
+        attributeLines.length > 0 ? `Attributes:\n${attributeLines.join("\n")}` : "",
+        linkedSources.length > 0 ? `Linked sources: ${linkedSources.join(", ")}` : "",
+        object.eventStartAt ? `Event start: ${object.eventStartAt}` : "",
+        object.eventEndAt ? `Event end: ${object.eventEndAt}` : "",
       ].filter(Boolean).join("\n\n"),
       normalizeWhitespace,
     );
-    if (!caseText) continue;
-    const embeddingText = `${passagePrefix}${caseText}`;
+    if (!objectText) continue;
+    const embeddingText = `${passagePrefix}${objectText}`;
     sources.push({
-      sourceType: "case",
-      sourceId: caseItem.id,
-      title: `Case: ${caseItem.name}`,
-      sourceHash: hashEmbeddingText(`case\n${caseItem.name}\n${caseText}`),
+      sourceType: "object",
+      sourceId: object.id,
+      title: `Object: ${object.title}`,
+      sourceHash: hashEmbeddingText(`object\n${object.objectType}\n${object.title}\n${objectText}`),
       items: [{
-        id: `case::${caseItem.id}`,
-        itemType: "case",
-        sourceId: caseItem.id,
-        title: `Case: ${caseItem.name}`,
+        id: `object::${object.id}`,
+        itemType: "object",
+        title: `Object: ${object.title}`,
         text: embeddingText,
         contentHash: hashEmbeddingText(embeddingText),
-        caseId: caseItem.id,
+        objectId: object.id,
       }],
     });
   }
 
-  for (const code of codes) {
+  for (const relationship of snapshot.relationships) {
+    const attributeLines = formatPostgresAttributeValues(relationship.attributeValues);
+    const fromSource = relationship.fromEntityType === "source" ? sourceById.get(relationship.fromEntityId) : null;
+    const toSource = relationship.toEntityType === "source" ? sourceById.get(relationship.toEntityId) : null;
+    const fromObject = relationship.fromEntityType === "object" ? objectById.get(relationship.fromEntityId) : null;
+    const toObject = relationship.toEntityType === "object" ? objectById.get(relationship.toEntityId) : null;
+    const fromName = relationship.fromEntityName || fromSource?.title || fromObject?.title || relationship.fromEntityId;
+    const toName = relationship.toEntityName || toSource?.title || toObject?.title || relationship.toEntityId;
+    const relationshipTitle = `${relationship.relationshipType || "Relationship"}: ${fromName} -> ${toName}`;
+    const relationshipText = normalizeEmbeddingText(
+      [
+        relationship.relationshipType ? `Relationship type: ${relationship.relationshipType}` : "",
+        fromName ? `From ${relationship.fromEntityType}: ${fromName}` : "",
+        toName ? `To ${relationship.toEntityType}: ${toName}` : "",
+        relationship.description ? `Description: ${htmlToPlainText(relationship.description)}` : "",
+        attributeLines.length > 0 ? `Attributes:\n${attributeLines.join("\n")}` : "",
+      ].filter(Boolean).join("\n\n"),
+      normalizeWhitespace,
+    );
+    if (!relationshipText) continue;
+    const embeddingText = `${passagePrefix}${relationshipText}`;
+    sources.push({
+      sourceType: "relationship",
+      sourceId: relationship.id,
+      title: relationshipTitle,
+      sourceHash: hashEmbeddingText(
+        `relationship\n${relationship.relationshipType}\n${fromName}\n${toName}\n${relationshipText}`,
+      ),
+      items: [{
+        id: `relationship::${relationship.id}`,
+        itemType: "relationship",
+        title: relationshipTitle,
+        text: embeddingText,
+        contentHash: hashEmbeddingText(embeddingText),
+        relationshipId: relationship.id,
+      }],
+    });
+  }
+
+  for (const code of snapshot.codes) {
     const codeText = normalizeEmbeddingText(
       [code.label, code.description].filter(Boolean).join("\n\n"),
       normalizeWhitespace,
@@ -272,7 +556,6 @@ export function buildProjectEmbeddingSources(
       items: [{
         id: `code::${code.id}`,
         itemType: "code",
-        sourceId: code.id,
         title: `Code: ${code.label}`,
         text: embeddingText,
         contentHash: hashEmbeddingText(embeddingText),
@@ -281,13 +564,19 @@ export function buildProjectEmbeddingSources(
     });
   }
 
-  for (const annotation of annotations) {
-    const code = codeById.get(annotation.codeId);
-    const document = documentById.get(annotation.documentId);
+  for (const annotation of snapshot.annotations) {
+    const source = sourceById.get(annotation.sourceId);
+    const codes = annotation.codeIds
+      .map((codeId) => codeById.get(codeId))
+      .filter((code): code is NonNullable<typeof code> => Boolean(code));
+    const objectIds = sourceObjectIdsBySourceId.get(annotation.sourceId) ?? [];
     const annotationText = normalizeEmbeddingText(
       [
-        code?.label ? `Code: ${code.label}` : "",
-        document?.name ? `Document: ${document.name}` : "",
+        codes.length > 0 ? `Codes: ${codes.map((code) => code.label).join(", ")}` : "",
+        source?.title ? `Source: ${source.title}` : "",
+        objectIds.length > 0
+          ? `Linked objects: ${objectIds.map((objectId) => objectById.get(objectId)?.title).filter(Boolean).join(", ")}`
+          : "",
         annotation.quote ? `Quote: ${annotation.quote}` : "",
         annotation.note ? `Note: ${annotation.note}` : "",
       ].filter(Boolean).join("\n"),
@@ -298,42 +587,40 @@ export function buildProjectEmbeddingSources(
     sources.push({
       sourceType: "annotation",
       sourceId: annotation.id,
-      title: `Annotation in ${document?.name ?? "document"}`,
+      title: `Annotation in ${source?.title ?? "source"}`,
       sourceHash: hashEmbeddingText(
-        `annotation\n${annotation.id}\n${document?.name ?? ""}\n${code?.label ?? ""}\n${annotationText}`,
+        `annotation\n${annotation.id}\n${source?.title ?? ""}\n${codes.map((code) => code.label).join(",")}\n${annotationText}`,
       ),
       items: [{
         id: `annotation::${annotation.id}`,
         itemType: "annotation",
-        sourceId: annotation.id,
-        title: `Annotation in ${document?.name ?? "document"}`,
+        title: `Annotation in ${source?.title ?? "source"}`,
         text: embeddingText,
         contentHash: hashEmbeddingText(embeddingText),
-        documentId: annotation.documentId,
-        codeId: annotation.codeId,
+        sourceId: annotation.sourceId,
+        codeId: annotation.primaryCodeId,
         annotationId: annotation.id,
-        startOffset: annotation.startOffset,
-        endOffset: annotation.endOffset,
+        startOffset: annotation.startOffset ?? undefined,
+        endOffset: annotation.endOffset ?? undefined,
       }],
     });
   }
 
-  for (const memo of memos) {
-    const annotation = memo.annotationId ? annotationById.get(memo.annotationId) : undefined;
-    const document = memo.documentId
-      ? documentById.get(memo.documentId)
-      : annotation?.documentId
-        ? documentById.get(annotation.documentId)
-        : undefined;
-    const code = annotation?.codeId ? codeById.get(annotation.codeId) : undefined;
+  for (const memo of snapshot.memos) {
+    const memoSources = memo.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean);
+    const memoAnnotations = memo.annotationIds.map((annotationId) => annotationById.get(annotationId)).filter(Boolean);
+    const memoCodes = memo.codeIds.map((codeId) => codeById.get(codeId)).filter(Boolean);
+    const memoObjects = memo.objectIds.map((objectId) => objectById.get(objectId)).filter(Boolean);
     const memoText = normalizeEmbeddingText(
       [
         memo.title ? `Memo: ${memo.title}` : "",
         memo.body ? `Body: ${htmlToPlainText(memo.body)}` : "",
-        document?.name ? `Document: ${document.name}` : "",
-        code?.label ? `Code: ${code.label}` : "",
-        annotation?.quote ? `Quote: ${annotation.quote}` : "",
-        annotation?.note ? `Annotation note: ${annotation.note}` : "",
+        memoSources.length > 0 ? `Sources: ${memoSources.map((source) => source?.title).join(", ")}` : "",
+        memoCodes.length > 0 ? `Codes: ${memoCodes.map((code) => code?.label).join(", ")}` : "",
+        memoObjects.length > 0 ? `Objects: ${memoObjects.map((object) => object?.title).join(", ")}` : "",
+        memoAnnotations.length > 0
+          ? `Annotations: ${memoAnnotations.map((annotation) => annotation?.quote).filter(Boolean).join(" | ")}`
+          : "",
       ].filter(Boolean).join("\n"),
       normalizeWhitespace,
     );
@@ -343,19 +630,17 @@ export function buildProjectEmbeddingSources(
       sourceType: "memo",
       sourceId: memo.id,
       title: `Memo: ${memo.title}`,
-      sourceHash: hashEmbeddingText(
-        `memo\n${memo.title}\n${document?.name ?? ""}\n${code?.label ?? ""}\n${memoText}`,
-      ),
+      sourceHash: hashEmbeddingText(`memo\n${memo.title}\n${memoText}`),
       items: [{
         id: `memo::${memo.id}`,
         itemType: "memo",
-        sourceId: memo.id,
         title: `Memo: ${memo.title}`,
         text: embeddingText,
         contentHash: hashEmbeddingText(embeddingText),
-        documentId: document?.id,
-        codeId: code?.id,
-        annotationId: annotation?.id,
+        sourceId: memo.sourceIds[0],
+        codeId: memo.codeIds[0],
+        annotationId: memo.annotationIds[0],
+        objectId: memo.objectIds[0],
         memoId: memo.id,
       }],
     });
@@ -364,14 +649,10 @@ export function buildProjectEmbeddingSources(
   return sources;
 }
 
-export function buildProjectEmbeddingItems(
-  documents: Document[],
-  cases: Case[],
-  codes: Code[],
-  annotations: Annotation[],
-  memos: Memo[],
+export async function buildPostgresProjectEmbeddingSourcesForProject(
+  projectId: string,
   llmSettings: LlmSettings = readAppSettings().llm,
-): ProjectEmbeddingBuildItem[] {
-  return buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, llmSettings)
-    .flatMap((source) => source.items);
+): Promise<ProjectEmbeddingBuildSource[]> {
+  const snapshot = await loadPostgresProjectWorkspaceSnapshot(projectId);
+  return buildPostgresProjectEmbeddingSources(snapshot, llmSettings);
 }

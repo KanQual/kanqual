@@ -22,11 +22,11 @@ import tagOutlineShapeSvg from "../assets/object-shapes/tag-outline.svg?raw";
 import starFilledShapeSvg from "../assets/object-shapes/star-filled.svg?raw";
 import starOutlineShapeSvg from "../assets/object-shapes/star-outline.svg?raw";
 import sourceTextOutlineShapeSvg from "../assets/object-shapes/source-text-outline.svg?raw";
+import sourceProcessedTranscriptOutlineShapeSvg from "../assets/object-shapes/source-processed-transcript-outline.svg?raw";
 import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline.svg?raw";
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
-import { useOptionalStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
@@ -91,7 +91,7 @@ type SourceObjectTypeShape =
   | "tag"
   | "star";
 type SourceObjectFill = "filled" | "outline";
-type SourceObjectVisualKey = "source_text" | "source_pdf" | "source_image" | "source_audio" | "source_video";
+type SourceObjectVisualKey = "source_text" | "source_processed_transcript" | "source_pdf" | "source_image" | "source_audio" | "source_video";
 
 const COLS: { key: SortCol; label: string; width: string }[] = [
   { key: "documentName", label: "Document", width: "20%" },
@@ -104,13 +104,6 @@ const COLS: { key: SortCol; label: string; width: string }[] = [
 
 const ANNOTATION_ID_WIDTH = "10%";
 const SOURCE_OBJECT_TYPE_DEFAULT_COLOR = "#355070";
-const POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS = [
-  "source_text",
-  "source_pdf",
-  "source_image",
-  "source_audio",
-  "source_video",
-] as const;
 
 function buildSvgDataUrl(svgMarkup: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}`;
@@ -130,14 +123,23 @@ const SOURCE_OBJECT_SHAPE_ASSET_URLS: Record<SourceObjectTypeShape, { filled: st
 };
 const SOURCE_OBJECT_VISUAL_ASSET_URLS: Record<SourceObjectVisualKey, string> = {
   source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
+  source_processed_transcript: buildSvgDataUrl(sourceProcessedTranscriptOutlineShapeSvg),
   source_pdf: buildSvgDataUrl(sourcePdfOutlineShapeSvg),
   source_image: buildSvgDataUrl(sourceImageOutlineShapeSvg),
   source_audio: buildSvgDataUrl(sourceAudioOutlineShapeSvg),
   source_video: buildSvgDataUrl(sourceVideoOutlineShapeSvg),
 };
+const POSTGRES_SOURCE_KIND_VISUALS: Record<string, { label: string; color: string; systemKey: SourceObjectVisualKey }> = {
+  text: { label: "Text", color: "#355070", systemKey: "source_text" },
+  transcript: { label: "Transcript", color: "#2a9d8f", systemKey: "source_processed_transcript" },
+  pdf: { label: "PDF", color: "#7f5539", systemKey: "source_pdf" },
+  image: { label: "Image", color: "#6d597a", systemKey: "source_image" },
+  audio: { label: "Audio", color: "#b56576", systemKey: "source_audio" },
+  video: { label: "Video", color: "#457b9d", systemKey: "source_video" },
+};
 
-function normalizeSourceObjectTypeShape(value: string | undefined): SourceObjectTypeShape {
-  const normalized = (value ?? "").trim().toLowerCase();
+function normalizeSourceObjectTypeShape(value: string): SourceObjectTypeShape {
+  const normalized = value.trim().toLowerCase();
   if (normalized === "pill" || normalized === "circle") return "rounded";
   if (
     normalized === "rectangle"
@@ -155,18 +157,19 @@ function normalizeSourceObjectTypeShape(value: string | undefined): SourceObject
   return "rounded";
 }
 
-function normalizeSourceObjectFill(value: string | undefined): SourceObjectFill {
-  return (value ?? "").trim().toLowerCase() === "outline" ? "outline" : "filled";
+function normalizeSourceObjectFill(value: string): SourceObjectFill {
+  return value.trim().toLowerCase() === "outline" ? "outline" : "filled";
 }
 
-function normalizeSourceObjectColor(value: string | undefined): string {
-  const normalized = (value ?? "").trim();
+function normalizeSourceObjectColor(value: string): string {
+  const normalized = value.trim();
   return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : SOURCE_OBJECT_TYPE_DEFAULT_COLOR;
 }
 
 function getSourceObjectVisualKey(systemKey: string | null | undefined): SourceObjectVisualKey | null {
   if (
     systemKey === "source_text"
+    || systemKey === "source_processed_transcript"
     || systemKey === "source_pdf"
     || systemKey === "source_image"
     || systemKey === "source_audio"
@@ -175,6 +178,12 @@ function getSourceObjectVisualKey(systemKey: string | null | undefined): SourceO
     return systemKey;
   }
   return null;
+}
+
+function getSourceKindVisual(sourceKind: string | null | undefined): { label: string; color: string; systemKey: SourceObjectVisualKey } | null {
+  const normalized = (sourceKind ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const key = normalized === "processed transcript" ? "transcript" : normalized;
+  return POSTGRES_SOURCE_KIND_VISUALS[key] ?? null;
 }
 
 function getSourceObjectMaskStyle(url: string): CSSProperties {
@@ -241,6 +250,8 @@ export interface AnnotationsViewProps {
   postgresProjectId?: string;
   postgresProjectStoragePath?: string;
   postgresCurrentUserId?: string;
+  initialPostgresAnnotationId?: string | null;
+  onInitialPostgresAnnotationHandled?: () => void;
   onOpenPostgresSourceAnnotation?: (target: { sourceId: string; annotationId: string }) => void;
 }
 
@@ -809,9 +820,10 @@ function formatAnnotationDisplayId(value: number | null): string {
 }
 
 function formatSourceType(value: string | undefined): string {
-  const normalized = (value ?? "").trim().toLowerCase();
+  const normalized = (value ?? "").trim().toLowerCase().replace(/_/g, " ");
   if (!normalized) return "-";
   if (normalized === "pdf") return "PDF";
+  if (normalized === "processed transcript") return "Transcript";
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
@@ -824,12 +836,15 @@ function sourceTypeRowLabel(label: string): string {
 }
 
 export function AnnotationsView(props: AnnotationsViewProps) {
-  const { postgresProjectId, postgresProjectStoragePath, postgresCurrentUserId, onOpenPostgresSourceAnnotation } = props;
+  const {
+    postgresProjectId,
+    postgresProjectStoragePath,
+    postgresCurrentUserId,
+    initialPostgresAnnotationId,
+    onInitialPostgresAnnotationHandled,
+    onOpenPostgresSourceAnnotation,
+  } = props;
   const { t } = useI18n();
-  const store = useOptionalStore();
-  const activeProject = store?.activeProject ?? null;
-  const pb = store?.pb ?? null;
-  const documents = store?.documents ?? [];
   const localizedCols = [
     { ...COLS[0], label: t("projectAnnotations.table.document") },
     COLS[1],
@@ -847,99 +862,79 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [selectedSourceKindFilter, setSelectedSourceKindFilter] = useState<string>("all");
   const [selectedRow, setSelectedRow] = useState<AnnRow | null>(null);
-  const postgresMode = !!postgresProjectId;
+
+  useEffect(() => {
+    if (!initialPostgresAnnotationId || rows.length === 0) return;
+    const matchingRow = rows.find((row) => row.id === initialPostgresAnnotationId);
+    if (!matchingRow) return;
+    setSelectedRow(matchingRow);
+    onInitialPostgresAnnotationHandled?.();
+  }, [initialPostgresAnnotationId, onInitialPostgresAnnotationHandled, rows]);
 
   const load = useCallback(async () => {
-    if (!activeProject && !postgresProjectId) return;
+    if (!postgresProjectId) return;
     setLoading(true);
     setError(null);
     try {
-      if (postgresProjectId) {
-        const snapshot = await loadPostgresProjectWorkspaceSnapshot(postgresProjectId);
-        const sourceById = Object.fromEntries(snapshot.sources.map((source) => [source.id, source]));
-        const primaryCodeById = Object.fromEntries(snapshot.codes.map((code) => [code.id, code]));
-        const sourceObjectBySourceId = new Map(
-          snapshot.objects
-            .filter((object) => object.sourceId)
-            .map((object) => [object.sourceId!, object]),
+      const snapshot = await loadPostgresProjectWorkspaceSnapshot(postgresProjectId);
+      const sourceById = Object.fromEntries(snapshot.sources.map((source) => [source.id, source]));
+      const primaryCodeById = Object.fromEntries(snapshot.codes.map((code) => [code.id, code]));
+      const sourceObjectTypeBySystemKey = new Map(
+        snapshot.objectTypes
+          .filter((objectType) => getSourceObjectVisualKey(objectType.systemKey))
+          .map((objectType) => [objectType.systemKey, objectType]),
+      );
+      const sourceLockById = Object.fromEntries(
+        snapshot.sourceLocks.map((lock) => [lock.sourceId, lock]),
+      );
+      setRows(snapshot.annotations.map((annotation) => {
+        const source = sourceById[annotation.sourceId];
+        const primaryCode = primaryCodeById[annotation.primaryCodeId];
+        const sourceLock = sourceLockById[annotation.sourceId];
+        const sourceKind = annotation.sourceKind || source?.sourceKind || "";
+        const sourceVisual = getSourceKindVisual(sourceKind);
+        const sourceObjectType = sourceVisual?.systemKey
+          ? sourceObjectTypeBySystemKey.get(sourceVisual.systemKey) ?? null
+          : null;
+        const lockStatus = describeSourceLock(
+          sourceLock?.userId,
+          sourceLock?.userName,
+          postgresCurrentUserId,
         );
-        const sourceObjectTypeById = new Map(
-          snapshot.objectTypes
-            .filter((objectType) => objectType.systemKey
-              && POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS.includes(objectType.systemKey as (typeof POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS)[number]))
-            .map((objectType) => [objectType.id, objectType]),
-        );
-        const sourceLockById = Object.fromEntries(
-          snapshot.sourceLocks.map((lock) => [lock.sourceId, lock]),
-        );
-        setRows(snapshot.annotations.map((annotation) => {
-          const source = sourceById[annotation.sourceId];
-          const sourceObject = sourceObjectBySourceId.get(annotation.sourceId);
-          const sourceObjectType = sourceObject ? sourceObjectTypeById.get(sourceObject.objectTypeId) : null;
-          const primaryCode = primaryCodeById[annotation.primaryCodeId];
-          const sourceLock = sourceLockById[annotation.sourceId];
-          const lockStatus = describeSourceLock(
-            sourceLock?.userId,
-            sourceLock?.userName,
-            postgresCurrentUserId,
-          );
-          return {
-            id: annotation.id,
-            displayId: annotation.displayId,
-            documentId: annotation.sourceId,
-            documentName: source?.title ?? "-",
-            codeId: annotation.primaryCodeId,
-            codeLabel: annotation.primaryCodeLabel || primaryCode?.label || "-",
-            codeColor: primaryCode?.color ?? "#888888",
-            quote: annotation.quote ?? "",
-            note: annotation.note ?? "",
-            sourceKind: annotation.sourceKind || source?.sourceKind,
-            sourceObjectType: sourceObjectType?.name ?? sourceObject?.objectType,
-            sourceObjectTypeSystemKey: sourceObjectType?.systemKey ?? sourceObject?.objectTypeSystemKey,
-            sourceObjectTypeShape: normalizeSourceObjectTypeShape(sourceObjectType?.shape),
-            sourceObjectTypeColor: normalizeSourceObjectColor(sourceObjectType?.color),
-            sourceObjectTypeFill: normalizeSourceObjectFill(sourceObjectType?.fill),
-            sourcePath: source?.storagePath,
-            imageRegion: annotation.imageRegion,
-            timeStartMs: annotation.timeStartMs,
-            timeEndMs: annotation.timeEndMs,
-            createdByName: annotation.createdByName || "-",
-            lockLabel: lockStatus.label,
-            lockTitle: lockStatus.title,
-            createdAt: annotation.createdAt,
-          };
-        }));
-        return;
-      }
-
-      if (!activeProject || !pb) return;
-
-      const annRecs = await pb.collection("annotations").getFullList({
-        filter: `document.project="${activeProject.id}"&&deleted_at=""`,
-        expand: "code,document,created_by",
-        sort: "document,start_offset",
-      });
-
-      setRows(annRecs.map((record) => ({
-        id: record.id,
-        displayId: null,
-        documentId: record.document,
-        documentName: record.expand?.document?.name ?? "-",
-        codeId: record.code,
-        codeLabel: record.expand?.code?.label ?? "-",
-        codeColor: record.expand?.code?.color ?? "#888888",
-        quote: record.quote ?? "",
-        note: record.note ?? "",
-        sourceKind: record.expand?.document?.type ?? "",
-        createdByName: record.expand?.created_by?.name ?? "-",
-        createdAt: record.created,
-      })));
+        return {
+          id: annotation.id,
+          displayId: annotation.displayId,
+          documentId: annotation.sourceId,
+          documentName: source?.title ?? "-",
+          codeId: annotation.primaryCodeId,
+          codeLabel: annotation.primaryCodeLabel || primaryCode?.label || "-",
+          codeColor: primaryCode?.color ?? "#888888",
+          quote: annotation.quote ?? "",
+          note: annotation.note ?? "",
+          sourceKind,
+          sourceObjectType: sourceObjectType?.name ?? sourceVisual?.label ?? formatSourceType(sourceKind || "source"),
+          sourceObjectTypeSystemKey: sourceObjectType?.systemKey ?? sourceVisual?.systemKey ?? null,
+          sourceObjectTypeShape: sourceObjectType ? normalizeSourceObjectTypeShape(sourceObjectType.shape) : "rounded",
+          sourceObjectTypeColor: sourceObjectType
+            ? normalizeSourceObjectColor(sourceObjectType.color)
+            : sourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
+          sourceObjectTypeFill: sourceObjectType ? normalizeSourceObjectFill(sourceObjectType.fill) : "outline",
+          sourcePath: source?.storagePath,
+          imageRegion: annotation.imageRegion,
+          timeStartMs: annotation.timeStartMs,
+          timeEndMs: annotation.timeEndMs,
+          createdByName: annotation.createdByName || "-",
+          lockLabel: lockStatus.label,
+          lockTitle: lockStatus.title,
+          createdAt: annotation.createdAt,
+        };
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("projectAnnotations.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb, postgresCurrentUserId, postgresProjectId]);
+  }, [postgresCurrentUserId, postgresProjectId, t]);
 
   useEffect(() => {
     void load();
@@ -958,19 +953,10 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   }
 
   function jumpToSourceAnnotation(row: AnnRow) {
-    if (postgresProjectId) {
-      onOpenPostgresSourceAnnotation?.({
-        sourceId: row.documentId,
-        annotationId: row.id,
-      });
-      return;
-    }
-    if (!pb) return;
-    const document = documents.find((item) => item.id === row.documentId);
-    if (!document) return;
-    store?.setActiveDocument(document);
-    store?.setPendingAnnId(row.id);
-    store?.setView("code-text");
+    onOpenPostgresSourceAnnotation?.({
+      sourceId: row.documentId,
+      annotationId: row.id,
+    });
   }
 
   const sourceKindSummaries = useMemo(() => {
@@ -1051,7 +1037,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               className="btn"
               onClick={() => jumpToSourceAnnotation(selectedRow)}
             >
-              Open in Source
+              Open in Coding
             </button>
           </div>
         </div>
@@ -1161,12 +1147,6 @@ export function AnnotationsView(props: AnnotationsViewProps) {
       </header>
 
       {error && <p className="users-error">{error}</p>}
-      {postgresMode && (
-        <p className="users-guide-copy" style={{ marginBottom: 16 }}>
-          PostgreSQL annotations are loaded directly from the project workspace. Selecting an annotation opens its detail view, and you can still jump from there into the source coding workflow when needed.
-        </p>
-      )}
-
       <div
         className="postgres-sources-grid"
         style={{

@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAuth } from "../context/AuthContext";
-import { useStore } from "../context/StoreContext";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
 import { HelpIcon } from "../components/AppIcons";
@@ -12,13 +10,16 @@ import {
   projectLogActionLabel,
   projectLogDescriptionLabel,
 } from "./Project_Log_View";
+import { createPostgresReport, deletePostgresReport, listPostgresReports } from "../lib/postgres";
+import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
 
-type CoderReportKind = "activity" | "comparison" | "agreement";
+export type CoderReportKind = "activity" | "comparison" | "agreement";
 type CoderReportSortCol = "name" | "kind" | "createdByName" | "createdAt";
 type SortDir = "asc" | "desc";
 
 interface CoderItem {
   id: string;
+  appUserId?: string;
   name: string;
 }
 
@@ -194,10 +195,6 @@ function buildDefaultAttributeFilter(
   };
 }
 
-function relationPreview(ids: string[]): string[] {
-  return ids.slice(0, 100);
-}
-
 function getPocketBaseErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
     return error instanceof Error ? error.message : "Failed to save report.";
@@ -266,6 +263,8 @@ function NewCoderReportModal({
   const { t } = useI18n();
   const options: Array<{ kind: CoderReportKind; text: string }> = [
     { kind: "activity", text: t("reportsUsers.newModal.activity") },
+    { kind: "comparison", text: t("reportsUsers.newModal.comparison") },
+    { kind: "agreement", text: t("reportsUsers.newModal.agreement") },
   ];
 
   return (
@@ -531,7 +530,7 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
       counts.set(entry.userId, (counts.get(entry.userId) ?? 0) + 1);
     }
     return [...periods.entries()]
-      .sort((a, b) => b[0].localeCompare(a[0]))
+      .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([periodKey, counts]) => ({
         periodKey,
         label: formatPeriodLabel(periodKey, granularity),
@@ -848,6 +847,8 @@ function CoderReportCreationPage({
   kind,
   row,
   initialSettings,
+  postgresProjectId,
+  hideBackButton,
   onBack,
   onSaved,
   onUseSettings,
@@ -855,26 +856,22 @@ function CoderReportCreationPage({
   kind: CoderReportKind;
   row?: CoderReportRow;
   initialSettings?: CoderReportSettings;
+  postgresProjectId?: string;
+  hideBackButton?: boolean;
   onBack: () => void;
   onSaved?: (row: CoderReportRow) => void;
   onUseSettings?: (settings: CoderReportSettings) => void;
 }) {
   const { t } = useI18n();
-  const { user: currentUser } = useAuth();
-  const { pb, activeProject, documents: storeDocuments, codes: storeCodes, logEntries, createCoderReport, canCurrentUser } = useStore();
   const frozenSnapshot = row?.snapshot;
   const isFrozen = !!row;
-  const canCreateReports = canCurrentUser("createReports");
-  const canEditReportConfiguration = canCurrentUser("editReportConfiguration");
-  const canStartReports = canCreateReports && canEditReportConfiguration;
+  const canStartReports = true;
   const reportKind = frozenSnapshot?.kind ?? kind;
   const settings = initialSettings ?? frozenSnapshot?.settings;
   const caseItems = frozenSnapshot?.caseItems ?? [];
-  const documents = frozenSnapshot?.documents ?? storeDocuments;
   const caseAttributeItemsFromSnapshot = frozenSnapshot?.caseAttributeItems ?? [];
   const caseDocumentLinksFromSnapshot = frozenSnapshot?.caseDocumentLinks ?? [];
   const caseAttributeValuesFromSnapshot = frozenSnapshot?.caseAttributeValues ?? [];
-  const codes = frozenSnapshot?.codes ?? storeCodes;
 
   const [name, setName] = useState(row?.name ?? `${reportLabel(t, reportKind)} Report`);
   const [allCaseItems, setAllCaseItems] = useState<CaseItem[]>(caseItems);
@@ -883,6 +880,11 @@ function CoderReportCreationPage({
   const [caseDocumentLinks, setCaseDocumentLinks] = useState<CaseDocumentLink[]>(caseDocumentLinksFromSnapshot);
   const [caseAttributeValues, setCaseAttributeValues] = useState<AttributeValueItem[]>(caseAttributeValuesFromSnapshot);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [postgresDocuments, setPostgresDocuments] = useState<ProjectDocument[] | null>(null);
+  const [postgresCodes, setPostgresCodes] = useState<Code[] | null>(null);
+  const [postgresLogEntries, setPostgresLogEntries] = useState<ProjectLogEntry[] | null>(null);
+  const documents = frozenSnapshot?.documents ?? postgresDocuments ?? [];
+  const codes = frozenSnapshot?.codes ?? postgresCodes ?? [];
   const [selCaseIds] = useState<Set<string>>(new Set(settings?.caseIds ?? []));
   const [selCoderIds, setSelCoderIds] = useState<Set<string>>(new Set(settings?.coderIds ?? []));
   const [selDocIds, setSelDocIds] = useState<Set<string>>(new Set(settings?.documentIds ?? []));
@@ -895,93 +897,36 @@ function CoderReportCreationPage({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!activeProject || !pb || isFrozen) return;
+    if (isFrozen || !postgresProjectId) return;
     let cancelled = false;
 
-    async function loadFilterData() {
+    async function loadPostgresData() {
       setLoadingFilters(true);
       setError(null);
       try {
-        const [caseRecs, memberRecs, caseAttrRecs, annotationRecs] = await Promise.all([
-          pb.collection("cases").getFullList({
-            filter: `project="${activeProject!.id}"&&deleted_at=""`,
-            sort: "name",
-          }),
-          pb.collection("project_members").getFullList({
-            filter: `project="${activeProject!.id}"`,
-            expand: "user",
-          }),
-          pb.collection("case_attribute_definitions").getFullList({
-            filter: `project="${activeProject!.id}"&&deleted_at=""`,
-            sort: "sort_order,name",
-          }),
-          storeDocuments.length > 0
-            ? pb.collection("annotations").getFullList({
-                filter: `(${storeDocuments.map((doc) => `document="${doc.id}"`).join(" || ")})&&deleted_at=""`,
-                sort: "created",
-                expand: "created_by",
-              })
-            : Promise.resolve([]),
-        ]);
-        const [caseDocRecs, caseAttrValueRecs] = await Promise.all([
-          caseRecs.length > 0
-            ? pb.collection("case_documents").getFullList({
-                filter: caseRecs.map((caseItem) => `case="${caseItem.id}"`).join(" || "),
-              })
-            : Promise.resolve([]),
-          caseRecs.length > 0
-            ? pb.collection("case_attribute_values").getFullList({
-                filter: `(${caseRecs.map((caseItem) => `case="${caseItem.id}"`).join(" || ")})&&deleted_at=""`,
-              })
-            : Promise.resolve([]),
-        ]);
+        const data = await loadPostgresReportBuilderData(postgresProjectId!);
         if (cancelled) return;
-        setAllCaseItems(caseRecs.map((record) => ({ id: record.id, name: record.name })));
-        setCoderItems(
-          memberRecs
-            .map((record) => {
-              const user = record.expand?.user;
-              return user ? { id: user.id, name: user.name || user.email || t("reportsCodes.exportSections.unknown") } : null;
-            })
-            .filter(Boolean) as CoderItem[],
-        );
-        setCaseAttributeItems(caseAttrRecs.map((record) => ({
-          id: record.id,
-          name: record.name ?? t("reportsUsers.untitledAttribute"),
-          dataType: record.data_type ?? "text",
-        })));
-        setCaseDocumentLinks(caseDocRecs.map((record) => ({
-          caseId: record.case,
-          documentId: record.document,
-        })));
-        setCaseAttributeValues(caseAttrValueRecs.map((record) => ({
-          id: record.id,
-          ownerId: record.case,
-          attributeId: record.attribute,
-          value: record.value ?? "",
-        })));
-        setAnnotations(annotationRecs.map((record) => ({
-          id: record.id,
-          documentId: record.document,
-          codeId: record.code,
-          startOffset: record.start_offset ?? 0,
-          endOffset: record.end_offset ?? 0,
-          quote: record.quote ?? "",
-          note: record.note ?? "",
-          createdAt: record.created,
-          createdBy: record.expand?.created_by?.name || record.expand?.created_by?.email || "",
-          createdById: record.created_by ?? "",
-        })));
+        setAllCaseItems(data.cases);
+        setCoderItems(data.users);
+        setCaseAttributeItems(data.caseAttributeItems);
+        setCaseDocumentLinks(data.caseDocumentLinks);
+        setCaseAttributeValues(data.caseAttributeValues);
+        setAnnotations(data.annotations);
+        setPostgresDocuments(data.documents);
+        setPostgresCodes(data.codes);
+        setPostgresLogEntries(data.projectLogEntries);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load report filters.");
+        if (!cancelled) setError(e instanceof Error ? e.message : "Unable to load report data.");
       } finally {
         if (!cancelled) setLoadingFilters(false);
       }
     }
 
-    loadFilterData();
-    return () => { cancelled = true; };
-  }, [activeProject, isFrozen, pb, storeDocuments]);
+    void loadPostgresData();
+    return () => {
+      cancelled = true;
+    };
+  }, [isFrozen, postgresProjectId]);
 
   const caseDocumentMap = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -1124,8 +1069,13 @@ function CoderReportCreationPage({
   const projectLogRows = useMemo(() => {
     if (frozenSnapshot?.frozenProjectLogRows) return frozenSnapshot.frozenProjectLogRows;
     if (reportKind !== "activity" || selCoderIds.size === 0) return [];
-    return logEntries.filter((entry) => selCoderIds.has(entry.userId));
-  }, [frozenSnapshot, logEntries, reportKind, selCoderIds]);
+    const selectedAppUserIds = new Set(
+      coderItems
+        .filter((coder) => selCoderIds.has(coder.id))
+        .map((coder) => coder.appUserId || coder.id),
+    );
+    return (postgresLogEntries ?? []).filter((entry) => selectedAppUserIds.has(entry.userId));
+  }, [coderItems, frozenSnapshot, postgresLogEntries, reportKind, selCoderIds]);
 
   const comparisonColumns = useMemo(() => {
     if (frozenSnapshot?.frozenCodeUsageColumns) return frozenSnapshot.frozenCodeUsageColumns;
@@ -1318,7 +1268,7 @@ function CoderReportCreationPage({
     .filter((item) => (effectiveCaseIds ?? new Set<string>()).has(item.id))
     .map((item) => item.name);
   const reportLabelText = reportLabel(t, reportKind);
-  const createdBy = row?.createdByName || currentUser?.name || currentUser?.email || "-";
+  const createdBy = row?.createdByName || "-";
 
   function currentSettings(): CoderReportSettings {
     return {
@@ -1342,10 +1292,10 @@ function CoderReportCreationPage({
       caseAttributeItems,
       caseDocumentLinks,
       caseAttributeValues,
-      documents: documents
+      documents: (postgresDocuments ?? documents)
         .filter((doc) => selDocIds.has(doc.id))
         .map((doc) => ({ ...doc, content: "", filePath: "" })),
-      codes: codes.map((code) => ({ ...code, description: "" })),
+      codes: (postgresCodes ?? codes).map((code) => ({ ...code, description: "" })),
       frozenSummaryRows: summaryRows,
       frozenProjectLogRows: reportKind === "activity" ? projectLogRows : undefined,
       frozenComparisonSummary: reportKind === "comparison" ? comparisonSummary : undefined,
@@ -1358,27 +1308,25 @@ function CoderReportCreationPage({
 
   async function handleSave() {
     if (!canStartReports) return;
-    if (!activeProject || isFrozen) return;
+    if (!postgresProjectId || isFrozen) return;
     setSaving(true);
     setError(null);
     try {
       const reportName = name.trim() || t("reportsUsers.defaultReportName", { kind: reportLabelText });
       const snapshot = buildSnapshot();
-      const record = await createCoderReport({
-        name: reportName,
-        coderIds: relationPreview(snapshot.settings.coderIds),
-        caseIds: relationPreview(snapshot.settings.caseIds),
-        documentIds: relationPreview(snapshot.settings.documentIds),
-        codeIds: relationPreview(snapshot.settings.codeIds),
-        createdBy: currentUser?.id,
-        snapshot: JSON.stringify(snapshot),
+      const record = await createPostgresReport({
+        projectId: postgresProjectId,
+        title: reportName,
+        reportType: "coder-report",
+        settingsJson: JSON.stringify(snapshot.settings),
+        contentJson: JSON.stringify(snapshot),
+        contentText: reportLabelText,
       });
-      if (!record) throw new Error("Failed to save report.");
       onSaved?.({
         id: record.id,
-        name: record.name || reportName,
-        createdByName: currentUser?.name || currentUser?.email || "-",
-        createdAt: record.created,
+        name: record.title || reportName,
+        createdByName: record.createdByName || "-",
+        createdAt: record.createdAt,
         snapshot,
       });
     } catch (e) {
@@ -1391,8 +1339,8 @@ function CoderReportCreationPage({
   return (
     <div className="annotate-view">
       <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
-        <button className="btn" onClick={onBack}>{t("reportsUsers.backToReports")}</button>
-        <div className="report-action-group" style={{ gap: 10 }}>
+        {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsUsers.backToReports")}</button>}
+        <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           {isFrozen ? (
             canStartReports ? (
@@ -1597,6 +1545,18 @@ function CoderReportCreationPage({
           </SelectionPanel>
 
           <SelectionPanel
+            title={t("reportsUsers.panels.relationships")}
+            count={0}
+            collapsed={false}
+            onToggleCollapsed={() => {}}
+            disabled={isFrozen}
+          >
+            <ul className="code-list">
+              <li className="code-list-empty">{t("reportsUsers.empty.noRelationships")}</li>
+            </ul>
+          </SelectionPanel>
+
+          <SelectionPanel
             title={t("reportsUsers.panels.codes")}
             count={selCodeIds.size}
             collapsed={false}
@@ -1686,15 +1646,21 @@ function CoderReportCreationPage({
   );
 }
 
-export function ReportsUsersView() {
+export type ReportsUsersViewProps = {
+  initialNewModalOpen?: boolean;
+  initialNewReportKind?: CoderReportKind;
+  postgresProjectId?: string;
+  onBackToReports?: () => void;
+};
+
+export function ReportsUsersView({ initialNewModalOpen = false, initialNewReportKind, postgresProjectId, onBackToReports }: ReportsUsersViewProps = {}) {
   const { t } = useI18n();
   const reportColumns = getReportColumns(t);
-  const { activeProject, pb, canCurrentUser, deleteCoderReport } = useStore();
-  const canCreateReports = canCurrentUser("createReports") && canCurrentUser("editReportConfiguration");
-  const canDeleteReports = canCurrentUser("deleteReports");
+  const canCreateReports = true;
+  const canDeleteReports = true;
 
-  const [showNewModal, setShowNewModal] = useState(false);
-  const [newReportKind, setNewReportKind] = useState<CoderReportKind | null>(null);
+  const [showNewModal, setShowNewModal] = useState(initialNewModalOpen && !initialNewReportKind);
+  const [newReportKind, setNewReportKind] = useState<CoderReportKind | null>(initialNewReportKind ?? null);
   const [openSavedRow, setOpenSavedRow] = useState<CoderReportRow | null>(null);
   const [newFromSettings, setNewFromSettings] = useState<CoderReportSettings | null>(null);
   const [rows, setRows] = useState<CoderReportRow[]>([]);
@@ -1710,35 +1676,27 @@ export function ReportsUsersView() {
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
   const loadReports = useCallback(async () => {
-    if (!activeProject || !pb) return [];
+    if (!postgresProjectId) return [];
     setLoading(true);
     setError(null);
     try {
-      const records = await pb.collection("coder_reports").getFullList({
-        filter: `project="${activeProject.id}"&&deleted_at=""`,
-        expand: "created_by",
-        sort: "-created",
-      });
+      const records = await listPostgresReports(postgresProjectId);
       const mappedRows = records
+        .filter((record) => record.reportType === "coder-report")
         .map((record) => {
-          let snapshot: CoderReportSnapshot | null = null;
-          if (record.snapshot) {
-            try {
-              const parsed = JSON.parse(record.snapshot);
-              if (parsed?.reportType === "coder-report") snapshot = parsed as CoderReportSnapshot;
-            } catch {
-              snapshot = null;
-            }
+          try {
+            const snapshot = JSON.parse(record.contentJson || "") as CoderReportSnapshot;
+            if (snapshot?.reportType !== "coder-report") return null;
+            return {
+              id: record.id,
+              name: record.title,
+              createdByName: record.createdByName || "-",
+              createdAt: record.createdAt,
+              snapshot,
+            };
+          } catch {
+            return null;
           }
-          if (!snapshot) return null;
-          const createdBy = record.expand?.created_by;
-          return {
-            id: record.id,
-            name: record.name,
-            createdByName: createdBy?.name || createdBy?.email || "-",
-            createdAt: record.created,
-            snapshot,
-          };
         })
         .filter(Boolean) as CoderReportRow[];
       setRows(mappedRows);
@@ -1749,7 +1707,7 @@ export function ReportsUsersView() {
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb]);
+  }, [postgresProjectId, t]);
 
   useEffect(() => {
     loadReports();
@@ -1784,7 +1742,8 @@ export function ReportsUsersView() {
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      await deleteCoderReport(confirmDelete.id, confirmDelete.name);
+      if (!postgresProjectId) throw new Error("Reports are not available outside a project workspace.");
+      await deletePostgresReport(postgresProjectId, confirmDelete.id);
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
@@ -1799,7 +1758,16 @@ export function ReportsUsersView() {
       <CoderReportCreationPage
         kind={newFromSettings?.kind ?? newReportKind ?? "activity"}
         initialSettings={newFromSettings ?? undefined}
-        onBack={() => { setNewReportKind(null); setNewFromSettings(null); }}
+        postgresProjectId={postgresProjectId}
+        hideBackButton={!!onBackToReports}
+        onBack={() => {
+          if (onBackToReports) {
+            onBackToReports();
+            return;
+          }
+          setNewReportKind(null);
+          setNewFromSettings(null);
+        }}
         onSaved={(row) => {
           setNewReportKind(null);
           setNewFromSettings(null);
@@ -1815,7 +1783,15 @@ export function ReportsUsersView() {
       <CoderReportCreationPage
         kind={openSavedRow.snapshot.kind}
         row={openSavedRow}
-        onBack={() => setOpenSavedRow(null)}
+        postgresProjectId={postgresProjectId}
+        hideBackButton={!!onBackToReports}
+        onBack={() => {
+          if (onBackToReports) {
+            onBackToReports();
+            return;
+          }
+          setOpenSavedRow(null);
+        }}
         onUseSettings={(settings) => {
           setOpenSavedRow(null);
           setNewFromSettings(settings);

@@ -3,15 +3,18 @@ import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { useI18n } from "../i18n/provider";
-import type { PostgresExperimentCode } from "../lib/postgresExperiment";
+import type { PostgresCode } from "../lib/postgres";
 import type { PendingSelection, SourceAnnotationRow } from "./Postgres_Sources_View";
 import {
   AnnotationEditorModal,
   type AnnotationContextMenuState,
+  orderedCodesWithDepth,
   type PostgresSourceCodingViewProps,
   PostgresSourceAnnotationContextMenu,
   PostgresSourceAnnotationPanel,
+  visibleCodeNodes,
 } from "./Postgres_Source_Coding_Shared";
+import { NewCodeModal, type CodeRow } from "./Project_Codebook_View";
 
 const SOURCE_IMPORT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 
@@ -229,6 +232,7 @@ export function PostgresSourceImageCodingView({
   canKickSourceLocks,
   canManageAnnotations,
   canManageMemos,
+  canCreateCodes,
   initialSelectedAnnotationId,
   projectStoragePath,
   saving,
@@ -238,10 +242,14 @@ export function PostgresSourceImageCodingView({
   onDeleteAnnotation,
   onKickSourceLock,
   onOpenMemoDraft,
+  onCreateCode,
+  onUpdateCode,
+  onDeleteCode,
   onBack,
 }: PostgresSourceCodingViewProps & { projectStoragePath: string }) {
   const { t } = useI18n();
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [scrollToAnnotationId, setScrollToAnnotationId] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<SourceAnnotationRow | null>(null);
   const [draftRect, setDraftRect] = useState<DraftRect | null>(null);
@@ -258,7 +266,14 @@ export function PostgresSourceImageCodingView({
   const [baseImageSize, setBaseImageSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [imageDisplaySize, setImageDisplaySize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
-  const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresExperimentCode } | null>(null);
+  const [collapsedCodeIds, setCollapsedCodeIds] = useState<Set<string>>(new Set());
+  const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresCode } | null>(null);
+  const [newCodeOpen, setNewCodeOpen] = useState(false);
+  const [editingCodeId, setEditingCodeId] = useState<string | null>(null);
+  const [childCodeParentId, setChildCodeParentId] = useState<string | null>(null);
+  const [deletingCodeId, setDeletingCodeId] = useState<string | null>(null);
+  const [deletingCode, setDeletingCode] = useState(false);
+  const [deleteCodeError, setDeleteCodeError] = useState("");
   const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -269,6 +284,25 @@ export function PostgresSourceImageCodingView({
   const annotationContextMenuStyle = useViewportContextMenuStyle(annotationContextMenu, annotationContextMenuRef);
 
   const codesById = useMemo(() => new Map(codes.map((code) => [code.id, code])), [codes]);
+  const codeTree = useMemo(() => orderedCodesWithDepth(codes), [codes]);
+  const visibleCodes = useMemo(() => visibleCodeNodes(codeTree, collapsedCodeIds), [collapsedCodeIds, codeTree]);
+  const codebookRows = useMemo<CodeRow[]>(() => codes.map((code) => {
+    const parentCode = code.parentCodeId ? codesById.get(code.parentCodeId) : null;
+    return {
+      id: code.id,
+      label: code.label,
+      color: code.color,
+      description: code.description,
+      parentId: code.parentCodeId,
+      parentLabel: parentCode?.label ?? "",
+      createdByName: "",
+      createdAt: code.createdAt,
+      sourcesCount: 0,
+    };
+  }), [codes, codesById]);
+  const editingCodeRow = editingCodeId ? codebookRows.find((code) => code.id === editingCodeId) ?? null : null;
+  const childCodeParentRow = childCodeParentId ? codebookRows.find((code) => code.id === childCodeParentId) ?? null : null;
+  const deletingCodeRow = deletingCodeId ? codebookRows.find((code) => code.id === deletingCodeId) ?? null : null;
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
   const canDeleteAnnotations = canEditAnnotations;
   const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
@@ -280,22 +314,67 @@ export function PostgresSourceImageCodingView({
     () => annotations.filter((annotation) => annotation.anchorKind === "image_rect" && annotation.imageRegion),
     [annotations],
   );
+  const annotationCountByCodeId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const annotation of regionAnnotations) {
+      for (const codeId of annotation.codeIds) {
+        counts.set(codeId, (counts.get(codeId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [regionAnnotations]);
   const currentPageRegionAnnotations = useMemo(
     () => regionAnnotations.filter((annotation) => !isPdfSource || (annotation.imageRegion?.pageNumber ?? 1) === selectedPdfPage),
     [isPdfSource, regionAnnotations, selectedPdfPage],
   );
+  const initialSelectedAnnotation = useMemo(
+    () => initialSelectedAnnotationId
+      ? regionAnnotations.find((annotation) => annotation.id === initialSelectedAnnotationId) ?? null
+      : null,
+    [initialSelectedAnnotationId, regionAnnotations],
+  );
+  const initialSelectedPdfPage = isPdfSource
+    ? initialSelectedAnnotation?.imageRegion?.pageNumber ?? 1
+    : 1;
 
   useEffect(() => {
-    if (!initialSelectedAnnotationId) return;
-    if (!regionAnnotations.some((annotation) => annotation.id === initialSelectedAnnotationId)) return;
-    setSelectedAnnotationId(initialSelectedAnnotationId);
-  }, [initialSelectedAnnotationId, regionAnnotations]);
+    if (!initialSelectedAnnotation) return;
+    if (isPdfSource) {
+      setSelectedPdfPage(initialSelectedAnnotation.imageRegion?.pageNumber ?? 1);
+    }
+    setSelectedAnnotationId(initialSelectedAnnotation.id);
+    setScrollToAnnotationId(initialSelectedAnnotation.id);
+  }, [initialSelectedAnnotation, isPdfSource]);
 
   useEffect(() => {
     if (selectedAnnotationId && !regionAnnotations.some((annotation) => annotation.id === selectedAnnotationId)) {
       setSelectedAnnotationId(null);
     }
   }, [regionAnnotations, selectedAnnotationId]);
+
+  useEffect(() => {
+    if (!scrollToAnnotationId || !viewportRef.current || !imageDisplaySize.width || !imageDisplaySize.height || imagePreviewLoading) return;
+    const selectedAnnotation = regionAnnotations.find((annotation) => annotation.id === scrollToAnnotationId);
+    if (!selectedAnnotation) return;
+    if (isPdfSource && (selectedAnnotation.imageRegion?.pageNumber ?? 1) !== selectedPdfPage) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = viewportRef.current?.querySelector<HTMLElement>(`button[data-annotation-id="${scrollToAnnotationId}"]`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      setScrollToAnnotationId(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    currentPageRegionAnnotations,
+    imageDisplaySize.height,
+    imageDisplaySize.width,
+    imagePreviewLoading,
+    imagePreviewUrl,
+    isPdfSource,
+    regionAnnotations,
+    scrollToAnnotationId,
+    selectedPdfPage,
+  ]);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -333,13 +412,13 @@ export function PostgresSourceImageCodingView({
     setZoom(1);
     setBaseImageSize({ width: 0, height: 0 });
     setNaturalImageSize({ width: 0, height: 0 });
-    setSelectedPdfPage(1);
+    setSelectedPdfPage(initialSelectedPdfPage);
     setPdfPageCount(0);
     setPdfPagePreviewUrls((current) => {
       Object.values(current).forEach((url) => URL.revokeObjectURL(url));
       return {};
     });
-  }, [row.id]);
+  }, [initialSelectedPdfPage, row.id]);
 
   useEffect(() => {
     if (!isImageSource || !resolvedFilePath) {
@@ -558,6 +637,29 @@ export function PostgresSourceImageCodingView({
     setPendingSelection(null);
   }
 
+  async function handleConfirmDeleteCode() {
+    if (!deletingCodeId || !onDeleteCode) return;
+    setDeletingCode(true);
+    setDeleteCodeError("");
+    try {
+      await onDeleteCode(deletingCodeId);
+      setDeletingCodeId(null);
+    } catch (deleteError) {
+      setDeleteCodeError(deleteError instanceof Error ? deleteError.message : "Failed to delete code.");
+    } finally {
+      setDeletingCode(false);
+    }
+  }
+
+  function toggleCollapsedCode(codeId: string) {
+    setCollapsedCodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(codeId)) next.delete(codeId);
+      else next.add(codeId);
+      return next;
+    });
+  }
+
   const draftStyle = useMemo(() => {
     if (!draftRect) return null;
     return {
@@ -594,6 +696,7 @@ export function PostgresSourceImageCodingView({
       setSelectedPdfPage(annotation.imageRegion.pageNumber);
     }
     setSelectedAnnotationId(annotation.id);
+    setScrollToAnnotationId(annotation.id);
   }
 
   function renderRegionExcerpt(annotation: SourceAnnotationRow) {
@@ -724,6 +827,16 @@ export function PostgresSourceImageCodingView({
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
               <span className="annotate-card-title">Codebook</span>
+              <button
+                type="button"
+                className="codebook-icon-action"
+                onClick={() => setNewCodeOpen(true)}
+                disabled={!canCreateCodes || !onCreateCode || saving}
+                aria-label="New code"
+                title={canCreateCodes && onCreateCode ? "New code" : "You do not have permission to create codes."}
+              >
+                +
+              </button>
             </div>
             {pendingSelection ? (
               <div className="codebook-selection-hint">
@@ -734,23 +847,39 @@ export function PostgresSourceImageCodingView({
               {codes.length === 0 ? (
                 <li className="code-list-empty">No codes yet.</li>
               ) : (
-                codes.map((code) => (
+                visibleCodes.map(({ code, depth, hasChildren }) => (
                   <li
                     key={code.id}
                     className={`code-item${pendingSelection && canEditAnnotations ? " code-item--annotatable" : ""}`}
+                    style={{ paddingLeft: 6 + depth * 16 }}
                     onMouseDown={(event) => {
                       if (pendingSelection) event.preventDefault();
                     }}
                     onClick={() => void handleQuickCode(code.id)}
                     onContextMenu={(event) => {
-                      if (!canManageMemos) return;
+                      if (!canManageMemos && !canCreateCodes && !onUpdateCode && !onDeleteCode) return;
                       event.preventDefault();
                       setCodeContextMenu({ x: event.clientX, y: event.clientY, code });
                     }}
                   >
-                    <span className="code-collapse-spacer" />
+                    {hasChildren ? (
+                      <button
+                        type="button"
+                        className="code-collapse-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleCollapsedCode(code.id);
+                        }}
+                        title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
+                      >
+                        {collapsedCodeIds.has(code.id) ? "\u25b6" : "\u25bc"}
+                      </button>
+                    ) : (
+                      <span className="code-collapse-spacer" />
+                    )}
                     <span className="code-swatch" style={{ background: code.color }} />
                     <span className="code-label">{code.label}</span>
+                    <span className="code-ann-count">{annotationCountByCodeId.get(code.id) ?? 0}</span>
                   </li>
                 ))
               )}
@@ -1072,17 +1201,141 @@ export function PostgresSourceImageCodingView({
         </div>
       </div>
 
-      {codeContextMenu && canManageMemos ? (
+      {codeContextMenu ? (
         <div ref={codeContextMenuRef} className="context-menu" style={codeContextMenuStyle}>
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              onOpenMemoDraft({ codeIds: [codeContextMenu.code.id] });
-              setCodeContextMenu(null);
-            }}
-          >
-            Memo about code
-          </button>
+          {canCreateCodes && onUpdateCode ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                setEditingCodeId(codeContextMenu.code.id);
+                setNewCodeOpen(false);
+                setChildCodeParentId(null);
+                setCodeContextMenu(null);
+              }}
+            >
+              Edit code
+            </button>
+          ) : null}
+          {canManageMemos ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                onOpenMemoDraft({ codeIds: [codeContextMenu.code.id] });
+                setCodeContextMenu(null);
+              }}
+            >
+              Memo about code
+            </button>
+          ) : null}
+          {canCreateCodes && onCreateCode ? (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                setChildCodeParentId(codeContextMenu.code.id);
+                setNewCodeOpen(false);
+                setEditingCodeId(null);
+                setCodeContextMenu(null);
+              }}
+            >
+              Add child code
+            </button>
+          ) : null}
+          {canCreateCodes && onDeleteCode ? (
+            <button
+              className="context-menu-item context-menu-item--danger"
+              onClick={() => {
+                setDeletingCodeId(codeContextMenu.code.id);
+                setDeleteCodeError("");
+                setCodeContextMenu(null);
+              }}
+            >
+              Delete code
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {newCodeOpen ? (
+        <NewCodeModal
+          allCodes={codebookRows}
+          onSubmit={async (payload) => {
+            if (!onCreateCode || !canCreateCodes) return;
+            await onCreateCode({
+              label: payload.label,
+              color: payload.color,
+              description: payload.description,
+              parentCodeId: payload.parentId ?? null,
+            });
+          }}
+          onDone={() => setNewCodeOpen(false)}
+          onClose={() => setNewCodeOpen(false)}
+        />
+      ) : null}
+
+      {childCodeParentRow ? (
+        <NewCodeModal
+          allCodes={codebookRows}
+          title="Add Child Code"
+          submitLabel="Create Code"
+          initialParentId={childCodeParentRow.id}
+          onSubmit={async (payload) => {
+            if (!onCreateCode || !canCreateCodes) return;
+            await onCreateCode({
+              label: payload.label,
+              color: payload.color,
+              description: payload.description,
+              parentCodeId: payload.parentId ?? childCodeParentRow.id,
+            });
+          }}
+          onDone={() => setChildCodeParentId(null)}
+          onClose={() => setChildCodeParentId(null)}
+        />
+      ) : null}
+
+      {editingCodeRow ? (
+        <NewCodeModal
+          allCodes={codebookRows}
+          title="Edit Code"
+          submitLabel="Save Changes"
+          initialLabel={editingCodeRow.label}
+          initialDescription={editingCodeRow.description}
+          initialColor={editingCodeRow.color}
+          initialParentId={editingCodeRow.parentId}
+          excludeCodeId={editingCodeRow.id}
+          onSubmit={async (payload) => {
+            if (!onUpdateCode || !canCreateCodes) return;
+            await onUpdateCode(editingCodeRow.id, {
+              label: payload.label,
+              color: payload.color,
+              description: payload.description,
+              parentCodeId: payload.parentId ?? null,
+            });
+          }}
+          onDone={() => setEditingCodeId(null)}
+          onClose={() => setEditingCodeId(null)}
+        />
+      ) : null}
+
+      {deletingCodeRow ? (
+        <div className="modal-overlay" onClick={() => !deletingCode && setDeletingCodeId(null)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-code-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="delete-code-title">Delete Code</h2>
+            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+              Delete <strong>{deletingCodeRow.label}</strong>?
+            </p>
+            <p className="modal-warning-text">
+              This removes the code from the codebook and clears it from existing annotations.
+            </p>
+            {deleteCodeError ? <p className="auth-error">{deleteCodeError}</p> : null}
+            <div className="form-actions" style={{ marginTop: 24 }}>
+              <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
+                {deletingCode ? "Deleting..." : "Delete Code"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 

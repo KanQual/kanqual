@@ -11,8 +11,7 @@ import {
   type LlmConnectionMode,
 } from "../lib/appSettings";
 import {
-  buildProjectEmbeddingItems,
-  buildProjectEmbeddingSources,
+  buildPostgresProjectEmbeddingSourcesForProject,
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { HelpIcon } from "../components/AppIcons";
@@ -129,17 +128,13 @@ function useEmbeddingRunState() {
   const { t } = useI18n();
   const {
     activeProject,
-    documents,
-    cases,
-    codes,
-    annotations,
-    memos,
     projectEmbeddingBuildStatus,
     projectAiAssistRuntimeStatus,
     isLocalWorkspace,
     startProjectEmbeddingBuild,
   } = useStore();
   const [indexStatus, setIndexStatus] = useState<ProjectEmbeddingStoreStatus | null>(null);
+  const [embeddingItemCount, setEmbeddingItemCount] = useState(0);
   const [error, setError] = useState("");
   const [buildModalOpen, setBuildModalOpen] = useState(false);
   const busy =
@@ -149,9 +144,11 @@ function useEmbeddingRunState() {
     const projectId = activeProject?.id;
     if (!projectId) {
       setIndexStatus(null);
+      setEmbeddingItemCount(0);
       setError("");
       return;
     }
+    const activeProjectId = projectId;
 
     if (!isLocalWorkspace) {
       setIndexStatus(
@@ -172,12 +169,16 @@ function useEmbeddingRunState() {
     let cancelled = false;
     async function refreshStatuses() {
       try {
-        const nextIndexStatus = await invoke<ProjectEmbeddingStoreStatus>(
-          "get_project_embedding_store_status",
-          { projectId },
-        );
+        const [nextIndexStatus, sources] = await Promise.all([
+          invoke<ProjectEmbeddingStoreStatus>(
+            "get_project_embedding_store_status",
+            { projectId: activeProjectId },
+          ),
+          buildPostgresProjectEmbeddingSourcesForProject(activeProjectId, readAppSettings().llm),
+        ]);
         if (cancelled) return;
         setIndexStatus(nextIndexStatus);
+        setEmbeddingItemCount(sources.flatMap((source) => source.items).length);
         setError("");
       } catch (nextError) {
         console.error("Failed to load AI Assist embedding status:", nextError);
@@ -211,7 +212,7 @@ function useEmbeddingRunState() {
         }
 
         const llmSettings = readAppSettings().llm;
-        const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, llmSettings);
+        const sources = await buildPostgresProjectEmbeddingSourcesForProject(activeProject.id, llmSettings);
         if (sources.length === 0) {
           setError(t("aiAssist.home.messages.noProjectContentToEmbed"));
           return false;
@@ -260,6 +261,7 @@ function useEmbeddingRunState() {
   return {
     activeProject,
     indexStatus,
+    embeddingItemCount,
     busy,
     error,
     buildModalOpen,
@@ -364,11 +366,6 @@ export function AIAssistView() {
     pb,
     canCurrentUser,
     isLocalWorkspace,
-    documents,
-    cases,
-    codes,
-    annotations,
-    memos,
     projectAiAssistRuntimeStatus,
     projectAiAssistSettings,
     updateProjectAiAssistSettings,
@@ -381,6 +378,7 @@ export function AIAssistView() {
   const {
     activeProject,
     indexStatus,
+    embeddingItemCount,
     busy: projectBuildBusy,
     error: projectBuildError,
     buildModalOpen,
@@ -479,14 +477,7 @@ export function AIAssistView() {
   const projectBuildPhase = activeProject && projectEmbeddingBuildStatus?.projectId === activeProject.id
     ? projectEmbeddingBuildStatus.phase
     : "idle";
-  const currentProjectEmbeddingItemCount = buildProjectEmbeddingItems(
-    documents,
-    cases,
-    codes,
-    annotations,
-    memos,
-    appSettings.llm,
-  ).length;
+  const currentProjectEmbeddingItemCount = embeddingItemCount;
   const embeddingStatusLabel =
     projectBuildPhase === "running"
       ? t("aiAssist.home.statuses.buildingInBackground")

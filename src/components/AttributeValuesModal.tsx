@@ -71,7 +71,21 @@ export function AttributeValuesModal({
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <h2>{draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}</h2>
+        <div className="modal-title-bar">
+          <div>
+            <h2>{draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}</h2>
+          </div>
+          <button
+            type="button"
+            className="modal-icon-close"
+            onClick={onCancel}
+            disabled={saving}
+            aria-label={t("common.cancel")}
+            title={t("common.cancel")}
+          >
+            x
+          </button>
+        </div>
 
         <div className="attribute-values-details">
           <label className="form-group">
@@ -176,9 +190,8 @@ export function AttributeValuesModal({
         </div>
         {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
 
-        <div className="form-actions" style={{ marginTop: 20 }}>
+        <div className="modal-actions">
           {onBack && <button className="btn" onClick={onBack} disabled={saving}>{t("attributeModal.back")}</button>}
-          <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
           <button
             className="btn btn--primary"
             onClick={() =>

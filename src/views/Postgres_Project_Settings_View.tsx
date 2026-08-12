@@ -1,24 +1,24 @@
 import { useEffect, useState } from "react";
 import {
-  deletePostgresExperimentProject,
-  getPostgresExperimentProjectAiAssistSettings,
-  getPostgresExperimentProjectDocumentImportSettings,
-  savePostgresExperimentProjectAiAssistSettings,
-  savePostgresExperimentProjectDocumentImportSettings,
-  updatePostgresExperimentProject,
-  type PostgresExperimentProject,
-  type PostgresExperimentProjectAiAssistSettings,
-  type PostgresExperimentProjectDocumentImportSettings,
-} from "../lib/postgresExperiment";
+  deletePostgresProject,
+  getPostgresProjectAiAssistSettings,
+  getPostgresProjectDocumentImportSettings,
+  savePostgresProjectAiAssistSettings,
+  savePostgresProjectDocumentImportSettings,
+  updatePostgresProject,
+  type PostgresProject,
+  type PostgresProjectAiAssistSettings,
+  type PostgresProjectDocumentImportSettings,
+} from "../lib/postgres";
 
-export type PostgresProjectSettingsExperimentViewProps = {
-  project: PostgresExperimentProject;
+export type PostgresProjectSettingsViewProps = {
+  project: PostgresProject;
   canManageProject: boolean;
   memberCount: number;
   ownerCount: number;
   objectCount: number;
   relationshipCount: number;
-  onProjectUpdated: (project: PostgresExperimentProject) => void;
+  onProjectUpdated: (project: PostgresProject) => void;
   onProjectDeleted: (projectId: string) => void;
 };
 
@@ -32,7 +32,7 @@ function describeUnknownError(error: unknown): string {
   }
 }
 
-function formatPostgresExperimentDateTime(iso: string): string {
+function formatPostgresDateTime(iso: string): string {
   if (!iso) return "-";
   try {
     return new Intl.DateTimeFormat([], {
@@ -47,7 +47,7 @@ function formatPostgresExperimentDateTime(iso: string): string {
   }
 }
 
-export function PostgresProjectSettingsExperimentView({
+export function PostgresProjectSettingsView({
   project,
   canManageProject,
   memberCount,
@@ -56,7 +56,7 @@ export function PostgresProjectSettingsExperimentView({
   relationshipCount,
   onProjectUpdated,
   onProjectDeleted,
-}: PostgresProjectSettingsExperimentViewProps) {
+}: PostgresProjectSettingsViewProps) {
   const [activeModal, setActiveModal] = useState<"details" | "storage" | "ai-assist" | "document-import" | "danger" | null>(null);
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description);
@@ -67,7 +67,7 @@ export function PostgresProjectSettingsExperimentView({
   const [error, setError] = useState("");
   const [aiAssistNotice, setAiAssistNotice] = useState("");
   const [documentImportNotice, setDocumentImportNotice] = useState("");
-  const [projectAiAssistSettings, setProjectAiAssistSettings] = useState<PostgresExperimentProjectAiAssistSettings>({
+  const [projectAiAssistSettings, setProjectAiAssistSettings] = useState<PostgresProjectAiAssistSettings>({
     enabled: false,
     allowSemanticSearch: true,
     allowQuestionAnswering: true,
@@ -76,7 +76,7 @@ export function PostgresProjectSettingsExperimentView({
     allowDraftReports: false,
   });
   const [projectDocumentImportSettings, setProjectDocumentImportSettings] =
-    useState<PostgresExperimentProjectDocumentImportSettings>({
+    useState<PostgresProjectDocumentImportSettings>({
       storeOriginalFileName: true,
     });
 
@@ -92,8 +92,8 @@ export function PostgresProjectSettingsExperimentView({
       setSettingsLoading(true);
       try {
         const [aiAssistSettings, documentImportSettings] = await Promise.all([
-          getPostgresExperimentProjectAiAssistSettings(project.id),
-          getPostgresExperimentProjectDocumentImportSettings(project.id),
+          getPostgresProjectAiAssistSettings(project.id),
+          getPostgresProjectDocumentImportSettings(project.id),
         ]);
         if (cancelled) return;
         setProjectAiAssistSettings(aiAssistSettings);
@@ -115,7 +115,7 @@ export function PostgresProjectSettingsExperimentView({
     };
   }, [project.id]);
 
-  async function handleSaveAiAssistSettings(next: PostgresExperimentProjectAiAssistSettings) {
+  async function handleSaveAiAssistSettings(next: PostgresProjectAiAssistSettings) {
     setError("");
     setNotice("");
     setDocumentImportNotice("");
@@ -126,7 +126,7 @@ export function PostgresProjectSettingsExperimentView({
     }
 
     try {
-      const saved = await savePostgresExperimentProjectAiAssistSettings({
+      const saved = await savePostgresProjectAiAssistSettings({
         projectId: project.id,
         settings: next,
       });
@@ -137,7 +137,7 @@ export function PostgresProjectSettingsExperimentView({
     }
   }
 
-  async function handleSaveDocumentImportSettings(next: PostgresExperimentProjectDocumentImportSettings) {
+  async function handleSaveDocumentImportSettings(next: PostgresProjectDocumentImportSettings) {
     setError("");
     setNotice("");
     setAiAssistNotice("");
@@ -148,7 +148,7 @@ export function PostgresProjectSettingsExperimentView({
     }
 
     try {
-      const saved = await savePostgresExperimentProjectDocumentImportSettings({
+      const saved = await savePostgresProjectDocumentImportSettings({
         projectId: project.id,
         settings: next,
       });
@@ -174,7 +174,7 @@ export function PostgresProjectSettingsExperimentView({
 
     setSubmitting("details");
     try {
-      const updated = await updatePostgresExperimentProject({
+      const updated = await updatePostgresProject({
         projectId: project.id,
         name: name.trim(),
         description: description.trim(),
@@ -203,7 +203,7 @@ export function PostgresProjectSettingsExperimentView({
 
     setSubmitting("delete");
     try {
-      await deletePostgresExperimentProject(project.id);
+      await deletePostgresProject(project.id);
       onProjectDeleted(project.id);
     } catch (deleteError) {
       setError(describeUnknownError(deleteError));
@@ -402,8 +402,8 @@ export function PostgresProjectSettingsExperimentView({
                           {project.storagePath || "-"}
                         </span>
                       </div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Created</span><span className="home-restricted-value">{formatPostgresExperimentDateTime(project.createdAt)}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Last updated</span><span className="home-restricted-value">{formatPostgresExperimentDateTime(project.updatedAt)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">Created</span><span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">Last updated</span><span className="home-restricted-value">{formatPostgresDateTime(project.updatedAt)}</span></div>
                       <div className="home-restricted-item"><span className="home-restricted-label">Owners</span><span className="home-restricted-value">{ownerCount}</span></div>
                       <div className="home-restricted-item"><span className="home-restricted-label">Members</span><span className="home-restricted-value">{memberCount}</span></div>
                     </div>

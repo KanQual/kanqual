@@ -1,11 +1,11 @@
 import type { ElementDefinition, StylesheetJson } from "cytoscape";
 import type {
-  PostgresExperimentCanvasNodeState,
-  PostgresExperimentObject,
-  PostgresExperimentObjectType,
-  PostgresExperimentRelationship,
-  PostgresExperimentRelationshipType,
-} from "./postgresExperiment";
+  PostgresCanvasNodeState,
+  PostgresObject,
+  PostgresObjectType,
+  PostgresRelationship,
+  PostgresRelationshipType,
+} from "./postgres";
 
 type CanvasObjectFill = "filled" | "outline";
 type CanvasObjectShape =
@@ -22,7 +22,7 @@ type CanvasObjectShape =
 type CanvasRelationshipLineShape = "solid" | "dashed" | "dotted";
 type CanvasRelationshipArrowhead = "one_sided" | "double_sided" | "none";
 
-type PostgresExperimentCanvasCytoscapeNodeData = {
+type PostgresCanvasCytoscapeNodeData = {
   color: string;
   backgroundColor: string;
   backgroundOpacity: number;
@@ -38,7 +38,7 @@ type PostgresExperimentCanvasCytoscapeNodeData = {
   label: string;
 };
 
-function getPostgresExperimentCanvasCytoscapeShape(shape: CanvasObjectShape): string {
+function getPostgresCanvasCytoscapeShape(shape: CanvasObjectShape): string {
   switch (shape) {
     case "rounded":
       return "ellipse";
@@ -64,7 +64,7 @@ function getPostgresExperimentCanvasCytoscapeShape(shape: CanvasObjectShape): st
   }
 }
 
-function getPostgresExperimentCanvasCytoscapePolygonPoints(shape: CanvasObjectShape): string {
+function getPostgresCanvasCytoscapePolygonPoints(shape: CanvasObjectShape): string {
   switch (shape) {
     case "parallelogram":
       return "-0.72 -1 1 -1 0.72 1 -1 1";
@@ -75,13 +75,13 @@ function getPostgresExperimentCanvasCytoscapePolygonPoints(shape: CanvasObjectSh
   }
 }
 
-function getPostgresExperimentCanvasNodeLabel(object: PostgresExperimentObject): string {
+function getPostgresCanvasNodeLabel(object: PostgresObject): string {
   const title = object.title.trim() || "Untitled object";
   const objectType = object.objectType.trim();
   return objectType ? `${title}\n${objectType}` : title;
 }
 
-function getPostgresExperimentCanvasTextMaxWidth(shape: CanvasObjectShape, width: number): number {
+function getPostgresCanvasTextMaxWidth(shape: CanvasObjectShape, width: number): number {
   switch (shape) {
     case "triangle":
       return Math.floor(width * 0.5);
@@ -102,16 +102,16 @@ function getPostgresExperimentCanvasTextMaxWidth(shape: CanvasObjectShape, width
   }
 }
 
-export function buildPostgresExperimentCanvasCytoscapeElements(args: {
-  objects: PostgresExperimentObject[];
-  nodeStates: Record<string, PostgresExperimentCanvasNodeState>;
-  objectTypeById: Map<string, PostgresExperimentObjectType>;
-  relationships: PostgresExperimentRelationship[];
-  relationshipTypes: PostgresExperimentRelationshipType[];
+export function buildPostgresCanvasCytoscapeElements(args: {
+  objects: PostgresObject[];
+  nodeStates: Record<string, PostgresCanvasNodeState>;
+  objectTypeById: Map<string, PostgresObjectType>;
+  relationships: PostgresRelationship[];
+  relationshipTypes: PostgresRelationshipType[];
   hiddenRelationshipIds: string[];
   getObjectAppearance: (
-    object: PostgresExperimentObject,
-    objectTypeRecord: PostgresExperimentObjectType | null,
+    object: PostgresObject,
+    objectTypeRecord: PostgresObjectType | null,
   ) => {
     shape: CanvasObjectShape;
     color: string;
@@ -126,11 +126,11 @@ export function buildPostgresExperimentCanvasCytoscapeElements(args: {
   };
   getNodeRenderedDimensions: (
     shape: CanvasObjectShape,
-    nodeState: Pick<PostgresExperimentCanvasNodeState, "width" | "height"> | null | undefined,
+    nodeState: Pick<PostgresCanvasNodeState, "width" | "height"> | null | undefined,
   ) => { width: number; height: number };
   getRelationshipAppearance: (
-    relationship: PostgresExperimentRelationship,
-    relationshipTypeRecord: PostgresExperimentRelationshipType | null,
+    relationship: PostgresRelationship,
+    relationshipTypeRecord: PostgresRelationshipType | null,
   ) => {
     color: string;
     lineWeight: number;
@@ -175,11 +175,11 @@ export function buildPostgresExperimentCanvasCytoscapeElements(args: {
         fill: appearance.fill,
         shape: appearance.shape,
         textColor: surface.textColor,
-        textMaxWidth: Math.max(72, getPostgresExperimentCanvasTextMaxWidth(appearance.shape, width)),
+        textMaxWidth: Math.max(72, getPostgresCanvasTextMaxWidth(appearance.shape, width)),
         width,
         height,
-        label: getPostgresExperimentCanvasNodeLabel(object),
-      } satisfies PostgresExperimentCanvasCytoscapeNodeData & { id: string },
+        label: getPostgresCanvasNodeLabel(object),
+      } satisfies PostgresCanvasCytoscapeNodeData & { id: string },
       position: { x: nodeState.x + width / 2, y: nodeState.y + height / 2 },
       classes: `canvas-object canvas-object--${appearance.shape}`,
     });
@@ -217,12 +217,12 @@ export function buildPostgresExperimentCanvasCytoscapeElements(args: {
   return [...nodes, ...edges];
 }
 
-export const POSTGRES_EXPERIMENT_CYTOSCAPE_STYLESHEET = [
+export const POSTGRES_CYTOSCAPE_STYLESHEET = [
   {
     selector: "node.canvas-object",
     style: {
-      shape: (element: { data: (key: string) => string }) => getPostgresExperimentCanvasCytoscapeShape(element.data("shape") as CanvasObjectShape),
-      "shape-polygon-points": (element: { data: (key: string) => string }) => getPostgresExperimentCanvasCytoscapePolygonPoints(element.data("shape") as CanvasObjectShape),
+      shape: (element: { data: (key: string) => string }) => getPostgresCanvasCytoscapeShape(element.data("shape") as CanvasObjectShape),
+      "shape-polygon-points": (element: { data: (key: string) => string }) => getPostgresCanvasCytoscapePolygonPoints(element.data("shape") as CanvasObjectShape),
       width: (element: { data: (key: string) => number }) => element.data("width"),
       height: (element: { data: (key: string) => number }) => element.data("height"),
       "background-color": (element: { data: (key: string) => string | number }) => String(element.data("backgroundColor")),

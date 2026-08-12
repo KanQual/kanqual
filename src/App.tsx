@@ -9,26 +9,23 @@ import { I18nProvider } from "./i18n";
 import { useI18n } from "./i18n/provider";
 import { readAppSettings, saveAppSettings } from "./lib/appSettings";
 import {
-  bootstrapPostgresExperiment,
-  clearPostgresExperimentRememberedAccounts,
-  clearPostgresExperimentUserProjectState,
-  getPostgresExperimentAuthStatus,
-  getPostgresExperimentInstallationSettings,
-  logoutPostgresExperimentAppUser,
-  getPostgresExperimentStatus,
-  getPostgresExperimentUserPreferences,
-  type PostgresExperimentAuthSession,
-  type PostgresExperimentAuthStatus,
-  type PostgresExperimentInstallationSettings,
-  type PostgresExperimentProject,
-  type PostgresExperimentStatus,
-  type PostgresExperimentUserPreferences,
-} from "./lib/postgresExperiment";
+  bootstrapPostgres,
+  clearPostgresRememberedAccounts,
+  clearPostgresUserProjectState,
+  getPostgresAuthStatus,
+  getPostgresInstallationSettings,
+  logoutPostgresAppUser,
+  getPostgresStatus,
+  getPostgresUserPreferences,
+  type PostgresAuthStatus,
+  type PostgresInstallationSettings,
+  type PostgresStatus,
+  type PostgresUserPreferences,
+} from "./lib/postgres";
 import { initTheme, setRuntimeThemePreferences } from "./theme";
-import sidebarMarkLogo from "./assets/logo-mark-no-background.png";
-import sidebarLogo from "./assets/logo-no-background.png";
 import {
   AppErrorBoundaryWithI18n,
+  PostgresProjectEmbeddingBuildBanner,
 } from "./views/App_Shell_Helpers";
 import "./App.css";
 
@@ -43,7 +40,7 @@ function describeUnknownError(error: unknown): string {
 }
 
 function syncLegacyAppSettingsFromPostgresInstallationSettings(
-  installationSettings: PostgresExperimentInstallationSettings,
+  installationSettings: PostgresInstallationSettings,
 ): void {
   const current = readAppSettings();
   saveAppSettings({
@@ -76,7 +73,7 @@ function syncLegacyAppSettingsFromPostgresInstallationSettings(
   });
 }
 
-function applyPostgresRuntimeThemePreferences(preferences: PostgresExperimentUserPreferences): void {
+function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferences): void {
   setRuntimeThemePreferences({
     theme: preferences.theme,
     density: preferences.density,
@@ -86,224 +83,21 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresExperimentUse
   initTheme();
 }
 
-const PostgresProjectsExperimentViewLazy = lazy(
-  () => import("./views/Postgres_Projects_Experiment_View").then((m) => ({ default: m.PostgresProjectsExperimentView })),
+const PostgresProjectsViewLazy = lazy(
+  () => import("./views/Postgres_Projects_View").then((m) => ({ default: m.PostgresProjectsView })),
 );
 const PostgresAdminHandoffViewLazy = lazy(
-  () => import("./views/Postgres_Experiment_Auth_Flow_Views").then((m) => ({ default: m.PostgresAdminHandoffView })),
+  () => import("./views/Postgres_Auth_Flow_Views").then((m) => ({ default: m.PostgresAdminHandoffView })),
 );
-const PostgresExperimentLaunchViewLazy = lazy(
-  () => import("./views/Postgres_Experiment_Auth_Flow_Views").then((m) => ({ default: m.PostgresExperimentLaunchView })),
+const PostgresLaunchViewLazy = lazy(
+  () => import("./views/Postgres_Auth_Flow_Views").then((m) => ({ default: m.PostgresLaunchView })),
 );
-const PostgresExperimentAuthViewLazy = lazy(
-  () => import("./views/Postgres_Experiment_Auth_Flow_Views").then((m) => ({ default: m.PostgresExperimentAuthView })),
+const PostgresAuthViewLazy = lazy(
+  () => import("./views/Postgres_Auth_Flow_Views").then((m) => ({ default: m.PostgresAuthView })),
 );
-const PostgresProjectHomeExperimentViewLazy = lazy(
-  () => import("./views/Postgres_Project_Home_Experiment_View").then((m) => ({ default: m.PostgresProjectHomeExperimentView })),
+const PostgresProjectHomeViewLazy = lazy(
+  () => import("./views/Postgres_Project_Home_View").then((m) => ({ default: m.PostgresProjectHomeView })),
 );
-
-function PostgresExperimentSidebar({
-  activeScreen,
-  activeProject,
-  authSession,
-  onShowProjects,
-  onShowProjectHome,
-  onShowProjectUsers,
-  onShowProjectSources,
-  onShowProjectAnnotations,
-  onShowProjectCodebook,
-  onShowProjectCodeText,
-  onShowProjectMemos,
-  onShowProjectLog,
-  onShowProjectObjects,
-  onShowProjectRelationships,
-  onShowFreeDraw,
-  onShowExplore,
-  onShowConstruct,
-  onShowCanvasView,
-  onShowAppSettings,
-  onShowProjectSettings,
-  onShowUserSettings,
-  onBackToGate,
-  onSignOut,
-}: {
-  activeScreen: "projects" | "home" | "users" | "sources" | "annotations" | "codebook" | "code-text" | "memos" | "project-log" | "objects" | "relationships" | "free-draw" | "explore" | "construct" | "view" | "app-settings" | "project-settings" | "user-settings";
-  activeProject: PostgresExperimentProject | null;
-  authSession: PostgresExperimentAuthSession;
-  onShowProjects?: () => void;
-  onShowProjectHome?: () => void;
-  onShowProjectUsers?: () => void;
-  onShowProjectSources?: () => void;
-  onShowProjectAnnotations?: () => void;
-  onShowProjectCodebook?: () => void;
-  onShowProjectCodeText?: () => void;
-  onShowProjectMemos?: () => void;
-  onShowProjectLog?: () => void;
-  onShowProjectObjects?: () => void;
-  onShowProjectRelationships?: () => void;
-  onShowFreeDraw?: () => void;
-  onShowExplore?: () => void;
-  onShowConstruct?: () => void;
-  onShowCanvasView?: () => void;
-  onShowAppSettings?: () => void;
-  onShowProjectSettings?: () => void;
-  onShowUserSettings?: () => void;
-  onBackToGate: () => void;
-  onSignOut: () => Promise<void>;
-}) {
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  const projectItems = [
-    { id: "home", label: "Home", disabled: !activeProject, onClick: onShowProjectHome },
-    { id: "users", label: "Users", disabled: !activeProject, onClick: onShowProjectUsers },
-    { id: "sources", label: "Sources", disabled: !activeProject, onClick: onShowProjectSources },
-    { id: "objects", label: "Objects", disabled: !activeProject, onClick: onShowProjectObjects },
-    { id: "relationships", label: "Relationships", disabled: !activeProject, onClick: onShowProjectRelationships },
-    { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
-    { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
-    { id: "project-log", label: "Log", disabled: !activeProject, onClick: onShowProjectLog },
-  ];
-  const canvasItems = [
-    { id: "free-draw", label: "Free Draw", disabled: !activeProject, onClick: onShowFreeDraw },
-    { id: "explore", label: "Explore", disabled: !activeProject, onClick: onShowExplore },
-    { id: "construct", label: "Construct", disabled: !activeProject, onClick: onShowConstruct },
-    { id: "view", label: "View", disabled: !activeProject, onClick: onShowCanvasView },
-  ];
-  const analysisItems = [
-    { id: "code-text", label: "Code Sources", disabled: !activeProject, onClick: onShowProjectCodeText },
-    { id: "memos", label: "Memos", disabled: !activeProject, onClick: onShowProjectMemos },
-  ];
-  const settingsItems = [
-    { id: "app-settings", label: "App Settings", disabled: false, onClick: onShowAppSettings },
-    { id: "project-settings", label: "Project Settings", disabled: !activeProject, onClick: onShowProjectSettings },
-    { id: "user-settings", label: "User Settings", disabled: false, onClick: onShowUserSettings },
-    { id: "projects", label: "Projects", disabled: false, onClick: onShowProjects },
-    { id: "experiment", label: "Back to Gate", disabled: false, onClick: onBackToGate },
-    { id: "sign-out", label: "Sign Out", disabled: false, onClick: () => void onSignOut() },
-  ];
-
-  return (
-    <aside
-      className={`sidebar ${sidebarExpanded ? "sidebar--expanded" : ""}`}
-      onMouseEnter={() => setSidebarExpanded(true)}
-      onMouseLeave={() => setSidebarExpanded(false)}
-    >
-      <div className="sidebar-brand">
-        <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
-        <div className="brand-collapsed-lockup" aria-hidden="true">
-          <img src={sidebarMarkLogo} alt="" className="brand-collapsed-logo" />
-          <span className="brand-collapsed-title">Kanqual</span>
-        </div>
-      </div>
-
-      {activeProject ? (
-        <div className="sidebar-project-badge">
-          <span className="project-badge-label">PostgreSQL Project</span>
-          <div className="project-badge-row">
-            <span className="project-badge-name">{activeProject.name}</span>
-          </div>
-        </div>
-      ) : (
-        <button type="button" className="sidebar-project-badge sidebar-project-badge--empty" onClick={onShowProjects}>
-          <span className="project-badge-label">PostgreSQL Project</span>
-          <span className="project-badge-empty-text">Open Project</span>
-        </button>
-      )}
-
-      <nav className="sidebar-nav">
-        <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
-            <span>Project</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
-          </button>
-          <div className="sidebar-section-items">
-            {projectItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Not wired into the PostgreSQL experiment yet." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
-            <span>Analysis</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
-          </button>
-          <div className="sidebar-section-items">
-            {analysisItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Not wired into the PostgreSQL experiment yet." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
-            <span>Settings</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
-          </button>
-          <div className="sidebar-section-items">
-            {settingsItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
-            <span>Canvas</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
-          </button>
-          <div className="sidebar-section-items">
-            {canvasItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </nav>
-
-      <div className="sidebar-user">
-        <div className="sidebar-user-info">
-          <div className="sidebar-user-name">{authSession.user.name}</div>
-          <div className="sidebar-user-email">{authSession.user.email}</div>
-        </div>
-      </div>
-    </aside>
-  );
-}
 
 function ViewLoadingFallback() {
   const { t } = useI18n();
@@ -318,54 +112,12 @@ function ViewLoadingFallback() {
   );
 }
 
-function ProjectHomeLoadingShell(props: {
-  project: PostgresExperimentProject;
-  authSession: PostgresExperimentAuthSession;
-  onBack: () => void;
-  onSignOut: () => Promise<void>;
-}) {
-  const { project, authSession, onBack, onSignOut } = props;
-
-  return (
-    <div className="app-shell">
-      <PostgresExperimentSidebar
-        activeScreen="home"
-        activeProject={project}
-        authSession={authSession}
-        onShowProjects={onBack}
-        onShowProjectHome={() => undefined}
-        onShowProjectUsers={() => undefined}
-        onShowProjectSources={() => undefined}
-        onShowProjectAnnotations={() => undefined}
-        onShowProjectCodebook={() => undefined}
-        onShowProjectCodeText={() => undefined}
-        onShowProjectMemos={() => undefined}
-        onShowProjectLog={() => undefined}
-        onShowProjectObjects={() => undefined}
-        onShowProjectRelationships={() => undefined}
-        onShowFreeDraw={() => undefined}
-        onShowExplore={() => undefined}
-        onShowConstruct={() => undefined}
-        onShowCanvasView={() => undefined}
-        onShowAppSettings={() => undefined}
-        onShowProjectSettings={() => undefined}
-        onShowUserSettings={() => undefined}
-        onBackToGate={onBack}
-        onSignOut={onSignOut}
-      />
-      <main className="app-main">
-        <ViewLoadingFallback />
-      </main>
-    </div>
-  );
-}
-
 function AuthGate() {
-  const [postgresStatus, setPostgresStatus] = useState<PostgresExperimentStatus | null>(null);
+  const [postgresStatus, setPostgresStatus] = useState<PostgresStatus | null>(null);
   const [postgresStatusLoaded, setPostgresStatusLoaded] = useState(false);
-  const [postgresAuthStatus, setPostgresAuthStatus] = useState<PostgresExperimentAuthStatus | null>(null);
+  const [postgresAuthStatus, setPostgresAuthStatus] = useState<PostgresAuthStatus | null>(null);
   const [postgresAuthLoaded, setPostgresAuthLoaded] = useState(false);
-  const [postgresInstallationSettings, setPostgresInstallationSettings] = useState<PostgresExperimentInstallationSettings | null>(null);
+  const [postgresInstallationSettings, setPostgresInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,7 +125,7 @@ function AuthGate() {
     async function loadPostgresRuntimePreferences() {
       if (!postgresAuthStatus?.currentSession) return;
       try {
-        const preferences = await getPostgresExperimentUserPreferences();
+        const preferences = await getPostgresUserPreferences();
         if (!cancelled) {
           applyPostgresRuntimeThemePreferences(preferences);
         }
@@ -391,14 +143,14 @@ function AuthGate() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadPostgresExperimentState() {
+    async function loadPostgresState() {
       try {
-        const nextStatus = await getPostgresExperimentStatus();
+        const nextStatus = await getPostgresStatus();
         if (cancelled) return;
 
         setPostgresStatus(nextStatus);
         const nextInstallationSettings = nextStatus.bootstrapApplied
-          ? await getPostgresExperimentInstallationSettings()
+          ? await getPostgresInstallationSettings()
           : null;
         if (!cancelled) {
           setPostgresInstallationSettings(nextInstallationSettings);
@@ -407,7 +159,7 @@ function AuthGate() {
           }
         }
         if (nextStatus.bootstrapApplied && nextStatus.adminHandoffCompleted) {
-          const nextAuthStatus = await getPostgresExperimentAuthStatus();
+          const nextAuthStatus = await getPostgresAuthStatus();
           if (!cancelled) {
             setPostgresAuthStatus(nextAuthStatus);
           }
@@ -415,7 +167,7 @@ function AuthGate() {
           setPostgresAuthStatus(null);
         }
       } catch (error) {
-        console.warn("Failed to load PostgreSQL experiment status:", describeUnknownError(error));
+        console.warn("Failed to load PostgreSQL status:", describeUnknownError(error));
         if (!cancelled) {
           setPostgresAuthStatus(null);
           setPostgresInstallationSettings(null);
@@ -428,7 +180,7 @@ function AuthGate() {
       }
     }
 
-    void loadPostgresExperimentState();
+    void loadPostgresState();
     return () => {
       cancelled = true;
     };
@@ -438,31 +190,31 @@ function AuthGate() {
     setPostgresStatusLoaded(false);
     setPostgresAuthLoaded(false);
     try {
-      const nextStatus = await getPostgresExperimentStatus();
+      const nextStatus = await getPostgresStatus();
       setPostgresStatus(nextStatus);
       const nextInstallationSettings = nextStatus.bootstrapApplied
-        ? await getPostgresExperimentInstallationSettings()
+        ? await getPostgresInstallationSettings()
         : null;
       setPostgresInstallationSettings(nextInstallationSettings);
       if (nextInstallationSettings) {
         syncLegacyAppSettingsFromPostgresInstallationSettings(nextInstallationSettings);
       }
       if (nextStatus.bootstrapApplied && nextStatus.adminHandoffCompleted) {
-        const nextAuthStatus = await getPostgresExperimentAuthStatus();
+        const nextAuthStatus = await getPostgresAuthStatus();
         setPostgresAuthStatus(nextAuthStatus);
       } else {
         setPostgresAuthStatus(null);
       }
     } catch (error) {
-      console.warn("Failed to refresh PostgreSQL experiment status:", describeUnknownError(error));
+      console.warn("Failed to refresh PostgreSQL status:", describeUnknownError(error));
     } finally {
       setPostgresStatusLoaded(true);
       setPostgresAuthLoaded(true);
     }
   }
 
-  async function handleBootstrapPostgresExperiment(superuserPassword: string) {
-    await bootstrapPostgresExperiment(superuserPassword);
+  async function handleBootstrapPostgres(superuserPassword: string) {
+    await bootstrapPostgres(superuserPassword);
     await refreshPostgresStatus();
   }
 
@@ -498,11 +250,10 @@ function AuthGate() {
       <div className="auth-screen">
         <div className="auth-card auth-card--startup">
           <div className="auth-brand">Kanqual</div>
-          <p className="auth-tagline">PostgreSQL Experiment</p>
           <p className="auth-starting">
             {postgresAuthReady
               ? "Checking PostgreSQL sign-in status..."
-              : "Checking local PostgreSQL experiment status..."}
+              : "Checking local PostgreSQL status..."}
           </p>
         </div>
       </div>
@@ -510,12 +261,12 @@ function AuthGate() {
   }
 
   const signOutPostgresSession = async () => {
-    const nextAuthStatus = await logoutPostgresExperimentAppUser();
+    const nextAuthStatus = await logoutPostgresAppUser();
     if (postgresInstallationSettings?.privacyForgetLoginIdentitiesOnLogout) {
-      await clearPostgresExperimentRememberedAccounts();
+      await clearPostgresRememberedAccounts();
     }
     if (postgresInstallationSettings?.privacyClearRecentProjectsOnSignOut) {
-      await clearPostgresExperimentUserProjectState();
+      await clearPostgresUserProjectState();
     }
     setPostgresAuthStatus(nextAuthStatus);
   };
@@ -532,58 +283,39 @@ function AuthGate() {
   if (postgresAuthReady && postgresAuthStatus?.currentSession) {
     return (
       <Suspense fallback={<ViewLoadingFallback />}>
-        <PostgresProjectsExperimentViewLazy
-          authSession={postgresAuthStatus.currentSession}
-          onBack={() => undefined}
-          onSignOut={signOutPostgresSession}
-          renderSidebar={({ openSelectedProject, authSession, onBack, onSignOut }) => (
-            <PostgresExperimentSidebar
-              activeScreen="projects"
-              activeProject={null}
-              authSession={authSession}
-              onShowProjects={() => undefined}
-              onShowProjectHome={openSelectedProject}
-              onShowProjectUsers={openSelectedProject}
-              onBackToGate={onBack}
-              onSignOut={onSignOut}
-            />
-          )}
+        <PostgresProjectsViewLazy
           renderProjectHome={(openedProject, helpers) => (
             <Suspense
-              fallback={(
-                <ProjectHomeLoadingShell
+              fallback={<ViewLoadingFallback />}
+            >
+              <>
+                <PostgresProjectEmbeddingBuildBanner activeProject={openedProject} />
+                <PostgresProjectHomeViewLazy
                   project={openedProject}
                   authSession={postgresAuthStatus.currentSession!}
+                  onAuthSessionUpdated={(session) => {
+                    setPostgresAuthStatus((current) => current
+                      ? {
+                          ...current,
+                          currentSession: session,
+                        }
+                      : {
+                          bootstrapApplied: true,
+                          adminHandoffCompleted: true,
+                          ready: true,
+                          registeredUserCount: 0,
+                          localAdminName: "postgres",
+                          requiresAccountSetup: false,
+                          currentSession: session,
+                        });
+                  }}
+                  onAuthSessionInvalidated={clearPostgresAuthSession}
                   onBack={helpers.onBack}
+                  onProjectUpdated={helpers.onProjectUpdated}
+                  onProjectDeleted={helpers.onProjectDeleted}
                   onSignOut={signOutPostgresSession}
                 />
-              )}
-            >
-              <PostgresProjectHomeExperimentViewLazy
-                project={openedProject}
-                authSession={postgresAuthStatus.currentSession!}
-                onAuthSessionUpdated={(session) => {
-                  setPostgresAuthStatus((current) => current
-                    ? {
-                        ...current,
-                        currentSession: session,
-                      }
-                    : {
-                        bootstrapApplied: true,
-                        adminHandoffCompleted: true,
-                        ready: true,
-                        registeredUserCount: 0,
-                        localAdminName: "postgres",
-                        requiresAccountSetup: false,
-                        currentSession: session,
-                      });
-                }}
-                onAuthSessionInvalidated={clearPostgresAuthSession}
-                onBack={helpers.onBack}
-                onProjectUpdated={helpers.onProjectUpdated}
-                onProjectDeleted={helpers.onProjectDeleted}
-                onSignOut={signOutPostgresSession}
-              />
+              </>
             </Suspense>
           )}
         />
@@ -594,7 +326,7 @@ function AuthGate() {
   if (postgresAuthReady) {
     return (
       <Suspense fallback={<ViewLoadingFallback />}>
-        <PostgresExperimentAuthViewLazy
+        <PostgresAuthViewLazy
           authStatus={postgresAuthStatus}
           onRefresh={refreshPostgresStatus}
           onAuthenticated={(session) => {
@@ -621,13 +353,13 @@ function AuthGate() {
 
   return (
     <Suspense fallback={<ViewLoadingFallback />}>
-      <PostgresExperimentLaunchViewLazy
+      <PostgresLaunchViewLazy
         status={postgresStatus}
         loading={!postgresStatusLoaded}
         onRefresh={() => {
           void refreshPostgresStatus();
         }}
-        onBootstrap={handleBootstrapPostgresExperiment}
+        onBootstrap={handleBootstrapPostgres}
         onOpenPostgresProjects={() => {
           void refreshPostgresStatus();
         }}

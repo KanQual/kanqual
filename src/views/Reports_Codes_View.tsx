@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAuth } from "../context/AuthContext";
-import { useStore } from "../context/StoreContext";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
+import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
+import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
+import { getFloatingTooltipStyle } from "./Postgres_Source_Coding_Shared";
+
+const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
 
 let writeExcelFilePromise: Promise<typeof import("write-excel-file/browser")> | null = null;
 let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
@@ -37,13 +41,26 @@ async function loadDocx() {
   return docxPromise;
 }
 
-type CodeReportKind = "frequencies" | "summary";
+export type CodeReportKind = "frequencies" | "summary";
 type CodeReportSortCol = "name" | "kind" | "createdByName" | "createdAt";
 type SortDir = "asc" | "desc";
+type RelationshipSortKey = "relationshipType" | "object1Name" | "object2Name";
+type RelationshipSortDir = "asc" | "desc";
 
 interface CaseItem {
   id: string;
   name: string;
+  objectType?: string;
+}
+
+interface RelationshipItem {
+  id: string;
+  relationshipType?: string;
+  object1Id?: string;
+  object1Name?: string;
+  object2Id?: string;
+  object2Name?: string;
+  name?: string;
 }
 
 interface UserItem {
@@ -112,12 +129,19 @@ interface CoOccurrenceCode {
   color: string;
 }
 
+interface CoOccurrenceCodeGroup extends CoOccurrenceCode {
+  codeIds: Set<string>;
+}
+
 interface CoOccurrenceMatrix {
   id: string;
   subtitle?: string;
   diagonalEmpty?: boolean;
   codes: CoOccurrenceCode[];
   cells: number[][];
+  entityCodeSets?: string[][];
+  entityLabels?: string[];
+  tooltipCells?: string[][][];
 }
 
 interface CoOccurrenceSingleEntityFreq {
@@ -136,8 +160,11 @@ interface CodeReportSettings {
   kind: CodeReportKind;
   caseIds: string[];
   documentIds: string[];
+  relationshipIds?: string[];
   caseAttributeIds: string[];
   documentAttributeIds: string[];
+  caseTypes?: string[];
+  documentTypes?: string[];
   codeIds: string[];
   userIds: string[];
   caseAttributeFilters?: Record<string, AttributeFilterConfig>;
@@ -149,6 +176,7 @@ interface CodeReportSnapshot {
   kind: CodeReportKind;
   settings: CodeReportSettings;
   caseItems: CaseItem[];
+  relationshipItems?: RelationshipItem[];
   userItems: UserItem[];
   caseAttributeItems: AttributeItem[];
   documentAttributeItems: AttributeItem[];
@@ -200,6 +228,19 @@ function getAttributeTypeLabel(t: ReturnType<typeof useI18n>["t"], dataType: str
   return dataType === "datetime" ? t("reportsCodes.attributeTypes.datetime") : dataType;
 }
 
+function formatSourceType(value: string | undefined): string {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/_/g, " ");
+  if (!normalized) return "-";
+  if (normalized === "pdf") return "PDF";
+  if (normalized === "processed transcript") return "Transcript";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function formatObjectType(value: string | undefined): string {
+  const normalized = (value ?? "").trim();
+  return normalized || "-";
+}
+
 function hasDescriptionContent(html: string | undefined): boolean {
   if (!html) return false;
   return html.replace(/<[^>]*>/g, "").trim().length > 0;
@@ -236,10 +277,6 @@ function formatDateInputValue(timestamp: number | null): string {
   const date = new Date(timestamp);
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function relationPreview(ids: string[]): string[] {
-  return ids.slice(0, 100);
 }
 
 function buildDefaultAttributeFilter(
@@ -328,25 +365,6 @@ function buildCodeTree(codes: Code[]): CodeTreeNode[] {
   const seen = new Set(result.map((node) => node.code.id));
   for (const code of codes) {
     if (!seen.has(code.id)) result.push({ code, depth: 0, hasChildren: false });
-  }
-
-  return result;
-}
-
-function visibleCodeNodes(tree: CodeTreeNode[], collapsed: Set<string>): CodeTreeNode[] {
-  const result: CodeTreeNode[] = [];
-  const collapseStack: number[] = [];
-
-  for (const node of tree) {
-    while (collapseStack.length > 0 && node.depth <= collapseStack[collapseStack.length - 1]) {
-      collapseStack.pop();
-    }
-    if (collapseStack.length > 0) continue;
-
-    result.push(node);
-    if (node.hasChildren && collapsed.has(node.code.id)) {
-      collapseStack.push(node.depth);
-    }
   }
 
   return result;
@@ -529,29 +547,149 @@ function heatmapColor(value: number, max: number): string {
   return `color-mix(in srgb, var(--color-heatmap-high) ${Math.round(t * 100)}%, var(--color-heatmap-low))`;
 }
 
-function ancestorAtDepth(codeId: string, targetDepth: number, codeById: Map<string, Code>, depthById: Map<string, number>): Code | null {
-  let current = codeById.get(codeId);
-  while (current && (depthById.get(current.id) ?? 0) > targetDepth) {
-    current = current.parentId ? codeById.get(current.parentId) : undefined;
+function truncateTooltipLabel(label: string, maxLength = 80): string {
+  const normalized = label.trim() || "Untitled";
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}...` : normalized;
+}
+
+function buildCoOccurrenceCodeGroups(
+  allCodes: Code[],
+  selectedCodes: CoOccurrenceCode[],
+  collapseChildren: boolean,
+): CoOccurrenceCodeGroup[] {
+  if (!collapseChildren) {
+    return selectedCodes.map((code) => ({ ...code, codeIds: new Set([code.id]) }));
   }
-  return current ?? null;
+
+  const selectedIds = new Set(selectedCodes.map((code) => code.id));
+  const selectedCodeById = new Map(selectedCodes.map((code) => [code.id, code]));
+  const fullCodeById = new Map(allCodes.map((code) => [code.id, code]));
+  const groupById = new Map<string, CoOccurrenceCodeGroup>();
+
+  for (const selectedCode of selectedCodes) {
+    let bucketId = selectedCode.id;
+    let current = fullCodeById.get(selectedCode.id);
+    while (current?.parentId && selectedIds.has(current.parentId)) {
+      bucketId = current.parentId;
+      current = fullCodeById.get(current.parentId);
+    }
+
+    const bucketCode = selectedCodeById.get(bucketId) ?? selectedCode;
+    if (!groupById.has(bucketId)) {
+      groupById.set(bucketId, {
+        id: bucketCode.id,
+        label: bucketCode.label,
+        color: bucketCode.color,
+        codeIds: new Set(),
+      });
+    }
+    groupById.get(bucketId)!.codeIds.add(selectedCode.id);
+  }
+
+  const tree = buildCodeTree(allCodes);
+  const ordered = tree
+    .filter((node) => groupById.has(node.code.id))
+    .map((node) => groupById.get(node.code.id)!);
+  for (const selectedCode of selectedCodes) {
+    if (!groupById.has(selectedCode.id) || ordered.some((group) => group.id === selectedCode.id)) continue;
+    ordered.push(groupById.get(selectedCode.id)!);
+  }
+  return ordered;
+}
+
+function aggregateCoOccurrenceCodeCounts(
+  codeCounts: Array<{ code: CoOccurrenceCode; count: number }>,
+  allCodes: Code[],
+  collapseChildren: boolean,
+): Array<{ code: CoOccurrenceCode; count: number }> {
+  const groups = buildCoOccurrenceCodeGroups(allCodes, codeCounts.map((item) => item.code), collapseChildren);
+  return groups.map((group) => {
+    let count = 0;
+    for (const item of codeCounts) {
+      if (group.codeIds.has(item.code.id)) count += item.count;
+    }
+    return { code: { id: group.id, label: group.label, color: group.color }, count };
+  });
+}
+
+function aggregateCoOccurrenceMatrix(
+  matrix: CoOccurrenceMatrix,
+  allCodes: Code[],
+  collapseChildren: boolean,
+): CoOccurrenceMatrix {
+  const groups = buildCoOccurrenceCodeGroups(allCodes, matrix.codes, collapseChildren);
+  if (!collapseChildren) return matrix;
+
+  const entityCodeSets = matrix.entityCodeSets?.map((codeIds) => new Set(codeIds));
+  const entityLabels = matrix.entityLabels ?? [];
+  return {
+    ...matrix,
+    codes: groups.map((group) => ({ id: group.id, label: group.label, color: group.color })),
+    cells: groups.map((rowGroup) => groups.map((colGroup) => {
+      if (matrix.diagonalEmpty && rowGroup.id === colGroup.id) return 0;
+      if (entityCodeSets) {
+        let count = 0;
+        for (const codeSet of entityCodeSets) {
+          const hasRowBucket = [...rowGroup.codeIds].some((codeId) => codeSet.has(codeId));
+          const hasColBucket = [...colGroup.codeIds].some((codeId) => codeSet.has(codeId));
+          if (hasRowBucket && hasColBucket) count += 1;
+        }
+        return count;
+      }
+      return Math.max(
+        ...[...rowGroup.codeIds].flatMap((rowCodeId) => {
+          const rowIndex = matrix.codes.findIndex((code) => code.id === rowCodeId);
+          return [...colGroup.codeIds].map((colCodeId) => {
+            const colIndex = matrix.codes.findIndex((code) => code.id === colCodeId);
+            return rowIndex >= 0 && colIndex >= 0 ? matrix.cells[rowIndex]?.[colIndex] ?? 0 : 0;
+          });
+        }),
+        0,
+      );
+    })),
+    tooltipCells: entityCodeSets
+      ? groups.map((rowGroup) => groups.map((colGroup) => {
+          if (matrix.diagonalEmpty && rowGroup.id === colGroup.id) return [];
+          const labels: string[] = [];
+          entityCodeSets.forEach((codeSet, index) => {
+            const hasRowBucket = [...rowGroup.codeIds].some((codeId) => codeSet.has(codeId));
+            const hasColBucket = [...colGroup.codeIds].some((codeId) => codeSet.has(codeId));
+            if (hasRowBucket && hasColBucket) labels.push(entityLabels[index] ?? "Untitled");
+          });
+          return labels;
+        }))
+      : matrix.tooltipCells,
+  };
 }
 
 function FrequencyReportCard({
   section,
   codeBuckets,
+  codes,
   annotations,
   frozenRows,
 }: {
   section: FrequencySection;
   codeBuckets: FrequencyCodeBucket[];
+  codes: Code[];
   annotations: Annotation[];
   frozenRows?: FrozenFrequencyRow[];
 }) {
   const { t } = useI18n();
   const [viewMode, setViewMode] = useState<FrequencyViewMode>("table");
+  const [collapseChildCodes, setCollapseChildCodes] = useState(false);
   const frequencyViewOptions = getFrequencyViewOptions(t);
   const annotationById = useMemo(() => new Map(annotations.map((ann) => [ann.id, ann])), [annotations]);
+  const canCollapseChildCodes = !frozenRows?.length && (section.key === "users" || section.key === "documents");
+  const activeCodeBuckets = useMemo(() => {
+    if (!canCollapseChildCodes || !collapseChildCodes) return codeBuckets;
+    return buildCoOccurrenceCodeGroups(codes, codeBuckets, true).map((group) => ({
+      id: group.id,
+      label: group.label,
+      color: group.color,
+      codeIds: group.codeIds,
+    }));
+  }, [canCollapseChildCodes, codeBuckets, codes, collapseChildCodes]);
   const countForBucket = (column: FrequencyColumn, bucket: FrequencyCodeBucket) => {
     let value = 0;
     for (const annotationId of column.annotationIds) {
@@ -564,10 +702,10 @@ function FrequencyReportCard({
     ? Array.from(new Set(frozenRows.flatMap((row) => row.values.map((value) => value.code)))).map((label) => ({
         id: label,
         label,
-        color: codeBuckets.find((bucket) => bucket.label === label)?.color ?? "var(--color-primary)",
+        color: activeCodeBuckets.find((bucket) => bucket.label === label)?.color ?? "var(--color-primary)",
         codeIds: new Set<string>(),
       }))
-    : codeBuckets;
+    : activeCodeBuckets;
   const tableRows = frozenRows && frozenRows.length > 0
     ? frozenRows.map((row) => ({
         id: row.category,
@@ -586,32 +724,212 @@ function FrequencyReportCard({
     return { bucket, cells };
   });
   const maxCell = Math.max(0, ...matrix.flatMap((row) => row.cells));
+  const isUsersFrequencyCard = section.key === "users";
+  const isSourcesFrequencyCard = section.key === "documents";
+  const isFacetedFrequencyCard = isUsersFrequencyCard || isSourcesFrequencyCard;
+  const chartHeight = isUsersFrequencyCard
+    ? Math.max(320, tableRows.length * 18 + 290)
+    : Math.max(260, displayBuckets.length * Math.max(32, tableRows.length * 14) + 82);
+  const facetChartOptions = useMemo<Array<{ id: string; label: string; option: EChartsCoreOption }>>(() => {
+    if (!isFacetedFrequencyCard || tableRows.length === 0 || displayBuckets.length === 0) return [];
+
+    const axisLabels = displayBuckets.map((bucket) => bucket.label);
+    return tableRows.map((row) => ({
+      id: row.id,
+      label: row.label,
+      option: {
+        animation: false,
+        grid: {
+          left: 44,
+          right: 22,
+          top: 8,
+          bottom: 74,
+        },
+        tooltip: {
+          trigger: "axis",
+          axisPointer: {
+            type: "shadow",
+          },
+          formatter: (params: any) => {
+            const item = Array.isArray(params) ? params[0] : params;
+            const codeName = item?.name ?? "";
+            const value = Number(item?.value ?? 0);
+            return `${escapeHtml(String(codeName))}: ${value}`;
+          },
+        },
+        xAxis: {
+          type: "category",
+          data: axisLabels,
+          axisLabel: {
+            color: "#687385",
+            fontSize: 10,
+            interval: 0,
+            rotate: 35,
+            overflow: "truncate",
+            width: 82,
+          },
+          axisLine: {
+            lineStyle: { color: "#d5dbe3" },
+          },
+          axisTick: {
+            show: false,
+          },
+        },
+        yAxis: {
+          type: "value",
+          minInterval: 1,
+          axisLabel: {
+            color: "#687385",
+            fontSize: 10,
+          },
+          axisLine: {
+            lineStyle: { color: "#d5dbe3" },
+          },
+          axisTick: {
+            lineStyle: { color: "#d5dbe3" },
+          },
+          splitLine: {
+            lineStyle: { color: "#eef2f6" },
+          },
+        },
+        series: [
+          {
+            name: row.label,
+            type: "bar",
+            barMaxWidth: 18,
+            data: displayBuckets.map((bucket, bucketIndex) => ({
+              name: bucket.label,
+              value: row.values[bucketIndex] ?? 0,
+              itemStyle: {
+                color: bucket.color,
+                borderRadius: [5, 5, 0, 0],
+              },
+            })),
+          },
+        ],
+      },
+    }));
+  }, [displayBuckets, isFacetedFrequencyCard, tableRows]);
+  const frequencyBarChartOption = useMemo<EChartsCoreOption>(() => {
+    if (tableRows.length === 0 || displayBuckets.length === 0) return {};
+
+    const axisLabels = displayBuckets.map((bucket) => bucket.label);
+    return {
+      animation: false,
+      color: tableRows.map((_row, index) => {
+        const palette = ["#B04A33", "#4F6F8F", "#6F7D52", "#9A6A3A", "#7B5CA7", "#3F7D7A", "#B85C7A", "#687385"];
+        return palette[index % palette.length];
+      }),
+      grid: {
+        left: 128,
+        right: 42,
+        top: 24,
+        bottom: 28,
+      },
+      legend: {
+        type: "scroll",
+        top: 0,
+        textStyle: {
+          color: "#687385",
+          fontSize: 11,
+        },
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: {
+          type: "shadow",
+        },
+      },
+      xAxis: {
+        type: "value",
+        minInterval: 1,
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        splitLine: {
+          lineStyle: { color: "#eef2f6" },
+        },
+      },
+      yAxis: {
+        type: "category",
+        data: axisLabels,
+        inverse: true,
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+          overflow: "truncate",
+          width: 116,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          show: false,
+        },
+      },
+      series: tableRows.map((row) => ({
+        name: row.label,
+        type: "bar",
+        barMaxWidth: 12,
+        data: displayBuckets.map((bucket, bucketIndex) => ({
+          name: bucket.label,
+          value: row.values[bucketIndex] ?? 0,
+          itemStyle: {
+            borderRadius: [0, 5, 5, 0],
+          },
+        })),
+      })),
+    };
+  }, [displayBuckets, tableRows]);
 
   return (
     <div className="annotate-card" style={{ flexShrink: 0 }}>
       <div className="annotate-card-header">
         <span className="annotate-card-title">{section.title}</span>
-        <div role="tablist" aria-label={`${section.title} frequency view`} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        {canCollapseChildCodes && (
+          <label
+            style={{
+              marginLeft: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 500,
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <input
+              type="checkbox"
+              className="memo-sel-checkbox"
+              checked={collapseChildCodes}
+              onChange={(event) => setCollapseChildCodes(event.target.checked)}
+            />
+            Collapse child codes
+          </label>
+        )}
+      </div>
+      <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="segmented-control" role="tablist" aria-label={`${section.title} frequency view`} style={{ alignSelf: "center" }}>
           {frequencyViewOptions.map((option) => (
             <button
               key={option.key}
               type="button"
               role="tab"
               aria-selected={viewMode === option.key}
-              className={`btn btn--small${viewMode === option.key ? " btn--primary" : ""}`}
+              className={`segmented-control-option${viewMode === option.key ? " segmented-control-option--active" : ""}`}
               onClick={() => setViewMode(option.key)}
-              style={{
-                fontSize: 11,
-                fontWeight: viewMode === option.key ? 700 : 500,
-                padding: "3px 8px",
-              }}
             >
               {option.label}
             </button>
           ))}
         </div>
-      </div>
-      <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 14 }}>
         {viewMode === "table" && (
           <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 230 }}>
             <table className="users-table">
@@ -640,38 +958,58 @@ function FrequencyReportCard({
         )}
 
         {viewMode === "chart" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {tableRows.length === 0 || displayBuckets.length === 0 ? (
-              <div className="users-td-msg">No selected items.</div>
-            ) : tableRows.map((row) => (
-              <div key={`${row.id}-bar`} style={{ display: "grid", gridTemplateColumns: "minmax(90px, 28%) 1fr", gap: 10, alignItems: "end", fontSize: 12 }}>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", alignSelf: "center" }}>{row.label}</span>
-                <div style={{ display: "flex", gap: 8, alignItems: "end", minHeight: 86, borderBottom: "1px solid var(--color-border)", paddingTop: 4 }}>
-                  {row.values.map((value, index) => (
+          tableRows.length === 0 || displayBuckets.length === 0 ? (
+            <div className="users-td-msg">No selected items.</div>
+          ) : (
+            <Suspense fallback={<div className="users-td-msg">Loading chart...</div>}>
+              {isFacetedFrequencyCard ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {facetChartOptions.map((facet) => (
                     <div
-                      key={`${row.id}-${displayBuckets[index].id}-bar`}
-                      title={`${displayBuckets[index].label}: ${value}`}
-                      style={{ flex: 1, minWidth: 26, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+                      key={facet.id}
+                      style={{
+                        border: "var(--border-width) solid var(--color-border)",
+                        borderRadius: 6,
+                        background: "var(--color-surface)",
+                        padding: "10px 12px 8px",
+                      }}
                     >
-                      <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{value}</span>
                       <div
                         style={{
+                          marginBottom: 6,
+                          color: "var(--color-text)",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={facet.label}
+                      >
+                        {facet.label}
+                      </div>
+                      <EChart
+                        option={facet.option}
+                        style={{
                           width: "100%",
-                          maxWidth: 34,
-                          height: maxCell > 0 ? Math.max(4, (value / maxCell) * 58) : 0,
-                          borderRadius: "4px 4px 0 0",
-                          background: displayBuckets[index].color,
+                          height: 220,
                         }}
                       />
-                      <span style={{ maxWidth: 58, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-text-muted)", fontSize: 10 }}>
-                        {displayBuckets[index].label}
-                      </span>
                     </div>
                   ))}
                 </div>
-              </div>
-            ))}
-          </div>
+              ) : (
+                <EChart
+                  option={frequencyBarChartOption}
+                  style={{
+                    width: "100%",
+                    height: chartHeight,
+                    minHeight: 260,
+                  }}
+                />
+              )}
+            </Suspense>
+          )
         )}
 
         {viewMode === "matrix" && (
@@ -681,7 +1019,20 @@ function FrequencyReportCard({
                 <tr>
                   <th className="users-th" style={{ minWidth: 160 }}>Code</th>
                   {tableRows.map((row) => (
-                    <th key={row.id} className="users-th" style={{ minWidth: 110 }}>{row.label}</th>
+                    <th
+                      key={row.id}
+                      className="users-th"
+                      style={{
+                        minWidth: isSourcesFrequencyCard ? 88 : 110,
+                        maxWidth: isSourcesFrequencyCard ? 88 : undefined,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={row.label}
+                    >
+                      {isSourcesFrequencyCard ? truncateTooltipLabel(row.label, 18) : row.label}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -718,14 +1069,56 @@ function FrequencyReportCard({
   );
 }
 
-function CoOccurrenceMatrixCard({ section }: { section: CoOccurrenceSection }) {
+function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSection; codes: Code[] }) {
   const { t } = useI18n();
+  const [collapseChildCodes, setCollapseChildCodes] = useState(false);
+  const [cellTooltip, setCellTooltip] = useState<{
+    x: number;
+    y: number;
+    rowColor: string;
+    colColor: string;
+    rowLabel: string;
+    colLabel: string;
+    value: number;
+    contributors: string[];
+  } | null>(null);
+  const sectionTitle = section.key === "users"
+    ? "Frequencies"
+    : section.key === "documents"
+      ? "Co-occurence per Source"
+      : section.title;
+  const canCollapseChildCodes = section.key === "users" || section.key === "documents";
+
   if (section.singleEntityFreq) {
     const { entityLabel, codeCounts } = section.singleEntityFreq;
+    const displayCodeCounts = canCollapseChildCodes
+      ? aggregateCoOccurrenceCodeCounts(codeCounts, codes, collapseChildCodes)
+      : codeCounts;
     return (
       <div className="annotate-card" style={{ flexShrink: 0 }}>
         <div className="annotate-card-header">
-          <span className="annotate-card-title">{section.title}</span>
+          <span className="annotate-card-title">{sectionTitle}</span>
+          {canCollapseChildCodes && (
+            <label
+              style={{
+                marginLeft: "auto",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 500,
+                color: "var(--color-text-muted)",
+              }}
+            >
+              <input
+                type="checkbox"
+                className="memo-sel-checkbox"
+                checked={collapseChildCodes}
+                onChange={(event) => setCollapseChildCodes(event.target.checked)}
+              />
+              Collapse child codes
+            </label>
+          )}
         </div>
         <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
@@ -740,9 +1133,9 @@ function CoOccurrenceMatrixCard({ section }: { section: CoOccurrenceSection }) {
                 </tr>
               </thead>
               <tbody>
-                {codeCounts.length === 0 ? (
+                {displayCodeCounts.length === 0 ? (
                   <tr><td colSpan={2} className="users-td-msg">{t("reportsCodes.singleEntity.selectCodes")}</td></tr>
-                ) : codeCounts.map(({ code, count }) => (
+                ) : displayCodeCounts.map(({ code, count }) => (
                   <tr key={code.id} className="users-row">
                     <td className="users-td users-td--name">
                       <span className="code-swatch" style={{ background: code.color, marginRight: 8 }} />
@@ -762,12 +1155,39 @@ function CoOccurrenceMatrixCard({ section }: { section: CoOccurrenceSection }) {
   return (
     <div className="annotate-card" style={{ flexShrink: 0 }}>
       <div className="annotate-card-header">
-        <span className="annotate-card-title">{section.title}</span>
+        <span className="annotate-card-title">{sectionTitle}</span>
+        {canCollapseChildCodes && (
+          <label
+            style={{
+              marginLeft: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 500,
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <input
+              type="checkbox"
+              className="memo-sel-checkbox"
+              checked={collapseChildCodes}
+              onChange={(event) => {
+                setCellTooltip(null);
+                setCollapseChildCodes(event.target.checked);
+              }}
+            />
+            Collapse child codes
+          </label>
+        )}
       </div>
       <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 16 }}>
         {section.matrices.length === 0 ? (
           <div className="users-td-msg">Select codes to build the matrix.</div>
-        ) : section.matrices.map((matrix) => {
+        ) : section.matrices.map((sourceMatrix) => {
+          const matrix = canCollapseChildCodes
+            ? aggregateCoOccurrenceMatrix(sourceMatrix, codes, collapseChildCodes)
+            : sourceMatrix;
           const maxCell = Math.max(0, ...matrix.cells.flatMap((row, rowIndex) => (
             row.filter((_value, colIndex) => !(matrix.diagonalEmpty && rowIndex === colIndex))
           )));
@@ -802,14 +1222,34 @@ function CoOccurrenceMatrixCard({ section }: { section: CoOccurrenceSection }) {
                           const isDiagonal = rowIndex === colIndex;
                           const value = matrix.cells[rowIndex]?.[colIndex] ?? 0;
                           const emptyCell = matrix.diagonalEmpty && isDiagonal;
+                          const contributors = matrix.tooltipCells?.[rowIndex]?.[colIndex] ?? [];
                           return (
                             <td
                               key={`${rowCode.id}-${colCode.id}`}
                               className="users-td"
+                              onMouseEnter={(event) => {
+                                if (emptyCell) return;
+                                setCellTooltip({
+                                  x: event.clientX,
+                                  y: event.clientY,
+                                  rowColor: rowCode.color,
+                                  colColor: colCode.color,
+                                  rowLabel: rowCode.label,
+                                  colLabel: colCode.label,
+                                  value,
+                                  contributors,
+                                });
+                              }}
+                              onMouseMove={(event) => {
+                                if (emptyCell) return;
+                                setCellTooltip((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current);
+                              }}
+                              onMouseLeave={() => setCellTooltip(null)}
                               style={{
                                 background: emptyCell ? "var(--color-surface-muted, #f4f4f5)" : heatmapColor(value, maxCell),
                                 color: value > 0 && !emptyCell ? "var(--color-text)" : "var(--color-text-muted)",
                                 textAlign: "center",
+                                cursor: emptyCell ? "default" : "help",
                               }}
                             >
                               {emptyCell ? "" : value}
@@ -825,6 +1265,57 @@ function CoOccurrenceMatrixCard({ section }: { section: CoOccurrenceSection }) {
           );
         })}
       </div>
+      {cellTooltip && (
+        <div
+          className="annotation-hover-tooltip"
+          style={getFloatingTooltipStyle(
+            cellTooltip.x,
+            cellTooltip.y,
+            340,
+            Math.min(420, 64 + Math.max(1, Math.min(cellTooltip.contributors.length, 20)) * 74),
+          )}
+        >
+          {cellTooltip.contributors.length === 0 ? (
+            <div className="annotation-hover-tooltip-section">
+              <div className="annotation-hover-tooltip-code">
+                <span className="annotation-hover-tooltip-swatch" style={{ background: cellTooltip.rowColor }} />
+                {cellTooltip.rowLabel}
+                <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>x</span>
+                <span className="annotation-hover-tooltip-swatch" style={{ background: cellTooltip.colColor }} />
+                {cellTooltip.colLabel}: {cellTooltip.value}
+              </div>
+              <div className="annotation-hover-tooltip-quote">No matching sources</div>
+            </div>
+          ) : (
+            <>
+              {cellTooltip.contributors.slice(0, 20).map((contributor, index) => (
+                <div key={`${contributor}-${index}`} className="annotation-hover-tooltip-section">
+                  <div className="annotation-hover-tooltip-code">
+                    <span className="annotation-hover-tooltip-swatch" style={{ background: cellTooltip.rowColor }} />
+                    {cellTooltip.rowLabel}
+                    <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>x</span>
+                    <span className="annotation-hover-tooltip-swatch" style={{ background: cellTooltip.colColor }} />
+                    {cellTooltip.colLabel}: {cellTooltip.value}
+                  </div>
+                  <div className="annotation-hover-tooltip-quote">{truncateTooltipLabel(contributor)}</div>
+                </div>
+              ))}
+              {cellTooltip.contributors.length > 20 && (
+                <div className="annotation-hover-tooltip-section">
+                  <div className="annotation-hover-tooltip-code">
+                    <span className="annotation-hover-tooltip-swatch" style={{ background: cellTooltip.rowColor }} />
+                    {cellTooltip.rowLabel}
+                    <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>x</span>
+                    <span className="annotation-hover-tooltip-swatch" style={{ background: cellTooltip.colColor }} />
+                    {cellTooltip.colLabel}: {cellTooltip.value}
+                  </div>
+                  <div className="annotation-hover-tooltip-quote">+{cellTooltip.contributors.length - 20} more</div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -922,144 +1413,6 @@ function ExportModal({
   );
 }
 
-function CodeHierarchySelectionPanel({
-  codes,
-  selectedIds,
-  onChange,
-  disabled = false,
-  className,
-  showAllClear = false,
-}: {
-  codes: Code[];
-  selectedIds: Set<string>;
-  onChange: (ids: Set<string>) => void;
-  disabled?: boolean;
-  className?: string;
-  showAllClear?: boolean;
-}) {
-  const { t } = useI18n();
-  const [collapsedCodes, setCollapsedCodes] = useState<Set<string>>(new Set());
-
-  const tree = useMemo(() => buildCodeTree(codes), [codes]);
-  const visible = useMemo(() => visibleCodeNodes(tree, collapsedCodes), [tree, collapsedCodes]);
-
-  function toggleCollapse(id: string) {
-    setCollapsedCodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function handleCodeClick(code: Code) {
-    if (disabled) return;
-    const next = new Set(selectedIds);
-    if (next.has(code.id)) next.delete(code.id);
-    else next.add(code.id);
-    onChange(next);
-  }
-
-  return (
-    <div className={`annotate-card${className ? ` ${className}` : ""}`}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{t("reportsCodes.panels.codes")}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
-      </div>
-      {showAllClear && !disabled && codes.length > 0 && (
-        <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set(codes.map((item) => item.id)))}>{t("reportsCodes.actions.all")}</button>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => onChange(new Set())}>{t("reportsCodes.actions.clear")}</button>
-        </div>
-      )}
-      <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
-        {codes.length === 0 ? (
-          <li className="code-list-empty">{t("reportsCodes.empty.noCodes")}</li>
-        ) : visible.map(({ code, depth, hasChildren }) => (
-          <li
-            key={code.id}
-            className="code-item"
-            style={{ cursor: disabled ? "default" : "pointer", paddingLeft: 6 + depth * 16 }}
-            onClick={() => handleCodeClick(code)}
-          >
-            {hasChildren ? (
-              <button
-                type="button"
-                className="code-collapse-btn"
-                onClick={(e) => { e.stopPropagation(); toggleCollapse(code.id); }}
-                title={collapsedCodes.has(code.id) ? t("reportsCodes.actions.expand") : t("reportsCodes.actions.collapse")}
-              >
-                {collapsedCodes.has(code.id) ? "▶" : "▼"}
-              </button>
-            ) : (
-              <span className="code-collapse-spacer" />
-            )}
-            <input
-              type="checkbox"
-              className="memo-sel-checkbox"
-              checked={selectedIds.has(code.id)}
-              disabled={disabled}
-              onChange={(e) => { e.stopPropagation(); handleCodeClick(code); }}
-              onClick={(e) => e.stopPropagation()}
-            />
-            <span className="code-swatch" style={{ background: code.color }} />
-            <span className="code-label">{code.label}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function SelectionPanel({
-  title,
-  count,
-  collapsed,
-  onToggleCollapsed,
-  selectAll,
-  disabled = false,
-  headerExtra,
-  children,
-}: {
-  title: string;
-  count: number;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  selectAll?: {
-    checked: boolean;
-    disabled?: boolean;
-    onToggle: () => void;
-  };
-  disabled?: boolean;
-  headerExtra?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className="annotate-card">
-      <button
-        className="annotate-card-header"
-        style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }}
-        onClick={onToggleCollapsed}
-      >
-        <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-          <span className="annotate-card-title">{title}{count > 0 ? ` (${count})` : ""}</span>
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {headerExtra}
-          <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed ? "▶" : "▼"}</span>
-        </span>
-      </button>
-      {!collapsed && selectAll && !disabled && !selectAll.disabled && (
-        <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (!selectAll.checked) selectAll.onToggle(); }}>{t("reportsCodes.actions.all")}</button>
-          <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={(e) => { e.stopPropagation(); if (selectAll.checked) selectAll.onToggle(); }}>{t("reportsCodes.actions.clear")}</button>
-        </div>
-      )}
-      {!collapsed && children}
-    </div>
-  );
-}
-
 function NewCodeReportModal({
   onClose,
   onSelect,
@@ -1136,6 +1489,8 @@ function CodeReportCreationPage({
   kind,
   row,
   initialSettings,
+  postgresProjectId,
+  hideBackButton,
   onBack,
   onSaved,
   onUseSettings,
@@ -1143,24 +1498,23 @@ function CodeReportCreationPage({
   kind: CodeReportKind;
   row?: CodeReportRow;
   initialSettings?: CodeReportSettings;
+  postgresProjectId?: string;
+  hideBackButton?: boolean;
   onBack: () => void;
   onSaved?: (row: CodeReportRow) => void;
   onUseSettings?: (settings: CodeReportSettings) => void;
 }) {
   const { t } = useI18n();
-  const { pb, activeProject, documents: storeDocuments, codes: storeCodes, createCodeReport, canCurrentUser } = useStore();
-  const { user: currentUser } = useAuth();
   const isFrozen = !!row;
-  const canCreateReports = canCurrentUser("createReports");
-  const canEditReportConfiguration = canCurrentUser("editReportConfiguration");
-  const canStartReports = canCreateReports && canEditReportConfiguration;
-  const canExportReports = canCurrentUser("exportReports");
+  const canStartReports = true;
+  const canExportReports = true;
   const frozenSnapshot = row?.snapshot;
   const activeSettings = frozenSnapshot?.settings ?? initialSettings;
   const reportKind = frozenSnapshot?.kind ?? kind;
 
   const [name, setName] = useState(row?.name ?? "");
   const [caseItems, setCaseItems] = useState<CaseItem[]>(frozenSnapshot?.caseItems ?? []);
+  const [relationshipItems, setRelationshipItems] = useState<RelationshipItem[]>(frozenSnapshot?.relationshipItems ?? []);
   const [userItems, setUserItems] = useState<UserItem[]>(frozenSnapshot?.userItems ?? []);
   const [caseAttributeItems, setCaseAttributeItems] = useState<AttributeItem[]>(frozenSnapshot?.caseAttributeItems ?? []);
   const [documentAttributeItems, setDocumentAttributeItems] = useState<AttributeItem[]>(frozenSnapshot?.documentAttributeItems ?? []);
@@ -1168,6 +1522,8 @@ function CodeReportCreationPage({
   const [caseDocumentLinks, setCaseDocumentLinks] = useState<CaseDocumentLink[]>(frozenSnapshot?.caseDocumentLinks ?? []);
   const [caseAttributeValues, setCaseAttributeValues] = useState<AttributeValueItem[]>(frozenSnapshot?.caseAttributeValues ?? []);
   const [documentAttributeValues, setDocumentAttributeValues] = useState<AttributeValueItem[]>(frozenSnapshot?.documentAttributeValues ?? []);
+  const [postgresDocuments, setPostgresDocuments] = useState<ProjectDocument[] | null>(null);
+  const [postgresCodes, setPostgresCodes] = useState<Code[] | null>(null);
   const [loadingFilters, setLoadingFilters] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDescription, setShowDescription] = useState(() => hasDescriptionContent(frozenSnapshot?.description));
@@ -1177,140 +1533,87 @@ function CodeReportCreationPage({
 
   const [selCaseIds, setSelCaseIds] = useState<Set<string>>(() => new Set(activeSettings?.caseIds ?? []));
   const [selDocIds, setSelDocIds] = useState<Set<string>>(() => new Set(activeSettings?.documentIds ?? []));
+  const [selRelationshipIds, setSelRelationshipIds] = useState<Set<string>>(() => new Set(activeSettings?.relationshipIds ?? []));
   const [selCaseAttrIds, setSelCaseAttrIds] = useState<Set<string>>(() => new Set(activeSettings?.caseAttributeIds ?? []));
   const [selDocAttrIds, setSelDocAttrIds] = useState<Set<string>>(() => new Set(activeSettings?.documentAttributeIds ?? []));
+  const [selCaseTypes, setSelCaseTypes] = useState<Set<string>>(() => new Set(activeSettings?.caseTypes ?? []));
+  const [selDocTypes, setSelDocTypes] = useState<Set<string>>(() => new Set(activeSettings?.documentTypes ?? []));
   const [selCodeIds, setSelCodeIds] = useState<Set<string>>(() => new Set(activeSettings?.codeIds ?? []));
   const [selUserIds, setSelUserIds] = useState<Set<string>>(() => new Set(activeSettings?.userIds ?? []));
   const [caseAttributeFilters, setCaseAttributeFilters] = useState<Record<string, AttributeFilterConfig>>(() => activeSettings?.caseAttributeFilters ?? {});
   const [documentAttributeFilters, setDocumentAttributeFilters] = useState<Record<string, AttributeFilterConfig>>(() => activeSettings?.documentAttributeFilters ?? {});
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(["cases", "documents", "users"]));
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(["cases", "documents", "relationships", "users"]));
   const [expandedSummaryCards, setExpandedSummaryCards] = useState<Set<string>>(new Set());
   const [showCaseAttributeFilters, setShowCaseAttributeFilters] = useState(false);
   const [showDocumentAttributeFilters, setShowDocumentAttributeFilters] = useState(false);
+  const [relationshipSortKey, setRelationshipSortKey] = useState<RelationshipSortKey>("relationshipType");
+  const [relationshipSortDir, setRelationshipSortDir] = useState<RelationshipSortDir>("asc");
   const descriptionEditor = useEditor({
     extensions: [StarterKit],
     editorProps: { attributes: { class: "report-description-editor" } },
     editable: !isFrozen,
     content: frozenSnapshot?.description ?? "",
   });
-  const documents = frozenSnapshot?.documents ?? storeDocuments;
-  const codes = frozenSnapshot?.codes ?? storeCodes;
+  const documents = frozenSnapshot?.documents ?? postgresDocuments ?? [];
+  const codes = frozenSnapshot?.codes ?? postgresCodes ?? [];
+
+  const caseTypeOptions = useMemo(() => {
+    const values = new Set(caseItems.map((item) => formatObjectType(item.objectType)));
+    return [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+  }, [caseItems]);
+
+  const documentTypeOptions = useMemo(() => {
+    const values = new Set(documents.map((doc) => formatSourceType(doc.type)));
+    return [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+  }, [documents]);
 
   useEffect(() => {
-    if (isFrozen || !pb || !activeProject) return;
+    if (isFrozen || loadingFilters || selCaseTypes.size > 0 || caseTypeOptions.length === 0) return;
+    setSelCaseTypes(new Set(caseTypeOptions));
+  }, [caseTypeOptions, isFrozen, loadingFilters, selCaseTypes.size]);
+
+  useEffect(() => {
+    if (isFrozen || loadingFilters || selDocTypes.size > 0 || documentTypeOptions.length === 0) return;
+    setSelDocTypes(new Set(documentTypeOptions));
+  }, [documentTypeOptions, isFrozen, loadingFilters, selDocTypes.size]);
+
+  useEffect(() => {
+    if (isFrozen || !postgresProjectId) return;
     let cancelled = false;
 
-    async function loadFilterData() {
+    async function loadPostgresData() {
       setLoadingFilters(true);
       setError(null);
       try {
-        const [caseRecs, memberRecs, caseAttrRecs, docAttrRecs, annotationRecs] = await Promise.all([
-          pb.collection("cases").getFullList({
-            filter: `project="${activeProject!.id}"&&deleted_at=""`,
-            sort: "name",
-          }),
-          pb.collection("project_members").getFullList({
-            filter: `project="${activeProject!.id}"`,
-            expand: "user",
-          }),
-          pb.collection("case_attribute_definitions").getFullList({
-            filter: `project="${activeProject!.id}"&&deleted_at=""`,
-            sort: "sort_order,name",
-          }),
-          pb.collection("document_attribute_definitions").getFullList({
-            filter: `project="${activeProject!.id}"&&deleted_at=""`,
-            sort: "sort_order,name",
-          }),
-          storeDocuments.length > 0
-            ? pb.collection("annotations").getFullList({
-                filter: `(${storeDocuments.map((doc) => `document="${doc.id}"`).join(" || ")})&&deleted_at=""`,
-                sort: "created",
-                expand: "created_by",
-              })
-            : Promise.resolve([]),
-        ]);
-
-        const [caseDocRecs, caseAttrValueRecs, docAttrValueRecs] = await Promise.all([
-          caseRecs.length > 0
-            ? pb.collection("case_documents").getFullList({
-                filter: caseRecs.map((caseItem) => `case="${caseItem.id}"`).join(" || "),
-              })
-            : Promise.resolve([]),
-          caseRecs.length > 0
-            ? pb.collection("case_attribute_values").getFullList({
-                filter: `(${caseRecs.map((caseItem) => `case="${caseItem.id}"`).join(" || ")})&&deleted_at=""`,
-              })
-            : Promise.resolve([]),
-          storeDocuments.length > 0
-            ? pb.collection("document_attribute_values").getFullList({
-                filter: `(${storeDocuments.map((doc) => `document="${doc.id}"`).join(" || ")})&&deleted_at=""`,
-              })
-            : Promise.resolve([]),
-        ]);
-
+        const data = await loadPostgresReportBuilderData(postgresProjectId!);
         if (cancelled) return;
-        setCaseItems(caseRecs.map((r) => ({ id: r.id, name: r.name })));
-        setAllAnnotations(annotationRecs.map((r) => ({
-          id: r.id,
-          documentId: r.document,
-          codeId: r.code,
-          startOffset: r.start_offset ?? 0,
-          endOffset: r.end_offset ?? 0,
-          quote: r.quote ?? "",
-          note: r.note ?? "",
-          createdAt: r.created,
-          createdBy: r.expand?.created_by?.name || r.expand?.created_by?.email || "",
-          createdById: r.created_by ?? "",
-        })));
-        setCaseDocumentLinks(caseDocRecs.map((r) => ({
-          caseId: r.case,
-          documentId: r.document,
-        })));
-        setCaseAttributeValues(caseAttrValueRecs.map((r) => ({
-          id: r.id,
-          ownerId: r.case,
-          attributeId: r.attribute,
-          value: r.value ?? "",
-        })));
-        setDocumentAttributeValues(docAttrValueRecs.map((r) => ({
-          id: r.id,
-          ownerId: r.document,
-          attributeId: r.attribute,
-          value: r.value ?? "",
-        })));
-        setCaseAttributeItems(caseAttrRecs.map((r) => ({
-          id: r.id,
-          name: r.name ?? t("reportsCodes.untitledAttribute"),
-          dataType: r.data_type ?? "text",
-        })));
-        setDocumentAttributeItems(docAttrRecs.map((r) => ({
-          id: r.id,
-          name: r.name ?? t("reportsCodes.untitledAttribute"),
-          dataType: r.data_type ?? "text",
-        })));
-        setUserItems(
-          memberRecs
-            .map((r) => {
-              const u = r.expand?.user;
-              return u ? { id: u.id, name: u.name || u.email || t("reportsCodes.exportSections.unknown") } : null;
-            })
-            .filter(Boolean) as UserItem[],
-        );
+        setCaseItems(data.cases);
+        setRelationshipItems(data.relationships);
+        setUserItems(data.users);
+        setCaseAttributeItems(data.caseAttributeItems);
+        setDocumentAttributeItems(data.documentAttributeItems);
+        setAllAnnotations(data.annotations);
+        setCaseDocumentLinks(data.caseDocumentLinks);
+        setCaseAttributeValues(data.caseAttributeValues);
+        setDocumentAttributeValues(data.documentAttributeValues);
+        setPostgresDocuments(data.documents);
+        setPostgresCodes(data.codes);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : t("reportsCodes.errors.loadFilters"));
+        if (!cancelled) setError(e instanceof Error ? e.message : "Unable to load report data.");
       } finally {
         if (!cancelled) setLoadingFilters(false);
       }
     }
 
-    loadFilterData();
-    return () => { cancelled = true; };
-  }, [isFrozen, pb, activeProject, storeDocuments]);
+    void loadPostgresData();
+    return () => {
+      cancelled = true;
+    };
+  }, [isFrozen, postgresProjectId]);
 
   const reportLabel = getCodeReportLabel(t, reportKind);
-  const createdBy = row?.createdByName || currentUser?.name || currentUser?.email || "-";
-  const visibleCases = selCaseIds.size;
-  const visibleDocs = selDocIds.size;
+  const createdBy = row?.createdByName || "-";
+  const visibleRelationships = selRelationshipIds.size;
   const visibleCodes = selCodeIds.size;
   const visibleUsers = selUserIds.size;
   const visibleCaseAttrs = selCaseAttrIds.size;
@@ -1327,30 +1630,14 @@ function CodeReportCreationPage({
   const codeBuckets = useMemo(() => {
     if (selCodeIds.size === 0) return [] as FrequencyCodeBucket[];
     const tree = buildCodeTree(codes);
-    const codeById = new Map(codes.map((code) => [code.id, code]));
-    const depthById = new Map(tree.map((node) => [node.code.id, node.depth]));
-    const selectedExistingIds = [...selCodeIds].filter((id) => codeById.has(id));
-    if (selectedExistingIds.length === 0) return [] as FrequencyCodeBucket[];
-    const targetDepth = Math.min(...selectedExistingIds.map((id) => depthById.get(id) ?? 0));
-    const bucketById = new Map<string, FrequencyCodeBucket>();
-
-    for (const selectedId of selectedExistingIds) {
-      const bucketCode = ancestorAtDepth(selectedId, targetDepth, codeById, depthById);
-      if (!bucketCode) continue;
-      if (!bucketById.has(bucketCode.id)) {
-        bucketById.set(bucketCode.id, {
-          id: bucketCode.id,
-          label: bucketCode.label,
-          color: bucketCode.color,
-          codeIds: new Set(),
-        });
-      }
-      bucketById.get(bucketCode.id)!.codeIds.add(selectedId);
-    }
-
     return tree
-      .filter((node) => bucketById.has(node.code.id))
-      .map((node) => bucketById.get(node.code.id)!);
+      .filter((node) => selCodeIds.has(node.code.id))
+      .map((node) => ({
+        id: node.code.id,
+        label: node.code.label,
+        color: node.code.color,
+        codeIds: new Set([node.code.id]),
+      }));
   }, [codes, selCodeIds]);
 
   const selectedCoOccurrenceCodes = useMemo(() => buildCodeTree(codes)
@@ -1536,13 +1823,29 @@ function CodeReportCreationPage({
     return matching;
   }, [selDocAttrIds, documents, documentAttributeMap, documentAttributeItems, documentAttributeFilters, documentAttributeValueStats]);
 
+  const caseIdsMatchingSelectedTypes = useMemo(() => {
+    if (caseTypeOptions.length === 0 || selCaseTypes.size === caseTypeOptions.length) return null;
+    return new Set(caseItems.filter((item) => selCaseTypes.has(formatObjectType(item.objectType))).map((item) => item.id));
+  }, [caseItems, caseTypeOptions.length, selCaseTypes]);
+
+  const docIdsMatchingSelectedTypes = useMemo(() => {
+    if (documentTypeOptions.length === 0 || selDocTypes.size === documentTypeOptions.length) return null;
+    return new Set(documents.filter((doc) => selDocTypes.has(formatSourceType(doc.type))).map((doc) => doc.id));
+  }, [documentTypeOptions.length, documents, selDocTypes]);
+
   const filteredSelectedCaseIds = useMemo(() => {
-    if (!caseIdsMatchingSelectedAttributes) return new Set(selCaseIds);
-    return new Set([...selCaseIds].filter((caseId) => caseIdsMatchingSelectedAttributes.has(caseId)));
-  }, [selCaseIds, caseIdsMatchingSelectedAttributes]);
+    return new Set([...selCaseIds].filter((caseId) => {
+      if (caseIdsMatchingSelectedTypes && !caseIdsMatchingSelectedTypes.has(caseId)) return false;
+      if (caseIdsMatchingSelectedAttributes && !caseIdsMatchingSelectedAttributes.has(caseId)) return false;
+      return true;
+    }));
+  }, [selCaseIds, caseIdsMatchingSelectedTypes, caseIdsMatchingSelectedAttributes]);
 
   const filteredSelectedDocIds = useMemo(() => {
     let next = new Set(selDocIds);
+    if (docIdsMatchingSelectedTypes) {
+      next = new Set([...next].filter((docId) => docIdsMatchingSelectedTypes.has(docId)));
+    }
     if (docIdsMatchingSelectedAttributes) {
       next = new Set([...next].filter((docId) => docIdsMatchingSelectedAttributes.has(docId)));
     }
@@ -1558,7 +1861,7 @@ function CodeReportCreationPage({
       );
     }
     return next;
-  }, [selDocIds, docIdsMatchingSelectedAttributes, filteredSelectedCaseIds, caseDocumentMap, documentCaseMap]);
+  }, [selDocIds, docIdsMatchingSelectedTypes, docIdsMatchingSelectedAttributes, filteredSelectedCaseIds, caseDocumentMap, documentCaseMap]);
 
   const selectedAnnotations = useMemo(
     () => allAnnotations.filter((ann) =>
@@ -1568,6 +1871,8 @@ function CodeReportCreationPage({
     ),
     [allAnnotations, selCodeIds, selUserIds, filteredSelectedDocIds],
   );
+  const visibleCases = filteredSelectedCaseIds.size;
+  const visibleDocs = filteredSelectedDocIds.size;
 
   const annotationsByDocument = useMemo(() => {
     const map = new Map<string, Annotation[]>();
@@ -1588,6 +1893,50 @@ function CodeReportCreationPage({
     [documentAttributeItems, selDocAttrIds, documentAttributeFilters, documentAttributeValueStats],
   );
 
+  const caseTypeFilterDetails = useMemo(() => {
+    if (caseTypeOptions.length === 0 || selCaseTypes.size === caseTypeOptions.length) return [];
+    if (selCaseTypes.size === 0) return ["Object Type: no types selected"];
+    const values = [...selCaseTypes].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+    return [`Object Type: ${values.length <= 4 ? values.join(", ") : `${values.slice(0, 4).join(", ")} +${values.length - 4} more`}`];
+  }, [caseTypeOptions.length, selCaseTypes]);
+
+  const documentTypeFilterDetails = useMemo(() => {
+    if (documentTypeOptions.length === 0 || selDocTypes.size === documentTypeOptions.length) return [];
+    if (selDocTypes.size === 0) return ["Source Type: no types selected"];
+    const values = [...selDocTypes].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+    return [`Source Type: ${values.length <= 4 ? values.join(", ") : `${values.slice(0, 4).join(", ")} +${values.length - 4} more`}`];
+  }, [documentTypeOptions.length, selDocTypes]);
+
+  const activeCaseFilterDetails = [...caseTypeFilterDetails, ...caseFilterDetails];
+  const activeDocumentFilterDetails = [...documentTypeFilterDetails, ...documentFilterDetails];
+  const hasActiveFilters = activeCaseFilterDetails.length > 0 || activeDocumentFilterDetails.length > 0;
+
+  const relationshipColumnValue = (relationship: RelationshipItem, key: RelationshipSortKey) => {
+    if (key === "relationshipType") return relationship.relationshipType || relationship.name || "Relationship";
+    if (key === "object1Name") return relationship.object1Name || "Unknown object";
+    return relationship.object2Name || "Unknown object";
+  };
+
+  const sortedRelationshipItems = useMemo(() => {
+    return [...relationshipItems].sort((a, b) => {
+      const cmp = relationshipColumnValue(a, relationshipSortKey).localeCompare(
+        relationshipColumnValue(b, relationshipSortKey),
+        undefined,
+        { sensitivity: "base", numeric: true },
+      );
+      return relationshipSortDir === "asc" ? cmp : -cmp;
+    });
+  }, [relationshipItems, relationshipSortDir, relationshipSortKey]);
+
+  function toggleRelationshipSort(key: RelationshipSortKey) {
+    if (relationshipSortKey === key) {
+      setRelationshipSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setRelationshipSortKey(key);
+    setRelationshipSortDir("asc");
+  }
+
   const coOccurrenceSections = useMemo(() => {
     if (isFrozen && frozenSnapshot?.frozenCoOccurrenceSections) {
       return frozenSnapshot.frozenCoOccurrenceSections;
@@ -1604,6 +1953,7 @@ function CodeReportCreationPage({
     const buildMatrix = (
       id: string,
       entityCodeSets: Set<string>[],
+      entityLabels: string[],
       subtitle?: string,
       diagonalEmpty = false,
     ): CoOccurrenceMatrix => ({
@@ -1611,6 +1961,16 @@ function CodeReportCreationPage({
       subtitle,
       diagonalEmpty,
       codes: codesForMatrix,
+      entityCodeSets: entityCodeSets.map((codeSet) => [...codeSet]),
+      entityLabels,
+      tooltipCells: codesForMatrix.map((rowCode, rowIndex) => codesForMatrix.map((colCode, colIndex) => {
+        if (diagonalEmpty && rowIndex === colIndex) return [];
+        const labels: string[] = [];
+        entityCodeSets.forEach((codeSet, index) => {
+          if (codeSet.has(rowCode.id) && codeSet.has(colCode.id)) labels.push(entityLabels[index] ?? "Untitled");
+        });
+        return labels;
+      })),
       cells: codesForMatrix.map((rowCode, rowIndex) => codesForMatrix.map((colCode, colIndex) => {
         if (diagonalEmpty && rowIndex === colIndex) return 0;
         let count = 0;
@@ -1631,15 +1991,16 @@ function CodeReportCreationPage({
       const anns = selectedAnnotations.filter((a) => a.createdById === userId && selCodeIds.has(a.codeId));
       sections.push({
         key: "users",
-        title: "Users",
+        title: "Frequencies",
         matrices: [],
         singleEntityFreq: { entityLabel: user?.name || t("reportsCodes.exportSections.unknown"), codeCounts: countPerCode(anns) },
       });
     } else if (selUserIds.size > 1) {
-      const entityCodeSets = userItems
-        .filter((item) => selUserIds.has(item.id))
+      const selectedUsers = userItems.filter((item) => selUserIds.has(item.id));
+      const entityCodeSets = selectedUsers
         .map((item) => makeCodeSet(selectedAnnotations.filter((ann) => ann.createdById === item.id)));
-      sections.push({ key: "users", title: "Users", matrices: [buildMatrix("users", entityCodeSets)] });
+      const entityLabels = selectedUsers.map((item) => item.name);
+      sections.push({ key: "users", title: "Frequencies", matrices: [buildMatrix("users", entityCodeSets, entityLabels)] });
     }
 
     if (filteredSelectedCaseIds.size === 1) {
@@ -1652,13 +2013,13 @@ function CodeReportCreationPage({
       const filtered = anns.filter((a) => selCodeIds.has(a.codeId));
       sections.push({
         key: "cases",
-        title: "Cases",
+        title: "Objects",
         matrices: [],
         singleEntityFreq: { entityLabel: caseItem?.name || t("reportsCodes.exportSections.unknown"), codeCounts: countPerCode(filtered) },
       });
     } else if (filteredSelectedCaseIds.size > 1) {
-      const entityCodeSets = caseItems
-        .filter((item) => filteredSelectedCaseIds.has(item.id))
+      const selectedCases = caseItems.filter((item) => filteredSelectedCaseIds.has(item.id));
+      const entityCodeSets = selectedCases
         .map((item) => {
           const annotations: Annotation[] = [];
           for (const docId of caseDocumentMap.get(item.id) ?? []) {
@@ -1667,7 +2028,8 @@ function CodeReportCreationPage({
           }
           return makeCodeSet(annotations);
         });
-      sections.push({ key: "cases", title: "Cases", matrices: [buildMatrix("cases", entityCodeSets)] });
+      const entityLabels = selectedCases.map((item) => item.name);
+      sections.push({ key: "cases", title: "Objects", matrices: [buildMatrix("cases", entityCodeSets, entityLabels)] });
     }
 
     if (filteredSelectedDocIds.size === 1) {
@@ -1676,15 +2038,15 @@ function CodeReportCreationPage({
       const anns = (annotationsByDocument.get(docId) ?? []).filter((a) => selCodeIds.has(a.codeId));
       sections.push({
         key: "documents",
-        title: "Documents",
+        title: "Co-occurence per Source",
         matrices: [],
         singleEntityFreq: { entityLabel: doc?.name || t("reportsCodes.exportSections.unknown"), codeCounts: countPerCode(anns) },
       });
     } else if (filteredSelectedDocIds.size > 1) {
-      const entityCodeSets = documents
-        .filter((item) => filteredSelectedDocIds.has(item.id))
-        .map((item) => makeCodeSet(annotationsByDocument.get(item.id) ?? []));
-      sections.push({ key: "documents", title: "Documents", matrices: [buildMatrix("documents", entityCodeSets)] });
+      const selectedDocuments = documents.filter((item) => filteredSelectedDocIds.has(item.id));
+      const entityCodeSets = selectedDocuments.map((item) => makeCodeSet(annotationsByDocument.get(item.id) ?? []));
+      const entityLabels = selectedDocuments.map((item) => item.name);
+      sections.push({ key: "documents", title: "Co-occurence per Source", matrices: [buildMatrix("documents", entityCodeSets, entityLabels)] });
     }
 
     if (selCaseAttrIds.size > 0) {
@@ -1698,15 +2060,19 @@ function CodeReportCreationPage({
           caseIdsByValue.get(valueLabel)!.add(value.ownerId);
         }
         for (const [valueLabel, caseIds] of caseIdsByValue) {
-          const entityCodeSets = [...caseIds].map((caseId) => {
+          const selectedCases = [...caseIds]
+            .map((caseId) => caseItems.find((item) => item.id === caseId))
+            .filter((item): item is CaseItem => !!item);
+          const entityCodeSets = selectedCases.map((caseItem) => {
             const annotations: Annotation[] = [];
-            for (const docId of caseDocumentMap.get(caseId) ?? []) {
+            for (const docId of caseDocumentMap.get(caseItem.id) ?? []) {
               if (!filteredSelectedDocIds.has(docId)) continue;
               annotations.push(...(annotationsByDocument.get(docId) ?? []));
             }
             return makeCodeSet(annotations);
           });
-          matrices.push(buildMatrix(`${attr.id}:${valueLabel}`, entityCodeSets, `${attr.name}: ${valueLabel}`, true));
+          const entityLabels = selectedCases.map((item) => item.name);
+          matrices.push(buildMatrix(`${attr.id}:${valueLabel}`, entityCodeSets, entityLabels, `${attr.name}: ${valueLabel}`, true));
         }
       }
       sections.push({ key: "case-attributes", title: "Case Attributes", matrices });
@@ -1723,8 +2089,12 @@ function CodeReportCreationPage({
           docIdsByValue.get(valueLabel)!.add(value.ownerId);
         }
         for (const [valueLabel, docIds] of docIdsByValue) {
-          const entityCodeSets = [...docIds].map((docId) => makeCodeSet(annotationsByDocument.get(docId) ?? []));
-          matrices.push(buildMatrix(`${attr.id}:${valueLabel}`, entityCodeSets, `${attr.name}: ${valueLabel}`, true));
+          const selectedDocuments = [...docIds]
+            .map((docId) => documents.find((item) => item.id === docId))
+            .filter((item): item is ProjectDocument => !!item);
+          const entityCodeSets = selectedDocuments.map((doc) => makeCodeSet(annotationsByDocument.get(doc.id) ?? []));
+          const entityLabels = selectedDocuments.map((item) => item.name);
+          matrices.push(buildMatrix(`${attr.id}:${valueLabel}`, entityCodeSets, entityLabels, `${attr.name}: ${valueLabel}`, true));
         }
       }
       sections.push({ key: "document-attributes", title: "Document Attributes", matrices });
@@ -1773,7 +2143,7 @@ function CodeReportCreationPage({
     if (filteredSelectedCaseIds.size > 0) {
       sections.push({
         key: "cases",
-        title: "Cases",
+        title: "Objects",
         columns: caseItems
           .filter((item) => filteredSelectedCaseIds.has(item.id))
           .map((item) => {
@@ -1810,7 +2180,7 @@ function CodeReportCreationPage({
     if (filteredSelectedDocIds.size > 0) {
       sections.push({
         key: "documents",
-        title: "Documents",
+        title: "Sources",
         columns: documents
           .filter((item) => filteredSelectedDocIds.has(item.id))
           .map((item) => ({
@@ -1866,19 +2236,40 @@ function CodeReportCreationPage({
     });
   }
 
+  function toggle(set: Set<string>, id: string) {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  }
+
+  function clearPrimarySelections() {
+    setSelCaseIds(new Set());
+    setSelDocIds(new Set());
+    setSelRelationshipIds(new Set());
+    setSelCodeIds(new Set());
+    setSelUserIds(new Set());
+  }
+
   function applyPrimarySelectionState(
     nextCaseIds: Set<string>,
     nextDocIds: Set<string>,
     nextCodeIds: Set<string>,
     nextUserIds: Set<string>,
+    options?: { preserveRelationshipSelection?: boolean },
   ) {
     setSelCaseIds(nextCaseIds);
     setSelDocIds(nextDocIds);
     setSelCodeIds(nextCodeIds);
     setSelUserIds(nextUserIds);
+    if (!options?.preserveRelationshipSelection) setSelRelationshipIds(new Set());
   }
 
   function applySelectionFromCases(nextCaseIds: Set<string>) {
+    if (nextCaseIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
     const nextDocIds = new Set<string>();
     const nextCodeIds = new Set<string>();
     const nextUserIds = new Set<string>();
@@ -1899,7 +2290,44 @@ function CodeReportCreationPage({
     applyPrimarySelectionState(nextCaseIds, nextDocIds, nextCodeIds, nextUserIds);
   }
 
+  function applySelectionFromRelationships(nextRelationshipIds: Set<string>) {
+    if (nextRelationshipIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
+    const nextCaseIds = new Set<string>();
+    for (const relationship of relationshipItems) {
+      if (!nextRelationshipIds.has(relationship.id)) continue;
+      if (relationship.object1Id) nextCaseIds.add(relationship.object1Id);
+      if (relationship.object2Id) nextCaseIds.add(relationship.object2Id);
+    }
+    if (nextCaseIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
+    const nextDocIds = new Set<string>();
+    const nextCodeIds = new Set<string>();
+    const nextUserIds = new Set<string>();
+    for (const caseId of nextCaseIds) {
+      for (const docId of caseDocumentMap.get(caseId) ?? []) {
+        nextDocIds.add(docId);
+      }
+    }
+    for (const docId of nextDocIds) {
+      for (const ann of annotationsByDocument.get(docId) ?? []) {
+        nextCodeIds.add(ann.codeId);
+        nextUserIds.add(ann.createdById);
+      }
+    }
+    setSelRelationshipIds(new Set(nextRelationshipIds));
+    applyPrimarySelectionState(nextCaseIds, nextDocIds, nextCodeIds, nextUserIds, { preserveRelationshipSelection: true });
+  }
+
   function applySelectionFromDocuments(nextDocIds: Set<string>) {
+    if (nextDocIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
     const nextCaseIds = new Set<string>();
     const nextCodeIds = new Set<string>();
     const nextUserIds = new Set<string>();
@@ -1918,6 +2346,10 @@ function CodeReportCreationPage({
   }
 
   function applySelectionFromCodes(nextCodeIds: Set<string>) {
+    if (nextCodeIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
     const nextDocIds = new Set<string>();
     const nextCaseIds = new Set<string>();
     const nextUserIds = new Set<string>();
@@ -1935,6 +2367,10 @@ function CodeReportCreationPage({
   }
 
   function applySelectionFromUsers(nextUserIds: Set<string>) {
+    if (nextUserIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
     const nextDocIds = new Set<string>();
     const nextCaseIds = new Set<string>();
     const nextCodeIds = new Set<string>();
@@ -2006,6 +2442,14 @@ function CodeReportCreationPage({
 
   function clearDocumentAttributeSelections() {
     setSelDocAttrIds(new Set());
+  }
+
+  function toggleCaseTypeSelection(typeLabel: string) {
+    setSelCaseTypes((current) => toggle(current, typeLabel));
+  }
+
+  function toggleDocumentTypeSelection(typeLabel: string) {
+    setSelDocTypes((current) => toggle(current, typeLabel));
   }
 
   function updateCaseAttributeFilter(attrId: string, updates: AttributeFilterConfig) {
@@ -2265,7 +2709,7 @@ function CodeReportCreationPage({
       label: t("reportsCodes.panels.cases"),
       value: visibleCases,
       items: caseItems
-        .filter((item) => selCaseIds.has(item.id))
+        .filter((item) => filteredSelectedCaseIds.has(item.id))
         .map((item) => ({ id: item.id, name: item.name })),
     },
     {
@@ -2273,8 +2717,19 @@ function CodeReportCreationPage({
       label: t("reportsCodes.panels.documents"),
       value: visibleDocs,
       items: documents
-        .filter((item) => selDocIds.has(item.id))
+        .filter((item) => filteredSelectedDocIds.has(item.id))
         .map((item) => ({ id: item.id, name: item.name })),
+    },
+    {
+      key: "relationships",
+      label: t("reportsCodes.panels.relationships"),
+      value: visibleRelationships,
+      items: relationshipItems
+        .filter((item) => selRelationshipIds.has(item.id))
+        .map((item) => ({
+          id: item.id,
+          name: `${relationshipColumnValue(item, "relationshipType")} (${relationshipColumnValue(item, "object1Name")} - ${relationshipColumnValue(item, "object2Name")})`,
+        })),
     },
     {
       key: "codes",
@@ -2295,13 +2750,13 @@ function CodeReportCreationPage({
   ];
 
   const includedCaseNames = useMemo(
-    () => caseItems.filter((item) => selCaseIds.has(item.id)).map((item) => item.name),
-    [caseItems, selCaseIds],
+    () => caseItems.filter((item) => filteredSelectedCaseIds.has(item.id)).map((item) => item.name),
+    [caseItems, filteredSelectedCaseIds],
   );
 
   const includedDocumentNames = useMemo(
-    () => documents.filter((item) => selDocIds.has(item.id)).map((item) => item.name),
-    [documents, selDocIds],
+    () => documents.filter((item) => filteredSelectedDocIds.has(item.id)).map((item) => item.name),
+    [documents, filteredSelectedDocIds],
   );
 
   const includedUserNames = useMemo(
@@ -2383,8 +2838,11 @@ function CodeReportCreationPage({
       kind: reportKind,
       caseIds: [...selCaseIds],
       documentIds: [...selDocIds],
+      relationshipIds: [...selRelationshipIds],
       caseAttributeIds: [...selCaseAttrIds],
       documentAttributeIds: [...selDocAttrIds],
+      caseTypes: [...selCaseTypes],
+      documentTypes: [...selDocTypes],
       codeIds: [...selCodeIds],
       userIds: [...selUserIds],
       caseAttributeFilters,
@@ -2404,6 +2862,7 @@ function CodeReportCreationPage({
       kind: reportKind,
       settings: currentSettings(),
       caseItems,
+      relationshipItems,
       userItems,
       caseAttributeItems,
       documentAttributeItems,
@@ -2419,6 +2878,22 @@ function CodeReportCreationPage({
       documentAttributeValues: [],
       description: currentDescriptionHtml(),
     };
+  }
+
+  async function recordReportExport(format: string, filePath: string) {
+    if (!postgresProjectId || !row?.id) return;
+    try {
+      await logPostgresReportExport({
+        projectId: postgresProjectId,
+        reportId: row.id,
+        title: name || row.name || "Report",
+        reportType: "code-report",
+        format,
+        filePath,
+      });
+    } catch (e) {
+      console.warn("Could not log report export:", e);
+    }
   }
 
   function exportHeatmapColor(value: number, max: number): string {
@@ -2473,26 +2948,25 @@ function CodeReportCreationPage({
 
   async function handleSave() {
     if (!canStartReports) return;
-    if (!activeProject || isFrozen) return;
+    if (!postgresProjectId || isFrozen) return;
     setSaving(true);
     setError(null);
     try {
       const reportName = name.trim() || `${reportLabel} Report`;
       const snapshot = buildSnapshot();
-      const record = await createCodeReport({
-        name: reportName,
-        caseIds: relationPreview(snapshot.settings.caseIds),
-        documentIds: relationPreview(snapshot.settings.documentIds),
-        codeIds: relationPreview(snapshot.settings.codeIds),
-        createdBy: currentUser?.id,
-        snapshot: JSON.stringify(snapshot),
+      const record = await createPostgresReport({
+        projectId: postgresProjectId,
+        title: reportName,
+        reportType: "code-report",
+        settingsJson: JSON.stringify(snapshot.settings),
+        contentJson: JSON.stringify(snapshot),
+        contentText: reportLabel,
       });
-      if (!record) throw new Error("Failed to save report.");
       const savedRow: CodeReportRow = {
         id: record.id,
-        name: record.name || reportName,
-        createdByName: currentUser?.name || currentUser?.email || "-",
-        createdAt: record.created,
+        name: record.title || reportName,
+        createdByName: record.createdByName || "-",
+        createdAt: record.createdAt,
         snapshot,
       };
       onSaved?.(savedRow);
@@ -2616,7 +3090,7 @@ function CodeReportCreationPage({
     ${description ? `<h2>${escapeHtml(t("reportsCodes.exportSections.description"))}</h2><div class="description">${description}</div>` : ""}
     <h2>${escapeHtml(t("reportsCodes.exportSections.summary"))}</h2>
     <table class="summary">
-      <tr><th>Users</th><th>Cases</th><th>Case Attributes</th><th>Documents</th><th>Document Attributes</th><th>Codes</th></tr>
+      <tr><th>Users</th><th>Objects</th><th>Object Attributes</th><th>Sources</th><th>Source Attributes</th><th>Codes</th></tr>
       <tr><td>${visibleUsers}</td><td>${visibleCases}</td><td>${visibleCaseAttrs}</td><td>${visibleDocs}</td><td>${visibleDocAttrs}</td><td>${visibleCodes}</td></tr>
     </table>
     ${resultsHtml}
@@ -2631,6 +3105,7 @@ function CodeReportCreationPage({
       const path = await save({ defaultPath: `${name || "Report"}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
       if (!path) return;
       await writeTextFile(path, getExportHtml());
+      await recordReportExport("html", path);
     } catch {
       setError("HTML export failed.");
     } finally {
@@ -2694,9 +3169,9 @@ function CodeReportCreationPage({
       metaRows.push([]);
       metaRows.push([sectionCell(t("reportsCodes.exportSections.summary"))]);
       metaRows.push(["Users", visibleUsers]);
-      metaRows.push(["Cases", visibleCases]);
+      metaRows.push(["Objects", visibleCases]);
       metaRows.push(["Case Attributes", visibleCaseAttrs]);
-      metaRows.push(["Documents", visibleDocs]);
+      metaRows.push(["Sources", visibleDocs]);
       metaRows.push(["Document Attributes", visibleDocAttrs]);
       metaRows.push(["Codes", visibleCodes]);
 
@@ -2775,6 +3250,7 @@ function CodeReportCreationPage({
       });
       const blob = await file.toBlob();
       await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+      await recordReportExport("xlsx", path);
     } catch (e) {
       console.error("XLSX export failed:", e);
       setError("XLSX export failed.");
@@ -3053,6 +3529,7 @@ function CodeReportCreationPage({
       }
 
       await writeFile(path, new Uint8Array(pdf.output("arraybuffer")));
+      await recordReportExport("pdf", path);
     } catch {
       setError("PDF export failed.");
     } finally {
@@ -3216,9 +3693,9 @@ function CodeReportCreationPage({
       children.push(new Paragraph({ text: t("reportsCodes.exportSections.summary"), heading: HeadingLevel.HEADING_1 }));
       children.push(buildDocxSingleValueTable(t("reportsCodes.exportSections.item"), t("reportsCodes.exportSections.count"), [
         { label: "Users", value: visibleUsers },
-        { label: "Cases", value: visibleCases },
+        { label: "Objects", value: visibleCases },
         { label: "Case Attributes", value: visibleCaseAttrs },
-        { label: "Documents", value: visibleDocs },
+        { label: "Sources", value: visibleDocs },
         { label: "Document Attributes", value: visibleDocAttrs },
         { label: "Codes", value: visibleCodes },
       ]));
@@ -3311,12 +3788,13 @@ function CodeReportCreationPage({
       }
 
       const doc = new DocxDocument({
-        creator: currentUser?.name || currentUser?.email || "Kanqual",
+        creator: row?.createdByName || "Kanqual",
         title: name || "Report",
         sections: [{ children }],
       });
       const buffer = await (await Packer.toBlob(doc)).arrayBuffer();
       await writeFile(path, new Uint8Array(buffer));
+      await recordReportExport("docx", path);
     } catch {
       setError("DOCX export failed.");
     } finally {
@@ -3328,8 +3806,8 @@ function CodeReportCreationPage({
   return (
     <div className="annotate-view">
       <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
-        <button className="btn" onClick={onBack}>{t("reportsCodes.backToReports")}</button>
-        <div className="report-action-group" style={{ gap: 10 }}>
+        {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsCodes.backToReports")}</button>}
+        <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           <button
             className="btn btn--secondary"
@@ -3366,139 +3844,339 @@ function CodeReportCreationPage({
         <div className="annotate-left">
           <div className="annotate-left-title">{t("reportsCodes.panels.includeInReport")}</div>
 
-          <CodeHierarchySelectionPanel
-            codes={codes}
-            selectedIds={selCodeIds}
-            onChange={applySelectionFromCodes}
-            disabled={isFrozen}
-            className="annotate-card--featured"
-            showAllClear
-          />
-
-          <SelectionPanel
-            title={t("reportsCodes.panels.cases")}
-            count={selCaseIds.size}
-            collapsed={collapsed.has("cases")}
-            onToggleCollapsed={() => togglePanel("cases")}
-            disabled={isFrozen}
-            headerExtra={
-              <button
-                type="button"
-                className="filter-icon-button filter-icon-button--compact"
-                aria-label={t("reportsCodes.filterButtons.caseAttributes")}
-                title={t("reportsCodes.filterButtons.caseAttributes")}
-                onClick={(e) => { e.stopPropagation(); setShowCaseAttributeFilters(true); }}
-              >
-                <FilterIcon className="filter-icon-svg" />
+          {/* Objects */}
+          <div className="annotate-card">
+            <div className="annotate-card-header" style={{ gap: 8 }}>
+              <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("cases")}>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="annotate-card-title">{t("reportsCodes.panels.cases")}{selCaseIds.size > 0 ? ` (${selCaseIds.size})` : ""}</span>
+                  <button
+                    type="button"
+                    className="filter-icon-button filter-icon-button--compact"
+                    aria-label={t("reportsCodes.filterButtons.caseAttributes")}
+                    title={t("reportsCodes.filterButtons.caseAttributes")}
+                    onClick={(e) => { e.stopPropagation(); setShowCaseAttributeFilters(true); }}
+                  >
+                    <FilterIcon className="filter-icon-svg" />
+                  </button>
+                </span>
+                <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("cases") ? "▶" : "▼"}</span>
               </button>
-            }
-            selectAll={{
-              checked: caseItems.length > 0 && selCaseIds.size === caseItems.length,
-              disabled: caseItems.length === 0,
-              onToggle: () => applySelectionFromCases(
-                caseItems.length > 0 && selCaseIds.size === caseItems.length ? new Set() : new Set(caseItems.map((item) => item.id))
-              ),
-            }}
-          >
-            <ul className="code-list">
-              {loadingFilters ? (
-                <li className="code-list-empty">{t("reportsCodes.empty.loading")}</li>
-              ) : caseItems.length === 0 ? (
-                <li className="code-list-empty">{t("reportsCodes.empty.noCases")}</li>
-              ) : caseItems.map((item) => (
-                <li key={item.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && applySelectionFromCases((() => { const next = new Set(selCaseIds); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })())}>
-                  <input
-                    type="checkbox"
-                    className="memo-sel-checkbox"
-                    checked={selCaseIds.has(item.id)}
-                    disabled={isFrozen}
-                    onChange={(e) => { e.stopPropagation(); if (!isFrozen) applySelectionFromCases((() => { const next = new Set(selCaseIds); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })()); }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <span className="code-label">{item.name}</span>
-                </li>
-              ))}
-            </ul>
-          </SelectionPanel>
+            </div>
+            {!collapsed.has("cases") && (
+              <>
+                {!isFrozen && !loadingFilters && caseItems.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCases(new Set(caseItems.map((item) => item.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                )}
+                <div className="code-list" style={{ padding: 0 }}>
+                  {loadingFilters ? (
+                    <div className="code-list-empty">{t("reportsCodes.empty.loading")}</div>
+                  ) : caseItems.length === 0 ? (
+                    <div className="code-list-empty">{t("reportsCodes.empty.noCases")}</div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
+                      <colgroup>
+                        <col style={{ width: 24 }} />
+                        <col style={{ width: 72 }} />
+                        <col />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th aria-label="Select object" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {caseItems.map((item) => {
+                          const selected = selCaseIds.has(item.id);
+                          return (
+                            <tr
+                              key={item.id}
+                              onClick={isFrozen ? undefined : () => applySelectionFromCases(toggle(selCaseIds, item.id))}
+                              style={{ cursor: isFrozen ? "default" : "pointer", background: selected ? "var(--color-surface-hover)" : "transparent" }}
+                            >
+                              <td style={{ padding: "6px 2px 6px 8px", verticalAlign: "top" }}>
+                                <input
+                                  type="checkbox"
+                                  className="memo-sel-checkbox"
+                                  checked={selected}
+                                  disabled={isFrozen}
+                                  onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromCases(toggle(selCaseIds, item.id)); }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </td>
+                              <td className="code-label" style={{ padding: "6px 6px 6px 4px", verticalAlign: "top" }}>{formatObjectType(item.objectType)}</td>
+                              <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>{item.name}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
 
-          <SelectionPanel
-            title={t("reportsCodes.panels.documents")}
-            count={selDocIds.size}
-            collapsed={collapsed.has("documents")}
-            onToggleCollapsed={() => togglePanel("documents")}
-            disabled={isFrozen}
-            headerExtra={
-              <button
-                type="button"
-                className="filter-icon-button filter-icon-button--compact"
-                aria-label={t("reportsCodes.filterButtons.documentAttributes")}
-                title={t("reportsCodes.filterButtons.documentAttributes")}
-                onClick={(e) => { e.stopPropagation(); setShowDocumentAttributeFilters(true); }}
-              >
-                <FilterIcon className="filter-icon-svg" />
+          {/* Sources */}
+          <div className="annotate-card">
+            <div className="annotate-card-header" style={{ gap: 8 }}>
+              <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("documents")}>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="annotate-card-title">{t("reportsCodes.panels.documents")}{selDocIds.size > 0 ? ` (${selDocIds.size})` : ""}</span>
+                  <button
+                    type="button"
+                    className="filter-icon-button filter-icon-button--compact"
+                    aria-label={t("reportsCodes.filterButtons.documentAttributes")}
+                    title={t("reportsCodes.filterButtons.documentAttributes")}
+                    onClick={(e) => { e.stopPropagation(); setShowDocumentAttributeFilters(true); }}
+                  >
+                    <FilterIcon className="filter-icon-svg" />
+                  </button>
+                </span>
+                <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("documents") ? "▶" : "▼"}</span>
               </button>
-            }
-            selectAll={{
-              checked: documents.length > 0 && selDocIds.size === documents.length,
-              disabled: documents.length === 0,
-              onToggle: () => applySelectionFromDocuments(
-                documents.length > 0 && selDocIds.size === documents.length ? new Set() : new Set(documents.map((item) => item.id))
-              ),
-            }}
-          >
-            <ul className="code-list">
-              {documents.length === 0 ? (
-                <li className="code-list-empty">{t("reportsCodes.empty.noDocuments")}</li>
-              ) : documents.map((doc) => (
-                <li key={doc.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && applySelectionFromDocuments((() => { const next = new Set(selDocIds); if (next.has(doc.id)) next.delete(doc.id); else next.add(doc.id); return next; })())}>
-                  <input
-                    type="checkbox"
-                    className="memo-sel-checkbox"
-                    checked={selDocIds.has(doc.id)}
-                    disabled={isFrozen}
-                    onChange={(e) => { e.stopPropagation(); if (!isFrozen) applySelectionFromDocuments((() => { const next = new Set(selDocIds); if (next.has(doc.id)) next.delete(doc.id); else next.add(doc.id); return next; })()); }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <span className="code-label">{doc.name}</span>
-                </li>
-              ))}
-            </ul>
-          </SelectionPanel>
+            </div>
+            {!collapsed.has("documents") && (
+              <>
+                {!isFrozen && documents.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromDocuments(new Set(documents.map((item) => item.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                )}
+                <div className="code-list" style={{ padding: 0 }}>
+                  {documents.length === 0 ? (
+                    <div className="code-list-empty">{t("reportsCodes.empty.noDocuments")}</div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
+                      <colgroup>
+                        <col style={{ width: 24 }} />
+                        <col style={{ width: 48 }} />
+                        <col />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th aria-label="Select source" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {documents.map((doc) => {
+                          const selected = selDocIds.has(doc.id);
+                          return (
+                            <tr
+                              key={doc.id}
+                              onClick={isFrozen ? undefined : () => applySelectionFromDocuments(toggle(selDocIds, doc.id))}
+                              style={{ cursor: isFrozen ? "default" : "pointer", background: selected ? "var(--color-surface-hover)" : "transparent" }}
+                            >
+                              <td style={{ padding: "6px 2px 6px 8px", verticalAlign: "top" }}>
+                                <input
+                                  type="checkbox"
+                                  className="memo-sel-checkbox"
+                                  checked={selected}
+                                  disabled={isFrozen}
+                                  onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromDocuments(toggle(selDocIds, doc.id)); }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </td>
+                              <td className="code-label" style={{ padding: "6px 6px 6px 4px", verticalAlign: "top" }}>{formatSourceType(doc.type)}</td>
+                              <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>{doc.name}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
 
-          <SelectionPanel
-            title={t("reportsCodes.panels.users")}
-            count={selUserIds.size}
-            collapsed={collapsed.has("users")}
-            onToggleCollapsed={() => togglePanel("users")}
-            disabled={isFrozen}
-            selectAll={{
-              checked: userItems.length > 0 && selUserIds.size === userItems.length,
-              disabled: userItems.length === 0,
-              onToggle: () => applySelectionFromUsers(
-                userItems.length > 0 && selUserIds.size === userItems.length ? new Set() : new Set(userItems.map((item) => item.id))
-              ),
-            }}
-          >
-            <ul className="code-list">
-              {loadingFilters ? (
-                <li className="code-list-empty">{t("reportsCodes.empty.loading")}</li>
-              ) : userItems.length === 0 ? (
-                <li className="code-list-empty">{t("reportsCodes.empty.noUsers")}</li>
-              ) : userItems.map((item) => (
-                <li key={item.id} className="code-item" style={{ cursor: isFrozen ? "default" : "pointer" }} onClick={() => !isFrozen && applySelectionFromUsers((() => { const next = new Set(selUserIds); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })())}>
-                  <input
-                    type="checkbox"
-                    className="memo-sel-checkbox"
-                    checked={selUserIds.has(item.id)}
-                    disabled={isFrozen}
-                    onChange={(e) => { e.stopPropagation(); if (!isFrozen) applySelectionFromUsers((() => { const next = new Set(selUserIds); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })()); }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <span className="code-label">{item.name}</span>
-                </li>
-              ))}
-            </ul>
-          </SelectionPanel>
+          {/* Relationships */}
+          <div className="annotate-card">
+            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("relationships")}>
+              <span className="annotate-card-title">{t("reportsCodes.panels.relationships")}{selRelationshipIds.size > 0 ? ` (${selRelationshipIds.size})` : ""}</span>
+              <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("relationships") ? "▶" : "▼"}</span>
+            </button>
+            {!collapsed.has("relationships") && (
+              <>
+                {!isFrozen && !loadingFilters && relationshipItems.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromRelationships(new Set(relationshipItems.filter((relationship) => relationship.object1Id && relationship.object2Id).map((relationship) => relationship.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                )}
+                <div className="code-list" style={{ padding: 0 }}>
+                  {loadingFilters ? (
+                    <div className="code-list-empty">{t("reportsCodes.empty.loading")}</div>
+                  ) : relationshipItems.length === 0 ? (
+                    <div className="code-list-empty">{t("reportsCodes.empty.noRelationships")}</div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
+                      <colgroup>
+                        <col style={{ width: 24 }} />
+                        <col />
+                        <col />
+                        <col />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th aria-label="Select relationship" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          {[
+                            ["relationshipType", "Type"],
+                            ["object1Name", "Object 1"],
+                            ["object2Name", "Object 2"],
+                          ].map(([key, label]) => (
+                            <th key={key} style={{ padding: 0, fontWeight: 600 }}>
+                              <button
+                                type="button"
+                                onClick={() => toggleRelationshipSort(key as RelationshipSortKey)}
+                                style={{
+                                  width: "100%",
+                                  padding: key === "relationshipType" ? "6px 6px 6px 4px" : "6px 6px",
+                                  border: "none",
+                                  background: "none",
+                                  color: "inherit",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 6,
+                                  font: "inherit",
+                                  fontWeight: 600,
+                                  textAlign: "left",
+                                }}
+                              >
+                                <span>{label}</span>
+                                <span aria-hidden="true">{relationshipSortKey === key ? (relationshipSortDir === "asc" ? "↑" : "↓") : "↕"}</span>
+                              </button>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedRelationshipItems.map((relationship) => {
+                          const canSelectRelationship = !isFrozen && !!relationship.object1Id && !!relationship.object2Id;
+                          const selected = selRelationshipIds.has(relationship.id);
+                          return (
+                            <tr
+                              key={relationship.id}
+                              onClick={canSelectRelationship ? () => applySelectionFromRelationships(toggle(selRelationshipIds, relationship.id)) : undefined}
+                              style={{ cursor: canSelectRelationship ? "pointer" : "default", background: selected ? "var(--color-surface-hover)" : "transparent" }}
+                            >
+                              <td style={{ padding: "6px 2px 6px 8px", verticalAlign: "top" }}>
+                                <input
+                                  type="checkbox"
+                                  className="memo-sel-checkbox"
+                                  checked={selected}
+                                  disabled={!canSelectRelationship}
+                                  onChange={canSelectRelationship ? (e) => { e.stopPropagation(); applySelectionFromRelationships(toggle(selRelationshipIds, relationship.id)); } : undefined}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </td>
+                              <td className="code-label" style={{ padding: "6px 6px 6px 4px", verticalAlign: "top" }}>{relationshipColumnValue(relationship, "relationshipType")}</td>
+                              <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>{relationshipColumnValue(relationship, "object1Name")}</td>
+                              <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>{relationshipColumnValue(relationship, "object2Name")}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Codes */}
+          <div className="annotate-card annotate-card--featured report-codes-card">
+            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("codes")}>
+              <span className="annotate-card-title">{t("reportsCodes.panels.codes")}{selCodeIds.size > 0 ? ` (${selCodeIds.size})` : ""}</span>
+              <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("codes") ? "▶" : "▼"}</span>
+            </button>
+            {!collapsed.has("codes") && (
+              <>
+                {!isFrozen && codes.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCodes(new Set(codes.map((item) => item.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                )}
+                <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
+                  {codes.length === 0 ? (
+                    <li className="code-list-empty">{t("reportsCodes.empty.noCodes")}</li>
+                  ) : buildCodeTree(codes).map(({ code, depth }) => (
+                    <li
+                      key={code.id}
+                      className="code-item"
+                      style={{ cursor: isFrozen ? "default" : "pointer" }}
+                      onClick={isFrozen ? undefined : () => applySelectionFromCodes(toggle(selCodeIds, code.id))}
+                    >
+                      <input
+                        type="checkbox"
+                        className="memo-sel-checkbox"
+                        checked={selCodeIds.has(code.id)}
+                        disabled={isFrozen}
+                        onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromCodes(toggle(selCodeIds, code.id)); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      {depth > 0 && <span aria-hidden="true" style={{ flex: "0 0 auto", width: depth * 16 }} />}
+                      <span className="code-swatch" style={{ background: code.color }} />
+                      <span className="code-label">{code.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+
+          {/* Users */}
+          <div className="annotate-card">
+            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("users")}>
+              <span className="annotate-card-title">{t("reportsCodes.panels.users")}{selUserIds.size > 0 ? ` (${selUserIds.size})` : ""}</span>
+              <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("users") ? "▶" : "▼"}</span>
+            </button>
+            {!collapsed.has("users") && (
+              <>
+                {!isFrozen && !loadingFilters && userItems.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromUsers(new Set(userItems.map((item) => item.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                )}
+                <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
+                  {loadingFilters ? (
+                    <li className="code-list-empty">{t("reportsCodes.empty.loading")}</li>
+                  ) : userItems.length === 0 ? (
+                    <li className="code-list-empty">{t("reportsCodes.empty.noUsers")}</li>
+                  ) : userItems.map((item) => (
+                    <li
+                      key={item.id}
+                      className="code-item"
+                      style={{ cursor: isFrozen ? "default" : "pointer" }}
+                      onClick={isFrozen ? undefined : () => applySelectionFromUsers(toggle(selUserIds, item.id))}
+                    >
+                      <input
+                        type="checkbox"
+                        className="memo-sel-checkbox"
+                        checked={selUserIds.has(item.id)}
+                        disabled={isFrozen}
+                        onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromUsers(toggle(selUserIds, item.id)); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="code-label">{item.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
 
         </div>
 
@@ -3534,17 +4212,6 @@ function CodeReportCreationPage({
                 <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsCodes.selectedCodes")} </span>
                 <span>{selectedCodeLabels}</span>
               </div>
-              {(caseFilterDetails.length > 0 || documentFilterDetails.length > 0) && (
-                <div>
-                  <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsCodes.appliedFilters")} </span>
-                  <span>
-                    {[
-                      ...caseFilterDetails.map((detail) => `${t("reportsCodes.panels.cases")}: ${detail}`),
-                      ...documentFilterDetails.map((detail) => `${t("reportsCodes.panels.documents")}: ${detail}`),
-                    ].join(" | ")}
-                  </span>
-                </div>
-              )}
             </div>
           </div>
 
@@ -3575,6 +4242,40 @@ function CodeReportCreationPage({
                 <EditorContent editor={descriptionEditor} />
               </>
             )}
+          </div>
+
+          <div className="annotate-card" style={{ flexShrink: 0 }}>
+            <div className="annotate-card-header">
+              <span className="annotate-card-title">Filters</span>
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+              {!hasActiveFilters ? (
+                <div style={{ color: "var(--color-text-muted)" }}>All selected objects and sources are included.</div>
+              ) : (
+                <>
+                  {activeCaseFilterDetails.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontWeight: 600 }}>{t("reportsCodes.panels.cases")}</div>
+                      {activeCaseFilterDetails.map((detail) => (
+                        <div key={`case-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          {detail}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeDocumentFilterDetails.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontWeight: 600 }}>{t("reportsCodes.panels.documents")}</div>
+                      {activeDocumentFilterDetails.map((detail) => (
+                        <div key={`document-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          {detail}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch" }}>
@@ -3643,11 +4344,12 @@ function CodeReportCreationPage({
               key={section.key}
               section={section}
               codeBuckets={codeBuckets}
+              codes={codes}
               annotations={selectedAnnotations}
               frozenRows={frozenSnapshot?.frozenFrequencyRows?.filter((rowItem) => rowItem.section === section.title)}
             />
           )) : coOccurrenceSections.map((section) => (
-            <CoOccurrenceMatrixCard key={section.key} section={section} />
+            <CoOccurrenceMatrixCard key={section.key} section={section} codes={codes} />
           ))}
         </div>
       </div>
@@ -3669,6 +4371,39 @@ function CodeReportCreationPage({
               <h2 style={{ margin: 0 }}>{t("reportsCodes.filters.caseTitle")}</h2>
               <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsCodes.close")}</button>
             </div>
+            {!isFrozen && !loadingFilters && caseTypeOptions.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>Object Type</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set(caseTypeOptions))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                </div>
+                <ul className="code-list" style={{ border: "1px solid var(--color-border)", borderRadius: 8, maxHeight: 180, overflowY: "auto" }}>
+                  {caseTypeOptions.map((typeLabel) => (
+                    <li
+                      key={typeLabel}
+                      className="code-item"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => toggleCaseTypeSelection(typeLabel)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="memo-sel-checkbox"
+                        checked={selCaseTypes.has(typeLabel)}
+                        onChange={(e) => { e.stopPropagation(); toggleCaseTypeSelection(typeLabel); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="code-label">{typeLabel}</span>
+                      <span className="users-filter-count">
+                        {caseItems.filter((item) => formatObjectType(item.objectType) === typeLabel).length}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!isFrozen && !loadingFilters && caseAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
                 <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllCaseAttributes}>{t("reportsCodes.actions.all")}</button>
@@ -3721,6 +4456,39 @@ function CodeReportCreationPage({
               <h2 style={{ margin: 0 }}>{t("reportsCodes.filters.documentTitle")}</h2>
               <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>{t("reportsCodes.close")}</button>
             </div>
+            {!isFrozen && !loadingFilters && documentTypeOptions.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>Source Type</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set(documentTypeOptions))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                </div>
+                <ul className="code-list" style={{ border: "1px solid var(--color-border)", borderRadius: 8, maxHeight: 180, overflowY: "auto" }}>
+                  {documentTypeOptions.map((typeLabel) => (
+                    <li
+                      key={typeLabel}
+                      className="code-item"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => toggleDocumentTypeSelection(typeLabel)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="memo-sel-checkbox"
+                        checked={selDocTypes.has(typeLabel)}
+                        onChange={(e) => { e.stopPropagation(); toggleDocumentTypeSelection(typeLabel); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="code-label">{typeLabel}</span>
+                      <span className="users-filter-count">
+                        {documents.filter((doc) => formatSourceType(doc.type) === typeLabel).length}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!isFrozen && !loadingFilters && documentAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
                 <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllDocumentAttributes}>{t("reportsCodes.actions.all")}</button>
@@ -3769,15 +4537,21 @@ function CodeReportCreationPage({
   );
 }
 
-export function CodesView() {
-  const { t } = useI18n();
-  const { activeProject, pb, canCurrentUser, deleteCodeReport } = useStore();
-  const codeReportColumns = getCodeReportColumns(t);
-  const canCreateReports = canCurrentUser("createReports") && canCurrentUser("editReportConfiguration");
-  const canDeleteReports = canCurrentUser("deleteReports");
+export type CodesViewProps = {
+  initialNewModalOpen?: boolean;
+  initialNewReportKind?: CodeReportKind;
+  postgresProjectId?: string;
+  onBackToReports?: () => void;
+};
 
-  const [showNewModal, setShowNewModal] = useState(false);
-  const [newReportKind, setNewReportKind] = useState<CodeReportKind | null>(null);
+export function CodesView({ initialNewModalOpen = false, initialNewReportKind, postgresProjectId, onBackToReports }: CodesViewProps = {}) {
+  const { t } = useI18n();
+  const codeReportColumns = getCodeReportColumns(t);
+  const canCreateReports = true;
+  const canDeleteReports = true;
+
+  const [showNewModal, setShowNewModal] = useState(initialNewModalOpen && !initialNewReportKind);
+  const [newReportKind, setNewReportKind] = useState<CodeReportKind | null>(initialNewReportKind ?? null);
   const [openSavedRow, setOpenSavedRow] = useState<CodeReportRow | null>(null);
   const [newFromSettings, setNewFromSettings] = useState<CodeReportSettings | null>(null);
   const [rows, setRows] = useState<CodeReportRow[]>([]);
@@ -3793,35 +4567,27 @@ export function CodesView() {
   const [helpOpen, setHelpOpen] = useState(false);
 
   const loadReports = useCallback(async () => {
-    if (!activeProject || !pb) return [];
+    if (!postgresProjectId) return [];
     setLoading(true);
     setError(null);
     try {
-      const records = await pb.collection("code_reports").getFullList({
-        filter: `project="${activeProject.id}"&&deleted_at=""`,
-        expand: "created_by",
-        sort: "-created",
-      });
+      const records = await listPostgresReports(postgresProjectId);
       const mappedRows = records
+        .filter((record) => record.reportType === "code-report")
         .map((record) => {
-          let snapshot: CodeReportSnapshot | null = null;
-          if (record.snapshot) {
-            try {
-              const parsed = JSON.parse(record.snapshot);
-              if (parsed?.reportType === "code-report") snapshot = parsed as CodeReportSnapshot;
-            } catch {
-              snapshot = null;
-            }
+          try {
+            const snapshot = JSON.parse(record.contentJson || "") as CodeReportSnapshot;
+            if (snapshot?.reportType !== "code-report") return null;
+            return {
+              id: record.id,
+              name: record.title,
+              createdByName: record.createdByName || "-",
+              createdAt: record.createdAt,
+              snapshot,
+            };
+          } catch {
+            return null;
           }
-          if (!snapshot) return null;
-          const createdBy = record.expand?.created_by;
-          return {
-            id: record.id,
-            name: record.name,
-            createdByName: createdBy?.name || createdBy?.email || "-",
-            createdAt: record.created,
-            snapshot,
-          };
         })
         .filter(Boolean) as CodeReportRow[];
       setRows(mappedRows);
@@ -3832,7 +4598,7 @@ export function CodesView() {
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb]);
+  }, [postgresProjectId, t]);
 
   useEffect(() => { loadReports(); }, [loadReports]);
 
@@ -3872,7 +4638,8 @@ export function CodesView() {
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      await deleteCodeReport(confirmDelete.id);
+      if (!postgresProjectId) throw new Error("Reports are not available outside a project workspace.");
+      await deletePostgresReport(postgresProjectId, confirmDelete.id);
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
@@ -3888,7 +4655,16 @@ export function CodesView() {
       <CodeReportCreationPage
         kind={newFromSettings?.kind ?? newReportKind ?? "frequencies"}
         initialSettings={newFromSettings ?? undefined}
-        onBack={() => { setNewReportKind(null); setNewFromSettings(null); }}
+        postgresProjectId={postgresProjectId}
+        hideBackButton={!!onBackToReports}
+        onBack={() => {
+          if (onBackToReports) {
+            onBackToReports();
+            return;
+          }
+          setNewReportKind(null);
+          setNewFromSettings(null);
+        }}
         onSaved={(row) => {
           setNewReportKind(null);
           setNewFromSettings(null);
@@ -3904,7 +4680,15 @@ export function CodesView() {
       <CodeReportCreationPage
         kind={openSavedRow.snapshot.kind}
         row={openSavedRow}
-        onBack={() => setOpenSavedRow(null)}
+        postgresProjectId={postgresProjectId}
+        hideBackButton={!!onBackToReports}
+        onBack={() => {
+          if (onBackToReports) {
+            onBackToReports();
+            return;
+          }
+          setOpenSavedRow(null);
+        }}
         onUseSettings={(settings) => {
           setOpenSavedRow(null);
           setNewFromSettings(settings);

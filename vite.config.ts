@@ -17,7 +17,7 @@ export default defineConfig({
           if (
             id.includes("cytoscape")
             || id.includes("elkjs")
-            || id.includes("src/lib/postgresExperimentCanvasGraph.ts")
+            || id.includes("src/lib/postgresCanvasGraph.ts")
             || id.includes("src/views/Postgres_Explore_Canvas_View.tsx")
             || id.includes("src/components/CanvasRichTextEditor.tsx")
           ) {

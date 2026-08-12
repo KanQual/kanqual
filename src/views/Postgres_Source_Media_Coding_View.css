@@ -165,6 +165,7 @@
   --media-player-video-play-size: clamp(89px, 13.62cqw, 104px);
   --media-player-video-play-icon-size: calc(var(--media-player-video-play-size) * 0.34);
   --media-player-video-pill-width: clamp(230px, calc(37.5cqw - 20px), 265px);
+  --media-player-video-clip-gap: 12px;
   --media-player-video-row-gap: clamp(3px, 0.53cqw, 4px);
   --media-player-video-column-gap: clamp(1px, 0.26cqw, 2px);
   --media-player-video-side-offset: clamp(6px, 1.05cqw, 8px);
@@ -1293,6 +1294,49 @@
   gap: var(--media-player-video-row-gap) var(--media-player-video-column-gap);
 }
 
+.media-player-controls-panel--video.media-player-controls-panel--clip-active {
+  max-width: min(
+    calc(
+      var(--media-player-video-pill-width) +
+      var(--media-player-video-clip-gap) +
+      var(--media-player-video-popout-anchor-width) +
+      var(--media-player-video-popout-width)
+    ),
+    100%
+  );
+}
+
+.media-player-controls-panel--video.media-player-controls-panel--clip-active::before {
+  right: auto;
+  width: min(var(--media-player-video-pill-width), 100%);
+}
+
+.media-player-controls-panel--video.media-player-controls-panel--clip-active .media-player-controller {
+  max-width: 100%;
+}
+
+.media-player-controls-panel--video .media-player-layout-grid--clip-active {
+  width: min(
+    calc(
+      var(--media-player-video-pill-width) +
+      var(--media-player-video-clip-gap) +
+      var(--media-player-video-popout-anchor-width) +
+      var(--media-player-video-popout-width)
+    ),
+    100%
+  );
+  grid-template-columns:
+    minmax(0, calc((var(--media-player-video-pill-width) - var(--media-player-video-play-size) - (2 * var(--media-player-video-button-size)) - (4 * var(--media-player-video-column-gap))) / 2))
+    auto
+    auto
+    auto
+    minmax(0, calc((var(--media-player-video-pill-width) - var(--media-player-video-play-size) - (2 * var(--media-player-video-button-size)) - (4 * var(--media-player-video-column-gap))) / 2))
+    var(--media-player-video-clip-gap)
+    var(--media-player-video-popout-anchor-width)
+    var(--media-player-video-popout-width);
+  column-gap: var(--media-player-video-column-gap);
+}
+
 .media-player-controls-panel--video .media-player-grid-clip,
 .media-player-controls-panel--video .media-player-grid-volume {
   transform: translateX(calc(-1 * var(--media-player-video-side-offset)));
@@ -1305,6 +1349,36 @@
 
 .media-player-controls-panel--video .media-player-clip-anchor-slot {
   margin-left: calc(-1 * var(--media-player-video-side-offset));
+}
+
+.media-player-controls-panel--video .media-player-layout-grid--clip-active .media-player-grid-clip {
+  grid-column: 7 / 9;
+  grid-row: 1;
+  transform: none;
+  justify-self: start;
+  width: calc(var(--media-player-video-popout-anchor-width) + var(--media-player-video-popout-width));
+  min-width: calc(var(--media-player-video-popout-anchor-width) + var(--media-player-video-popout-width));
+  height: var(--media-player-controls-pill-height);
+  min-height: var(--media-player-controls-pill-height);
+}
+
+.media-player-controls-panel--video .media-player-layout-grid--clip-active .media-player-clip-anchor-slot {
+  grid-column: 7;
+  grid-row: 1;
+  transform: none;
+  margin-left: 0;
+  justify-self: center;
+}
+
+.media-player-controls-panel--video .media-player-layout-grid--clip-active .media-player-active-clip-slot-spacer {
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: start;
+  width: var(--media-player-video-button-size);
+  min-width: var(--media-player-video-button-size);
+  height: var(--media-player-video-button-size);
+  min-height: var(--media-player-video-button-size);
+  transform: translateX(calc(-1 * var(--media-player-video-side-offset)));
 }
 
 .media-player-controls-panel--video .media-player-grid-clip,
@@ -1373,11 +1447,21 @@
   width: calc(var(--media-player-video-popout-anchor-width) + var(--media-player-video-popout-width));
 }
 
+.media-player-controls-panel--video .media-player-layout-grid--clip-active .media-player-clip-group {
+  left: 0;
+}
+
 .media-player-controls-panel--video .media-player-clip-popout {
   top: var(--media-player-video-popout-top);
   left: var(--media-player-video-popout-left);
   align-items: center;
   padding: var(--media-player-video-popout-pad-top) var(--media-player-video-popout-pad-right) var(--media-player-video-popout-pad-bottom) var(--media-player-video-popout-pad-left);
+}
+
+.media-player-controls-panel--video .media-player-layout-grid--clip-active .media-player-clip-popout {
+  top: 0;
+  left: 0;
+  padding-left: var(--media-player-video-popout-pad-right);
 }
 
 .media-player-controls-panel--video .media-player-clip-inline-editor {

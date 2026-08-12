@@ -1,19 +1,26 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useStore } from "../context/StoreContext";
-import { useAuth } from "../context/AuthContext";
+import { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
+import { readFile as readTauriFile, writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
+import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
+import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
+import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
+import type { Code, Document as ProjectDocument } from "../types";
+
+const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
+const ANNOTATION_LENGTH_SUBTITLE = "Number of characters";
 
 let writeExcelFilePromise: Promise<typeof import("write-excel-file/browser")> | null = null;
 let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
 let docxPromise: Promise<typeof import("docx")> | null = null;
+let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
 async function loadWriteExcelFile() {
   if (!writeExcelFilePromise) {
@@ -36,6 +43,16 @@ async function loadDocx() {
   return docxPromise;
 }
 
+async function loadPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+      return module;
+    });
+  }
+  return pdfJsPromise;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AnnItem {
@@ -44,6 +61,19 @@ interface AnnItem {
   note: string;
   documentId: string;
   documentName: string;
+  sourceKind?: string;
+  sourcePath?: string;
+  timeStartMs?: number | null;
+  timeEndMs?: number | null;
+  imageRegion?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    imageWidth: number;
+    imageHeight: number;
+    pageNumber?: number | null;
+  } | null;
   codeId: string;
   codeName: string;
   codeColor: string;
@@ -52,7 +82,16 @@ interface AnnItem {
   createdById: string;
 }
 
-interface CaseItem { id: string; name: string; }
+interface CaseItem { id: string; name: string; objectType?: string; }
+interface RelationshipItem {
+  id: string;
+  relationshipType?: string;
+  object1Id?: string;
+  object1Name?: string;
+  object2Id?: string;
+  object2Name?: string;
+  name?: string;
+}
 interface UserItem { id: string; name: string; }
 interface CaseDocumentLink { caseId: string; documentId: string; }
 interface AttributeItem { id: string; name: string; dataType: string; }
@@ -64,10 +103,19 @@ interface AttributeFilterConfig {
   selectedValues?: string[];
 }
 
+interface CodeTreeNode {
+  code: Code;
+  depth: number;
+}
+
+type RelationshipSortKey = "relationshipType" | "object1Name" | "object2Name";
+type RelationshipSortDir = "asc" | "desc";
+
 interface ReportSnapshot {
   reportType?: "annotations";
   filteredAnns: AnnItem[];
   caseItems: CaseItem[];
+  relationshipItems?: RelationshipItem[];
   userItems: UserItem[];
   caseAttributeItems?: AttributeItem[];
   documentAttributeItems?: AttributeItem[];
@@ -75,8 +123,11 @@ interface ReportSnapshot {
   summaryCounts: { cases: number; docs: number; codes: number; users: number };
   description?: string;
   selectedUserIds?: string[];
+  selectedRelationshipIds?: string[];
   selectedCaseAttributeIds?: string[];
   selectedDocumentAttributeIds?: string[];
+  selectedCaseTypes?: string[];
+  selectedDocumentTypes?: string[];
   caseAttributeFilters?: Record<string, AttributeFilterConfig>;
   documentAttributeFilters?: Record<string, AttributeFilterConfig>;
   showDescription?: boolean;
@@ -92,13 +143,73 @@ function hasDescriptionContent(html: string | undefined): boolean {
   return html.replace(/<[^>]*>/g, "").trim().length > 0;
 }
 
+function formatSourceType(value: string | undefined): string {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/_/g, " ");
+  if (!normalized) return "-";
+  if (normalized === "pdf") return "PDF";
+  if (normalized === "processed transcript") return "Transcript";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function formatObjectType(value: string | undefined): string {
+  const normalized = (value ?? "").trim();
+  return normalized || "-";
+}
+
+function formatMediaMilliseconds(value: number): string {
+  const totalSeconds = Math.max(0, Math.floor(value / 1000));
+  const milliseconds = Math.max(0, Math.floor(value % 1000));
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const base = hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return `${base}.${String(Math.floor(milliseconds / 100)).padStart(1, "0")}`;
+}
+
+function isAbsoluteStoragePath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("/");
+}
+
+function resolveProjectStoragePath(projectStoragePath: string | undefined, sourceStoragePath: string | undefined): string {
+  const trimmedSourcePath = (sourceStoragePath ?? "").trim();
+  if (!trimmedSourcePath) return "";
+  if (isAbsoluteStoragePath(trimmedSourcePath)) return trimmedSourcePath;
+  const trimmedProjectPath = (projectStoragePath ?? "").trim().replace(/[\\/]+$/, "");
+  if (!trimmedProjectPath) return trimmedSourcePath;
+  const normalizedSourcePath = trimmedSourcePath.replace(/^([\\/])+/, "");
+  return `${trimmedProjectPath}\\${normalizedSourcePath.replace(/\//g, "\\")}`;
+}
+
+function fileExtensionFromPath(path: string): string {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function mediaTypeFromFileExtension(ext: string): string | null {
+  if (ext === "mp3") return "audio/mpeg";
+  if (ext === "wav") return "audio/wav";
+  if (ext === "m4a" || ext === "aac") return "audio/mp4";
+  if (ext === "ogg") return "audio/ogg";
+  if (ext === "flac") return "audio/flac";
+  if (ext === "mp4" || ext === "m4v") return "video/mp4";
+  if (ext === "webm") return "video/webm";
+  if (ext === "ogv") return "video/ogg";
+  if (ext === "mov") return "video/quicktime";
+  return null;
+}
+
 interface ReportSettings {
   caseIds: string[];
   documentIds: string[];
   codeIds: string[];
   userIds?: string[];
+  relationshipIds?: string[];
   caseAttributeIds?: string[];
   documentAttributeIds?: string[];
+  caseTypes?: string[];
+  documentTypes?: string[];
   caseAttributeFilters?: Record<string, AttributeFilterConfig>;
   documentAttributeFilters?: Record<string, AttributeFilterConfig>;
 }
@@ -129,15 +240,6 @@ function fmtDate(iso: string): string {
       hour: "2-digit", minute: "2-digit",
     });
   } catch { return "—"; }
-}
-
-function toArr<T>(v: T | T[] | undefined | null): T[] {
-  if (!v) return [];
-  return Array.isArray(v) ? v : [v];
-}
-
-function relationPreview(ids: string[]): string[] {
-  return ids.slice(0, 100);
 }
 
 function escapeHtml(value: string): string {
@@ -341,10 +443,151 @@ function ExportModal({
 
 // ─── Report page ──────────────────────────────────────────────────────────────
 
+function AnnotationMediaPreview({
+  annotation,
+  source,
+  projectStoragePath,
+}: {
+  annotation: AnnItem;
+  source?: ProjectDocument | null;
+  projectStoragePath?: string;
+}) {
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const sourceKind = (annotation.sourceKind || source?.type || "").trim().toLowerCase();
+  const sourcePath = annotation.sourcePath || source?.filePath;
+  const resolvedPath = resolveProjectStoragePath(projectStoragePath, sourcePath);
+  const mediaType = mediaTypeFromFileExtension(fileExtensionFromPath(sourcePath ?? ""));
+  const region = annotation.imageRegion ?? null;
+
+  useEffect(() => {
+    if (!resolvedPath || !["audio", "video", "image", "pdf"].includes(sourceKind)) {
+      setMediaUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      setLoadError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const cropRegion = region;
+    setLoadError(null);
+
+    async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
+      if (sourceKind !== "pdf") {
+        return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
+      }
+      if (!cropRegion) throw new Error("No PDF region is available for this annotation.");
+      const pdfjsLib = await loadPdfJs();
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const safePage = Math.min(Math.max(cropRegion.pageNumber ?? 1, 1), pdf.numPages);
+      const page = await pdf.getPage(safePage);
+      const viewport = page.getViewport({ scale: 1.6 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvas, canvasContext: context, viewport }).promise;
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((nextBlob) => {
+          if (nextBlob) resolve(nextBlob);
+          else reject(new Error("Could not render the PDF page preview."));
+        }, "image/png");
+      });
+      return URL.createObjectURL(blob);
+    }
+
+    void readTauriFile(resolvedPath)
+      .then(async (bytes) => {
+        objectUrl = await buildPreviewUrl(bytes);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setMediaUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMediaUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return null;
+        });
+        setLoadError(error instanceof Error ? error.message : "Could not load annotation media.");
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [mediaType, region, resolvedPath, sourceKind]);
+
+  if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
+
+  const timeLabel = typeof annotation.timeStartMs === "number" || typeof annotation.timeEndMs === "number"
+    ? `${typeof annotation.timeStartMs === "number" ? formatMediaMilliseconds(annotation.timeStartMs) : "-"} - ${typeof annotation.timeEndMs === "number" ? formatMediaMilliseconds(annotation.timeEndMs) : "-"}`
+    : null;
+  const regionLabel = region
+    ? `${sourceKind === "pdf" ? `Page ${region.pageNumber ?? 1} - ` : ""}${Math.round(region.width)} x ${Math.round(region.height)} px`
+    : null;
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {(timeLabel || regionLabel) && (
+        <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginBottom: 6 }}>
+          {timeLabel ?? regionLabel}
+        </div>
+      )}
+      {loadError ? (
+        <p className="auth-error" style={{ margin: 0 }}>{loadError}</p>
+      ) : !mediaUrl ? (
+        <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>Loading media...</p>
+      ) : sourceKind === "audio" ? (
+        <audio controls preload="metadata" src={mediaUrl} style={{ width: "100%" }} />
+      ) : sourceKind === "video" ? (
+        <video controls preload="metadata" playsInline src={mediaUrl} style={{ width: "100%", maxHeight: 360, borderRadius: 6, background: "#000" }} />
+      ) : region ? (
+        <div
+          style={{
+            aspectRatio: `${Math.max(region.width, 1)} / ${Math.max(region.height, 1)}`,
+            width: "min(100%, 680px)",
+            overflow: "hidden",
+            border: "var(--border-width) solid var(--color-border)",
+            borderRadius: 6,
+            background: "var(--color-surface-alt)",
+          }}
+        >
+          <img
+            src={mediaUrl}
+            alt={`${sourceKind === "pdf" ? "PDF" : "Image"} annotation region`}
+            style={{
+              display: "block",
+              width: `${(Math.max(region.imageWidth, region.width, 1) / Math.max(region.width, 1)) * 100}%`,
+              height: `${(Math.max(region.imageHeight, region.height, 1) / Math.max(region.height, 1)) * 100}%`,
+              transform: `translate(-${(Math.max(region.x, 0) / Math.max(region.imageWidth, region.width, 1)) * 100}%, -${(Math.max(region.y, 0) / Math.max(region.imageHeight, region.height, 1)) * 100}%)`,
+              transformOrigin: "top left",
+            }}
+          />
+        </div>
+      ) : (
+        <img src={mediaUrl} alt="Annotation media" style={{ display: "block", width: "min(100%, 680px)", borderRadius: 6 }} />
+      )}
+    </div>
+  );
+}
+
 function ReportPage({
   row,
   isNew,
   initialSettings,
+  postgresProjectId,
+  projectStoragePath,
+  hideBackButton,
   onSaved,
   onBack,
   onUseSettings,
@@ -352,19 +595,18 @@ function ReportPage({
   row?: ReportRow;
   isNew?: boolean;
   initialSettings?: ReportSettings;
+  postgresProjectId?: string;
+  projectStoragePath?: string;
+  hideBackButton?: boolean;
   onSaved: (id?: string) => void;
   onBack: () => void;
   onUseSettings?: (settings: ReportSettings) => void;
 }) {
   const { t } = useI18n();
-  const { pb, activeProject, documents: storeDocs, codes: storeCodes, createCodeReport, canCurrentUser } = useStore();
-  const { user: currentUser } = useAuth();
 
   const isFrozen = !!row;
-  const canCreateReports = canCurrentUser("createReports");
-  const canEditReportConfiguration = canCurrentUser("editReportConfiguration");
-  const canStartReports = canCreateReports && canEditReportConfiguration;
-  const canExportReports = canCurrentUser("exportReports");
+  const canStartReports = true;
+  const canExportReports = true;
 
   const [name,   setName]   = useState(row?.name ?? "");
   const [saving, setSaving] = useState(false);
@@ -379,11 +621,14 @@ function ReportPage({
   const [selDocIds,   setSelDocIds]   = useState<Set<string>>(() => new Set(row?.documentIds ?? initialSettings?.documentIds ?? []));
   const [selCodeIds,  setSelCodeIds]  = useState<Set<string>>(() => new Set(row?.codeIds  ?? initialSettings?.codeIds  ?? []));
   const [selUserIds,  setSelUserIds]  = useState<Set<string>>(() => new Set(row?.snapshot?.selectedUserIds ?? initialSettings?.userIds ?? []));
+  const [selRelationshipIds, setSelRelationshipIds] = useState<Set<string>>(() => new Set(row?.snapshot?.selectedRelationshipIds ?? initialSettings?.relationshipIds ?? []));
   const [selCaseAttrIds, setSelCaseAttrIds] = useState<Set<string>>(() => new Set(row?.snapshot?.selectedCaseAttributeIds ?? initialSettings?.caseAttributeIds ?? []));
   const [selDocAttrIds,  setSelDocAttrIds]  = useState<Set<string>>(() => new Set(row?.snapshot?.selectedDocumentAttributeIds ?? initialSettings?.documentAttributeIds ?? []));
+  const [selCaseTypes, setSelCaseTypes] = useState<Set<string>>(() => new Set(row?.snapshot?.selectedCaseTypes ?? initialSettings?.caseTypes ?? []));
+  const [selDocTypes, setSelDocTypes] = useState<Set<string>>(() => new Set(row?.snapshot?.selectedDocumentTypes ?? initialSettings?.documentTypes ?? []));
   const [caseAttributeFilters, setCaseAttributeFilters] = useState<Record<string, AttributeFilterConfig>>(() => row?.snapshot?.caseAttributeFilters ?? initialSettings?.caseAttributeFilters ?? {});
   const [documentAttributeFilters, setDocumentAttributeFilters] = useState<Record<string, AttributeFilterConfig>>(() => row?.snapshot?.documentAttributeFilters ?? initialSettings?.documentAttributeFilters ?? {});
-  const [collapsed,   setCollapsed]   = useState<Set<string>>(() => new Set(["cases", "documents", "codes", "users"]));
+  const [collapsed,   setCollapsed]   = useState<Set<string>>(() => new Set(["cases", "documents", "relationships", "codes", "users"]));
   const [expandedSummaryCards, setExpandedSummaryCards] = useState<Set<string>>(new Set());
 
   // Report display options (functional even on frozen reports)
@@ -393,7 +638,9 @@ function ReportPage({
   const [showCaseAttributeFilters, setShowCaseAttributeFilters] = useState(false);
   const [showDocumentAttributeFilters, setShowDocumentAttributeFilters] = useState(false);
   const [annotationGroupBy, setAnnotationGroupBy] = useState<AnnotationGroupBy>(() => row?.snapshot?.annotationGroupBy ?? "none");
-  const [annotationSortBy, setAnnotationSortBy] = useState<AnnotationSortBy>(() => row?.snapshot?.annotationSortBy ?? "document");
+  const [annotationSortBy, setAnnotationSortBy] = useState<AnnotationSortBy>(() => row?.snapshot?.annotationSortBy ?? "code");
+  const [relationshipSortKey, setRelationshipSortKey] = useState<RelationshipSortKey>("relationshipType");
+  const [relationshipSortDir, setRelationshipSortDir] = useState<RelationshipSortDir>("asc");
   const frozenDescription = row?.snapshot?.description;
   const [showDescription, setShowDescription] = useState(() =>
     isFrozen
@@ -420,14 +667,18 @@ function ReportPage({
     setSelDocIds(new Set(initialSettings.documentIds ?? []));
     setSelCodeIds(new Set(initialSettings.codeIds ?? []));
     setSelUserIds(new Set(initialSettings.userIds ?? []));
+    setSelRelationshipIds(new Set(initialSettings.relationshipIds ?? []));
     setSelCaseAttrIds(new Set(initialSettings.caseAttributeIds ?? []));
     setSelDocAttrIds(new Set(initialSettings.documentAttributeIds ?? []));
+    setSelCaseTypes(new Set(initialSettings.caseTypes ?? []));
+    setSelDocTypes(new Set(initialSettings.documentTypes ?? []));
     setCaseAttributeFilters(initialSettings.caseAttributeFilters ?? {});
     setDocumentAttributeFilters(initialSettings.documentAttributeFilters ?? {});
   }, [initialSettings, isFrozen]);
 
   // Live data (only used for new reports)
   const [caseItems,     setCaseItems]     = useState<CaseItem[]>([]);
+  const [relationshipItems, setRelationshipItems] = useState<RelationshipItem[]>([]);
   const [userItems,     setUserItems]     = useState<UserItem[]>([]);
   const [caseAttributeItems, setCaseAttributeItems] = useState<AttributeItem[]>(row?.snapshot?.caseAttributeItems ?? []);
   const [documentAttributeItems, setDocumentAttributeItems] = useState<AttributeItem[]>(row?.snapshot?.documentAttributeItems ?? []);
@@ -436,11 +687,41 @@ function ReportPage({
   const [documentAttributeValues, setDocumentAttributeValues] = useState<AttributeValueItem[]>([]);
   const [allAnns,       setAllAnns]       = useState<AnnItem[]>([]);
   const [docContentMap, setDocContentMap] = useState<Map<string, string>>(new Map());
+  const [postgresDocs, setPostgresDocs] = useState<ProjectDocument[] | null>(null);
+  const [postgresCodes, setPostgresCodes] = useState<Code[] | null>(null);
   const [dataLoading,   setDataLoading]   = useState(!isFrozen);
+  const reportDocs = postgresDocs ?? [];
+  const reportCodes = postgresCodes ?? [];
+  const reportDocById = useMemo(() => new Map(reportDocs.map((doc) => [doc.id, doc])), [reportDocs]);
+  const codeTree = useMemo<CodeTreeNode[]>(() => {
+    const byParent = new Map<string, Code[]>();
+    const codeIds = new Set(reportCodes.map((code) => code.id));
+    for (const code of reportCodes) {
+      const parentKey = code.parentId && codeIds.has(code.parentId) ? code.parentId : "";
+      const siblings = byParent.get(parentKey) ?? [];
+      siblings.push(code);
+      byParent.set(parentKey, siblings);
+    }
+
+    for (const siblings of byParent.values()) {
+      siblings.sort((a, b) => a.label.localeCompare(b.label));
+    }
+
+    const nodes: CodeTreeNode[] = [];
+    const visit = (parentId: string, depth: number) => {
+      for (const code of byParent.get(parentId) ?? []) {
+        nodes.push({ code, depth });
+        visit(code.id, depth + 1);
+      }
+    };
+    visit("", 0);
+    return nodes;
+  }, [reportCodes]);
 
   // For frozen reports, pull data from the snapshot
   const frozenAnns      = row?.snapshot?.filteredAnns  ?? [];
   const frozenCaseItems = row?.snapshot?.caseItems     ?? [];
+  const frozenRelationshipItems = row?.snapshot?.relationshipItems ?? [];
   const frozenUserItems = row?.snapshot?.userItems     ?? [];
   const frozenCaseAttributeItems = row?.snapshot?.caseAttributeItems ?? [];
   const frozenDocumentAttributeItems = row?.snapshot?.documentAttributeItems ?? [];
@@ -449,18 +730,19 @@ function ReportPage({
 
   const effectiveDocContentMap = useMemo(() => {
     const merged = new Map(docContentMap);
-    for (const doc of storeDocs) {
+    for (const doc of reportDocs) {
       if (typeof doc.content === "string" && doc.content.length > 0 && !merged.has(doc.id)) {
         merged.set(doc.id, doc.content);
       }
     }
     return merged;
-  }, [docContentMap, storeDocs]);
+  }, [docContentMap, reportDocs]);
 
   useEffect(() => {
     if (!isFrozen) return;
     setUserItems(frozenUserItems);
     setCaseItems(frozenCaseItems);
+    setRelationshipItems(frozenRelationshipItems);
     setCaseAttributeItems(frozenCaseAttributeItems);
     setDocumentAttributeItems(frozenDocumentAttributeItems);
     setCaseDocLinks(frozenCaseDocLinks);
@@ -474,132 +756,64 @@ function ReportPage({
     setShowContext(row?.snapshot?.showContext ?? false);
     setContextChars(row?.snapshot?.contextChars ?? 100);
     setAnnotationGroupBy(row?.snapshot?.annotationGroupBy ?? "none");
-    setAnnotationSortBy(row?.snapshot?.annotationSortBy ?? "document");
-  }, [isFrozen, row?.id, row?.snapshot, frozenCaseAttributeItems, frozenDocumentAttributeItems, frozenDescription]);
+    setAnnotationSortBy(row?.snapshot?.annotationSortBy ?? "code");
+  }, [isFrozen, row?.id, row?.snapshot, frozenCaseAttributeItems, frozenDocumentAttributeItems, frozenDescription, frozenRelationshipItems]);
 
   useEffect(() => {
-    if (!isFrozen || !pb || frozenCaseDocLinks.length > 0 || !row?.caseIds.length) return;
+    if (!postgresProjectId) return;
     let cancelled = false;
+    if (!isFrozen) setDataLoading(true);
     (async () => {
       try {
-        const links = await pb.collection("case_documents").getFullList({
-          filter: row.caseIds.map((caseId) => `case="${caseId}"`).join(" || "),
-        });
-        if (!cancelled) {
-          setCaseDocLinks(links.map((r) => ({ caseId: r.case, documentId: r.document })));
-        }
-      } catch {
-        if (!cancelled) setCaseDocLinks([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isFrozen, pb, row?.id, frozenCaseDocLinks.length]);
-
-  useEffect(() => {
-    if (isFrozen || !pb || !activeProject) return;
-    setDataLoading(true);
-    (async () => {
-      try {
-        const [caseRecs, caseAttrRecs, docAttrRecs] = await Promise.all([
-          pb.collection("cases").getFullList({ filter: `project="${activeProject.id}"&&deleted_at=""`, sort: "name" }),
-          pb.collection("case_attribute_definitions").getFullList({
-            filter: `project="${activeProject.id}"&&deleted_at=""`,
-            sort: "sort_order,name",
-          }),
-          pb.collection("document_attribute_definitions").getFullList({
-            filter: `project="${activeProject.id}"&&deleted_at=""`,
-            sort: "sort_order,name",
-          }),
-        ]);
-        setCaseItems(caseRecs.map((r) => ({ id: r.id, name: r.name })));
-        setCaseAttributeItems(caseAttrRecs.map((r) => ({
-          id: r.id,
-          name: r.name ?? t("reportsAnnotations.labels.untitledAttribute"),
-          dataType: r.data_type ?? "text",
-        })));
-        setDocumentAttributeItems(docAttrRecs.map((r) => ({
-          id: r.id,
-          name: r.name ?? t("reportsAnnotations.labels.untitledAttribute"),
-          dataType: r.data_type ?? "text",
-        })));
-
-        const memberRecs = await pb.collection("project_members").getFullList({
-          filter: `project="${activeProject.id}"`, expand: "user",
-        });
-        setUserItems(
-          memberRecs
-            .map((r) => { const u = r.expand?.user; return u ? { id: u.id, name: u.name || u.email || t("reportsCodes.exportSections.unknown") } : null; })
-            .filter(Boolean) as UserItem[],
-        );
-
-        if (caseRecs.length > 0) {
-          const [cdRecs, caseAttrValueRecs] = await Promise.all([
-            pb.collection("case_documents").getFullList({
-              filter: caseRecs.map((c) => `case="${c.id}"`).join(" || "),
-            }),
-            pb.collection("case_attribute_values").getFullList({
-              filter: `(${caseRecs.map((c) => `case="${c.id}"`).join(" || ")})&&deleted_at=""`,
-            }),
-          ]);
-          setCaseDocLinks(cdRecs.map((r) => ({ caseId: r.case, documentId: r.document })));
-          setCaseAttributeValues(caseAttrValueRecs.map((r) => ({
-            id: r.id,
-            ownerId: r.case,
-            attributeId: r.attribute,
-            value: r.value ?? "",
-          })));
-        } else {
-          setCaseDocLinks([]);
-          setCaseAttributeValues([]);
-        }
-
-        if (storeDocs.length > 0) {
-          const [annRecs, docAttrValueRecs] = await Promise.all([
-            pb.collection("annotations").getFullList({
-              filter: `(${storeDocs.map((d) => `document="${d.id}"`).join(" || ")})&&deleted_at=""`,
-              expand: "code,document,created_by",
-            }),
-            pb.collection("document_attribute_values").getFullList({
-              filter: `(${storeDocs.map((d) => `document="${d.id}"`).join(" || ")})&&deleted_at=""`,
-            }),
-          ]);
-          const contentMap = new Map<string, string>();
-          for (const r of annRecs) {
-            const doc = r.expand?.document;
-            if (doc && typeof doc.content === "string" && !contentMap.has(doc.id))
-              contentMap.set(doc.id, doc.content);
-          }
-          setDocContentMap(contentMap);
-          setDocumentAttributeValues(docAttrValueRecs.map((r) => ({
-            id: r.id,
-            ownerId: r.document,
-            attributeId: r.attribute,
-            value: r.value ?? "",
-          })));
-          setAllAnns(annRecs.map((r) => ({
-            id:           r.id,
-            quote:        r.quote,
-            note:         r.note ?? "",
-            documentId:   r.document,
-            documentName: r.expand?.document?.name ?? "—",
-            codeId:       r.code,
-            codeName:     r.expand?.code?.label ?? "—",
-            codeColor:    r.expand?.code?.color ?? "#888888",
-            startOffset:  r.start_offset ?? 0,
-            endOffset:    r.end_offset   ?? 0,
-            createdById:  r.created_by   ?? "",
-          })));
-        } else {
-          setDocumentAttributeValues([]);
-          setAllAnns([]);
-        }
+        const data = await loadPostgresReportBuilderData(postgresProjectId!);
+        if (cancelled) return;
+        const docById = new Map(data.documents.map((doc) => [doc.id, doc]));
+        const codeById = new Map(data.codes.map((code) => [code.id, code]));
+        setPostgresDocs(data.documents);
+        setPostgresCodes(data.codes);
+        setDocContentMap(new Map(data.documents.map((doc) => [doc.id, doc.content ?? ""])));
+        if (isFrozen) return;
+        setCaseItems(data.cases);
+        setRelationshipItems(data.relationships);
+        setUserItems(data.users);
+        setCaseAttributeItems(data.caseAttributeItems);
+        setDocumentAttributeItems(data.documentAttributeItems);
+        setCaseDocLinks(data.caseDocumentLinks);
+        setCaseAttributeValues(data.caseAttributeValues);
+        setDocumentAttributeValues(data.documentAttributeValues);
+        setAllAnns(data.annotations.map((annotation) => {
+          const doc = docById.get(annotation.documentId);
+          const code = codeById.get(annotation.codeId);
+          return {
+            id: annotation.id,
+            quote: annotation.quote,
+            note: annotation.note ?? "",
+            documentId: annotation.documentId,
+            documentName: doc?.name ?? "-",
+            sourceKind: annotation.sourceKind || doc?.type,
+            sourcePath: doc?.filePath,
+            timeStartMs: annotation.timeStartMs,
+            timeEndMs: annotation.timeEndMs,
+            imageRegion: annotation.imageRegion,
+            codeId: annotation.codeId,
+            codeName: code?.label ?? "-",
+            codeColor: code?.color ?? "#888888",
+            startOffset: annotation.startOffset ?? 0,
+            endOffset: annotation.endOffset ?? 0,
+            createdById: annotation.createdById ?? "",
+          };
+        }));
       } catch (e) {
         console.error(e);
       } finally {
-        setDataLoading(false);
+        if (!cancelled) setDataLoading(false);
       }
     })();
-  }, [pb, activeProject, storeDocs, isFrozen]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isFrozen, postgresProjectId]);
+
 
   const caseDocMap = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -691,6 +905,26 @@ function ReportPage({
     return map;
   }, [documentAttributeItems, documentAttributeValues]);
 
+  const caseTypeOptions = useMemo(() => {
+    const values = new Set(caseItems.map((item) => formatObjectType(item.objectType)));
+    return [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+  }, [caseItems]);
+
+  const documentTypeOptions = useMemo(() => {
+    const values = new Set(reportDocs.map((doc) => formatSourceType(doc.type)));
+    return [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+  }, [reportDocs]);
+
+  useEffect(() => {
+    if (isFrozen || dataLoading || selCaseTypes.size > 0 || caseTypeOptions.length === 0) return;
+    setSelCaseTypes(new Set(caseTypeOptions));
+  }, [caseTypeOptions, dataLoading, isFrozen, selCaseTypes.size]);
+
+  useEffect(() => {
+    if (isFrozen || dataLoading || selDocTypes.size > 0 || documentTypeOptions.length === 0) return;
+    setSelDocTypes(new Set(documentTypeOptions));
+  }, [dataLoading, documentTypeOptions, isFrozen, selDocTypes.size]);
+
   const caseIdsMatchingSelectedAttributes = useMemo(() => {
     if (selCaseAttrIds.size === 0) return null;
     const matching = new Set<string>();
@@ -732,7 +966,7 @@ function ReportPage({
   const docIdsMatchingSelectedAttributes = useMemo(() => {
     if (selDocAttrIds.size === 0) return null;
     const matching = new Set<string>();
-    for (const doc of storeDocs) {
+    for (const doc of reportDocs) {
       const values = documentAttributeMap.get(doc.id);
       const hasAllSelectedValues = [...selDocAttrIds].every((attrId) => {
         const attr = documentAttributeItems.find((candidate) => candidate.id === attrId);
@@ -765,7 +999,17 @@ function ReportPage({
       if (hasAllSelectedValues) matching.add(doc.id);
     }
     return matching;
-  }, [selDocAttrIds, storeDocs, documentAttributeMap, documentAttributeItems, documentAttributeFilters, documentAttributeValueStats]);
+  }, [selDocAttrIds, reportDocs, documentAttributeMap, documentAttributeItems, documentAttributeFilters, documentAttributeValueStats]);
+
+  const caseIdsMatchingSelectedTypes = useMemo(() => {
+    if (caseTypeOptions.length === 0 || selCaseTypes.size === caseTypeOptions.length) return null;
+    return new Set(caseItems.filter((item) => selCaseTypes.has(formatObjectType(item.objectType))).map((item) => item.id));
+  }, [caseItems, caseTypeOptions.length, selCaseTypes]);
+
+  const docIdsMatchingSelectedTypes = useMemo(() => {
+    if (documentTypeOptions.length === 0 || selDocTypes.size === documentTypeOptions.length) return null;
+    return new Set(reportDocs.filter((doc) => selDocTypes.has(formatSourceType(doc.type))).map((doc) => doc.id));
+  }, [documentTypeOptions.length, reportDocs, selDocTypes]);
 
   const caseFilterDocIds = useMemo(() => {
     const standaloneSelectedDocIds = new Set(
@@ -774,38 +1018,42 @@ function ReportPage({
     if (selCaseIds.size === 0) return standaloneSelectedDocIds;
     const ids = new Set<string>();
     for (const cId of selCaseIds) {
+      if (caseIdsMatchingSelectedTypes && !caseIdsMatchingSelectedTypes.has(cId)) continue;
       if (caseIdsMatchingSelectedAttributes && !caseIdsMatchingSelectedAttributes.has(cId)) continue;
       for (const dId of (caseDocMap.get(cId) ?? [])) {
+        if (docIdsMatchingSelectedTypes && !docIdsMatchingSelectedTypes.has(dId)) continue;
         if (docIdsMatchingSelectedAttributes && !docIdsMatchingSelectedAttributes.has(dId)) continue;
         ids.add(dId);
       }
     }
     for (const docId of standaloneSelectedDocIds) {
+      if (docIdsMatchingSelectedTypes && !docIdsMatchingSelectedTypes.has(docId)) continue;
       if (docIdsMatchingSelectedAttributes && !docIdsMatchingSelectedAttributes.has(docId)) continue;
       ids.add(docId);
     }
     return ids;
-  }, [selCaseIds, selDocIds, caseDocMap, docCaseMap, caseIdsMatchingSelectedAttributes, docIdsMatchingSelectedAttributes]);
+  }, [selCaseIds, selDocIds, caseDocMap, docCaseMap, caseIdsMatchingSelectedTypes, caseIdsMatchingSelectedAttributes, docIdsMatchingSelectedTypes, docIdsMatchingSelectedAttributes]);
 
   const filteredAnns = useMemo(() => {
     if (isFrozen) return frozenAnns;
     return allAnns.filter((ann) => {
       if (!caseFilterDocIds.has(ann.documentId)) return false;
       if (!selDocIds.has(ann.documentId)) return false;
+      if (docIdsMatchingSelectedTypes && !docIdsMatchingSelectedTypes.has(ann.documentId)) return false;
       if (docIdsMatchingSelectedAttributes && !docIdsMatchingSelectedAttributes.has(ann.documentId)) return false;
       if (!selCodeIds.has(ann.codeId)) return false;
       if (!selUserIds.has(ann.createdById)) return false;
       return true;
     });
-  }, [isFrozen, frozenAnns, allAnns, caseFilterDocIds, selDocIds, docIdsMatchingSelectedAttributes, selCodeIds, selUserIds]);
+  }, [isFrozen, frozenAnns, allAnns, caseFilterDocIds, selDocIds, docIdsMatchingSelectedTypes, docIdsMatchingSelectedAttributes, selCodeIds, selUserIds]);
 
   const coverageStats = useMemo(() => {
     const empty = { rows: [] as { codeName: string; codeColor: string; chars: number; pct: number }[], totalChars: 0 };
     if (!showCoverage) return empty;
-    const activeDocs = storeDocs.filter((d) => selDocIds.has(d.id));
+    const activeDocs = reportDocs.filter((d) => selDocIds.has(d.id));
     const totalChars = activeDocs.reduce((sum, d) => sum + (effectiveDocContentMap.get(d.id)?.length ?? 0), 0);
     if (totalChars === 0) return empty;
-    const visibleCodes = storeCodes.filter((c) => selCodeIds.has(c.id));
+    const visibleCodes = reportCodes.filter((c) => selCodeIds.has(c.id));
     const byCode = new Map<string, { codeName: string; codeColor: string; chars: number }>();
     for (const c of visibleCodes) byCode.set(c.id, { codeName: c.label, codeColor: c.color, chars: 0 });
     for (const ann of filteredAnns) {
@@ -817,12 +1065,12 @@ function ReportPage({
       .filter((r) => r.pct > 0)
       .sort((a, b) => b.pct - a.pct);
     return { rows, totalChars };
-  }, [showCoverage, filteredAnns, selDocIds, selCodeIds, storeDocs, storeCodes, effectiveDocContentMap]);
+  }, [showCoverage, filteredAnns, selDocIds, selCodeIds, reportDocs, reportCodes, effectiveDocContentMap]);
 
   const annotationFrequencyStats = useMemo(() => {
     const empty = [] as { codeId: string; codeName: string; codeColor: string; count: number }[];
     if (!showCoverage) return empty;
-    const visibleCodes = storeCodes.filter((c) => selCodeIds.has(c.id));
+    const visibleCodes = reportCodes.filter((c) => selCodeIds.has(c.id));
     const byCode = new Map<string, { codeId: string; codeName: string; codeColor: string; count: number }>();
     for (const c of visibleCodes) {
       byCode.set(c.id, { codeId: c.id, codeName: c.label, codeColor: c.color, count: 0 });
@@ -834,12 +1082,12 @@ function ReportPage({
     return Array.from(byCode.values())
       .filter((row) => row.count > 0)
       .sort((a, b) => b.count - a.count || a.codeName.localeCompare(b.codeName, undefined, { sensitivity: "base" }));
-  }, [showCoverage, filteredAnns, selCodeIds, storeCodes]);
+  }, [showCoverage, filteredAnns, selCodeIds, reportCodes]);
 
   const annotationDocumentStats = useMemo(() => {
     const empty = [] as { documentId: string; documentName: string; count: number }[];
     if (!showCoverage) return empty;
-    const visibleDocs = storeDocs.filter((d) => selDocIds.has(d.id));
+    const visibleDocs = reportDocs.filter((d) => selDocIds.has(d.id));
     const byDocument = new Map<string, { documentId: string; documentName: string; count: number }>();
     for (const doc of visibleDocs) {
       byDocument.set(doc.id, { documentId: doc.id, documentName: doc.name, count: 0 });
@@ -851,7 +1099,7 @@ function ReportPage({
     return Array.from(byDocument.values())
       .filter((row) => row.count > 0)
       .sort((a, b) => b.count - a.count || a.documentName.localeCompare(b.documentName, undefined, { sensitivity: "base" }));
-  }, [showCoverage, filteredAnns, selDocIds, storeDocs]);
+  }, [showCoverage, filteredAnns, selDocIds, reportDocs]);
 
   const annotationLengthStats = useMemo(() => {
     const empty = {
@@ -866,11 +1114,12 @@ function ReportPage({
         q3: number;
         max: number;
         mean: number;
+        lengths: number[];
       }[],
       maxValue: 0,
     };
     if (!showCoverage || filteredAnns.length === 0) return empty;
-    const visibleCodes = storeCodes.filter((c) => selCodeIds.has(c.id));
+    const visibleCodes = reportCodes.filter((c) => selCodeIds.has(c.id));
     const byCode = new Map<string, { codeId: string; codeName: string; codeColor: string; lengths: number[] }>();
     for (const c of visibleCodes) {
       byCode.set(c.id, { codeId: c.id, codeName: c.label, codeColor: c.color, lengths: [] });
@@ -895,12 +1144,326 @@ function ReportPage({
           q3: quantile(lengths, 0.75),
           max: lengths[lengths.length - 1] ?? 0,
           mean: total / lengths.length,
+          lengths,
         };
       })
       .sort((a, b) => b.count - a.count || a.codeName.localeCompare(b.codeName, undefined, { sensitivity: "base" }));
     const maxValue = rows.reduce((max, row) => Math.max(max, row.max), 0);
     return { rows, maxValue };
-  }, [showCoverage, filteredAnns, selCodeIds, storeCodes]);
+  }, [showCoverage, filteredAnns, selCodeIds, reportCodes]);
+
+  const annotationLengthChartOption = useMemo<EChartsCoreOption>(() => {
+    const rows = annotationLengthStats.rows;
+    if (rows.length === 0) return {};
+
+    const boxData = rows.map((row) => ({
+      name: row.codeName,
+      value: [row.min, row.q1, row.median, row.q3, row.max],
+      itemStyle: {
+        color: row.codeColor,
+        opacity: 0.5,
+        borderColor: row.codeColor,
+        borderWidth: 2,
+      },
+    }));
+
+    return {
+      animation: false,
+      grid: {
+        left: 108,
+        right: 48,
+        top: 10,
+        bottom: 24,
+      },
+      tooltip: {
+        trigger: "item",
+      },
+      xAxis: {
+        type: "value",
+        min: 0,
+        max: annotationLengthStats.maxValue > 0 ? annotationLengthStats.maxValue : 1,
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        splitLine: {
+          lineStyle: { color: "#eef2f6" },
+        },
+      },
+      yAxis: {
+        type: "category",
+        data: rows.map((row) => row.codeName),
+        inverse: true,
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+          overflow: "truncate",
+          width: 100,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          show: false,
+        },
+      },
+      series: [
+        {
+          type: "boxplot",
+          layout: "horizontal",
+          data: boxData,
+          boxWidth: ["38%", "70%"],
+        },
+      ],
+    };
+  }, [annotationLengthStats]);
+
+  const coverageChartOption = useMemo<EChartsCoreOption>(() => {
+    const rows = coverageStats.rows;
+    if (rows.length === 0) return {};
+
+    return {
+      animation: false,
+      grid: {
+        left: 108,
+        right: 48,
+        top: 6,
+        bottom: 18,
+      },
+      tooltip: {
+        trigger: "item",
+        formatter: (params: any) => {
+          const data = params?.data ?? {};
+          return t("reportsAnnotations.charts.coverageTooltip", {
+            code: data.name ?? "",
+            coverage: Number(data.value ?? 0).toFixed(1),
+            characters: formatCurrentNumber(Number(data.characters ?? 0)),
+          });
+        },
+      },
+      xAxis: {
+        type: "value",
+        min: 0,
+        max: Math.max((rows[0]?.pct ?? 0) + 5, 1),
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+          formatter: (value: number) => `${value.toFixed(1)}%`,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        splitLine: {
+          lineStyle: { color: "#eef2f6" },
+        },
+      },
+      yAxis: {
+        type: "category",
+        data: rows.map((row) => row.codeName),
+        inverse: true,
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+          overflow: "truncate",
+          width: 100,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          show: false,
+        },
+      },
+      series: [
+        {
+          type: "bar",
+          barWidth: 12,
+          data: rows.map((row) => ({
+            name: row.codeName,
+            value: row.pct,
+            characters: row.chars,
+            itemStyle: {
+              color: row.codeColor,
+              borderRadius: [0, 6, 6, 0],
+            },
+          })),
+          label: {
+            show: true,
+            position: "right",
+            color: "#687385",
+            fontSize: 10,
+            formatter: (params: any) => {
+              const value = Number(params?.value ?? 0);
+              return `${value < 0.1 ? "<0.1" : value.toFixed(1)}%`;
+            },
+          },
+        },
+      ],
+    };
+  }, [coverageStats, formatCurrentNumber, t]);
+
+  const annotationFrequencyChartOption = useMemo<EChartsCoreOption>(() => {
+    const rows = annotationFrequencyStats;
+    if (rows.length === 0) return {};
+
+    return {
+      animation: false,
+      grid: {
+        left: 108,
+        right: 48,
+        top: 6,
+        bottom: 18,
+      },
+      tooltip: {
+        trigger: "item",
+        formatter: (params: any) => t("reportsAnnotations.charts.annotationsTooltip", {
+          code: params?.data?.name ?? "",
+          count: Number(params?.data?.value ?? 0),
+        }),
+      },
+      xAxis: {
+        type: "value",
+        min: 0,
+        max: Math.max(rows[0]?.count ?? 0, 1),
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        splitLine: {
+          lineStyle: { color: "#eef2f6" },
+        },
+      },
+      yAxis: {
+        type: "category",
+        data: rows.map((row) => row.codeName),
+        inverse: true,
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+          overflow: "truncate",
+          width: 100,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          show: false,
+        },
+      },
+      series: [
+        {
+          type: "bar",
+          barWidth: 12,
+          data: rows.map((row) => ({
+            name: row.codeName,
+            value: row.count,
+            itemStyle: {
+              color: row.codeColor,
+              borderRadius: [0, 6, 6, 0],
+            },
+          })),
+          label: {
+            show: true,
+            position: "right",
+            color: "#687385",
+            fontSize: 10,
+          },
+        },
+      ],
+    };
+  }, [annotationFrequencyStats, t]);
+
+  const annotationDocumentChartOption = useMemo<EChartsCoreOption>(() => {
+    const rows = annotationDocumentStats;
+    if (rows.length === 0) return {};
+
+    return {
+      animation: false,
+      grid: {
+        left: 108,
+        right: 48,
+        top: 6,
+        bottom: 18,
+      },
+      tooltip: {
+        trigger: "item",
+        formatter: (params: any) => t("reportsAnnotations.charts.documentAnnotationsTooltip", {
+          document: params?.data?.name ?? "",
+          count: Number(params?.data?.value ?? 0),
+        }),
+      },
+      xAxis: {
+        type: "value",
+        min: 0,
+        max: Math.max(rows[0]?.count ?? 0, 1),
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        splitLine: {
+          lineStyle: { color: "#eef2f6" },
+        },
+      },
+      yAxis: {
+        type: "category",
+        data: rows.map((row) => row.documentName),
+        inverse: true,
+        axisLabel: {
+          color: "#687385",
+          fontSize: 10,
+          overflow: "truncate",
+          width: 100,
+        },
+        axisLine: {
+          lineStyle: { color: "#d5dbe3" },
+        },
+        axisTick: {
+          show: false,
+        },
+      },
+      series: [
+        {
+          type: "bar",
+          barWidth: 12,
+          data: rows.map((row) => ({
+            name: row.documentName,
+            value: row.count,
+            itemStyle: {
+              color: "#687385",
+              borderRadius: [0, 6, 6, 0],
+            },
+          })),
+          label: {
+            show: true,
+            position: "right",
+            color: "#687385",
+            fontSize: 10,
+          },
+        },
+      ],
+    };
+  }, [annotationDocumentStats, t]);
 
   function togglePanel(key: string) {
     setCollapsed((prev) => {
@@ -949,11 +1512,18 @@ function ReportPage({
     return next;
   }
 
-  function applySelectionSets(nextCaseIds: Set<string>, nextDocIds: Set<string>, nextCodeIds: Set<string>, nextUserIds: Set<string>) {
+  function applySelectionSets(
+    nextCaseIds: Set<string>,
+    nextDocIds: Set<string>,
+    nextCodeIds: Set<string>,
+    nextUserIds: Set<string>,
+    options?: { preserveRelationshipSelection?: boolean },
+  ) {
     setSelCaseIds(new Set(nextCaseIds));
     setSelDocIds(new Set(nextDocIds));
     setSelCodeIds(new Set(nextCodeIds));
     setSelUserIds(new Set(nextUserIds));
+    if (!options?.preserveRelationshipSelection) setSelRelationshipIds(new Set());
   }
 
   function clearPrimarySelections() {
@@ -1012,6 +1582,14 @@ function ReportPage({
     setSelDocAttrIds(new Set());
   }
 
+  function toggleCaseTypeSelection(typeLabel: string) {
+    setSelCaseTypes((current) => toggle(current, typeLabel));
+  }
+
+  function toggleDocumentTypeSelection(typeLabel: string) {
+    setSelDocTypes((current) => toggle(current, typeLabel));
+  }
+
   function updateCaseAttributeFilter(attrId: string, updates: AttributeFilterConfig) {
     setCaseAttributeFilters((prev) => ({
       ...prev,
@@ -1053,6 +1631,38 @@ function ReportPage({
     applySelectionSets(nextCaseIds, nextDocIds, nextCodeIds, nextUserIds);
   }
 
+  function applySelectionFromRelationships(nextRelationshipIds: Set<string>) {
+    if (nextRelationshipIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
+    const nextCaseIds = new Set<string>();
+    for (const relationship of displayRelationshipItems) {
+      if (!nextRelationshipIds.has(relationship.id)) continue;
+      if (relationship.object1Id) nextCaseIds.add(relationship.object1Id);
+      if (relationship.object2Id) nextCaseIds.add(relationship.object2Id);
+    }
+    if (nextCaseIds.size === 0) {
+      clearPrimarySelections();
+      return;
+    }
+    const nextDocIds = new Set<string>();
+    const nextCodeIds = new Set<string>();
+    const nextUserIds = new Set<string>();
+    for (const caseId of nextCaseIds) {
+      for (const docId of caseDocMap.get(caseId) ?? []) {
+        nextDocIds.add(docId);
+      }
+    }
+    for (const ann of allAnns) {
+      if (!nextDocIds.has(ann.documentId)) continue;
+      nextCodeIds.add(ann.codeId);
+      if (ann.createdById) nextUserIds.add(ann.createdById);
+    }
+    setSelRelationshipIds(new Set(nextRelationshipIds));
+    applySelectionSets(nextCaseIds, nextDocIds, nextCodeIds, nextUserIds, { preserveRelationshipSelection: true });
+  }
+
   function applySelectionFromDocuments(nextDocIds: Set<string>) {
     if (nextDocIds.size === 0) {
       clearPrimarySelections();
@@ -1075,7 +1685,8 @@ function ReportPage({
   }
 
   function applySelectionFromCodes(nextCodeIds: Set<string>) {
-    if (nextCodeIds.size === 0) {
+    const expandedCodeIds = expandCodeSelectionWithDescendants(nextCodeIds);
+    if (expandedCodeIds.size === 0) {
       clearPrimarySelections();
       return;
     }
@@ -1083,7 +1694,7 @@ function ReportPage({
     const nextCaseIds = new Set<string>();
     const nextUserIds = new Set<string>();
     for (const ann of allAnns) {
-      if (!nextCodeIds.has(ann.codeId)) continue;
+      if (!expandedCodeIds.has(ann.codeId)) continue;
       nextDocIds.add(ann.documentId);
       if (ann.createdById) nextUserIds.add(ann.createdById);
     }
@@ -1092,7 +1703,56 @@ function ReportPage({
         nextCaseIds.add(caseId);
       }
     }
-    applySelectionSets(nextCaseIds, nextDocIds, nextCodeIds, nextUserIds);
+    applySelectionSets(nextCaseIds, nextDocIds, expandedCodeIds, nextUserIds);
+  }
+
+  function expandCodeSelectionWithDescendants(codeIds: Set<string>) {
+    const childrenByParent = new Map<string, Code[]>();
+    for (const code of reportCodes) {
+      if (!code.parentId) continue;
+      const children = childrenByParent.get(code.parentId) ?? [];
+      children.push(code);
+      childrenByParent.set(code.parentId, children);
+    }
+
+    const expandedCodeIds = new Set(codeIds);
+    const addDescendants = (codeId: string) => {
+      for (const child of childrenByParent.get(codeId) ?? []) {
+        if (expandedCodeIds.has(child.id)) continue;
+        expandedCodeIds.add(child.id);
+        addDescendants(child.id);
+      }
+    };
+
+    for (const codeId of codeIds) addDescendants(codeId);
+    return expandedCodeIds;
+  }
+
+  function toggleCodeSelection(codeId: string) {
+    const childrenByParent = new Map<string, Code[]>();
+    for (const code of reportCodes) {
+      if (!code.parentId) continue;
+      const children = childrenByParent.get(code.parentId) ?? [];
+      children.push(code);
+      childrenByParent.set(code.parentId, children);
+    }
+
+    const nextCodeIds = new Set(selCodeIds);
+    const collectDescendantIds = (parentId: string, ids: Set<string>) => {
+      for (const child of childrenByParent.get(parentId) ?? []) {
+        ids.add(child.id);
+        collectDescendantIds(child.id, ids);
+      }
+    };
+
+    const branchIds = new Set<string>([codeId]);
+    collectDescendantIds(codeId, branchIds);
+    if (selCodeIds.has(codeId)) {
+      for (const id of branchIds) nextCodeIds.delete(id);
+    } else {
+      for (const id of branchIds) nextCodeIds.add(id);
+    }
+    applySelectionFromCodes(nextCodeIds);
   }
 
   function applySelectionFromUsers(nextUserIds: Set<string>) {
@@ -1118,7 +1778,7 @@ function ReportPage({
 
   async function handleSave() {
     if (!canStartReports) return;
-    if (!activeProject || !name.trim()) return;
+    if (!postgresProjectId || !name.trim()) return;
     if (selCaseIds.size === 0 || selDocIds.size === 0 || selCodeIds.size === 0 || selUserIds.size === 0) {
       setError(t("reportsAnnotations.errors.selectAtLeastOne"));
       return;
@@ -1131,13 +1791,17 @@ function ReportPage({
         reportType: "annotations",
         filteredAnns,
         caseItems,
+        relationshipItems,
         userItems,
         caseAttributeItems,
         documentAttributeItems,
         caseDocLinks,
         selectedUserIds: [...selUserIds],
+        selectedRelationshipIds: [...selRelationshipIds],
         selectedCaseAttributeIds: [...selCaseAttrIds],
         selectedDocumentAttributeIds: [...selDocAttrIds],
+        selectedCaseTypes: [...selCaseTypes],
+        selectedDocumentTypes: [...selDocTypes],
         caseAttributeFilters,
         documentAttributeFilters,
         description: hasDescriptionContent(descHtml) ? descHtml : undefined,
@@ -1148,22 +1812,33 @@ function ReportPage({
         annotationGroupBy,
         annotationSortBy,
         summaryCounts: {
-          cases: selCaseIds.size,
-          docs:  selDocIds.size,
-          codes: selCodeIds.size,
-          users: selUserIds.size,
+          cases: effectiveCaseIds.size,
+          docs:  effectiveDocIds.size,
+          codes: effectiveCodeIds.size,
+          users: effectiveUserIds.size,
         },
       };
-      const record = await createCodeReport({
-        name:        name.trim(),
-        caseIds:     relationPreview([...selCaseIds]),
-        documentIds: relationPreview([...selDocIds]),
-        codeIds:     relationPreview([...selCodeIds]),
-        createdBy:   currentUser?.id,
-        snapshot:    JSON.stringify(snapshot),
+      const record = await createPostgresReport({
+        projectId: postgresProjectId,
+        title: name.trim(),
+        reportType: "annotations",
+        settingsJson: JSON.stringify({
+          caseIds: [...selCaseIds],
+          documentIds: [...selDocIds],
+          codeIds: [...selCodeIds],
+          userIds: [...selUserIds],
+          relationshipIds: [...selRelationshipIds],
+          caseAttributeIds: [...selCaseAttrIds],
+          documentAttributeIds: [...selDocAttrIds],
+          caseTypes: [...selCaseTypes],
+          documentTypes: [...selDocTypes],
+          caseAttributeFilters,
+          documentAttributeFilters,
+        }),
+        contentJson: JSON.stringify(snapshot),
+        contentText: `${filteredAnns.length} annotations`,
       });
-      if (!record) throw new Error("Failed to save report.");
-      onSaved(record?.id);
+      onSaved(record.id);
     } catch (e) {
       console.error(e);
       setError(getPocketBaseErrorMessage(e));
@@ -1172,15 +1847,79 @@ function ReportPage({
   }
 
   // Summary counts — from snapshot for frozen, derived for live
-  const caseCount = frozenCounts?.cases ?? selCaseIds.size;
-  const docCount  = frozenCounts?.docs  ?? selDocIds.size;
-  const codeCount = frozenCounts?.codes ?? selCodeIds.size;
-  const userCount = frozenCounts?.users ?? selUserIds.size;
+  async function recordReportExport(format: string, filePath: string) {
+    if (!postgresProjectId || !row?.id) return;
+    try {
+      await logPostgresReportExport({
+        projectId: postgresProjectId,
+        reportId: row.id,
+        title: name || row.name || t("reportsAnnotations.untitledReport"),
+        reportType: "annotations",
+        format,
+        filePath,
+      });
+    } catch (e) {
+      console.warn("Could not log report export:", e);
+    }
+  }
+
+  const effectiveCaseIds = useMemo(() => {
+    if (isFrozen) return new Set(frozenCaseItems.map((item) => item.id));
+    return new Set([...selCaseIds].filter((caseId) => {
+      if (caseIdsMatchingSelectedTypes && !caseIdsMatchingSelectedTypes.has(caseId)) return false;
+      if (caseIdsMatchingSelectedAttributes && !caseIdsMatchingSelectedAttributes.has(caseId)) return false;
+      return true;
+    }));
+  }, [caseIdsMatchingSelectedAttributes, caseIdsMatchingSelectedTypes, frozenCaseItems, isFrozen, selCaseIds]);
+
+  const effectiveDocIds = useMemo(() => {
+    if (isFrozen) return new Set(frozenAnns.map((ann) => ann.documentId));
+    return new Set([...selDocIds].filter((docId) => caseFilterDocIds.has(docId)));
+  }, [caseFilterDocIds, frozenAnns, isFrozen, selDocIds]);
+
+  const effectiveCodeIds = useMemo(
+    () => new Set(filteredAnns.map((ann) => ann.codeId)),
+    [filteredAnns],
+  );
+
+  const effectiveUserIds = useMemo(
+    () => new Set(filteredAnns.map((ann) => ann.createdById)),
+    [filteredAnns],
+  );
+
+  const caseCount = frozenCounts?.cases ?? effectiveCaseIds.size;
+  const docCount  = frozenCounts?.docs  ?? effectiveDocIds.size;
+  const codeCount = frozenCounts?.codes ?? effectiveCodeIds.size;
+  const userCount = frozenCounts?.users ?? effectiveUserIds.size;
 
   const displayCaseItems = isFrozen ? frozenCaseItems : caseItems;
+  const displayRelationshipItems = isFrozen ? frozenRelationshipItems : relationshipItems;
   const displayUserItems = isFrozen ? frozenUserItems : userItems;
   const displayCaseAttributeItems = isFrozen ? frozenCaseAttributeItems : caseAttributeItems;
   const displayDocumentAttributeItems = isFrozen ? frozenDocumentAttributeItems : documentAttributeItems;
+  const relationshipColumnValue = (relationship: RelationshipItem, key: RelationshipSortKey) => {
+    if (key === "relationshipType") return relationship.relationshipType || relationship.name || "Relationship";
+    if (key === "object1Name") return relationship.object1Name || "Unknown object";
+    return relationship.object2Name || "Unknown object";
+  };
+  const sortedRelationshipItems = useMemo(() => {
+    return [...displayRelationshipItems].sort((a, b) => {
+      const cmp = relationshipColumnValue(a, relationshipSortKey).localeCompare(
+        relationshipColumnValue(b, relationshipSortKey),
+        undefined,
+        { sensitivity: "base", numeric: true },
+      );
+      return relationshipSortDir === "asc" ? cmp : -cmp;
+    });
+  }, [displayRelationshipItems, relationshipSortDir, relationshipSortKey]);
+  const toggleRelationshipSort = (key: RelationshipSortKey) => {
+    if (relationshipSortKey === key) {
+      setRelationshipSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setRelationshipSortKey(key);
+    setRelationshipSortDir("asc");
+  };
 
   const uniqueByName = (items: { id: string; name: string }[]) => {
     const seen = new Set<string>();
@@ -1192,10 +1931,10 @@ function ReportPage({
     });
   };
 
-  const includedCaseItems = displayCaseItems.filter((item) => selCaseIds.has(item.id));
+  const includedCaseItems = displayCaseItems.filter((item) => effectiveCaseIds.has(item.id));
 
   const includedDocumentItems = (() => {
-    const selected = storeDocs.filter((doc) => selDocIds.has(doc.id));
+    const selected = reportDocs.filter((doc) => effectiveDocIds.has(doc.id));
     if (selected.length > 0 || !isFrozen) {
       return selected.map((doc) => ({ id: doc.id, name: doc.name }));
     }
@@ -1203,7 +1942,7 @@ function ReportPage({
   })();
 
   const includedCodeItems = (() => {
-    const selected = storeCodes.filter((code) => selCodeIds.has(code.id));
+    const selected = reportCodes.filter((code) => effectiveCodeIds.has(code.id));
     if (selected.length > 0 || !isFrozen) {
       return selected.map((code) => ({ id: code.id, name: code.label, color: code.color }));
     }
@@ -1217,7 +1956,7 @@ function ReportPage({
       .map((ann) => ({ id: ann.codeId, name: getCodeName(ann), color: ann.codeColor }));
   })();
 
-  const includedUserItems = displayUserItems.filter((item) => selUserIds.has(item.id));
+  const includedUserItems = displayUserItems.filter((item) => effectiveUserIds.has(item.id));
 
   const summaryCards: { key: string; label: string; value: number; items: SummaryItem[]; expandable?: boolean }[] = [
     { key: "cases",       label: t("reportsAnnotations.labels.cases"),       value: caseCount,           items: includedCaseItems },
@@ -1232,7 +1971,7 @@ function ReportPage({
   }
 
   function getCodeName(ann: AnnItem): string {
-    return ann.codeName || storeCodes.find((code) => code.id === ann.codeId)?.label || t("reportsCodes.exportSections.unknown");
+    return ann.codeName || reportCodes.find((code) => code.id === ann.codeId)?.label || t("reportsCodes.exportSections.unknown");
   }
 
   function getCaseNameForAnn(ann: AnnItem): string {
@@ -1511,7 +2250,7 @@ function ReportPage({
 
   const sortedAnns = useMemo(() => {
     return [...filteredAnns].sort(compareAnnotations);
-  }, [filteredAnns, annotationSortBy, displayUserItems, displayCaseItems, storeCodes, selCaseIds, caseDocMap]);
+  }, [filteredAnns, annotationSortBy, displayUserItems, displayCaseItems, reportCodes, selCaseIds, caseDocMap]);
 
   const groupedAnns = useMemo(() => {
     const getGroupMeta = (ann: AnnItem): { key: string; label: string } => {
@@ -1539,7 +2278,7 @@ function ReportPage({
       groups.get(meta.key)!.items.push(ann);
     }
     return Array.from(groups.values());
-  }, [sortedAnns, annotationGroupBy, displayUserItems, storeCodes]);
+  }, [sortedAnns, annotationGroupBy, displayUserItems, reportCodes]);
 
   const caseFilterDetails = useMemo(
     () => describeAttributeFilters(displayCaseAttributeItems, selCaseAttrIds, caseAttributeFilters, caseAttributeValueStats),
@@ -1551,19 +2290,27 @@ function ReportPage({
     [displayDocumentAttributeItems, selDocAttrIds, documentAttributeFilters, documentAttributeValueStats],
   );
 
+  const caseTypeFilterDetails = useMemo(() => {
+    if (caseTypeOptions.length === 0 || selCaseTypes.size === caseTypeOptions.length) return [];
+    if (selCaseTypes.size === 0) return ["Object Type: no types selected"];
+    const values = [...selCaseTypes].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+    return [`Object Type: ${values.length <= 4 ? values.join(", ") : `${values.slice(0, 4).join(", ")} +${values.length - 4} more`}`];
+  }, [caseTypeOptions.length, selCaseTypes]);
+
+  const documentTypeFilterDetails = useMemo(() => {
+    if (documentTypeOptions.length === 0 || selDocTypes.size === documentTypeOptions.length) return [];
+    if (selDocTypes.size === 0) return ["Source Type: no types selected"];
+    const values = [...selDocTypes].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+    return [`Source Type: ${values.length <= 4 ? values.join(", ") : `${values.slice(0, 4).join(", ")} +${values.length - 4} more`}`];
+  }, [documentTypeOptions.length, selDocTypes]);
+
+  const activeCaseFilterDetails = [...caseTypeFilterDetails, ...caseFilterDetails];
+  const activeDocumentFilterDetails = [...documentTypeFilterDetails, ...documentFilterDetails];
+  const hasActiveFilters = activeCaseFilterDetails.length > 0 || activeDocumentFilterDetails.length > 0;
+
   async function buildExportContentMap(): Promise<Map<string, string>> {
-    const map = new Map<string, string>();
-    if (!showContext || !pb) return map;
-    const docIds = [...new Set(filteredAnns.map((a) => a.documentId))];
-    if (docIds.length === 0) return map;
-    try {
-      const docs = await pb.collection("documents").getFullList({
-        filter: docIds.map((id) => `id="${id}"`).join("||"),
-        fields: "id,content",
-      });
-      for (const d of docs) map.set(d.id, d.content ?? "");
-    } catch { /* context not critical — skip silently */ }
-    return map;
+    if (!showContext) return new Map<string, string>();
+    return effectiveDocContentMap;
   }
 
   function annContext(ann: AnnItem, contentMap: Map<string, string>) {
@@ -1576,6 +2323,134 @@ function ReportPage({
       ellipsisBefore: ann.startOffset > contextChars,
       ellipsisAfter:  ann.endOffset + contextChars < content.length,
     };
+  }
+
+  function sourceForAnnotation(ann: AnnItem): ProjectDocument | undefined {
+    return reportDocById.get(ann.documentId);
+  }
+
+  function sourceKindForAnnotation(ann: AnnItem): string {
+    return (ann.sourceKind || sourceForAnnotation(ann)?.type || "").trim().toLowerCase();
+  }
+
+  function sourcePathForAnnotation(ann: AnnItem): string {
+    return ann.sourcePath || sourceForAnnotation(ann)?.filePath || "";
+  }
+
+  function resolvedPathForAnnotation(ann: AnnItem): string {
+    return resolveProjectStoragePath(projectStoragePath, sourcePathForAnnotation(ann));
+  }
+
+  function mediaSummaryForAnnotation(ann: AnnItem): string {
+    const sourceKind = sourceKindForAnnotation(ann);
+    if (sourceKind === "audio" || sourceKind === "video") {
+      const start = typeof ann.timeStartMs === "number" ? formatMediaMilliseconds(ann.timeStartMs) : "-";
+      const end = typeof ann.timeEndMs === "number" ? formatMediaMilliseconds(ann.timeEndMs) : "-";
+      return `${formatSourceType(sourceKind)} clip: ${start} - ${end}`;
+    }
+    if ((sourceKind === "image" || sourceKind === "pdf") && ann.imageRegion) {
+      const region = ann.imageRegion;
+      const page = sourceKind === "pdf" && region.pageNumber ? `Page ${region.pageNumber}; ` : "";
+      return `${formatSourceType(sourceKind)} region: ${page}${Math.round(region.width)} x ${Math.round(region.height)} px`;
+    }
+    return "";
+  }
+
+  function dataUrlToBytes(dataUrl: string): Uint8Array {
+    const base64 = dataUrl.split(",")[1] ?? "";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Image failed to load"));
+      image.src = src;
+    });
+  }
+
+  async function buildAnnotationImagePreview(ann: AnnItem): Promise<{ dataUrl: string; width: number; height: number } | null> {
+    const sourceKind = sourceKindForAnnotation(ann);
+    const region = ann.imageRegion;
+    const resolvedPath = resolvedPathForAnnotation(ann);
+    if (!region || !resolvedPath || (sourceKind !== "image" && sourceKind !== "pdf")) return null;
+
+    if (sourceKind === "image") {
+      let objectUrl = "";
+      try {
+        const bytes = await readTauriFile(resolvedPath);
+        const mediaType = mediaTypeFromFileExtension(fileExtensionFromPath(resolvedPath)) ?? "image/png";
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaType }));
+        const image = await loadImage(objectUrl);
+        const sourceWidth = Math.max(region.imageWidth, region.width, 1);
+        const sourceHeight = Math.max(region.imageHeight, region.height, 1);
+        const scaleX = image.naturalWidth / sourceWidth;
+        const scaleY = image.naturalHeight / sourceHeight;
+        const cropX = Math.max(0, region.x * scaleX);
+        const cropY = Math.max(0, region.y * scaleY);
+        const cropW = Math.max(1, Math.min(region.width * scaleX, image.naturalWidth - cropX));
+        const cropH = Math.max(1, Math.min(region.height * scaleY, image.naturalHeight - cropY));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(cropW);
+        canvas.height = Math.round(cropH);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        ctx.drawImage(image, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+        return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
+      } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      }
+    }
+
+    try {
+      const bytes = await readTauriFile(resolvedPath);
+      const pdfjs = await loadPdfJs();
+      const pdf = await pdfjs.getDocument({ data: bytes.slice().buffer }).promise;
+      const page = await pdf.getPage(Math.max(1, ann.imageRegion?.pageNumber ?? 1));
+      const viewport = page.getViewport({ scale: 1.6 });
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = Math.ceil(viewport.width);
+      pageCanvas.height = Math.ceil(viewport.height);
+      const pageCtx = pageCanvas.getContext("2d");
+      if (!pageCtx) return null;
+      await page.render({ canvas: pageCanvas, canvasContext: pageCtx, viewport }).promise;
+      const sourceWidth = Math.max(region.imageWidth, region.width, 1);
+      const sourceHeight = Math.max(region.imageHeight, region.height, 1);
+      const scaleX = pageCanvas.width / sourceWidth;
+      const scaleY = pageCanvas.height / sourceHeight;
+      const cropX = Math.max(0, region.x * scaleX);
+      const cropY = Math.max(0, region.y * scaleY);
+      const cropW = Math.max(1, Math.min(region.width * scaleX, pageCanvas.width - cropX));
+      const cropH = Math.max(1, Math.min(region.height * scaleY, pageCanvas.height - cropY));
+      const cropCanvas = document.createElement("canvas");
+      cropCanvas.width = Math.round(cropW);
+      cropCanvas.height = Math.round(cropH);
+      const cropCtx = cropCanvas.getContext("2d");
+      if (!cropCtx) return null;
+      cropCtx.drawImage(pageCanvas, cropX, cropY, cropW, cropH, 0, 0, cropCanvas.width, cropCanvas.height);
+      return { dataUrl: cropCanvas.toDataURL("image/png"), width: cropCanvas.width, height: cropCanvas.height };
+    } catch (e) {
+      console.error("Media preview export failed:", e);
+      return null;
+    }
+  }
+
+  async function mediaHtmlForAnnotation(ann: AnnItem): Promise<string> {
+    const summary = mediaSummaryForAnnotation(ann);
+    const sourcePath = sourcePathForAnnotation(ann);
+    const preview = await buildAnnotationImagePreview(ann);
+    if (!summary && !sourcePath && !preview) return "";
+    return `
+      <div class="media-export">
+        ${summary ? `<p class="media-export-meta">${escapeHtml(summary)}</p>` : ""}
+        ${sourcePath ? `<p class="media-export-meta"><strong>Source file:</strong> ${escapeHtml(sourcePath)}</p>` : ""}
+        ${preview ? `<img src="${preview.dataUrl}" alt="Media annotation preview" />` : ""}
+      </div>
+    `;
   }
 
   function getCoverageChartSvg(forExport = false): string | null {
@@ -1714,9 +2589,9 @@ function ReportPage({
     `;
   }
 
-  function getCleanReportHtml(contentMap: Map<string, string> = new Map()): string {
+  async function getCleanReportHtml(contentMap: Map<string, string> = new Map()): Promise<string> {
     const title = name || t("reportsAnnotations.untitledReport");
-    const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"));
+    const createdBy = row?.createdByName || t("reportsCodes.exportSections.unknown");
     const createdAt = row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString());
     const descriptionHtml = getExportDescriptionHtml();
     const groupLabels: Record<string, string> = { none: t("reportsAnnotations.exportLabels.none"), code: t("reportsAnnotations.exportLabels.code"), document: t("reportsAnnotations.exportLabels.document"), coder: t("reportsAnnotations.exportLabels.coder") };
@@ -1725,14 +2600,14 @@ function ReportPage({
     const filterRows: string[] = [];
     if (selCaseIds.size > 0) {
       const names = displayCaseItems.filter((c) => selCaseIds.has(c.id)).map((c) => c.name).join(", ");
-      filterRows.push(`<tr><td><strong>Cases</strong></td><td>${escapeHtml(names)}</td></tr>`);
+      filterRows.push(`<tr><td><strong>Objects</strong></td><td>${escapeHtml(names)}</td></tr>`);
     }
     if (selDocIds.size > 0) {
-      const names = storeDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ");
-      filterRows.push(`<tr><td><strong>Documents</strong></td><td>${escapeHtml(names)}</td></tr>`);
+      const names = reportDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ");
+      filterRows.push(`<tr><td><strong>Sources</strong></td><td>${escapeHtml(names)}</td></tr>`);
     }
     if (selCodeIds.size > 0) {
-      const names = storeCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ");
+      const names = reportCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ");
       filterRows.push(`<tr><td><strong>Codes</strong></td><td>${escapeHtml(names)}</td></tr>`);
     }
     if (selUserIds.size > 0) {
@@ -1751,7 +2626,7 @@ function ReportPage({
       { title: t("reportsAnnotations.charts.codeCoverage"), subtitle: t("reportsAnnotations.charts.codeCoverageSubtitle", { count: formatCurrentNumber(coverageStats.totalChars) }), image: getCoverageChartSvg(true) },
       { title: t("reportsAnnotations.charts.annotationsPerCode"), subtitle: t("reportsAnnotations.charts.annotationsPerCodeSubtitle"), image: getAnnotationFrequencyChartSvg(true) },
       { title: t("reportsAnnotations.charts.annotationsPerDocument"), subtitle: t("reportsAnnotations.charts.annotationsPerDocumentSubtitle"), image: getAnnotationDocumentChartSvg(true) },
-      { title: t("reportsAnnotations.charts.annotationLength"), subtitle: t("reportsAnnotations.charts.annotationLengthSubtitle"), image: getAnnotationLengthChartSvg(true) },
+      { title: t("reportsAnnotations.charts.annotationLength"), subtitle: ANNOTATION_LENGTH_SUBTITLE, image: getAnnotationLengthChartSvg(true) },
     ]
       .filter((item) => item.image)
       .map((item) => `
@@ -1763,7 +2638,7 @@ function ReportPage({
       `)
       .join("");
 
-    const annGroupHtml = (items: AnnItem[]) => items.map((ann) => {
+    const annGroupHtml = async (items: AnnItem[]) => (await Promise.all(items.map(async (ann) => {
       const ctx = annContext(ann, contentMap);
       const quotePart = ctx.before || ctx.after
         ? [
@@ -1772,6 +2647,7 @@ function ReportPage({
             ctx.after ? `<span class="ctx">${escapeHtml(ctx.after + (ctx.ellipsisAfter ? "…" : ""))}</span>` : "",
           ].join("")
         : escapeHtml(ann.quote);
+      const mediaHtml = await mediaHtmlForAnnotation(ann);
       return `
         <section class="annotation">
           <div class="annotation-meta">
@@ -1780,20 +2656,21 @@ function ReportPage({
             <span>${escapeHtml(getCoderName(ann.createdById))}</span>
             <span>${escapeHtml(getCaseNameForAnn(ann))}</span>
           </div>
-          <blockquote>${quotePart}</blockquote>
+          ${ann.quote || ctx.before || ctx.after ? `<blockquote>${quotePart}</blockquote>` : ""}
+          ${mediaHtml}
           ${ann.note ? `<p class="note"><strong>Note:</strong> ${escapeHtml(ann.note)}</p>` : ""}
         </section>
       `;
-    }).join("");
+    }))).join("");
 
     const annotationHtml = sortedAnns.length === 0
       ? `<p class="muted">${escapeHtml(t("reportsAnnotations.empty.noAnnotationsCaptured"))}</p>`
       : annotationGroupBy === "none"
-        ? annGroupHtml(sortedAnns)
-        : groupedAnns.map((group) => `
+        ? await annGroupHtml(sortedAnns)
+        : (await Promise.all(groupedAnns.map(async (group) => `
             <h3 class="group-header">${escapeHtml(group.label)} <span class="group-count">(${group.items.length})</span></h3>
-            ${annGroupHtml(group.items)}
-          `).join("");
+            ${await annGroupHtml(group.items)}
+          `))).join("");
 
     return `<!doctype html>
 <html>
@@ -1819,6 +2696,9 @@ function ReportPage({
       .code { color: #fff; border-radius: 4px; padding: 2px 6px; font-weight: 700; }
       blockquote { margin: 7px 0; padding-left: 12px; border-left: 3px solid #b7c1ce; }
       .ctx { color: #9aa5b4; }
+      .media-export { margin: 8px 0; }
+      .media-export img { display: block; max-width: 100%; height: auto; border: 1px solid #d5dbe3; border-radius: 6px; }
+      .media-export-meta { margin: 3px 0; color: #687385; font-size: 12px; }
       .note { margin: 7px 0 0; }
       .group-header { font-size: 14px; margin: 20px 0 4px; color: #687385; border-bottom: 1px solid #d5dbe3; padding-bottom: 4px; }
       .group-count { font-weight: 400; }
@@ -1835,7 +2715,7 @@ function ReportPage({
     ${descriptionHtml ? `<h2>Description</h2><div class="description">${descriptionHtml}</div>` : ""}
     <h2>Summary</h2>
     <table class="summary">
-      <tr><th>Cases</th><th>Documents</th><th>Codes</th><th>Users</th><th>Annotations</th></tr>
+      <tr><th>Objects</th><th>Sources</th><th>Codes</th><th>Users</th><th>Annotations</th></tr>
       <tr><td>${caseCount}</td><td>${docCount}</td><td>${codeCount}</td><td>${userCount}</td><td>${filteredAnns.length}</td></tr>
     </table>
     ${filtersHtml}
@@ -1854,7 +2734,7 @@ function ReportPage({
       if (!path) return;
 
       const { default: writeXlsxFile } = await loadWriteExcelFile();
-      const createdBy = row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"));
+      const createdBy = row?.createdByName || t("reportsCodes.exportSections.unknown");
       const createdAt = row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString());
       const groupLabels: Record<string, string> = { none: t("reportsAnnotations.exportLabels.none"), code: t("reportsAnnotations.exportLabels.code"), document: t("reportsAnnotations.exportLabels.document"), coder: t("reportsAnnotations.exportLabels.coder") };
       const sortLabels: Record<string, string> = { document: t("reportsAnnotations.exportLabels.document"), code: t("reportsAnnotations.exportLabels.code"), coder: t("reportsAnnotations.exportLabels.coder"), quoteLength: t("reportsAnnotations.exportLabels.quoteLength"), quote: t("reportsAnnotations.exportLabels.quoteAZ") };
@@ -1903,16 +2783,16 @@ function ReportPage({
 
       metaRows.push([]);
       metaRows.push([sectionCell("Summary")]);
-      metaRows.push(["Cases", caseCount]);
-      metaRows.push(["Documents", docCount]);
+      metaRows.push(["Objects", caseCount]);
+      metaRows.push(["Sources", docCount]);
       metaRows.push(["Codes", codeCount]);
       metaRows.push(["Users", userCount]);
       metaRows.push(["Annotations", filteredAnns.length]);
 
       const filterLines: Array<[string, string]> = [];
-      if (selCaseIds.size  > 0) filterLines.push(["Cases",       displayCaseItems.filter(c => selCaseIds.has(c.id)).map(c => c.name).join(", ")]);
-      if (selDocIds.size   > 0) filterLines.push(["Documents",   storeDocs.filter(d => selDocIds.has(d.id)).map(d => d.name).join(", ")]);
-      if (selCodeIds.size  > 0) filterLines.push(["Codes",       storeCodes.filter(c => selCodeIds.has(c.id)).map(c => c.label).join(", ")]);
+      if (selCaseIds.size  > 0) filterLines.push(["Objects",     displayCaseItems.filter(c => selCaseIds.has(c.id)).map(c => c.name).join(", ")]);
+      if (selDocIds.size   > 0) filterLines.push(["Sources",     reportDocs.filter(d => selDocIds.has(d.id)).map(d => d.name).join(", ")]);
+      if (selCodeIds.size  > 0) filterLines.push(["Codes",       reportCodes.filter(c => selCodeIds.has(c.id)).map(c => c.label).join(", ")]);
       if (selUserIds.size  > 0) filterLines.push(["Users",       displayUserItems.filter(u => selUserIds.has(u.id)).map(u => u.name).join(", ")]);
       if (caseFilterDetails.length     > 0) filterLines.push([t("reportsAnnotations.exportLabels.caseAttributes"),     caseFilterDetails.join("; ")]);
       if (documentFilterDetails.length > 0) filterLines.push([t("reportsAnnotations.exportLabels.documentAttributes"), documentFilterDetails.join("; ")]);
@@ -1971,7 +2851,7 @@ function ReportPage({
 
       pushStatsSection(
         t("reportsAnnotations.charts.annotationLength"),
-        t("reportsAnnotations.charts.annotationLengthSubtitle"),
+        ANNOTATION_LENGTH_SUBTITLE,
         ["Code", "Color", "Annotations", "Min", "Q1", "Median", "Q3", "Max", "Mean"],
         annotationLengthStats.rows.map((row) => [
           row.codeName,
@@ -1993,7 +2873,7 @@ function ReportPage({
 
       const headers = [
         ...(withGroup ? ["Group"] : []),
-        "Case", "Document", "Coder", "Code", "Quote",
+        "Case", "Document", "Source Type", "Media", "Source Path", "Coder", "Code", "Quote",
         ...(withContext ? ["Context Before", "Context After"] : []),
         "Note",
       ];
@@ -2012,6 +2892,9 @@ function ReportPage({
           ...(withGroup ? [annToGroup.get(ann.id) ?? groupLabels[annotationGroupBy]] : []),
           getCaseNameForAnn(ann),
           ann.documentName,
+          formatSourceType(sourceKindForAnnotation(ann)),
+          mediaSummaryForAnnotation(ann),
+          sourcePathForAnnotation(ann),
           displayUserItems.find(u => u.id === ann.createdById)?.name || "—",
           getCodeName(ann),
           wrappedCell(ann.quote),
@@ -2042,6 +2925,9 @@ function ReportPage({
               ...(withGroup ? [{ width: 20 }] : []),
               { width: 20 },
               { width: 26 },
+              { width: 14 },
+              { width: 28 },
+              { width: 38 },
               { width: 18 },
               { width: 20 },
               { width: 52 },
@@ -2058,6 +2944,7 @@ function ReportPage({
       );
       const blob = await file.toBlob();
       await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+      await recordReportExport("xlsx", path);
     } catch (e) {
       console.error("XLSX export failed:", e);
       setError(t("reportsAnnotations.errors.xlsxExportFailed"));
@@ -2074,7 +2961,8 @@ function ReportPage({
       const path = await save({ defaultPath: `${name || t("reportsAnnotations.untitledReport")}.html`, filters: [{ name: t("reportsAnnotations.fileTypes.html"), extensions: ["html"] }] });
       if (!path) return;
       const contentMap = await buildExportContentMap();
-      await writeTextFile(path, getCleanReportHtml(contentMap));
+      await writeTextFile(path, await getCleanReportHtml(contentMap));
+      await recordReportExport("html", path);
     } catch (e) {
       setError(t("reportsAnnotations.errors.htmlExportFailed"));
     } finally {
@@ -2115,11 +3003,25 @@ function ReportPage({
         y += lines.length * lineHeight + gap;
       };
 
+      const addPdfMediaPreview = async (ann: AnnItem) => {
+        const summary = mediaSummaryForAnnotation(ann);
+        const sourcePath = sourcePathForAnnotation(ann);
+        if (summary) addText(summary, 9, "normal", 4);
+        if (sourcePath) addText(`Source file: ${sourcePath}`, 8, "normal", 4);
+        const preview = await buildAnnotationImagePreview(ann);
+        if (!preview) return;
+        const displayW = Math.min(contentWidth, preview.width);
+        const displayH = (preview.height / Math.max(preview.width, 1)) * displayW;
+        ensureSpace(displayH + 12);
+        pdf.addImage(preview.dataUrl, "PNG", margin, y, displayW, displayH);
+        y += displayH + 10;
+      };
+
       const pdfGroupLabels: Record<string, string> = { none: t("reportsAnnotations.exportLabels.none"), code: t("reportsAnnotations.exportLabels.code"), document: t("reportsAnnotations.exportLabels.document"), coder: t("reportsAnnotations.exportLabels.coder") };
       const pdfSortLabels: Record<string, string> = { document: t("reportsAnnotations.exportLabels.document"), code: t("reportsAnnotations.exportLabels.code"), coder: t("reportsAnnotations.exportLabels.coder"), quoteLength: t("reportsAnnotations.exportLabels.quoteLength"), quote: t("reportsAnnotations.exportLabels.quoteAZ") };
 
       addText(name || t("reportsAnnotations.untitledReport"), 20, "bold", 14);
-      addText(`${t("reportsAnnotations.createdBy")}: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"))}`, 10);
+      addText(`${t("reportsAnnotations.createdBy")}: ${row?.createdByName || t("reportsCodes.exportSections.unknown")}`, 10);
       addText(`${t("reportsAnnotations.created")}: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`, 10);
       addText(`Group by: ${pdfGroupLabels[annotationGroupBy] ?? annotationGroupBy}   Sort by: ${pdfSortLabels[annotationSortBy] ?? annotationSortBy}`, 10, "normal", 14);
 
@@ -2134,8 +3036,8 @@ function ReportPage({
 
       const pdfFilterLines: string[] = [];
       if (selCaseIds.size > 0) pdfFilterLines.push(`${t("reportsAnnotations.labels.cases")}: ${displayCaseItems.filter((c) => selCaseIds.has(c.id)).map((c) => c.name).join(", ")}`);
-      if (selDocIds.size > 0)  pdfFilterLines.push(`${t("reportsAnnotations.labels.documents")}: ${storeDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
-      if (selCodeIds.size > 0) pdfFilterLines.push(`${t("reportsAnnotations.labels.codes")}: ${storeCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
+      if (selDocIds.size > 0)  pdfFilterLines.push(`${t("reportsAnnotations.labels.documents")}: ${reportDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
+      if (selCodeIds.size > 0) pdfFilterLines.push(`${t("reportsAnnotations.labels.codes")}: ${reportCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
       if (selUserIds.size > 0) pdfFilterLines.push(`${t("reportsAnnotations.labels.users")}: ${displayUserItems.filter((u) => selUserIds.has(u.id)).map((u) => u.name).join(", ")}`);
       if (caseFilterDetails.length > 0) pdfFilterLines.push(`${t("reportsAnnotations.exportLabels.caseAttributes")}: ${caseFilterDetails.join("; ")}`);
       if (documentFilterDetails.length > 0) pdfFilterLines.push(`${t("reportsAnnotations.exportLabels.documentAttributes")}: ${documentFilterDetails.join("; ")}`);
@@ -2177,7 +3079,7 @@ function ReportPage({
 
       addText("Annotations", 14, "bold", 8);
 
-      const addAnnBlock = (ann: AnnItem) => {
+      const addAnnBlock = async (ann: AnnItem) => {
         ensureSpace(76);
         pdf.setDrawColor(210);
         pdf.line(margin, y, pageWidth - margin, y);
@@ -2185,24 +3087,26 @@ function ReportPage({
         addText(`${ann.codeName} | ${ann.documentName} | ${getCoderName(ann.createdById)} | ${getCaseNameForAnn(ann)}`, 9, "bold", 6);
         const ctx = annContext(ann, pdfContentMap);
         if (ctx.before) addText(`${ctx.ellipsisBefore ? "…" : ""}${ctx.before}`, 9, "italic", 2);
-        addText(`"${ann.quote}"`, 10, "italic", ctx.after ? 2 : 6);
+        if (ann.quote) addText(`"${ann.quote}"`, 10, "italic", ctx.after ? 2 : 6);
         if (ctx.after) addText(`${ctx.after}${ctx.ellipsisAfter ? "…" : ""}`, 9, "italic", 6);
+        await addPdfMediaPreview(ann);
         if (ann.note) addText(`Note: ${ann.note}`, 9, "normal", 10);
       };
 
       if (sortedAnns.length === 0) {
         addText(t("reportsAnnotations.empty.noAnnotationsCaptured"), 10, "italic");
       } else if (annotationGroupBy === "none") {
-        for (const ann of sortedAnns) addAnnBlock(ann);
+        for (const ann of sortedAnns) await addAnnBlock(ann);
       } else {
         for (const group of groupedAnns) {
           ensureSpace(30);
           addText(`${group.label} (${group.items.length})`, 11, "bold", 6);
-          for (const ann of group.items) addAnnBlock(ann);
+          for (const ann of group.items) await addAnnBlock(ann);
         }
       }
 
       await writeFile(path, new Uint8Array(pdf.output("arraybuffer")));
+      await recordReportExport("pdf", path);
     } catch (e) {
       console.error(e);
       setError(t("reportsAnnotations.errors.pdfExportFailed"));
@@ -2233,7 +3137,7 @@ function ReportPage({
 
       const children: any[] = [
         new Paragraph({ text: name || t("reportsAnnotations.untitledReport"), heading: HeadingLevel.TITLE }),
-        new Paragraph(`${t("reportsAnnotations.createdBy")}: ${row ? row.createdByName : (currentUser?.name || currentUser?.email || t("reportsCodes.exportSections.unknown"))}`),
+        new Paragraph(`${t("reportsAnnotations.createdBy")}: ${row?.createdByName || t("reportsCodes.exportSections.unknown")}`),
         new Paragraph(`${t("reportsAnnotations.created")}: ${row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())}`),
         new Paragraph(`Group by: ${docxGroupLabels[annotationGroupBy] ?? annotationGroupBy}   |   Sort by: ${docxSortLabels[annotationSortBy] ?? annotationSortBy}`),
         new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }),
@@ -2242,8 +3146,8 @@ function ReportPage({
 
       const docxFilterLines: string[] = [];
       if (selCaseIds.size > 0) docxFilterLines.push(`${t("reportsAnnotations.labels.cases")}: ${displayCaseItems.filter((c) => selCaseIds.has(c.id)).map((c) => c.name).join(", ")}`);
-      if (selDocIds.size > 0)  docxFilterLines.push(`${t("reportsAnnotations.labels.documents")}: ${storeDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
-      if (selCodeIds.size > 0) docxFilterLines.push(`${t("reportsAnnotations.labels.codes")}: ${storeCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
+      if (selDocIds.size > 0)  docxFilterLines.push(`${t("reportsAnnotations.labels.documents")}: ${reportDocs.filter((d) => selDocIds.has(d.id)).map((d) => d.name).join(", ")}`);
+      if (selCodeIds.size > 0) docxFilterLines.push(`${t("reportsAnnotations.labels.codes")}: ${reportCodes.filter((c) => selCodeIds.has(c.id)).map((c) => c.label).join(", ")}`);
       if (selUserIds.size > 0) docxFilterLines.push(`${t("reportsAnnotations.labels.users")}: ${displayUserItems.filter((u) => selUserIds.has(u.id)).map((u) => u.name).join(", ")}`);
       if (caseFilterDetails.length > 0) docxFilterLines.push(`${t("reportsAnnotations.exportLabels.caseAttributes")}: ${caseFilterDetails.join("; ")}`);
       if (documentFilterDetails.length > 0) docxFilterLines.push(`${t("reportsAnnotations.exportLabels.documentAttributes")}: ${documentFilterDetails.join("; ")}`);
@@ -2294,11 +3198,26 @@ function ReportPage({
 
       const docxContentMap = await buildExportContentMap();
 
-      const addDocxAnn = (ann: AnnItem) => {
+      const addDocxMediaPreview = async (ann: AnnItem) => {
+        const summary = mediaSummaryForAnnotation(ann);
+        const sourcePath = sourcePathForAnnotation(ann);
+        if (summary) children.push(new Paragraph({ children: [new TextRun({ text: summary, color: "687385" })] }));
+        if (sourcePath) children.push(new Paragraph({ children: [new TextRun({ text: `Source file: ${sourcePath}`, color: "687385" })] }));
+        const preview = await buildAnnotationImagePreview(ann);
+        if (!preview) return;
+        const displayW = Math.min(480, preview.width);
+        const displayH = Math.round((preview.height / Math.max(preview.width, 1)) * displayW);
+        const bytes = dataUrlToBytes(preview.dataUrl);
+        children.push(new Paragraph({
+          children: [new ImageRun({ type: "png", data: bytes.buffer, transformation: { width: displayW, height: displayH } })],
+        }));
+      };
+
+      const addDocxAnn = async (ann: AnnItem) => {
         const ctx = annContext(ann, docxContentMap);
         const quoteRuns: any[] = [];
         if (ctx.before) quoteRuns.push(new TextRun({ text: (ctx.ellipsisBefore ? "…" : "") + ctx.before, italics: true, color: "9AA5B4" }));
-        quoteRuns.push(new TextRun({ text: `"${ann.quote}"`, italics: true }));
+        if (ann.quote) quoteRuns.push(new TextRun({ text: `"${ann.quote}"`, italics: true }));
         if (ctx.after) quoteRuns.push(new TextRun({ text: ctx.after + (ctx.ellipsisAfter ? "…" : ""), italics: true, color: "9AA5B4" }));
         children.push(
           new Paragraph({
@@ -2308,8 +3227,9 @@ function ReportPage({
             ],
             spacing: { before: 240 },
           }),
-          new Paragraph({ children: quoteRuns }),
         );
+        if (quoteRuns.length > 0) children.push(new Paragraph({ children: quoteRuns }));
+        await addDocxMediaPreview(ann);
         if (ann.note) {
           children.push(new Paragraph({ children: [new TextRun({ text: "Note: ", bold: true }), new TextRun(ann.note)] }));
         }
@@ -2319,21 +3239,22 @@ function ReportPage({
       if (sortedAnns.length === 0) {
         children.push(new Paragraph({ children: [new TextRun({ text: t("reportsAnnotations.empty.noAnnotationsCaptured"), italics: true })] }));
       } else if (annotationGroupBy === "none") {
-        for (const ann of sortedAnns) addDocxAnn(ann);
+        for (const ann of sortedAnns) await addDocxAnn(ann);
       } else {
         for (const group of groupedAnns) {
           children.push(new Paragraph({ text: `${group.label} (${group.items.length})`, heading: HeadingLevel.HEADING_2 }));
-          for (const ann of group.items) addDocxAnn(ann);
+          for (const ann of group.items) await addDocxAnn(ann);
         }
       }
 
       const doc = new DocxDocument({
-        creator: currentUser?.name || currentUser?.email || "Kanqual",
+        creator: row?.createdByName || "Kanqual",
         title: name || t("reportsAnnotations.untitledReport"),
         sections: [{ children }],
       });
       const buffer = await (await Packer.toBlob(doc)).arrayBuffer();
       await writeFile(path, new Uint8Array(buffer));
+      await recordReportExport("docx", path);
     } catch (e) {
       console.error(e);
       setError(t("reportsAnnotations.errors.docxExportFailed"));
@@ -2349,8 +3270,8 @@ function ReportPage({
 
       {/* ── Top bar ── */}
       <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
-        <button className="btn" onClick={onBack}>{t("reportsAnnotations.backToReports")}</button>
-        <div className="report-action-group" style={{ gap: 10 }}>
+        {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsAnnotations.backToReports")}</button>}
+        <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
           <button
             className="btn btn--secondary"
@@ -2374,6 +3295,7 @@ function ReportPage({
                 documentIds: row!.documentIds,
                 codeIds: row!.codeIds,
                 userIds: row!.snapshot?.selectedUserIds ?? [],
+                relationshipIds: row!.snapshot?.selectedRelationshipIds ?? [],
                 caseAttributeIds: row!.snapshot?.selectedCaseAttributeIds ?? [],
                 documentAttributeIds: row!.snapshot?.selectedDocumentAttributeIds ?? [],
                 caseAttributeFilters: row!.snapshot?.caseAttributeFilters ?? {},
@@ -2398,7 +3320,7 @@ function ReportPage({
         <div className="annotate-left">
           <div className="annotate-left-title">{t("reportsAnnotations.includeInReport")}</div>
 
-          {/* Cases */}
+          {/* Objects */}
           <div className="annotate-card">
             <div className="annotate-card-header" style={{ gap: 8 }}>
               <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("cases")}>
@@ -2407,8 +3329,8 @@ function ReportPage({
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
-                    aria-label="Filter cases by attributes"
-                    title="Filter cases by attributes"
+                    aria-label="Filter objects"
+                    title="Filter objects"
                     onClick={(e) => { e.stopPropagation(); setShowCaseAttributeFilters(true); }}
                   >
                     <FilterIcon className="filter-icon-svg" />
@@ -2425,31 +3347,65 @@ function ReportPage({
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
                   </div>
                 )}
-                <ul className="code-list">
-                {dataLoading
-                  ? <li className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</li>
-                  : displayCaseItems.length === 0
-                    ? <li className="code-list-empty">{t("reportsAnnotations.empty.noCases")}</li>
-                    : displayCaseItems.map((c) => (
-                        <li key={c.id} className="code-item"
-                          style={{ cursor: isFrozen ? "default" : "pointer" }}
-                          onClick={isFrozen ? undefined : () => applySelectionFromCases(toggle(selCaseIds, c.id))}
-                        >
-                          <input type="checkbox" className="memo-sel-checkbox"
-                            checked={selCaseIds.has(c.id)} disabled={isFrozen}
-                            onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromCases(toggle(selCaseIds, c.id)); }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <span className="code-label">{c.name}</span>
-                        </li>
-                      ))
-                }
-                </ul>
+                <div className="code-list" style={{ padding: 0 }}>
+                  {dataLoading ? (
+                    <div className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</div>
+                  ) : displayCaseItems.length === 0 ? (
+                    <div className="code-list-empty">{t("reportsAnnotations.empty.noCases")}</div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
+                      <colgroup>
+                        <col style={{ width: 24 }} />
+                        <col style={{ width: 72 }} />
+                        <col />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th aria-label="Select object" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {displayCaseItems.map((c) => {
+                          const isSelectedObject = selCaseIds.has(c.id);
+                          return (
+                            <tr
+                              key={c.id}
+                              onClick={isFrozen ? undefined : () => applySelectionFromCases(toggle(selCaseIds, c.id))}
+                              style={{
+                                cursor: isFrozen ? "default" : "pointer",
+                                background: isSelectedObject ? "var(--color-surface-hover)" : "transparent",
+                              }}
+                            >
+                              <td style={{ padding: "6px 2px 6px 8px", verticalAlign: "top" }}>
+                                <input
+                                  type="checkbox"
+                                  className="memo-sel-checkbox"
+                                  checked={isSelectedObject}
+                                  disabled={isFrozen}
+                                  onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromCases(toggle(selCaseIds, c.id)); }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </td>
+                              <td className="code-label" style={{ padding: "6px 6px 6px 4px", verticalAlign: "top" }}>
+                                {formatObjectType(c.objectType)}
+                              </td>
+                              <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>
+                                {c.name}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </>
             )}
           </div>
 
-          {/* Documents */}
+          {/* Sources */}
           <div className="annotate-card">
             <div className="annotate-card-header" style={{ gap: 8 }}>
               <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("documents")}>
@@ -2458,8 +3414,8 @@ function ReportPage({
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
-                    aria-label="Filter documents by attributes"
-                    title="Filter documents by attributes"
+                    aria-label="Filter sources"
+                    title="Filter sources"
                     onClick={(e) => { e.stopPropagation(); setShowDocumentAttributeFilters(true); }}
                   >
                     <FilterIcon className="filter-icon-svg" />
@@ -2470,30 +3426,179 @@ function ReportPage({
             </div>
             {!collapsed.has("documents") && (
               <>
-                {!isFrozen && storeDocs.length > 0 && (
+                {!isFrozen && reportDocs.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromDocuments(new Set(storeDocs.map(d => d.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromDocuments(new Set(reportDocs.map(d => d.id)))}>{t("reportsCodes.actions.all")}</button>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
                   </div>
                 )}
-                <ul className="code-list">
-                  {storeDocs.length === 0
-                    ? <li className="code-list-empty">No documents.</li>
-                    : storeDocs.map((d) => (
-                        <li key={d.id} className="code-item"
-                          style={{ cursor: isFrozen ? "default" : "pointer" }}
-                          onClick={isFrozen ? undefined : () => applySelectionFromDocuments(toggle(selDocIds, d.id))}
+                <div className="code-list" style={{ padding: 0 }}>
+                  {reportDocs.length === 0 ? (
+                    <div className="code-list-empty">No sources.</div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
+                      <colgroup>
+                        <col style={{ width: 24 }} />
+                        <col style={{ width: 48 }} />
+                        <col />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th aria-label="Select source" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportDocs.map((d) => {
+                          const isSelectedSource = selDocIds.has(d.id);
+                          return (
+                            <tr
+                              key={d.id}
+                              onClick={isFrozen ? undefined : () => applySelectionFromDocuments(toggle(selDocIds, d.id))}
+                              style={{
+                                cursor: isFrozen ? "default" : "pointer",
+                                background: isSelectedSource ? "var(--color-surface-hover)" : "transparent",
+                              }}
+                            >
+                              <td style={{ padding: "6px 2px 6px 8px", verticalAlign: "top" }}>
+                                <input
+                                  type="checkbox"
+                                  className="memo-sel-checkbox"
+                                  checked={isSelectedSource}
+                                  disabled={isFrozen}
+                                  onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromDocuments(toggle(selDocIds, d.id)); }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </td>
+                              <td className="code-label" style={{ padding: "6px 6px 6px 4px", verticalAlign: "top" }}>
+                                {formatSourceType(d.type)}
+                              </td>
+                              <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>
+                                {d.name}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Relationships */}
+          <div className="annotate-card">
+            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("relationships")}>
+              <span className="annotate-card-title">{t("reportsAnnotations.panels.relationships", { count: selRelationshipIds.size })}</span>
+              <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("relationships") ? "▶" : "▼"}</span>
+            </button>
+            {!collapsed.has("relationships") && (
+              <>
+                {!isFrozen && !dataLoading && displayRelationshipItems.length > 0 && (
+                  <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
+                    <button
+                      className="btn"
+                      style={{ fontSize: 11, padding: "1px 8px" }}
+                      onClick={() => applySelectionFromRelationships(new Set(displayRelationshipItems.filter((relationship) => relationship.object1Id && relationship.object2Id).map((relationship) => relationship.id)))}
+                    >
+                      {t("reportsCodes.actions.all")}
+                    </button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>
+                      {t("reportsCodes.actions.clear")}
+                    </button>
+                  </div>
+                )}
+                <div className="code-list" style={{ padding: 0 }}>
+                  {dataLoading ? (
+                    <div className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</div>
+                  ) : displayRelationshipItems.length === 0 ? (
+                    <div className="code-list-empty">No relationships.</div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
+                    <colgroup>
+                      <col style={{ width: 24 }} />
+                      <col />
+                      <col />
+                      <col />
+                    </colgroup>
+                    <thead>
+                      <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
+                        <th aria-label="Select relationship" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                        {[
+                          ["relationshipType", "Type"],
+                          ["object1Name", "Object 1"],
+                          ["object2Name", "Object 2"],
+                        ].map(([key, label]) => (
+                          <th key={key} style={{ padding: 0, fontWeight: 600 }}>
+                            <button
+                              type="button"
+                              onClick={() => toggleRelationshipSort(key as RelationshipSortKey)}
+                              style={{
+                                width: "100%",
+                                padding: key === "relationshipType" ? "6px 6px 6px 4px" : "6px 6px",
+                                border: "none",
+                                background: "none",
+                                color: "inherit",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 6,
+                                font: "inherit",
+                                fontWeight: 600,
+                                textAlign: "left",
+                              }}
+                            >
+                              <span>{label}</span>
+                              <span aria-hidden="true">
+                                {relationshipSortKey === key ? (relationshipSortDir === "asc" ? "↑" : "↓") : "↕"}
+                              </span>
+                            </button>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedRelationshipItems.map((relationship) => {
+                        const canSelectRelationship = !isFrozen && !!relationship.object1Id && !!relationship.object2Id;
+                        const isSelectedRelationship = selRelationshipIds.has(relationship.id);
+                        return (
+                          <tr
+                            key={relationship.id}
+                            onClick={canSelectRelationship ? () => applySelectionFromRelationships(toggle(selRelationshipIds, relationship.id)) : undefined}
+                            style={{
+                              cursor: canSelectRelationship ? "pointer" : "default",
+                            background: isSelectedRelationship ? "var(--color-surface-hover)" : "transparent",
+                          }}
                         >
-                          <input type="checkbox" className="memo-sel-checkbox"
-                            checked={selDocIds.has(d.id)} disabled={isFrozen}
-                            onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromDocuments(toggle(selDocIds, d.id)); }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <span className="code-label">{d.name}</span>
-                        </li>
-                      ))
-                  }
-                </ul>
+                            <td style={{ padding: "6px 2px 6px 8px", verticalAlign: "top" }}>
+                              <input
+                                type="checkbox"
+                                className="memo-sel-checkbox"
+                                checked={isSelectedRelationship}
+                                disabled={!canSelectRelationship}
+                                onChange={canSelectRelationship ? (e) => { e.stopPropagation(); applySelectionFromRelationships(toggle(selRelationshipIds, relationship.id)); } : undefined}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </td>
+                            <td className="code-label" style={{ padding: "6px 6px 6px 4px", verticalAlign: "top" }}>
+                              {relationshipColumnValue(relationship, "relationshipType")}
+                            </td>
+                            <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>
+                              {relationshipColumnValue(relationship, "object1Name")}
+                            </td>
+                            <td className="code-label" style={{ padding: "6px 6px", verticalAlign: "top" }}>
+                              {relationshipColumnValue(relationship, "object2Name")}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    </table>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -2506,25 +3611,26 @@ function ReportPage({
             </button>
             {!collapsed.has("codes") && (
               <>
-                {!isFrozen && storeCodes.length > 0 && (
+                {!isFrozen && reportCodes.length > 0 && (
                   <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCodes(new Set(storeCodes.map(c => c.id)))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => applySelectionFromCodes(new Set(reportCodes.map(c => c.id)))}>{t("reportsCodes.actions.all")}</button>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => clearPrimarySelections()}>{t("reportsCodes.actions.clear")}</button>
                   </div>
                 )}
                 <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
-                  {storeCodes.length === 0
+                  {reportCodes.length === 0
                     ? <li className="code-list-empty">No codes.</li>
-                    : storeCodes.map((c) => (
+                    : codeTree.map(({ code: c, depth }) => (
                         <li key={c.id} className="code-item"
                           style={{ cursor: isFrozen ? "default" : "pointer" }}
-                          onClick={isFrozen ? undefined : () => applySelectionFromCodes(toggle(selCodeIds, c.id))}
+                          onClick={isFrozen ? undefined : () => toggleCodeSelection(c.id)}
                         >
                           <input type="checkbox" className="memo-sel-checkbox"
                             checked={selCodeIds.has(c.id)} disabled={isFrozen}
-                            onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); applySelectionFromCodes(toggle(selCodeIds, c.id)); }}
+                            onChange={isFrozen ? undefined : (e) => { e.stopPropagation(); toggleCodeSelection(c.id); }}
                             onClick={(e) => e.stopPropagation()}
                           />
+                          {depth > 0 && <span aria-hidden="true" style={{ flex: "0 0 auto", width: depth * 16 }} />}
                           <span className="code-swatch" style={{ background: c.color }} />
                           <span className="code-label">{c.label}</span>
                         </li>
@@ -2601,7 +3707,7 @@ function ReportPage({
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               <span>
               <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsAnnotations.createdBy")} </span>
-                <span>{row ? row.createdByName : (currentUser?.name || currentUser?.email || "—")}</span>
+                <span>{row?.createdByName || "—"}</span>
               </span>
               <span>
                 <span style={{ color: "var(--color-text-muted)", fontWeight: 500 }}>{t("reportsAnnotations.created")} </span>
@@ -2620,33 +3726,6 @@ function ReportPage({
                 </span>
               )}
               </div>
-              {(caseFilterDetails.length > 0 || documentFilterDetails.length > 0) && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--color-border)", paddingTop: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-muted)", letterSpacing: "0.04em" }}>
-                    {t("reportsAnnotations.appliedFilters")}
-                  </div>
-                  {caseFilterDetails.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <div style={{ fontWeight: 500 }}>{t("reportsAnnotations.labels.cases")}</div>
-                      {caseFilterDetails.map((detail) => (
-                        <div key={`case-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                          {detail}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {documentFilterDetails.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <div style={{ fontWeight: 500 }}>{t("reportsAnnotations.labels.documents")}</div>
-                      {documentFilterDetails.map((detail) => (
-                        <div key={`document-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                          {detail}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
@@ -2682,6 +3761,40 @@ function ReportPage({
               )}
             </div>
           )}
+
+          <div className="annotate-card" style={{ flexShrink: 0 }}>
+            <div className="annotate-card-header">
+              <span className="annotate-card-title">Filters</span>
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+              {!hasActiveFilters ? (
+                <div style={{ color: "var(--color-text-muted)" }}>All selected objects and sources are included.</div>
+              ) : (
+                <>
+                  {activeCaseFilterDetails.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontWeight: 600 }}>{t("reportsAnnotations.labels.cases")}</div>
+                      {activeCaseFilterDetails.map((detail) => (
+                        <div key={`case-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          {detail}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeDocumentFilterDetails.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontWeight: 600 }}>{t("reportsAnnotations.labels.documents")}</div>
+                      {activeDocumentFilterDetails.map((detail) => (
+                        <div key={`document-filter-${detail}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          {detail}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
           {/* Summary counts */}
           <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
@@ -2765,48 +3878,8 @@ function ReportPage({
                     <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsAnnotations.loadingEllipsis")}</p>
                   ) : filteredAnns.length === 0 ? (
                     <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No statistics data for the current filters.</p>
-                  ) : (() => {
-                    const maxPct = coverageStats.rows[0]?.pct ?? 0;
-                    const coverageScale = maxPct > 0 ? maxPct + 5 : 1;
-                    const maxCount = annotationFrequencyStats[0]?.count ?? 0;
-                    const countScale = maxCount > 0 ? maxCount : 1;
-                    const maxDocumentCount = annotationDocumentStats[0]?.count ?? 0;
-                    const documentCountScale = maxDocumentCount > 0 ? maxDocumentCount : 1;
-                    const lengthScale = annotationLengthStats.maxValue > 0 ? annotationLengthStats.maxValue : 1;
-                    const labelWidth = 108;
-                    const lineStart = labelWidth + 12;
-                    const lineEnd = 292;
-                    const valueToX = (value: number) => lineStart + (value / lengthScale) * (lineEnd - lineStart);
-                    return (
+                  ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.codeCoverage")}</div>
-                            <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                              {t("reportsAnnotations.charts.codeCoverageSubtitle", { count: formatCurrentNumber(coverageStats.totalChars) })}
-                            </div>
-                          </div>
-                          {coverageStats.rows.length === 0 ? (
-                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No coverage data for the current filters.</p>
-                          ) : (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                              {coverageStats.rows.map((row) => (
-                                <div key={row.codeName} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <span style={{ fontSize: 12, width: 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.codeName}</span>
-                                  <div style={{ flex: 1, height: 12, position: "relative" }}>
-                                    <div
-                                      title={t("reportsAnnotations.charts.coverageTooltip", { code: row.codeName, coverage: row.pct.toFixed(1), characters: formatCurrentNumber(row.chars) })}
-                                      style={{ width: `${(row.pct / coverageScale) * 100}%`, height: "100%", background: row.codeColor, borderRadius: 6, transition: "width 0.3s ease" }}
-                                    />
-                                  </div>
-                                  <span style={{ fontSize: 12, width: 42, flexShrink: 0, textAlign: "right", color: "var(--color-text-muted)" }}>
-                                    {row.pct < 0.1 ? "<0.1" : row.pct.toFixed(1)}%
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.annotationsPerCode")}</div>
@@ -2817,22 +3890,29 @@ function ReportPage({
                           {annotationFrequencyStats.length === 0 ? (
                             <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No annotation frequency data for the current filters.</p>
                           ) : (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                              {annotationFrequencyStats.map((row) => (
-                                <div key={row.codeId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <span style={{ fontSize: 12, width: 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.codeName}</span>
-                                  <div style={{ flex: 1, height: 12, position: "relative" }}>
-                                    <div
-                                      title={t("reportsAnnotations.charts.annotationsTooltip", { code: row.codeName, count: row.count })}
-                                      style={{ width: `${(row.count / countScale) * 100}%`, height: "100%", background: row.codeColor, borderRadius: 6, transition: "width 0.3s ease" }}
-                                    />
-                                  </div>
-                                  <span style={{ fontSize: 12, width: 42, flexShrink: 0, textAlign: "right", color: "var(--color-text-muted)" }}>
-                                    {row.count}
-                                  </span>
+                            <Suspense
+                              fallback={
+                                <div
+                                  style={{
+                                    width: "100%",
+                                    height: Math.max(76 + annotationFrequencyStats.length * 24, 120),
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: 12,
+                                    color: "var(--color-text-muted)",
+                                  }}
+                                >
+                                  {t("reportsAnnotations.loadingEllipsis")}
                                 </div>
-                              ))}
-                            </div>
+                              }
+                            >
+                              <EChart
+                                option={annotationFrequencyChartOption}
+                                style={{ width: "100%", height: Math.max(76 + annotationFrequencyStats.length * 24, 120) }}
+                                setOptionOpts={{ notMerge: true }}
+                              />
+                            </Suspense>
                           )}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2845,31 +3925,71 @@ function ReportPage({
                           {annotationDocumentStats.length === 0 ? (
                             <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No document frequency data for the current filters.</p>
                           ) : (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                {annotationDocumentStats.map((row) => (
-                                  <div key={row.documentId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                    <span style={{ fontSize: 12, width: 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.documentName}</span>
-                                    <div style={{ flex: 1, height: 12, position: "relative" }}>
-                                      <div
-                                        title={t("reportsAnnotations.charts.documentAnnotationsTooltip", { document: row.documentName, count: row.count })}
-                                        style={{ width: `${(row.count / documentCountScale) * 100}%`, height: "100%", background: "var(--color-text-muted)", borderRadius: 6, transition: "width 0.3s ease" }}
-                                      />
-                                    </div>
-                                    <span style={{ fontSize: 12, width: 42, flexShrink: 0, textAlign: "right", color: "var(--color-text-muted)" }}>
-                                      {row.count}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
+                            <Suspense
+                              fallback={
+                                <div
+                                  style={{
+                                    width: "100%",
+                                    height: Math.max(76 + annotationDocumentStats.length * 24, 120),
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: 12,
+                                    color: "var(--color-text-muted)",
+                                  }}
+                                >
+                                  {t("reportsAnnotations.loadingEllipsis")}
+                                </div>
+                              }
+                            >
+                              <EChart
+                                option={annotationDocumentChartOption}
+                                style={{ width: "100%", height: Math.max(76 + annotationDocumentStats.length * 24, 120) }}
+                                setOptionOpts={{ notMerge: true }}
+                              />
+                            </Suspense>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.codeCoverage")}</div>
+                            <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+                              {t("reportsAnnotations.charts.codeCoverageSubtitle", { count: formatCurrentNumber(coverageStats.totalChars) })}
                             </div>
+                          </div>
+                          {coverageStats.rows.length === 0 ? (
+                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No coverage data for the current filters.</p>
+                          ) : (
+                            <Suspense
+                              fallback={
+                                <div
+                                  style={{
+                                    width: "100%",
+                                    height: Math.max(76 + coverageStats.rows.length * 24, 120),
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: 12,
+                                    color: "var(--color-text-muted)",
+                                  }}
+                                >
+                                  {t("reportsAnnotations.loadingEllipsis")}
+                                </div>
+                              }
+                            >
+                              <EChart
+                                option={coverageChartOption}
+                                style={{ width: "100%", height: Math.max(76 + coverageStats.rows.length * 24, 120) }}
+                                setOptionOpts={{ notMerge: true }}
+                              />
+                            </Suspense>
                           )}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 600 }}>{t("reportsAnnotations.charts.annotationLength")}</div>
                             <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                              {t("reportsAnnotations.charts.annotationLengthSubtitle")}
+                              {ANNOTATION_LENGTH_SUBTITLE}
                             </div>
                           </div>
                           {annotationLengthStats.rows.length === 0 ? (
@@ -2878,54 +3998,29 @@ function ReportPage({
                             </p>
                           ) : (
                             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                              <svg
-                                viewBox={`0 0 320 ${Math.max(56 + annotationLengthStats.rows.length * 42, 96)}`}
-                                role="img"
-                                aria-label={t("reportsAnnotations.charts.annotationLengthAriaLabel")}
-                                style={{ width: "100%", height: Math.max(56 + annotationLengthStats.rows.length * 42, 96), overflow: "visible" }}
+                              <Suspense
+                                fallback={
+                                  <div
+                                    style={{
+                                      width: "100%",
+                                      height: Math.max(96 + annotationLengthStats.rows.length * 34, 140),
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontSize: 12,
+                                      color: "var(--color-text-muted)",
+                                    }}
+                                  >
+                                    {t("reportsAnnotations.loadingEllipsis")}
+                                  </div>
+                                }
                               >
-                                {annotationLengthStats.rows.map((row, index) => {
-                                  const rowY = 28 + index * 42;
-                                  const rowBoxTop = rowY - 12;
-                                  const rowBoxBottom = rowY + 12;
-                                  return (
-                                    <g key={row.codeId}>
-                                      <title>{t("reportsAnnotations.charts.annotationLengthTooltip", { code: row.codeName, min: Math.round(row.min), q1: Math.round(row.q1), median: Math.round(row.median), q3: Math.round(row.q3), max: Math.round(row.max), count: row.count, mean: row.mean.toFixed(1) })}</title>
-                                      <text
-                                        x={labelWidth}
-                                        y={rowY + 4}
-                                        textAnchor="end"
-                                        fontSize="10"
-                                        fill="var(--color-text-muted)"
-                                      >
-                                        {row.codeName}
-                                      </text>
-                                      <line x1={lineStart} y1={rowY} x2={lineEnd} y2={rowY} stroke="var(--color-border)" strokeWidth="1" />
-                                      <line x1={valueToX(row.min)} y1={rowBoxTop + 4} x2={valueToX(row.min)} y2={rowBoxBottom - 4} stroke="var(--color-text-muted)" strokeWidth="2" />
-                                      <line x1={valueToX(row.max)} y1={rowBoxTop + 4} x2={valueToX(row.max)} y2={rowBoxBottom - 4} stroke="var(--color-text-muted)" strokeWidth="2" />
-                                      <line x1={valueToX(row.min)} y1={rowY} x2={valueToX(row.q1)} y2={rowY} stroke="var(--color-text-muted)" strokeWidth="2" />
-                                      <line x1={valueToX(row.q3)} y1={rowY} x2={valueToX(row.max)} y2={rowY} stroke="var(--color-text-muted)" strokeWidth="2" />
-                                      <rect
-                                        x={valueToX(row.q1)}
-                                        y={rowBoxTop}
-                                        width={Math.max(valueToX(row.q3) - valueToX(row.q1), 2)}
-                                        height={rowBoxBottom - rowBoxTop}
-                                        fill={row.codeColor}
-                                        fillOpacity="0.18"
-                                        stroke={row.codeColor}
-                                        strokeWidth="2"
-                                        rx="6"
-                                      />
-                                      <line x1={valueToX(row.median)} y1={rowBoxTop} x2={valueToX(row.median)} y2={rowBoxBottom} stroke={row.codeColor} strokeWidth="2" />
-                                      <text x={lineEnd + 6} y={rowY + 4} fontSize="10" fill="var(--color-text-muted)">
-                                        {t("reportsAnnotations.charts.annotationsCountShort", { count: row.count })}
-                                      </text>
-                                    </g>
-                                  );
-                                })}
-                                <text x={lineStart} y={16} textAnchor="middle" fontSize="10" fill="var(--color-text-muted)">0</text>
-                                <text x={lineEnd} y={16} textAnchor="middle" fontSize="10" fill="var(--color-text-muted)">{Math.round(annotationLengthStats.maxValue)}</text>
-                              </svg>
+                                <EChart
+                                  option={annotationLengthChartOption}
+                                  style={{ width: "100%", height: Math.max(96 + annotationLengthStats.rows.length * 34, 140) }}
+                                  setOptionOpts={{ notMerge: true }}
+                                />
+                              </Suspense>
                               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "var(--color-text-muted)" }}>
                                 <span>{t("reportsAnnotations.charts.codesCount", { count: annotationLengthStats.rows.length })}</span>
                                 <span>{t("reportsAnnotations.charts.maxLengthValue", { value: Math.round(annotationLengthStats.maxValue) })}</span>
@@ -2935,8 +4030,7 @@ function ReportPage({
                           )}
                         </div>
                       </div>
-                    );
-                  })()}
+                  )}
                 </div>
               )}
             </div>
@@ -3039,22 +4133,27 @@ function ReportPage({
                               <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{ann.documentName}</span>
                               {ann.createdById && <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{getCoderName(ann.createdById)}</span>}
                             </div>
-                            <p className="annotation-quote">
-                              {ctxBefore != null && (
-                                <span className="annotation-context annotation-context--before">
-                                  {ann.startOffset > contextChars ? "..." : ""}{ctxBefore}
-                                </span>
-                              )}
-                              <span className="annotation-quote-text">"{ann.quote}"</span>
-                              {ctxAfter != null && (
-                                <span className="annotation-context annotation-context--after">
-                                  {ctxAfter}{ann.endOffset + contextChars < docContent.length ? "..." : ""}
-                                </span>
-                              )}
-                            </p>
-                            {ann.note && <p className="annotation-note">{ann.note}</p>}
-                          </li>
-                        );
+                          <p className="annotation-quote">
+                            {ctxBefore != null && (
+                              <span className="annotation-context annotation-context--before">
+                                {ann.startOffset > contextChars ? "..." : ""}{ctxBefore}
+                              </span>
+                            )}
+                            <span className="annotation-quote-text">"{ann.quote}"</span>
+                            {ctxAfter != null && (
+                              <span className="annotation-context annotation-context--after">
+                                {ctxAfter}{ann.endOffset + contextChars < docContent.length ? "..." : ""}
+                              </span>
+                            )}
+                          </p>
+                          <AnnotationMediaPreview
+                            annotation={ann}
+                            source={reportDocById.get(ann.documentId)}
+                            projectStoragePath={projectStoragePath}
+                          />
+                          {ann.note && <p className="annotation-note">{ann.note}</p>}
+                        </li>
+                      );
                       })}
                     </ul>
                   </div>
@@ -3074,6 +4173,39 @@ function ReportPage({
               <h2 style={{ margin: 0 }}>{t("reportsAnnotations.filters.caseTitle")}</h2>
               <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsAnnotations.close")}</button>
             </div>
+            {!isFrozen && !dataLoading && caseTypeOptions.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>Object Type</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set(caseTypeOptions))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                </div>
+                <ul className="code-list" style={{ border: "1px solid var(--color-border)", borderRadius: 8, maxHeight: 180, overflowY: "auto" }}>
+                  {caseTypeOptions.map((typeLabel) => (
+                    <li
+                      key={typeLabel}
+                      className="code-item"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => toggleCaseTypeSelection(typeLabel)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="memo-sel-checkbox"
+                        checked={selCaseTypes.has(typeLabel)}
+                        onChange={(e) => { e.stopPropagation(); toggleCaseTypeSelection(typeLabel); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="code-label">{typeLabel}</span>
+                      <span className="users-filter-count">
+                        {caseItems.filter((item) => formatObjectType(item.objectType) === typeLabel).length}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!isFrozen && !dataLoading && displayCaseAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
                 <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => selectAllCaseAttributes()}>{t("reportsCodes.actions.all")}</button>
@@ -3124,6 +4256,39 @@ function ReportPage({
               <h2 style={{ margin: 0 }}>{t("reportsAnnotations.filters.documentTitle")}</h2>
               <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>{t("reportsAnnotations.close")}</button>
             </div>
+            {!isFrozen && !dataLoading && documentTypeOptions.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>Source Type</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set(documentTypeOptions))}>{t("reportsCodes.actions.all")}</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
+                  </div>
+                </div>
+                <ul className="code-list" style={{ border: "1px solid var(--color-border)", borderRadius: 8, maxHeight: 180, overflowY: "auto" }}>
+                  {documentTypeOptions.map((typeLabel) => (
+                    <li
+                      key={typeLabel}
+                      className="code-item"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => toggleDocumentTypeSelection(typeLabel)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="memo-sel-checkbox"
+                        checked={selDocTypes.has(typeLabel)}
+                        onChange={(e) => { e.stopPropagation(); toggleDocumentTypeSelection(typeLabel); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="code-label">{typeLabel}</span>
+                      <span className="users-filter-count">
+                        {reportDocs.filter((doc) => formatSourceType(doc.type) === typeLabel).length}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!isFrozen && !dataLoading && displayDocumentAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
                 <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => selectAllDocumentAttributes()}>{t("reportsCodes.actions.all")}</button>
@@ -3183,12 +4348,18 @@ function ReportPage({
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-export function CodeReportsView() {
+export type CodeReportsViewProps = {
+  initialNewReportOpen?: boolean;
+  postgresProjectId?: string;
+  projectStoragePath?: string;
+  onBackToReports?: () => void;
+};
+
+export function CodeReportsView({ initialNewReportOpen = false, postgresProjectId, projectStoragePath, onBackToReports }: CodeReportsViewProps = {}) {
   const { t } = useI18n();
   const cols = getCols(t);
-  const { activeProject, pb, canCurrentUser, deleteCodeReport } = useStore();
-  const canCreateReports = canCurrentUser("createReports") && canCurrentUser("editReportConfiguration");
-  const canDeleteReports = canCurrentUser("deleteReports");
+  const canCreateReports = true;
+  const canDeleteReports = true;
 
   const [rows,    setRows]    = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -3206,48 +4377,48 @@ export function CodeReportsView() {
   const [helpOpen, setHelpOpen] = useState(false);
 
   const [openRow,        setOpenRow]        = useState<ReportRow | null>(null);
-  const [showNew,        setShowNew]        = useState(false);
+  const [showNew,        setShowNew]        = useState(initialNewReportOpen);
   const [newFromSettings, setNewFromSettings] = useState<ReportSettings | null>(null);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadReports = useCallback(async () => {
-    if (!activeProject || !pb) return [];
+    if (!postgresProjectId) return [];
     setLoading(true);
     setError(null);
     try {
-      const records = await pb.collection("code_reports").getFullList({
-        filter: `project="${activeProject.id}"&&deleted_at=""`,
-        expand: "created_by",
-        sort: "-created",
-      });
-      const mappedRows = records.map((r) => {
-        const cb = r.expand?.created_by;
-        let snapshot: ReportSnapshot | undefined;
-        if (r.snapshot) {
-          try { snapshot = JSON.parse(r.snapshot); } catch { /* malformed snapshot — treat as legacy */ }
-        }
-        return {
-          id:            r.id,
-          name:          r.name,
-          createdByName: cb?.name || cb?.email || "—",
-          createdAt:     r.created,
-          caseIds:       toArr<string>(r.cases),
-          documentIds:   toArr<string>(r.documents),
-          codeIds:       toArr<string>(r.codes),
-          snapshot,
-        };
-      });
-      const annotationRows = mappedRows.filter((row) => !row.snapshot?.reportType || row.snapshot.reportType === "annotations");
-      setRows(annotationRows);
-      return annotationRows;
+      const records = await listPostgresReports(postgresProjectId);
+      const mappedRows = records
+        .filter((record) => record.reportType === "annotations")
+        .map((record) => {
+          try {
+            const snapshot = JSON.parse(record.contentJson || "") as ReportSnapshot;
+            if (snapshot?.reportType !== "annotations") return null;
+            const settings = JSON.parse(record.settingsJson || "{}") as Partial<ReportSettings>;
+            return {
+              id: record.id,
+              name: record.title,
+              createdByName: record.createdByName || "-",
+              createdAt: record.createdAt,
+              caseIds: settings.caseIds ?? [],
+              documentIds: settings.documentIds ?? snapshot.filteredAnns.map((ann) => ann.documentId),
+              codeIds: settings.codeIds ?? snapshot.filteredAnns.map((ann) => ann.codeId),
+              snapshot,
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean) as ReportRow[];
+      setRows(mappedRows);
+      return mappedRows;
     } catch (e) {
       setError(e instanceof Error ? e.message : t("reportsAnnotations.errors.loadReportsFailed"));
       return [];
     } finally {
       setLoading(false);
     }
-  }, [activeProject, pb]);
+  }, [postgresProjectId, t]);
 
   useEffect(() => { loadReports(); }, [loadReports]);
 
@@ -3281,7 +4452,8 @@ export function CodeReportsView() {
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      await deleteCodeReport(confirmDelete.id);
+      if (!postgresProjectId) throw new Error("Reports are not available outside a project workspace.");
+      await deletePostgresReport(postgresProjectId, confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
     } catch (e) {
@@ -3300,6 +4472,9 @@ export function CodeReportsView() {
         key={newFromSettings ? `new-from-settings-${JSON.stringify(newFromSettings)}` : "new-report"}
         isNew
         initialSettings={newFromSettings ?? undefined}
+        postgresProjectId={postgresProjectId}
+        projectStoragePath={projectStoragePath}
+        hideBackButton={!!onBackToReports}
         onSaved={async (id) => { 
           setShowNew(false); 
           setNewFromSettings(null); 
@@ -3309,7 +4484,14 @@ export function CodeReportsView() {
             if (newRow) setOpenRow(newRow);
           }
         }}
-        onBack={() => { setShowNew(false); setNewFromSettings(null); }}
+        onBack={() => {
+          if (onBackToReports) {
+            onBackToReports();
+            return;
+          }
+          setShowNew(false);
+          setNewFromSettings(null);
+        }}
       />
     );
   }
@@ -3319,8 +4501,17 @@ export function CodeReportsView() {
       <ReportPage
         key={`saved-report-${openRow.id}`}
         row={openRow}
+        postgresProjectId={postgresProjectId}
+        projectStoragePath={projectStoragePath}
+        hideBackButton={!!onBackToReports}
         onSaved={() => { setOpenRow(null); loadReports(); }}
-        onBack={() => setOpenRow(null)}
+        onBack={() => {
+          if (onBackToReports) {
+            onBackToReports();
+            return;
+          }
+          setOpenRow(null);
+        }}
         onUseSettings={(settings) => { setOpenRow(null); setNewFromSettings(settings); }}
       />
     );

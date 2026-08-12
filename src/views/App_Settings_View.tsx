@@ -17,16 +17,16 @@ import {
 import { clearLocalAccounts, clearRemoteSessions } from "../lib/authHistory";
 import { getAppRuntimeInfo, joinFsPath, type AppRuntimeInfo } from "../lib/dataRoot";
 import {
-  bootstrapPostgresExperiment,
-  createPostgresExperimentProject,
-  ensurePostgresExperimentSchema,
-  getPostgresExperimentStatus,
-  listPostgresExperimentProjects,
-  type BootstrapPostgresExperimentResult,
-  type PostgresExperimentProject,
-  type PostgresExperimentStatus,
+  bootstrapPostgres,
+  createPostgresProject,
+  ensurePostgresSchema,
+  getPostgresStatus,
+  listPostgresProjects,
+  type BootstrapPostgresResult,
+  type PostgresProject,
+  type PostgresStatus,
   type PostgresSchemaMigrationResult,
-} from "../lib/postgresExperiment";
+} from "../lib/postgres";
 import {
   clearAppDataRecords,
   deleteUserAccount,
@@ -415,14 +415,14 @@ export function AppSettingsView() {
   const [externalPing, setExternalPing] = useState<PingResult>({ status: "idle" });
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [dbHealth, setDbHealth] = useState<"checking" | "ok" | "error">("checking");
-  const [postgresExperimentStatus, setPostgresExperimentStatus] = useState<PostgresExperimentStatus | null>(null);
-  const [postgresExperimentBusy, setPostgresExperimentBusy] = useState(false);
-  const [postgresExperimentError, setPostgresExperimentError] = useState("");
-  const [postgresExperimentNotice, setPostgresExperimentNotice] = useState("");
+  const [postgresStatus, setPostgresStatus] = useState<PostgresStatus | null>(null);
+  const [postgresBusy, setPostgresBusy] = useState(false);
+  const [postgresError, setPostgresError] = useState("");
+  const [postgresNotice, setPostgresNotice] = useState("");
   const [postgresSuperuserPassword, setPostgresSuperuserPassword] = useState("");
-  const [postgresBootstrapResult, setPostgresBootstrapResult] = useState<BootstrapPostgresExperimentResult | null>(null);
+  const [postgresBootstrapResult, setPostgresBootstrapResult] = useState<BootstrapPostgresResult | null>(null);
   const [postgresSchemaResult, setPostgresSchemaResult] = useState<PostgresSchemaMigrationResult | null>(null);
-  const [postgresProjects, setPostgresProjects] = useState<PostgresExperimentProject[]>([]);
+  const [postgresProjects, setPostgresProjects] = useState<PostgresProject[]>([]);
   const [postgresProjectName, setPostgresProjectName] = useState("");
   const [postgresProjectDescription, setPostgresProjectDescription] = useState("");
   const [storageBusy, setStorageBusy] = useState(false);
@@ -669,84 +669,84 @@ export function AppSettingsView() {
     setNotice(message);
   }
 
-  const refreshPostgresExperiment = useCallback(async () => {
+  const refreshPostgres = useCallback(async () => {
     try {
-      const status = await getPostgresExperimentStatus();
-      setPostgresExperimentStatus(status);
-      setPostgresExperimentError("");
+      const status = await getPostgresStatus();
+      setPostgresStatus(status);
+      setPostgresError("");
     } catch (error) {
-      console.error("Failed to load Postgres experiment status:", error);
-      setPostgresExperimentError("Could not load PostgreSQL experiment status.");
+      console.error("Failed to load Postgres status:", error);
+      setPostgresError("Could not load PostgreSQL status.");
     }
   }, []);
 
-  const refreshPostgresExperimentProjects = useCallback(async () => {
+  const refreshPostgresProjects = useCallback(async () => {
     try {
-      const projects = await listPostgresExperimentProjects();
+      const projects = await listPostgresProjects();
       setPostgresProjects(projects);
     } catch (error) {
-      console.error("Failed to load Postgres experiment projects:", error);
+      console.error("Failed to load Postgres projects:", error);
       setPostgresProjects([]);
     }
   }, []);
 
-  async function handleBootstrapPostgresExperiment() {
-    setPostgresExperimentBusy(true);
-    setPostgresExperimentError("");
-    setPostgresExperimentNotice("");
+  async function handleBootstrapPostgres() {
+    setPostgresBusy(true);
+    setPostgresError("");
+    setPostgresNotice("");
     try {
-      const result = await bootstrapPostgresExperiment(postgresSuperuserPassword);
+      const result = await bootstrapPostgres(postgresSuperuserPassword);
       setPostgresBootstrapResult(result);
       setPostgresSchemaResult(null);
       setPostgresProjects([]);
-      setPostgresExperimentNotice(
+      setPostgresNotice(
         result.appRoleReady
           ? `Created or updated ${result.appRoleName} and verified access to ${result.appDatabase}.`
           : `Created or updated ${result.appRoleName}, but the app-role verification step still needs review.`,
       );
       setPostgresSuperuserPassword("");
-      await refreshPostgresExperiment();
+      await refreshPostgres();
     } catch (error) {
-      console.error("Postgres bootstrap experiment failed:", error);
-      setPostgresExperimentError(error instanceof Error ? error.message : String(error));
+      console.error("Postgres bootstrap failed:", error);
+      setPostgresError(error instanceof Error ? error.message : String(error));
     } finally {
-      setPostgresExperimentBusy(false);
+      setPostgresBusy(false);
     }
   }
 
-  async function handleEnsurePostgresExperimentSchema() {
-    setPostgresExperimentBusy(true);
-    setPostgresExperimentError("");
+  async function handleEnsurePostgresSchema() {
+    setPostgresBusy(true);
+    setPostgresError("");
     try {
-      const result = await ensurePostgresExperimentSchema();
+      const result = await ensurePostgresSchema();
       setPostgresSchemaResult(result);
-      setPostgresExperimentNotice(`PostgreSQL experiment schema ready. Applied versions: ${result.appliedVersions.join(", ") || "none"}.`);
-      await refreshPostgresExperimentProjects();
+      setPostgresNotice(`PostgreSQL schema ready. Applied versions: ${result.appliedVersions.join(", ") || "none"}.`);
+      await refreshPostgresProjects();
     } catch (error) {
-      console.error("Postgres schema experiment failed:", error);
-      setPostgresExperimentError(error instanceof Error ? error.message : String(error));
+      console.error("Postgres schema failed:", error);
+      setPostgresError(error instanceof Error ? error.message : String(error));
     } finally {
-      setPostgresExperimentBusy(false);
+      setPostgresBusy(false);
     }
   }
 
-  async function handleCreatePostgresExperimentProject() {
-    setPostgresExperimentBusy(true);
-    setPostgresExperimentError("");
+  async function handleCreatePostgresProject() {
+    setPostgresBusy(true);
+    setPostgresError("");
     try {
-      const created = await createPostgresExperimentProject({
+      const created = await createPostgresProject({
         name: postgresProjectName,
         description: postgresProjectDescription,
       });
       setPostgresProjectName("");
       setPostgresProjectDescription("");
-      setPostgresExperimentNotice(`Created PostgreSQL experiment project "${created.name}".`);
-      await refreshPostgresExperimentProjects();
+      setPostgresNotice(`Created PostgreSQL project "${created.name}".`);
+      await refreshPostgresProjects();
     } catch (error) {
-      console.error("Postgres experiment project creation failed:", error);
-      setPostgresExperimentError(error instanceof Error ? error.message : String(error));
+      console.error("Postgres project creation failed:", error);
+      setPostgresError(error instanceof Error ? error.message : String(error));
     } finally {
-      setPostgresExperimentBusy(false);
+      setPostgresBusy(false);
     }
   }
 
@@ -772,7 +772,7 @@ export function AppSettingsView() {
 
     if (!pb) {
       setDbHealth("error");
-      await refreshPostgresExperiment();
+      await refreshPostgres();
       return;
     }
     try {
@@ -782,7 +782,7 @@ export function AppSettingsView() {
       setDbHealth("error");
     }
 
-    await refreshPostgresExperiment();
+    await refreshPostgres();
   }
 
   useEffect(() => {
@@ -1536,21 +1536,21 @@ export function AppSettingsView() {
             </SettingsModalSection>
 
             <SettingsModalSection
-              title="PostgreSQL Experiment"
+              title="PostgreSQL"
               description="Bootstrap a local PostgreSQL app role and database without changing the current PocketBase runtime yet."
             >
               <div className="settings-row">
                 <div className="settings-row-info">
                   <div className="settings-row-label">Local PostgreSQL service</div>
                   <div className="settings-row-desc">
-                    {postgresExperimentStatus
-                      ? (postgresExperimentStatus.serviceReachable
-                        ? `${postgresExperimentStatus.host}:${postgresExperimentStatus.port} reachable`
-                        : `${postgresExperimentStatus.host}:${postgresExperimentStatus.port} unreachable`)
+                    {postgresStatus
+                      ? (postgresStatus.serviceReachable
+                        ? `${postgresStatus.host}:${postgresStatus.port} reachable`
+                        : `${postgresStatus.host}:${postgresStatus.port} unreachable`)
                       : "Checking..."}
                   </div>
                 </div>
-                <button className="btn" type="button" onClick={() => void refreshPostgresExperiment()} disabled={postgresExperimentBusy}>
+                <button className="btn" type="button" onClick={() => void refreshPostgres()} disabled={postgresBusy}>
                   Refresh
                 </button>
               </div>
@@ -1559,7 +1559,7 @@ export function AppSettingsView() {
                 <div className="settings-row-info">
                   <div className="settings-row-label">Bootstrap identity</div>
                   <div className="settings-row-desc settings-code-line">
-                    {postgresExperimentStatus?.bootstrapIdentityPath ?? "Loading..."}
+                    {postgresStatus?.bootstrapIdentityPath ?? "Loading..."}
                   </div>
                 </div>
               </div>
@@ -1568,8 +1568,8 @@ export function AppSettingsView() {
                 <div className="settings-row-info">
                   <div className="settings-row-label">Planned app role</div>
                   <div className="settings-row-desc settings-code-line">
-                    {postgresExperimentStatus
-                      ? `${postgresExperimentStatus.appRoleName} -> ${postgresExperimentStatus.appDatabase}`
+                    {postgresStatus
+                      ? `${postgresStatus.appRoleName} -> ${postgresStatus.appDatabase}`
                       : "Loading..."}
                   </div>
                 </div>
@@ -1591,8 +1591,8 @@ export function AppSettingsView() {
                 This bootstrap step uses the current PostgreSQL superuser credential once to create or rotate the restricted Kanqual app role and ensure the local `kanqual` database exists.
               </div>
 
-              {postgresExperimentError ? <p className="auth-error">{postgresExperimentError}</p> : null}
-              {postgresExperimentNotice ? <div className="settings-success project-settings-success">{postgresExperimentNotice}</div> : null}
+              {postgresError ? <p className="auth-error">{postgresError}</p> : null}
+              {postgresNotice ? <div className="settings-success project-settings-success">{postgresNotice}</div> : null}
 
               {postgresBootstrapResult ? (
                 <div className="settings-row">
@@ -1611,7 +1611,7 @@ export function AppSettingsView() {
 
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <div className="settings-row-label">Experiment schema</div>
+                  <div className="settings-row-label">Schema</div>
                   <div className="settings-row-desc">
                     {postgresSchemaResult
                       ? `Ready (${postgresSchemaResult.appliedVersions.join(", ") || "no recorded versions"})`
@@ -1621,15 +1621,15 @@ export function AppSettingsView() {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => void handleEnsurePostgresExperimentSchema()}
-                  disabled={postgresExperimentBusy || !postgresExperimentStatus?.bootstrapApplied}
+                  onClick={() => void handleEnsurePostgresSchema()}
+                  disabled={postgresBusy || !postgresStatus?.bootstrapApplied}
                 >
                   Apply schema
                 </button>
               </div>
 
               <label className="form-label">
-                Experiment project name
+                Project name
                 <input
                   className="form-input"
                   type="text"
@@ -1640,7 +1640,7 @@ export function AppSettingsView() {
               </label>
 
               <label className="form-label">
-                Experiment project description
+                Project description
                 <textarea
                   className="form-input"
                   value={postgresProjectDescription}
@@ -1654,16 +1654,16 @@ export function AppSettingsView() {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => void refreshPostgresExperimentProjects()}
-                  disabled={postgresExperimentBusy || !postgresSchemaResult?.ready}
+                  onClick={() => void refreshPostgresProjects()}
+                  disabled={postgresBusy || !postgresSchemaResult?.ready}
                 >
                   Refresh projects
                 </button>
                 <button
                   type="button"
                   className="btn btn--primary"
-                  onClick={() => void handleCreatePostgresExperimentProject()}
-                  disabled={postgresExperimentBusy || !postgresSchemaResult?.ready || !postgresProjectName.trim()}
+                  onClick={() => void handleCreatePostgresProject()}
+                  disabled={postgresBusy || !postgresSchemaResult?.ready || !postgresProjectName.trim()}
                 >
                   Create Postgres project
                 </button>
@@ -1681,7 +1681,7 @@ export function AppSettingsView() {
                   <tbody>
                     {!postgresProjects.length ? (
                       <tr>
-                        <td colSpan={3} className="users-td users-td--muted">No PostgreSQL experiment projects yet.</td>
+                        <td colSpan={3} className="users-td users-td--muted">No PostgreSQL projects yet.</td>
                       </tr>
                     ) : (
                       postgresProjects.map((project) => (
@@ -1700,10 +1700,10 @@ export function AppSettingsView() {
                 <button
                   type="button"
                   className="btn btn--primary"
-                  onClick={() => void handleBootstrapPostgresExperiment()}
-                  disabled={postgresExperimentBusy || !postgresSuperuserPassword.trim()}
+                  onClick={() => void handleBootstrapPostgres()}
+                  disabled={postgresBusy || !postgresSuperuserPassword.trim()}
                 >
-                  {postgresExperimentBusy ? "Bootstrapping..." : "Bootstrap PostgreSQL experiment"}
+                  {postgresBusy ? "Bootstrapping..." : "Bootstrap PostgreSQL"}
                 </button>
               </div>
             </SettingsModalSection>

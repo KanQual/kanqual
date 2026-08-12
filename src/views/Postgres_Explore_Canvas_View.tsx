@@ -2,19 +2,19 @@ import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useStat
 import cytoscape, { type Core as CytoscapeCore, type ElementDefinition } from "cytoscape";
 import ELK from "elkjs/lib/elk.bundled.js";
 import {
-  POSTGRES_EXPERIMENT_CYTOSCAPE_STYLESHEET,
-} from "../lib/postgresExperimentCanvasGraph";
+  POSTGRES_CYTOSCAPE_STYLESHEET,
+} from "../lib/postgresCanvasGraph";
 import type {
-  PostgresExperimentCanvasNodeState,
-  PostgresExperimentObject,
-  PostgresExperimentObjectType,
-  PostgresExperimentRelationship,
-  PostgresExperimentRelationshipType,
-} from "../lib/postgresExperiment";
+  PostgresCanvasNodeState,
+  PostgresObject,
+  PostgresObjectType,
+  PostgresRelationship,
+  PostgresRelationshipType,
+} from "../lib/postgres";
 
-const postgresExperimentExploreElk = new ELK();
+const postgresExploreElk = new ELK();
 
-async function computePostgresExperimentCanvasAutoLayout({
+async function computePostgresCanvasAutoLayout({
   objects,
   objectTypes,
   relationships,
@@ -22,22 +22,22 @@ async function computePostgresExperimentCanvasAutoLayout({
   hiddenRelationshipIds,
   getNodeRenderedDimensions,
 }: {
-  objects: PostgresExperimentObject[];
-  objectTypes: PostgresExperimentObjectType[];
-  relationships: PostgresExperimentRelationship[];
-  canvasNodes: Record<string, PostgresExperimentCanvasNodeState>;
+  objects: PostgresObject[];
+  objectTypes: PostgresObjectType[];
+  relationships: PostgresRelationship[];
+  canvasNodes: Record<string, PostgresCanvasNodeState>;
   hiddenRelationshipIds: string[];
   getNodeRenderedDimensions: (
-    object: PostgresExperimentObject,
-    objectTypeRecord: PostgresExperimentObjectType | null,
-    nodeState: PostgresExperimentCanvasNodeState,
+    object: PostgresObject,
+    objectTypeRecord: PostgresObjectType | null,
+    nodeState: PostgresCanvasNodeState,
   ) => { width: number; height: number };
-}): Promise<Record<string, PostgresExperimentCanvasNodeState>> {
+}): Promise<Record<string, PostgresCanvasNodeState>> {
   const visibleNodeIds = new Set(Object.keys(canvasNodes));
   if (!visibleNodeIds.size) return canvasNodes;
   const objectTypeById = new Map(objectTypes.map((objectType) => [objectType.id, objectType]));
 
-  const layout = await postgresExperimentExploreElk.layout({
+  const layout = await postgresExploreElk.layout({
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
@@ -86,7 +86,7 @@ async function computePostgresExperimentCanvasAutoLayout({
   return nextNodes;
 }
 
-export function PostgresExperimentExploreCanvasView({
+export function PostgresExploreCanvasView({
   objectTypes,
   objects,
   relationships,
@@ -101,16 +101,16 @@ export function PostgresExperimentExploreCanvasView({
   getNodeDefaultDimensions,
   getNodeRenderedDimensions,
 }: {
-  objectTypes: PostgresExperimentObjectType[];
-  objects: PostgresExperimentObject[];
-  relationships: PostgresExperimentRelationship[];
-  relationshipTypes: PostgresExperimentRelationshipType[];
-  canvasNodes: Record<string, PostgresExperimentCanvasNodeState>;
-  setCanvasNodes: Dispatch<SetStateAction<Record<string, PostgresExperimentCanvasNodeState>>>;
+  objectTypes: PostgresObjectType[];
+  objects: PostgresObject[];
+  relationships: PostgresRelationship[];
+  relationshipTypes: PostgresRelationshipType[];
+  canvasNodes: Record<string, PostgresCanvasNodeState>;
+  setCanvasNodes: Dispatch<SetStateAction<Record<string, PostgresCanvasNodeState>>>;
   hiddenCanvasRelationshipIds: string[];
   getObjectAppearance: (
-    object: PostgresExperimentObject,
-    objectTypeRecord: PostgresExperimentObjectType | null,
+    object: PostgresObject,
+    objectTypeRecord: PostgresObjectType | null,
   ) => {
     shape: "rounded" | "rectangle" | "triangle" | "diamond" | "hexagon" | "octagon" | "parallelogram" | "trapezoid" | "tag" | "star";
     color: string;
@@ -127,8 +127,8 @@ export function PostgresExperimentExploreCanvasView({
     textColor: string;
   };
   getRelationshipAppearance: (
-    relationship: PostgresExperimentRelationship,
-    relationshipTypeRecord: PostgresExperimentRelationshipType | null,
+    relationship: PostgresRelationship,
+    relationshipTypeRecord: PostgresRelationshipType | null,
   ) => {
     color: string;
     lineWeight: number;
@@ -137,13 +137,13 @@ export function PostgresExperimentExploreCanvasView({
   };
   getRelationshipStrokeWidth: (lineWeight: number) => number;
   getNodeDefaultDimensions: (
-    object: PostgresExperimentObject,
-    objectTypeRecord: PostgresExperimentObjectType | null,
+    object: PostgresObject,
+    objectTypeRecord: PostgresObjectType | null,
   ) => { width: number; height: number };
   getNodeRenderedDimensions: (
-    object: PostgresExperimentObject,
-    objectTypeRecord: PostgresExperimentObjectType | null,
-    nodeState: PostgresExperimentCanvasNodeState,
+    object: PostgresObject,
+    objectTypeRecord: PostgresObjectType | null,
+    nodeState: PostgresCanvasNodeState,
   ) => { width: number; height: number };
 }) {
   const cyContainerRef = useRef<HTMLDivElement | null>(null);
@@ -238,7 +238,7 @@ export function PostgresExperimentExploreCanvasView({
   }, [canvasNodes]);
 
   function buildUpdatedNodes(
-    current: Record<string, PostgresExperimentCanvasNodeState>,
+    current: Record<string, PostgresCanvasNodeState>,
     node: { id: string; position: { x: number; y: number } },
   ) {
     const object = objectById.get(node.id) ?? null;
@@ -262,7 +262,7 @@ export function PostgresExperimentExploreCanvasView({
     setLayoutRunning(true);
     setLayoutError("");
     try {
-      const nextCanvasNodes = await computePostgresExperimentCanvasAutoLayout({
+      const nextCanvasNodes = await computePostgresCanvasAutoLayout({
         objects,
         objectTypes,
         relationships,
@@ -287,7 +287,7 @@ export function PostgresExperimentExploreCanvasView({
     const cy = cytoscape({
       container: cyContainerRef.current,
       elements: graphElements,
-      style: POSTGRES_EXPERIMENT_CYTOSCAPE_STYLESHEET,
+      style: POSTGRES_CYTOSCAPE_STYLESHEET,
       layout: { name: "preset" },
       minZoom: 0.3,
       maxZoom: 2.4,

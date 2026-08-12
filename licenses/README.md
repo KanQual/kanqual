@@ -11,9 +11,15 @@ It is intended to ship alongside the application and the
 - `APACHE-2.0.txt`
   Covers KanQual itself and many bundled code dependencies that are licensed
   under Apache 2.0 or dual Apache 2.0 / MIT terms.
+- `BSD-3-Clause.txt`
+  Generic BSD 3-Clause license text used by JavaScript and Rust dependencies.
+- `0BSD.txt`
+  Generic Zero-Clause BSD license text used by JavaScript dependencies.
 - `MIT.txt`
   Generic MIT license text used by many JavaScript, Rust, and bundled
   components.
+- `ECHARTS-D3-BSD-3-Clause.txt`
+  Apache ECharts subcomponent notice and d3.js BSD 3-Clause license text.
 - `POCKETBASE-MIT.txt`
   PocketBase redistribution notice and MIT license text for the bundled
   PocketBase server executable.

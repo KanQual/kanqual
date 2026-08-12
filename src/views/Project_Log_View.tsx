@@ -33,11 +33,11 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "codebook.import":     "Codebook imported",
   "ai_assist.index":     "AI Assist embeddings built",
   "ai_assist.reindex":   "AI Assist embeddings rebuilt",
-  "document.create":     "Document added",
-  "document.update":     "Document updated",
-  "document.delete":     "Document deleted",
-  "document.restore":    "Document restored",
-  "document.associations": "Document associations updated",
+  "source.create":       "Source added",
+  "source.update":       "Source updated",
+  "source.delete":       "Source deleted",
+  "source.restore":      "Source restored",
+  "source.associations": "Source associations updated",
   "code.create":         "Code added",
   "code.update":         "Code updated",
   "code.delete":         "Code deleted",
@@ -54,9 +54,9 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "case_attribute.create": "Case attribute added",
   "case_attribute.update": "Case attribute updated",
   "case_attribute.delete": "Case attribute deleted",
-  "document_attribute.create": "Document attribute added",
-  "document_attribute.update": "Document attribute updated",
-  "document_attribute.delete": "Document attribute deleted",
+  "document_attribute.create": "Source attribute added",
+  "document_attribute.update": "Source attribute updated",
+  "document_attribute.delete": "Source attribute deleted",
   "object_type.create": "Object type added",
   "object_type.update": "Object type updated",
   "object_type.delete": "Object type deleted",
@@ -84,6 +84,10 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "coder_report.update": "Coder report updated",
   "coder_report.delete": "Coder report deleted",
   "coder_report.restore": "Coder report restored",
+  "report.create": "Report created",
+  "report.update": "Report updated",
+  "report.delete": "Report deleted",
+  "report.export": "Report exported",
   "ai_analysis.create": "AI analysis created",
   "ai_analysis.update": "AI analysis updated",
   "ai_analysis.delete": "AI analysis deleted",
@@ -126,11 +130,11 @@ export function projectLogActionLabel(action: string, t: ReturnType<typeof useI1
     case "codebook.import": return t("projectLog.actions.codebookImport");
     case "ai_assist.index": return t("projectLog.actions.aiAssistIndex");
     case "ai_assist.reindex": return t("projectLog.actions.aiAssistReindex");
-    case "document.create": return t("projectLog.actions.documentCreate");
-    case "document.update": return t("projectLog.actions.documentUpdate");
-    case "document.delete": return t("projectLog.actions.documentDelete");
-    case "document.restore": return t("projectLog.actions.documentRestore");
-    case "document.associations": return t("projectLog.actions.documentAssociations");
+    case "source.create": return t("projectLog.actions.sourceCreate");
+    case "source.update": return t("projectLog.actions.sourceUpdate");
+    case "source.delete": return t("projectLog.actions.sourceDelete");
+    case "source.restore": return t("projectLog.actions.sourceRestore");
+    case "source.associations": return t("projectLog.actions.sourceAssociations");
     case "code.create": return t("projectLog.actions.codeCreate");
     case "code.update": return t("projectLog.actions.codeUpdate");
     case "code.delete": return t("projectLog.actions.codeDelete");
@@ -150,6 +154,18 @@ export function projectLogActionLabel(action: string, t: ReturnType<typeof useI1
     case "document_attribute.create": return t("projectLog.actions.documentAttributeCreate");
     case "document_attribute.update": return t("projectLog.actions.documentAttributeUpdate");
     case "document_attribute.delete": return t("projectLog.actions.documentAttributeDelete");
+    case "object_type.create": return t("projectLog.actions.objectTypeCreate");
+    case "object_type.update": return t("projectLog.actions.objectTypeUpdate");
+    case "object_type.delete": return t("projectLog.actions.objectTypeDelete");
+    case "object.create": return t("projectLog.actions.objectCreate");
+    case "object.update": return t("projectLog.actions.objectUpdate");
+    case "object.delete": return t("projectLog.actions.objectDelete");
+    case "relationship_type.create": return t("projectLog.actions.relationshipTypeCreate");
+    case "relationship_type.update": return t("projectLog.actions.relationshipTypeUpdate");
+    case "relationship_type.delete": return t("projectLog.actions.relationshipTypeDelete");
+    case "relationship.create": return t("projectLog.actions.relationshipCreate");
+    case "relationship.update": return t("projectLog.actions.relationshipUpdate");
+    case "relationship.delete": return t("projectLog.actions.relationshipDelete");
     case "memo.create": return t("projectLog.actions.memoCreate");
     case "memo.update": return t("projectLog.actions.memoUpdate");
     case "memo.delete": return t("projectLog.actions.memoDelete");
@@ -162,6 +178,10 @@ export function projectLogActionLabel(action: string, t: ReturnType<typeof useI1
     case "coder_report.update": return t("projectLog.actions.coderReportUpdate");
     case "coder_report.delete": return t("projectLog.actions.coderReportDelete");
     case "coder_report.restore": return t("projectLog.actions.coderReportRestore");
+    case "report.create": return t("projectLog.actions.reportCreate");
+    case "report.update": return t("projectLog.actions.reportUpdate");
+    case "report.delete": return t("projectLog.actions.reportDelete");
+    case "report.export": return t("projectLog.actions.reportExport");
     case "ai_analysis.create": return t("projectLog.actions.aiAnalysisCreate");
     case "ai_analysis.update": return t("projectLog.actions.aiAnalysisUpdate");
     case "ai_analysis.delete": return t("projectLog.actions.aiAnalysisDelete");
@@ -201,12 +221,14 @@ export function projectLogActionCategory(action: string): string {
     || action.startsWith("relationship_type.")
   ) return "project";
   if (action.startsWith("case.") || action.startsWith("case_attribute.")) return "case";
-  if (action.startsWith("document.") || action.startsWith("document_attribute.")) return "document";
+  if (action.startsWith("source.") || action.startsWith("source_attribute.")) return "source";
+  if (action.startsWith("document_attribute.")) return "document";
   if (action.startsWith("code.") || action.startsWith("codebook.")) return "code";
   if (action.startsWith("annotation.")) return "annotation";
   if (action.startsWith("memo.")) return "memo";
   if (
-    action.includes("_report.")
+    action.startsWith("report.")
+    || action.includes("_report.")
     || action.startsWith("ai_analysis.")
     || action.startsWith("ai_attribute_suggestion_run.")
   ) return "report";
@@ -320,6 +342,9 @@ function formatDetailValue(
   if (value == null) return { text: "-", multiline: false };
   if (typeof value === "string") {
     if (!value) return { text: "-", multiline: false };
+    if (value === "document") return { text: "source", multiline: false };
+    if (value === "document_attribute") return { text: "source attribute", multiline: false };
+    if (value === "document_attribute_value") return { text: "source attribute value", multiline: false };
     if (isIsoDateTimeString(value)) {
       return { text: formatProjectLogDateTime(value), multiline: false };
     }
@@ -581,25 +606,25 @@ export function projectLogDescriptionLabel(
       return typeof details?.userLabel === "string"
         ? t("projectLog.labels.presenceInactive", { name: details.userLabel })
         : projectLogActionLabel(entry.action, t);
-    case "document.create":
+    case "source.create":
       return typeof details?.name === "string"
-        ? t("projectLog.labels.documentCreated", { name: details.name })
+        ? t("projectLog.labels.sourceCreated", { name: details.name })
         : projectLogActionLabel(entry.action, t);
-    case "document.update":
+    case "source.update":
       return typeof details?.name === "string"
-        ? t("projectLog.labels.documentUpdated", { name: details.name })
-        : t("projectLog.labels.documentUpdatedGeneric");
-    case "document.delete":
+        ? t("projectLog.labels.sourceUpdated", { name: details.name })
+        : t("projectLog.labels.sourceUpdatedGeneric");
+    case "source.delete":
       return typeof details?.name === "string"
-        ? t("projectLog.labels.documentDeleted", { name: details.name })
-        : t("projectLog.labels.documentDeletedGeneric");
-    case "document.associations":
+        ? t("projectLog.labels.sourceDeleted", { name: details.name })
+        : t("projectLog.labels.sourceDeletedGeneric");
+    case "source.associations":
       if (
         typeof details?.name === "string"
         && typeof details?.addedCount === "number"
         && typeof details?.removedCount === "number"
       ) {
-        return t("projectLog.labels.documentAssociationsUpdated", {
+        return t("projectLog.labels.sourceAssociationsUpdated", {
           name: details.name,
           added: details.addedCount,
           removed: details.removedCount,
@@ -671,6 +696,22 @@ export function projectLogDescriptionLabel(
       return typeof details?.name === "string"
         ? t("projectLog.labels.coderReportCreated", { name: details.name })
         : projectLogActionLabel(entry.action, t);
+    case "report.create":
+      return typeof details?.title === "string"
+        ? t("projectLog.labels.reportCreated", { name: details.title })
+        : projectLogActionLabel(entry.action, t);
+    case "report.update":
+      return typeof details?.title === "string"
+        ? t("projectLog.labels.reportUpdated", { name: details.title })
+        : projectLogActionLabel(entry.action, t);
+    case "report.delete":
+      return typeof details?.title === "string"
+        ? t("projectLog.labels.reportDeleted", { name: details.title })
+        : entry.label || projectLogActionLabel(entry.action, t);
+    case "report.export":
+      return typeof details?.title === "string" && typeof details?.format === "string"
+        ? t("projectLog.labels.reportExported", { name: details.title, format: details.format.toUpperCase() })
+        : entry.label || projectLogActionLabel(entry.action, t);
     case "ai_attribute_suggestion_run.create":
       return typeof details?.name === "string"
         ? t("projectLog.labels.savedSuggestionsCreated", { name: details.name })
@@ -694,6 +735,54 @@ export function projectLogDescriptionLabel(
       if (typeof details?.name === "string") return t("projectLog.labels.caseAttributeAdded", { name: details.name });
       if (typeof details?.attributeName === "string") return t("projectLog.labels.caseAttributeAdded", { name: details.attributeName });
       return entry.label || projectLogActionLabel(entry.action, t);
+    case "object_type.create":
+      return typeof details?.name === "string"
+        ? t("projectLog.labels.objectTypeCreated", { name: details.name })
+        : projectLogActionLabel(entry.action, t);
+    case "object_type.update":
+      return typeof details?.name === "string"
+        ? t("projectLog.labels.objectTypeUpdated", { name: details.name })
+        : projectLogActionLabel(entry.action, t);
+    case "object_type.delete":
+      return typeof details?.name === "string"
+        ? t("projectLog.labels.objectTypeDeleted", { name: details.name })
+        : entry.label || projectLogActionLabel(entry.action, t);
+    case "object.create":
+      return typeof details?.title === "string"
+        ? t("projectLog.labels.objectCreated", { name: details.title })
+        : projectLogActionLabel(entry.action, t);
+    case "object.update":
+      return typeof details?.title === "string"
+        ? t("projectLog.labels.objectUpdated", { name: details.title })
+        : projectLogActionLabel(entry.action, t);
+    case "object.delete":
+      return typeof details?.title === "string"
+        ? t("projectLog.labels.objectDeleted", { name: details.title })
+        : entry.label || projectLogActionLabel(entry.action, t);
+    case "relationship_type.create":
+      return typeof details?.name === "string"
+        ? t("projectLog.labels.relationshipTypeCreated", { name: details.name })
+        : projectLogActionLabel(entry.action, t);
+    case "relationship_type.update":
+      return typeof details?.name === "string"
+        ? t("projectLog.labels.relationshipTypeUpdated", { name: details.name })
+        : projectLogActionLabel(entry.action, t);
+    case "relationship_type.delete":
+      return typeof details?.name === "string"
+        ? t("projectLog.labels.relationshipTypeDeleted", { name: details.name })
+        : entry.label || projectLogActionLabel(entry.action, t);
+    case "relationship.create":
+      return typeof details?.relationshipType === "string"
+        ? t("projectLog.labels.relationshipCreated", { name: details.relationshipType })
+        : projectLogActionLabel(entry.action, t);
+    case "relationship.update":
+      return typeof details?.relationshipType === "string"
+        ? t("projectLog.labels.relationshipUpdated", { name: details.relationshipType })
+        : projectLogActionLabel(entry.action, t);
+    case "relationship.delete":
+      return typeof details?.relationshipType === "string"
+        ? t("projectLog.labels.relationshipDeleted", { name: details.relationshipType })
+        : entry.label || projectLogActionLabel(entry.action, t);
     default:
       return entry.label || projectLogActionLabel(entry.action, t);
   }

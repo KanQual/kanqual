@@ -3,10 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { HelpIcon } from "../components/AppIcons";
 import {
   POSTGRES_PROJECT_CHANGED_EVENT,
-  listPostgresExperimentProjectLog,
-  type PostgresExperimentProjectChangeEvent,
-  type PostgresExperimentProjectLogEntry,
-} from "../lib/postgresExperiment";
+  listPostgresProjectLog,
+  type PostgresProjectChangeEvent,
+  type PostgresProjectLogEntry,
+} from "../lib/postgres";
 import { useI18n } from "../i18n/provider";
 import {
   formatProjectLogDateTime,
@@ -25,7 +25,7 @@ export function PostgresProjectLogView({
   projectId: string;
 }) {
   const { t } = useI18n();
-  const [entries, setEntries] = useState<PostgresExperimentProjectLogEntry[]>([]);
+  const [entries, setEntries] = useState<PostgresProjectLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -35,7 +35,7 @@ export function PostgresProjectLogView({
     setLoading(true);
     setError(null);
     try {
-      setEntries(await listPostgresExperimentProjectLog(projectId));
+      setEntries(await listPostgresProjectLog(projectId));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load the PostgreSQL project log.");
     } finally {
@@ -52,7 +52,7 @@ export function PostgresProjectLogView({
     let unlisten: (() => void) | undefined;
 
     async function subscribe() {
-      unlisten = await listen<PostgresExperimentProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
+      unlisten = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
         if (disposed) return;
         if (event.payload.projectId !== projectId) return;
         void load();

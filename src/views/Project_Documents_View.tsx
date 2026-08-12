@@ -411,11 +411,11 @@ function DocumentDetail({
     if (activeProject) {
       await logAction(
         activeProject.id,
-        "document.create",
+        "source.create",
         t("projectLog.labels.documentEditableCopyCreated", { name: row.name }),
         newDocumentId,
         {
-          entityType: "document",
+          entityType: "source",
           copiedFromDocumentId: row.id,
           copiedCaseCount: caseDocs.length,
           copiedCaseIds: caseDocs.map((record) => String(record.case ?? "")),
@@ -427,11 +427,11 @@ function DocumentDetail({
       if (caseDocs.length > 0) {
         await logAction(
           activeProject.id,
-          "document.associations",
+          "source.associations",
           t("projectLog.labels.documentAssociationsCopied", { count: caseDocs.length, name: row.name }),
           newDocumentId,
           {
-            entityType: "document_associations",
+            entityType: "source_associations",
             copiedFromDocumentId: row.id,
             copiedCaseIds: caseDocs.map((record) => String(record.case ?? "")),
             copiedAssociationCount: caseDocs.length,
@@ -1217,8 +1217,8 @@ function AssociateCasesModal({
       ]);
       if (toAdd.length > 0 || toRemove.length > 0) {
         await onLog(
-          "document.associations",
-          t("projectLog.labels.documentAssociationsUpdated", {
+          "source.associations",
+          t("projectLog.labels.sourceAssociationsUpdated", {
             name: docRow.name,
             added: toAdd.length,
             removed: toRemove.length,

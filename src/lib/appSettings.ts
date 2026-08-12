@@ -32,6 +32,7 @@ export type UpdateSettings = {
 export type LlmConnectionMode = "none" | "local" | "cloud";
 
 export type CloudLlmProvider = "openai" | "anthropic" | "copilot" | "blablador" | "ollama";
+export type LocalLlmProvider = "ollama" | "llamacpp" | "custom";
 
 export type LlmSettings = {
   chunkSize: number;
@@ -44,6 +45,7 @@ export type LlmSettings = {
   cloudProvider: CloudLlmProvider;
   cloudApiSecret: string;
   cloudSelectedModel: string;
+  localProvider: LocalLlmProvider;
   ollamaEnabled: boolean;
   ollamaProtocol: "http" | "https";
   ollamaHost: string;
@@ -105,6 +107,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     cloudProvider: "openai",
     cloudApiSecret: "",
     cloudSelectedModel: "",
+    localProvider: "ollama",
     ollamaEnabled: false,
     ollamaProtocol: "http",
     ollamaHost: "127.0.0.1",
@@ -151,6 +154,10 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
       : value?.ollamaEnabled
         ? "local"
         : DEFAULT_APP_SETTINGS.llm.connectionMode;
+  const localProvider =
+    value?.localProvider === "llamacpp" || value?.localProvider === "custom" || value?.localProvider === "ollama"
+      ? value.localProvider
+      : DEFAULT_APP_SETTINGS.llm.localProvider;
   return {
     chunkSize,
     overlapSize,
@@ -168,12 +175,15 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
         : DEFAULT_APP_SETTINGS.llm.cloudProvider,
     cloudApiSecret: typeof value?.cloudApiSecret === "string" ? value.cloudApiSecret : "",
     cloudSelectedModel: typeof value?.cloudSelectedModel === "string" ? value.cloudSelectedModel : "",
+    localProvider,
     ollamaEnabled: connectionMode === "local",
     ollamaProtocol: value?.ollamaProtocol === "https" ? "https" : DEFAULT_APP_SETTINGS.llm.ollamaProtocol,
-    ollamaHost: typeof value?.ollamaHost === "string" && value.ollamaHost.trim()
+    ollamaHost: typeof value?.ollamaHost === "string" && (localProvider === "custom" || value.ollamaHost.trim())
       ? value.ollamaHost.trim()
       : DEFAULT_APP_SETTINGS.llm.ollamaHost,
-    ollamaPort: clampInteger(value?.ollamaPort, DEFAULT_APP_SETTINGS.llm.ollamaPort, 1, 65535),
+    ollamaPort: localProvider === "custom" && (value?.ollamaPort == null || Number(value.ollamaPort) === 0)
+      ? 0
+      : clampInteger(value?.ollamaPort, DEFAULT_APP_SETTINGS.llm.ollamaPort, 1, 65535),
     ollamaSelectedModel: typeof value?.ollamaSelectedModel === "string" ? value.ollamaSelectedModel : "",
     ollamaRequestTimeoutSeconds: clampInteger(
       value?.ollamaRequestTimeoutSeconds,

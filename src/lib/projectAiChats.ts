@@ -1,9 +1,16 @@
-import type PocketBase from "pocketbase";
-import type { RecordModel } from "pocketbase";
 import type { AppRole, Role } from "../types";
-
-export const PROJECT_AI_CHAT_COLLECTION = "project_ai_chats";
-export const PROJECT_AI_CHAT_MESSAGE_COLLECTION = "project_ai_chat_messages";
+import {
+  createPostgresProjectAiChat,
+  createPostgresProjectAiChatMessage,
+  deletePostgresProjectAiChat,
+  getPostgresAuthStatus,
+  listPostgresProjectAiChatMessages,
+  listPostgresProjectAiChats,
+  listPostgresProjectUsers,
+  touchPostgresProjectAiChat,
+  type PostgresProjectAiChat,
+  type PostgresProjectAiChatMessage,
+} from "./postgres";
 
 export type ProjectAiChatMessage = {
   id: string;
@@ -22,6 +29,8 @@ export type ProjectAiChatMessage = {
       itemType: string;
       title: string;
       preview: string;
+      sourceId?: string | null;
+      objectId?: string | null;
       documentId?: string | null;
       caseId?: string | null;
       codeId?: string | null;
@@ -43,6 +52,13 @@ export type ProjectAiChat = {
   createdByName: string;
   participantUserIds: string[];
   messages: ProjectAiChatMessage[];
+};
+
+export type CurrentProjectAiChatUser = {
+  id: string;
+  name: string;
+  appRole: AppRole;
+  projectRole: Role | null;
 };
 
 function projectAiChatsKey(projectId: string): string {
@@ -77,43 +93,47 @@ export function sortProjectAiChats(chats: ProjectAiChat[]): ProjectAiChat[] {
   return [...chats].sort((a, b) => getChatSortTimestamp(b) - getChatSortTimestamp(a));
 }
 
-function parseMessageMetadata(record: RecordModel): ProjectAiChatMessage["metadata"] | undefined {
-  const raw = record.metadata_json;
-  if (!raw) return undefined;
-  if (typeof raw === "object") return raw as ProjectAiChatMessage["metadata"];
-  if (typeof raw !== "string") return undefined;
+function parseJsonArray(value: string): string[] {
   try {
-    return JSON.parse(raw) as ProjectAiChatMessage["metadata"];
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseMessageMetadata(value: string): ProjectAiChatMessage["metadata"] | undefined {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as ProjectAiChatMessage["metadata"];
   } catch {
     return undefined;
   }
 }
 
-function toProjectAiChatMessage(record: RecordModel): ProjectAiChatMessage {
+function toProjectAiChatMessage(record: PostgresProjectAiChatMessage): ProjectAiChatMessage {
   return {
     id: record.id,
-    chatId: String(record.chat ?? ""),
+    chatId: record.chatId,
     role: record.role === "assistant" ? "assistant" : "user",
-    text: String(record.text ?? ""),
-    createdAt: record.created,
-    createdById: record.created_by || undefined,
-    createdByName: typeof record.created_by_name === "string" ? record.created_by_name : undefined,
-    metadata: parseMessageMetadata(record),
+    text: record.text,
+    createdAt: record.createdAt,
+    createdById: record.createdByProjectUserId || undefined,
+    createdByName: record.createdByName || undefined,
+    metadata: parseMessageMetadata(record.metadataJson),
   };
 }
 
-function toProjectAiChat(record: RecordModel, messages: ProjectAiChatMessage[]): ProjectAiChat {
+function toProjectAiChat(record: PostgresProjectAiChat, messages: ProjectAiChatMessage[]): ProjectAiChat {
   return {
     id: record.id,
-    projectId: String(record.project ?? ""),
-    title: String(record.title ?? ""),
-    createdAt: record.created,
-    updatedAt: String(record.last_message_at ?? record.updated ?? record.created),
-    createdById: String(record.created_by ?? ""),
-    createdByName: String(record.created_by_name ?? ""),
-    participantUserIds: Array.isArray(record.participant_users)
-      ? record.participant_users.map((value: unknown) => String(value)).filter(Boolean)
-      : [],
+    projectId: record.projectId,
+    title: record.title,
+    createdAt: record.createdAt,
+    updatedAt: record.lastMessageAt ?? record.updatedAt ?? record.createdAt,
+    createdById: record.createdByProjectUserId,
+    createdByName: record.createdByName,
+    participantUserIds: parseJsonArray(record.participantProjectUserIdsJson),
     messages,
   };
 }
@@ -173,35 +193,47 @@ function getFirstUserMessage(chat: ProjectAiChat): ProjectAiChatMessage | null {
   return chat.messages.find((message) => message.role === "user") ?? null;
 }
 
-export async function loadProjectAiChats(
-  pb: PocketBase,
-  args: {
-    projectId: string;
-    appRole: AppRole;
-    projectRole: Role | null;
-    currentUserId: string;
-  },
-): Promise<ProjectAiChat[]> {
-  const canSeeAll = args.appRole === "administrator" || args.projectRole === "owner" || args.projectRole === "editor";
-  const chatFilter = canSeeAll
-    ? `project="${args.projectId}"&&deleted_at=""`
-    : `project="${args.projectId}"&&created_by="${args.currentUserId}"&&deleted_at=""`;
+function stringifyMetadata(metadata: ProjectAiChatMessage["metadata"] | undefined): string {
+  if (!metadata) return "";
+  try {
+    return JSON.stringify(metadata);
+  } catch {
+    return "";
+  }
+}
 
+export async function loadCurrentProjectAiChatUser(projectId: string): Promise<CurrentProjectAiChatUser | null> {
+  const authStatus = await getPostgresAuthStatus();
+  const session = authStatus.currentSession;
+  if (!session) return null;
+
+  const users = await listPostgresProjectUsers(projectId);
+  const projectUser = users.find((user) => user.appUserId === session.user.id || user.email.toLowerCase() === session.user.email.toLowerCase());
+  return {
+    id: projectUser?.id ?? "",
+    name: projectUser?.name || session.user.name || session.user.email || "You",
+    appRole: session.user.role === "administrator" ? "administrator" : "standard",
+    projectRole: projectUser?.role === "owner" || projectUser?.role === "editor" || projectUser?.role === "coder" || projectUser?.role === "viewer"
+      ? projectUser.role
+      : null,
+  };
+}
+
+export async function loadProjectAiChats(args: {
+  projectId: string;
+  appRole: AppRole;
+  projectRole: Role | null;
+  currentUserId: string;
+}): Promise<ProjectAiChat[]> {
   const [chatRecords, messageRecords] = await Promise.all([
-    pb.collection(PROJECT_AI_CHAT_COLLECTION).getFullList({
-      filter: chatFilter,
-      sort: "-last_message_at,-created",
-    }),
-    pb.collection(PROJECT_AI_CHAT_MESSAGE_COLLECTION).getFullList({
-      filter: `project="${args.projectId}"&&deleted_at=""`,
-      sort: "created",
-    }),
+    listPostgresProjectAiChats(args.projectId),
+    listPostgresProjectAiChatMessages(args.projectId),
   ]);
 
   const chatIds = new Set(chatRecords.map((record) => record.id));
   const messagesByChat = new Map<string, ProjectAiChatMessage[]>();
   for (const record of messageRecords) {
-    if (!chatIds.has(String(record.chat ?? ""))) continue;
+    if (!chatIds.has(record.chatId)) continue;
     const message = toProjectAiChatMessage(record);
     const list = messagesByChat.get(message.chatId) ?? [];
     list.push(message);
@@ -213,97 +245,71 @@ export async function loadProjectAiChats(
   );
 }
 
-export async function createProjectAiChat(
-  pb: PocketBase,
-  args: {
-    projectId: string;
-    createdById: string;
-    createdByIdentifier: string;
-    createdByName: string;
-    initialTitle: string;
-  },
-): Promise<ProjectAiChat> {
-  const record = await pb.collection(PROJECT_AI_CHAT_COLLECTION).create({
-    project: args.projectId,
-    created_by: args.createdById,
-    created_by_identifier: args.createdByIdentifier,
-    created_by_name: args.createdByName,
-    participant_users: [args.createdById],
-    participant_identifiers_json: JSON.stringify(args.createdByIdentifier ? [args.createdByIdentifier] : []),
+export async function createProjectAiChat(args: {
+  projectId: string;
+  createdById: string;
+  createdByIdentifier: string;
+  createdByName: string;
+  initialTitle: string;
+}): Promise<ProjectAiChat> {
+  const record = await createPostgresProjectAiChat({
+    projectId: args.projectId,
     title: args.initialTitle,
-    last_message_at: new Date().toISOString(),
+    participantProjectUserIds: args.createdById ? [args.createdById] : [],
   });
   return toProjectAiChat(record, []);
 }
 
-export async function createProjectAiChatMessage(
-  pb: PocketBase,
-  args: {
-    chatId: string;
-    projectId: string;
-    role: "user" | "assistant";
-    text: string;
-    createdById?: string;
-    createdByIdentifier?: string;
-    createdByName?: string;
-    metadata?: ProjectAiChatMessage["metadata"];
-  },
-): Promise<ProjectAiChatMessage> {
-  const record = await pb.collection(PROJECT_AI_CHAT_MESSAGE_COLLECTION).create({
-    chat: args.chatId,
-    project: args.projectId,
+export async function createProjectAiChatMessage(args: {
+  chatId: string;
+  projectId: string;
+  role: "user" | "assistant";
+  text: string;
+  createdById?: string;
+  createdByIdentifier?: string;
+  createdByName?: string;
+  metadata?: ProjectAiChatMessage["metadata"];
+}): Promise<ProjectAiChatMessage> {
+  const record = await createPostgresProjectAiChatMessage({
+    chatId: args.chatId,
+    projectId: args.projectId,
     role: args.role,
     text: args.text,
-    metadata_json: args.metadata ? JSON.stringify(args.metadata) : "",
-    created_by: args.createdById ?? "",
-    created_by_identifier: args.createdByIdentifier ?? "",
-    created_by_name: args.createdByName ?? "",
+    metadataJson: stringifyMetadata(args.metadata),
   });
   return toProjectAiChatMessage(record);
 }
 
-export async function touchProjectAiChat(
-  pb: PocketBase,
-  args: {
-    chatId: string;
-    lastMessageAt: string;
-    title?: string;
-  },
-): Promise<void> {
-  const payload: Record<string, unknown> = {
-    last_message_at: args.lastMessageAt,
-  };
-  if (args.title) payload.title = args.title;
-  await pb.collection(PROJECT_AI_CHAT_COLLECTION).update(args.chatId, payload);
+export async function touchProjectAiChat(args: {
+  projectId: string;
+  chatId: string;
+  lastMessageAt: string;
+  title?: string;
+}): Promise<void> {
+  await touchPostgresProjectAiChat({
+    projectId: args.projectId,
+    chatId: args.chatId,
+    lastMessageAt: args.lastMessageAt,
+    title: args.title,
+  });
 }
 
-export async function deleteProjectAiChat(pb: PocketBase, chatId: string): Promise<void> {
-  const deletedAt = new Date().toISOString();
-  await Promise.all([
-    pb.collection(PROJECT_AI_CHAT_COLLECTION).update(chatId, { deleted_at: deletedAt }),
-    pb.collection(PROJECT_AI_CHAT_MESSAGE_COLLECTION).getFullList({
-      filter: `chat="${chatId}"&&deleted_at=""`,
-    }).then((records) =>
-      Promise.all(records.map((record) => pb.collection(PROJECT_AI_CHAT_MESSAGE_COLLECTION).update(record.id, { deleted_at: deletedAt }))),
-    ),
-  ]);
+export async function deleteProjectAiChat(projectId: string, chatId: string): Promise<void> {
+  await deletePostgresProjectAiChat(projectId, chatId);
 }
 
-export async function migrateLegacyProjectAiChatsToBackend(
-  pb: PocketBase,
-  args: {
-    projectId: string;
-    currentUserId: string;
-    currentUserIdentifier: string;
-    currentUserName: string;
-    appRole: AppRole;
-    projectRole: Role | null;
-  },
-): Promise<void> {
+export async function migrateLegacyProjectAiChatsToBackend(args: {
+  projectId: string;
+  currentUserId: string;
+  currentUserIdentifier: string;
+  currentUserName: string;
+  appRole: AppRole;
+  projectRole: Role | null;
+}): Promise<void> {
   const legacyChats = readLegacyProjectAiChats(args.projectId);
   if (legacyChats.length === 0) return;
 
-  const existingChats = await loadProjectAiChats(pb, args);
+  const existingChats = await loadProjectAiChats(args);
   const hasCurrentUserBackendChats = existingChats.some((chat) => chat.createdById === args.currentUserId);
   if (hasCurrentUserBackendChats) {
     clearLegacyProjectAiChats(args.projectId);
@@ -312,7 +318,7 @@ export async function migrateLegacyProjectAiChatsToBackend(
 
   for (const legacyChat of legacyChats) {
     const firstUserMessage = getFirstUserMessage(legacyChat);
-    const createdChat = await createProjectAiChat(pb, {
+    const createdChat = await createProjectAiChat({
       projectId: args.projectId,
       createdById: args.currentUserId,
       createdByIdentifier: args.currentUserIdentifier,
@@ -321,7 +327,7 @@ export async function migrateLegacyProjectAiChatsToBackend(
     });
 
     for (const message of legacyChat.messages) {
-      await createProjectAiChatMessage(pb, {
+      await createProjectAiChatMessage({
         chatId: createdChat.id,
         projectId: args.projectId,
         role: message.role,
@@ -334,7 +340,8 @@ export async function migrateLegacyProjectAiChatsToBackend(
     }
 
     const lastCreatedAt = legacyChat.messages[legacyChat.messages.length - 1]?.createdAt ?? legacyChat.updatedAt ?? legacyChat.createdAt;
-    await touchProjectAiChat(pb, {
+    await touchProjectAiChat({
+      projectId: args.projectId,
       chatId: createdChat.id,
       lastMessageAt: lastCreatedAt,
       title: shortenChatLabel(firstUserMessage?.text ?? legacyChat.title ?? "Untitled chat"),

@@ -1,4 +1,9 @@
-import type PocketBase from "pocketbase";
+import {
+  cancelPostgresAiJob,
+  createPostgresAiJob,
+  getPostgresAiJob,
+  type PostgresAiJob,
+} from "./postgres";
 
 export const AI_JOB_COLLECTION = "ai_jobs";
 
@@ -19,9 +24,10 @@ export type ProjectChatAiJobRequest = {
   projectId: string;
   query: string;
   conversation: Array<{ role: string; content: string }>;
-  selectedContextMode: "prioritize" | "restrict";
+  selectedContextMode: "default" | "prioritize" | "restrict";
   selectedDocumentIds: string[];
   selectedCaseIds: string[];
+  selectedRelationshipIds?: string[];
   selectedCodeIds: string[];
   selectedAnnotationIds: string[];
   selectedMemoIds: string[];
@@ -37,8 +43,11 @@ export type ProjectChatAiJobResult = {
     itemType: string;
     title: string;
     preview: string;
+    sourceId?: string | null;
+    objectId?: string | null;
     documentId?: string | null;
     caseId?: string | null;
+    relationshipId?: string | null;
     codeId?: string | null;
     annotationId?: string | null;
     memoId?: string | null;
@@ -103,6 +112,8 @@ export type RelevantSegmentsAiJobResult = {
     matchText?: string;
     reason: string;
     similarity: number;
+    sourceId?: string;
+    objectId?: string;
     documentId?: string;
     codeId?: string;
     annotationId?: string;
@@ -221,6 +232,20 @@ export function toAiJobRecord(record: Record<string, unknown>): AiJobRecord {
   };
 }
 
+export function toAiJobRecordFromPostgres(job: PostgresAiJob): AiJobRecord {
+  return {
+    id: job.id,
+    projectId: job.projectId,
+    jobType: job.jobType,
+    status: job.status,
+    requestJson: job.requestJson,
+    resultJson: job.resultJson,
+    errorMessage: job.errorMessage,
+    hostMessage: job.hostMessage,
+    createdBy: job.createdByProjectUserId,
+  };
+}
+
 export function isLocalBackendUrl(baseUrl: string): boolean {
   try {
     const url = new URL(baseUrl);
@@ -232,97 +257,80 @@ export function isLocalBackendUrl(baseUrl: string): boolean {
 }
 
 async function createAiJob<TRequest>(
-  pb: PocketBase,
   jobType: AiJobType,
   projectId: string,
   request: TRequest,
 ): Promise<AiJobRecord> {
-  const record = await pb.collection(AI_JOB_COLLECTION).create({
-    project: projectId,
-    job_type: jobType,
-    status: "queued",
-    request_json: JSON.stringify(request),
-    result_json: "",
-    error_message: "",
-    host_message: "Queued for host AI processing.",
-    created_by: pb.authStore.record?.id ?? "",
-    created_by_identifier: String(pb.authStore.record?.user_identifier ?? ""),
+  const record = await createPostgresAiJob({
+    projectId,
+    jobType,
+    requestJson: JSON.stringify(request),
   });
-  return toAiJobRecord(record);
+  return toAiJobRecordFromPostgres(record);
 }
 
 export async function createProjectChatAiJob(
-  pb: PocketBase,
   request: ProjectChatAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "project_chat", request.projectId, request);
+  return createAiJob("project_chat", request.projectId, request);
 }
 
 export async function createDocumentProcessingAiJob(
-  pb: PocketBase,
   request: DocumentProcessingAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "document_processing", request.projectId, request);
+  return createAiJob("document_processing", request.projectId, request);
 }
 
 export async function createAttributeSuggestionAiJob(
-  pb: PocketBase,
   request: AttributeSuggestionAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "attribute_suggestions", request.projectId, request);
+  return createAiJob("attribute_suggestions", request.projectId, request);
 }
 
 export async function createEmbeddingBuildAiJob(
-  pb: PocketBase,
   request: EmbeddingBuildAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "embedding_build", request.projectId, request);
+  return createAiJob("embedding_build", request.projectId, request);
 }
 
 export async function createRelevantSegmentsAiJob(
-  pb: PocketBase,
   request: RelevantSegmentsAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "relevant_segments_search", request.projectId, request);
+  return createAiJob("relevant_segments_search", request.projectId, request);
 }
 
 export async function createCodeConceptualSummaryAiJob(
-  pb: PocketBase,
   request: CodeAnalysisBaseAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "code_conceptual_summary", request.projectId, request);
+  return createAiJob("code_conceptual_summary", request.projectId, request);
 }
 
 export async function createMostTypicalAnnotationAiJob(
-  pb: PocketBase,
   request: CodeAnalysisBaseAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "most_typical_annotation", request.projectId, request);
+  return createAiJob("most_typical_annotation", request.projectId, request);
 }
 
 export async function createCodeDecompositionAiJob(
-  pb: PocketBase,
   request: CodeAnalysisBaseAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "code_decomposition", request.projectId, request);
+  return createAiJob("code_decomposition", request.projectId, request);
 }
 
 export async function createCodePositionAiJob(
-  pb: PocketBase,
   request: CodePositionAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "code_position", request.projectId, request);
+  return createAiJob("code_position", request.projectId, request);
 }
 
 export async function createCodeUniqueAnnotationsAiJob(
-  pb: PocketBase,
   request: CodeAnalysisBaseAiJobRequest,
 ): Promise<AiJobRecord> {
-  return createAiJob(pb, "code_unique_annotations", request.projectId, request);
+  return createAiJob("code_unique_annotations", request.projectId, request);
 }
 
 export async function waitForAiJobTerminalState(
-  pb: PocketBase,
+  projectId: string,
   jobId: string,
   options?: {
     timeoutMs?: number;
@@ -335,8 +343,7 @@ export async function waitForAiJobTerminalState(
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const record = await pb.collection(AI_JOB_COLLECTION).getOne(jobId);
-    const job = toAiJobRecord(record as unknown as Record<string, unknown>);
+    const job = toAiJobRecordFromPostgres(await getPostgresAiJob(projectId, jobId));
     options?.onProgress?.(job);
     if (job.status === "completed" || job.status === "error") {
       return job;
@@ -348,13 +355,9 @@ export async function waitForAiJobTerminalState(
 }
 
 export async function cancelAiJob(
-  pb: PocketBase,
+  projectId: string,
   jobId: string,
   message: string,
 ): Promise<void> {
-  await pb.collection(AI_JOB_COLLECTION).update(jobId, {
-    status: "error",
-    error_message: message,
-    host_message: message,
-  });
+  await cancelPostgresAiJob(projectId, jobId, message);
 }

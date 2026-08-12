@@ -2,20 +2,19 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { listen } from "@tauri-apps/api/event";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import {
-  createPostgresExperimentProject,
-  deletePostgresExperimentProject,
-  getPostgresExperimentInstallationSettings,
-  getPostgresExperimentUserProjectState,
-  listPostgresExperimentProjects,
+  createPostgresProject,
+  deletePostgresProject,
+  getPostgresInstallationSettings,
+  getPostgresUserProjectState,
+  listPostgresProjects,
   POSTGRES_PROJECT_CHANGED_EVENT,
-  rememberPostgresExperimentProjectOpened,
-  removePostgresExperimentProjectFromState,
-  type PostgresExperimentAuthSession,
-  type PostgresExperimentProject,
-  type PostgresExperimentProjectChangeEvent,
-  type PostgresExperimentRecentProject,
-  updatePostgresExperimentProject,
-} from "../lib/postgresExperiment";
+  rememberPostgresProjectOpened,
+  removePostgresProjectFromState,
+  type PostgresProject,
+  type PostgresProjectChangeEvent,
+  type PostgresRecentProject,
+  updatePostgresProject,
+} from "../lib/postgres";
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -27,35 +26,21 @@ function describeUnknownError(error: unknown): string {
   }
 }
 
-export type PostgresProjectsExperimentViewProps = {
-  authSession: PostgresExperimentAuthSession;
-  onBack: () => void;
-  onSignOut: () => Promise<void>;
+export type PostgresProjectsViewProps = {
   renderProjectHome: (
-    project: PostgresExperimentProject,
+    project: PostgresProject,
     helpers: {
       onBack: () => void;
-      onProjectUpdated: (project: PostgresExperimentProject) => void;
+      onProjectUpdated: (project: PostgresProject) => void;
       onProjectDeleted: (projectId: string) => void;
     },
   ) => ReactNode;
-  renderSidebar: (helpers: {
-    selectedProject: PostgresExperimentProject | null;
-    openSelectedProject: (() => void) | undefined;
-    authSession: PostgresExperimentAuthSession;
-    onBack: () => void;
-    onSignOut: () => Promise<void>;
-  }) => ReactNode;
 };
 
-export function PostgresProjectsExperimentView({
-  authSession,
-  onBack,
-  onSignOut,
+export function PostgresProjectsView({
   renderProjectHome,
-  renderSidebar,
-}: PostgresProjectsExperimentViewProps) {
-  const [projects, setProjects] = useState<PostgresExperimentProject[]>([]);
+}: PostgresProjectsViewProps) {
+  const [projects, setProjects] = useState<PostgresProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -73,15 +58,15 @@ export function PostgresProjectsExperimentView({
   const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const recordProjectOpened = useCallback(async (project: PostgresExperimentProject) => {
-    const recentProject: PostgresExperimentRecentProject = {
+  const recordProjectOpened = useCallback(async (project: PostgresProject) => {
+    const recentProject: PostgresRecentProject = {
       id: project.id,
       name: project.name,
       description: project.description,
       openedAt: new Date().toISOString(),
     };
     try {
-      await rememberPostgresExperimentProjectOpened(recentProject);
+      await rememberPostgresProjectOpened(recentProject);
     } catch (rememberError) {
       console.warn("Could not persist PostgreSQL recent project state:", describeUnknownError(rememberError));
     }
@@ -95,9 +80,9 @@ export function PostgresProjectsExperimentView({
       setError("");
       try {
         const [nextProjects, installationSettings, projectState] = await Promise.all([
-          listPostgresExperimentProjects(),
-          getPostgresExperimentInstallationSettings(),
-          getPostgresExperimentUserProjectState(),
+          listPostgresProjects(),
+          getPostgresInstallationSettings(),
+          getPostgresUserProjectState(),
         ]);
         if (!cancelled) {
           setProjects(nextProjects);
@@ -126,7 +111,6 @@ export function PostgresProjectsExperimentView({
     };
   }, []);
 
-  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0] ?? null;
   const openedProject = projects.find((project) => project.id === openedProjectId) ?? null;
   const projectPendingDelete = projects.find((project) => project.id === removingProjectId) ?? null;
   const canConfirmDelete = !!projectPendingDelete
@@ -136,7 +120,7 @@ export function PostgresProjectsExperimentView({
     setLoading(true);
     setError("");
     try {
-      const nextProjects = await listPostgresExperimentProjects();
+      const nextProjects = await listPostgresProjects();
       setProjects(nextProjects);
       setSelectedProjectId((current) => {
         if (current && nextProjects.some((project) => project.id === current)) return current;
@@ -155,13 +139,13 @@ export function PostgresProjectsExperimentView({
     setError("");
     setNotice("");
     if (!name.trim()) {
-      setError("Enter a project name for the PostgreSQL experiment.");
+      setError("Enter a project name for the PostgreSQL.");
       return false;
     }
 
     setSubmitting(true);
     try {
-      const created = await createPostgresExperimentProject({
+      const created = await createPostgresProject({
         name: name.trim(),
         description: description.trim(),
       });
@@ -171,7 +155,7 @@ export function PostgresProjectsExperimentView({
       setOpenedProjectId(created.id);
       setName("");
       setDescription("");
-      setNotice(`Created PostgreSQL experiment project "${created.name}".`);
+      setNotice(`Created PostgreSQL project "${created.name}".`);
       return true;
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : String(createError));
@@ -183,7 +167,7 @@ export function PostgresProjectsExperimentView({
 
   async function handleSaveProject() {
     if (!editingProjectId || !editingProjectName.trim()) {
-      setError("Enter a project name for the PostgreSQL experiment.");
+      setError("Enter a project name for the PostgreSQL.");
       return;
     }
 
@@ -191,7 +175,7 @@ export function PostgresProjectsExperimentView({
     setError("");
     setNotice("");
     try {
-      const updated = await updatePostgresExperimentProject({
+      const updated = await updatePostgresProject({
         projectId: editingProjectId,
         name: editingProjectName.trim(),
         description: editingProjectDescription.trim(),
@@ -199,7 +183,7 @@ export function PostgresProjectsExperimentView({
       setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
       setSelectedProjectId(updated.id);
       setEditingProjectId(null);
-      setNotice(`Updated PostgreSQL experiment project "${updated.name}".`);
+      setNotice(`Updated PostgreSQL project "${updated.name}".`);
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : String(updateError));
     } finally {
@@ -212,14 +196,14 @@ export function PostgresProjectsExperimentView({
     setError("");
     setNotice("");
     try {
-      await deletePostgresExperimentProject(projectId);
-      await removePostgresExperimentProjectFromState(projectId);
+      await deletePostgresProject(projectId);
+      await removePostgresProjectFromState(projectId);
       setProjects((current) => current.filter((project) => project.id !== projectId));
       setSelectedProjectId((current) => (current === projectId ? null : current));
       setOpenedProjectId((current) => (current === projectId ? null : current));
       setRemovingProjectId(null);
       setDeleteConfirmationName("");
-      setNotice("Deleted PostgreSQL experiment project.");
+      setNotice("Deleted PostgreSQL project.");
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
     } finally {
@@ -232,7 +216,7 @@ export function PostgresProjectsExperimentView({
     let unlisten: (() => void) | undefined;
 
     async function subscribeToProjectChanges() {
-      unlisten = await listen<PostgresExperimentProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
+      unlisten = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
         if (disposed) return;
         if (event.payload.entityType !== "project") return;
         void refreshProjects();
@@ -278,13 +262,6 @@ export function PostgresProjectsExperimentView({
 
   return (
     <div className="app-shell">
-      {renderSidebar({
-        selectedProject,
-        openSelectedProject: selectedProject ? () => setOpenedProjectId(selectedProject.id) : undefined,
-        authSession,
-        onBack,
-        onSignOut,
-      })}
       <main className="app-main">
         <div className="view projects-view">
           <header className="view-header">
@@ -313,11 +290,11 @@ export function PostgresProjectsExperimentView({
 
           {loading ? (
             <div className="empty-state">
-              <p>Loading PostgreSQL experiment projects...</p>
+              <p>Loading PostgreSQL projects...</p>
             </div>
           ) : projects.length === 0 ? (
             <div className="empty-state">
-              <p>No PostgreSQL experiment projects yet.</p>
+              <p>No PostgreSQL projects yet.</p>
               <div className="form-actions" style={{ justifyContent: "center", marginTop: 16 }}>
                 <button
                   type="button"

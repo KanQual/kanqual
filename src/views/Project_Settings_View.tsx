@@ -36,7 +36,7 @@ import {
   type ProjectAiAssistSettings,
 } from "../lib/projectSettings";
 import {
-  buildProjectEmbeddingSources,
+  buildPostgresProjectEmbeddingSourcesForProject,
   type ProjectEmbeddingBuildPreflight,
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
@@ -334,9 +334,6 @@ export function ProjectSettingsView() {
     documents,
     projectUploadedFiles,
     cases,
-    codes,
-    annotations,
-    memos,
     createProject,
     openProject,
     openProjectToView,
@@ -543,18 +540,18 @@ export function ProjectSettingsView() {
     }
     let cancelled = false;
     const appSettings = readAppSettings();
-    const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, appSettings.llm);
-    void invoke<ProjectEmbeddingBuildPreflight>("get_project_embedding_store_build_preflight", {
-      request: {
-        projectId: activeProject.id,
-        batchSize: appSettings.llm.batchSize,
-        chunkSize: appSettings.llm.chunkSize,
-        overlapSize: appSettings.llm.overlapSize,
-        prefixPassages: appSettings.llm.prefixPassages,
-        normalizeWhitespace: appSettings.llm.normalizeWhitespace,
-        sources,
-      },
-    })
+    void buildPostgresProjectEmbeddingSourcesForProject(activeProject.id, appSettings.llm)
+      .then((sources) => invoke<ProjectEmbeddingBuildPreflight>("get_project_embedding_store_build_preflight", {
+        request: {
+          projectId: activeProject.id,
+          batchSize: appSettings.llm.batchSize,
+          chunkSize: appSettings.llm.chunkSize,
+          overlapSize: appSettings.llm.overlapSize,
+          prefixPassages: appSettings.llm.prefixPassages,
+          normalizeWhitespace: appSettings.llm.normalizeWhitespace,
+          sources,
+        },
+      }))
       .then((preflight) => {
         if (!cancelled) setAiAssistBuildPreflight(preflight);
       })
@@ -568,11 +565,6 @@ export function ProjectSettingsView() {
   }, [
     activeProject?.id,
     canManageProjectAiAssist,
-    documents,
-    cases,
-    codes,
-    annotations,
-    memos,
     isLocalWorkspace,
     projectEmbeddingBuildStatus?.phase,
   ]);
@@ -1085,7 +1077,7 @@ export function ProjectSettingsView() {
         return;
       }
 
-      const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos);
+      const sources = await buildPostgresProjectEmbeddingSourcesForProject(activeProject.id);
       if (sources.length === 0) {
         await persistAiAssistSettings(
           nextSettings,
@@ -1142,7 +1134,7 @@ export function ProjectSettingsView() {
       }
 
       const appSettings = readAppSettings();
-      const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, appSettings.llm);
+      const sources = await buildPostgresProjectEmbeddingSourcesForProject(activeProject.id, appSettings.llm);
       if (sources.length === 0) {
         persistAiAssistSettings(
           { ...projectAiAssistSettings, enabled: true },

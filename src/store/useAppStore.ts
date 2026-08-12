@@ -83,7 +83,7 @@ import type {
   ProjectEmbeddingBuildSource,
   ProjectEmbeddingBuildStatus,
 } from "../lib/projectEmbeddings";
-import { buildProjectEmbeddingSources } from "../lib/projectEmbeddings";
+import { buildPostgresProjectEmbeddingSourcesForProject } from "../lib/projectEmbeddings";
 import {
   DEFAULT_PROJECT_AI_ASSIST_SETTINGS,
   DEFAULT_PROJECT_AI_ASSIST_RUNTIME_STATUS,
@@ -1222,8 +1222,8 @@ export function useAppStore(pb: PocketBase) {
         return runProjectChatRequestLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createProjectChatAiJob(pb, request);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const job = await createProjectChatAiJob(request);
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
       if (terminal.status === "error") {
@@ -1262,9 +1262,9 @@ export function useAppStore(pb: PocketBase) {
         return runAttributeSuggestionsLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createAttributeSuggestionAiJob(pb, request);
+      const job = await createAttributeSuggestionAiJob(request);
       onJobQueued?.(job.id);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 20 * 60 * 1000,
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
@@ -1284,9 +1284,10 @@ export function useAppStore(pb: PocketBase) {
         return;
       }
       if (!jobId) return;
-      await cancelAiJob(pb, jobId, message);
+      if (!activeProject) return;
+      await cancelAiJob(activeProject.id, jobId, message);
     },
-    [pb],
+    [activeProject, pb],
   );
 
   const runRelevantSegmentSearchLocally = useCallback(
@@ -1315,8 +1316,8 @@ export function useAppStore(pb: PocketBase) {
         return runRelevantSegmentSearchLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createRelevantSegmentsAiJob(pb, request);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const job = await createRelevantSegmentsAiJob(request);
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 20 * 60 * 1000,
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
@@ -1420,8 +1421,8 @@ export function useAppStore(pb: PocketBase) {
         return runCodeConceptualSummaryLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createCodeConceptualSummaryAiJob(pb, request);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const job = await createCodeConceptualSummaryAiJob(request);
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 20 * 60 * 1000,
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
@@ -1451,8 +1452,8 @@ export function useAppStore(pb: PocketBase) {
         return runMostTypicalAnnotationLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createMostTypicalAnnotationAiJob(pb, request);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const job = await createMostTypicalAnnotationAiJob(request);
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 20 * 60 * 1000,
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
@@ -1481,8 +1482,8 @@ export function useAppStore(pb: PocketBase) {
         return runCodeDecompositionLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createCodeDecompositionAiJob(pb, request);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const job = await createCodeDecompositionAiJob(request);
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 20 * 60 * 1000,
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
@@ -1511,8 +1512,8 @@ export function useAppStore(pb: PocketBase) {
         return runCodePositionLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createCodePositionAiJob(pb, request);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const job = await createCodePositionAiJob(request);
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 20 * 60 * 1000,
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
@@ -1542,8 +1543,8 @@ export function useAppStore(pb: PocketBase) {
         return runCodeUniqueAnnotationsLocally(request);
       }
       onProgress?.("Queued for host AI processing...");
-      const job = await createCodeUniqueAnnotationsAiJob(pb, request);
-      const terminal = await waitForAiJobTerminalState(pb, job.id, {
+      const job = await createCodeUniqueAnnotationsAiJob(request);
+      const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 20 * 60 * 1000,
         onProgress: (currentJob) => onProgress?.(currentJob.hostMessage || "Waiting for host AI processing..."),
       });
@@ -1574,23 +1575,7 @@ export function useAppStore(pb: PocketBase) {
 
   async function buildHostEmbeddingRequestForProject(projectId: string): Promise<EmbeddingBuildStartRequest> {
     const llmSettings = readAppSettings().llm;
-    const [documentRecords, caseRecords, codeRecords, annotationRecords, memoRecords] = await Promise.all([
-      pb.collection("documents").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "created" }),
-      pb.collection("cases").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "created" }),
-      pb.collection("codes").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "created" }),
-      pb.collection("annotations").getFullList({ filter: `deleted_at=""`, sort: "created" }),
-      pb.collection("memos").getFullList({ filter: `project="${projectId}"&&deleted_at=""`, sort: "-created" }),
-    ]);
-    const documents = documentRecords.map(toDocument);
-    const cases = caseRecords.map(toCase);
-    const codes = codeRecords.map(toCode);
-    const documentIds = new Set(documents.map((document) => document.id));
-    const codeIds = new Set(codes.map((code) => code.id));
-    const annotations = annotationRecords
-      .map(toAnnotation)
-      .filter((annotation) => documentIds.has(annotation.documentId) && codeIds.has(annotation.codeId));
-    const memos = memoRecords.map(toMemo);
-    const sources = buildProjectEmbeddingSources(documents, cases, codes, annotations, memos, llmSettings);
+    const sources = await buildPostgresProjectEmbeddingSourcesForProject(projectId, llmSettings);
     return {
       projectId,
       llmSettings: {
@@ -1958,8 +1943,8 @@ export function useAppStore(pb: PocketBase) {
       };
       projectEmbeddingLastPhaseRef.current = initialStatus.phase;
       setProjectEmbeddingBuildStatus(initialStatus);
-      const job = await createEmbeddingBuildAiJob(pb, { projectId: request.projectId });
-      const run = waitForAiJobTerminalState(pb, job.id, {
+      const job = await createEmbeddingBuildAiJob({ projectId: request.projectId });
+      const run = waitForAiJobTerminalState(request.projectId, job.id, {
         timeoutMs: 60 * 60 * 1000,
         onProgress: (currentJob) => {
           setProjectEmbeddingBuildStatus((current) => ({
@@ -2137,13 +2122,13 @@ export function useAppStore(pb: PocketBase) {
               currentChunkTotal: undefined,
             });
           } else {
-            const job = await createDocumentProcessingAiJob(pb, {
+            const job = await createDocumentProcessingAiJob({
               projectId: request.projectId,
               documentIds: request.documentIds,
               reviewLenses: request.reviewLenses,
               restartDocumentIds: request.restartDocumentIds,
             });
-            const terminal = await waitForAiJobTerminalState(pb, job.id, {
+            const terminal = await waitForAiJobTerminalState(request.projectId, job.id, {
               timeoutMs: 60 * 60 * 1000,
               onProgress: (currentJob) => {
                 let progressResult:
@@ -3543,8 +3528,8 @@ export function useAppStore(pb: PocketBase) {
       if (options?.setActive !== false) {
         setActiveDocument(doc);
       }
-      await logAction(activeProject.id, "document.create", `Added document "${name}"`, record.id, {
-        entityType: "document",
+      await logAction(activeProject.id, "source.create", `Added source "${name}"`, record.id, {
+        entityType: "source",
         name,
         type: options?.type ?? "Text",
         importedFromRetainedUpload: Boolean(uploadedFileRecord?.id),
@@ -3562,14 +3547,14 @@ export function useAppStore(pb: PocketBase) {
       await pb.collection("documents").update(id, data);
 
       if (activeProject && data.name) {
-        await logAction(activeProject.id, "document.update", `Renamed document to "${data.name}"`, id, {
-          entityType: "document",
+        await logAction(activeProject.id, "source.update", `Renamed source to "${data.name}"`, id, {
+          entityType: "source",
           name: data.name,
           changedFields: Object.keys(data),
         });
       } else if (activeProject) {
-        await logAction(activeProject.id, "document.update", "Updated document", id, {
-          entityType: "document",
+        await logAction(activeProject.id, "source.update", "Updated source", id, {
+          entityType: "source",
           name: data.name,
           changedFields: Object.keys(data),
         });
@@ -3580,7 +3565,7 @@ export function useAppStore(pb: PocketBase) {
 
   const deleteDocument = useCallback(
     async (id: string, name?: string) => {
-      await ensureProjectSafetyBackup("document.delete", `Deleted document${name ? ` "${name}"` : ""}`);
+      await ensureProjectSafetyBackup("source.delete", `Deleted source${name ? ` "${name}"` : ""}`);
       const deletedAt = new Date().toISOString();
       // Cascade soft-delete to annotations so they don't surface in reports
       const anns = await pb.collection("annotations").getFullList({ filter: `document="${id}"&&deleted_at=""`, fields: "id" });
@@ -3594,13 +3579,13 @@ export function useAppStore(pb: PocketBase) {
           updateProjectUploadedFileStatus(
             record.id,
             "orphaned",
-            `Document${name ? ` "${name}"` : ""} was deleted while retaining the original upload.`,
+            `Source${name ? ` "${name}"` : ""} was deleted while retaining the original upload.`,
             { documentId: id },
           ),
         ),
       );
-      if (activeProject) await logAction(activeProject.id, "document.delete", `Deleted document${name ? ` "${name}"` : ""}`, id, {
-        entityType: "document",
+      if (activeProject) await logAction(activeProject.id, "source.delete", `Deleted source${name ? ` "${name}"` : ""}`, id, {
+        entityType: "source",
         name,
       });
     },

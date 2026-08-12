@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useStore } from "../context/StoreContext";
 import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
@@ -12,6 +13,7 @@ import {
   createProjectAiChatMessage,
   deleteProjectAiChat,
   getLastUserMessage,
+  loadCurrentProjectAiChatUser,
   loadProjectAiChats,
   migrateLegacyProjectAiChatsToBackend,
   readActiveProjectAiChatId,
@@ -20,13 +22,20 @@ import {
   sortProjectAiChats,
   touchProjectAiChat,
   type ProjectAiChat,
+  type CurrentProjectAiChatUser,
 } from "../lib/projectAiChats";
+import {
+  POSTGRES_PROJECT_CHANGED_EVENT,
+  type PostgresProjectChangeEvent,
+} from "../lib/postgres";
 
 type OllamaProjectChatCitation = {
   id: string;
   itemType: string;
   title: string;
   preview: string;
+  sourceId?: string | null;
+  objectId?: string | null;
   documentId?: string | null;
   caseId?: string | null;
   codeId?: string | null;
@@ -79,6 +88,7 @@ type CitationKind =
 function getCitationKind(citation: OllamaProjectChatCitation): CitationKind {
   if (citation.itemType === "code") return "code";
   if (citation.itemType === "annotation" || citation.annotationId) return "annotation";
+  if (citation.itemType === "object" || citation.objectId) return "case";
   if (citation.itemType === "case" || citation.caseId) return "case";
   if (citation.itemType === "memo") return "memo";
   if (citation.itemType === "project-description" || citation.itemType === "project_description") return "project-description";
@@ -113,6 +123,16 @@ function annotationPreview(value: string, maxLength = 96): string {
   const clean = value.replace(/\s+/g, " ").trim();
   if (clean.length <= maxLength) return clean;
   return `${clean.slice(0, maxLength - 1)}...`;
+}
+
+function getChatFlowErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown chat flow error.";
+  }
 }
 
 function renderChatTextWithCitations(
@@ -174,7 +194,6 @@ export function AIAssistChatView() {
     projectAiAssistSettings,
     isLocalWorkspace,
     runProjectChat,
-    pb,
     userRole,
     appRole,
     isAdministrator,
@@ -201,39 +220,50 @@ export function AIAssistChatView() {
   });
   const [selectedContextMode, setSelectedContextMode] = useState<ChatContextMode>("prioritize");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; chatId: string } | null>(null);
+  const [currentChatUser, setCurrentChatUser] = useState<CurrentProjectAiChatUser | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
-  const currentUserId = pb.authStore.record?.id ?? "";
-  const currentUserIdentifier = pb.authStore.record?.user_identifier || "";
-  const currentUserName = pb.authStore.record?.name || pb.authStore.record?.email || "You";
+  const currentUserId = currentChatUser?.id ?? "";
+  const currentUserIdentifier = currentChatUser?.id ?? "";
+  const currentUserName = currentChatUser?.name ?? "You";
   const canSeeAllChats = isAdministrator || userRole === "owner" || userRole === "editor";
 
   useEffect(() => {
     let cancelled = false;
-    let unsubChats: (() => void) | null = null;
-    let unsubMessages: (() => void) | null = null;
+    let unlisten: (() => void) | null = null;
 
     async function refreshChats() {
-      if (!activeProject || !currentUserId) {
+      if (!activeProject) {
         if (!cancelled) {
           setChats([]);
           setActiveChatId(null);
+          setCurrentChatUser(null);
         }
         return;
       }
 
-      await migrateLegacyProjectAiChatsToBackend(pb, {
+      const chatUser = await loadCurrentProjectAiChatUser(activeProject.id);
+      if (!chatUser) {
+        if (!cancelled) {
+          setChats([]);
+          setActiveChatId(null);
+          setCurrentChatUser(null);
+        }
+        return;
+      }
+
+      await migrateLegacyProjectAiChatsToBackend({
         projectId: activeProject.id,
-        currentUserId,
-        currentUserIdentifier,
-        currentUserName,
+        currentUserId: chatUser.id,
+        currentUserIdentifier: chatUser.id,
+        currentUserName: chatUser.name,
         appRole,
         projectRole: userRole,
       });
 
-      const savedChats = await loadProjectAiChats(pb, {
+      const savedChats = await loadProjectAiChats({
         projectId: activeProject.id,
-        currentUserId,
+        currentUserId: chatUser.id,
         appRole,
         projectRole: userRole,
       });
@@ -244,6 +274,7 @@ export function AIAssistChatView() {
         : savedChats[0]?.id ?? null;
       setChats(savedChats);
       setActiveChatId(nextActiveChatId);
+      setCurrentChatUser(chatUser);
       if (nextActiveChatId) saveActiveProjectAiChatId(activeProject.id, nextActiveChatId);
       else clearActiveProjectAiChatId(activeProject.id);
     }
@@ -256,24 +287,22 @@ export function AIAssistChatView() {
 
     void refreshChats();
 
-    void pb.collection("project_ai_chats").subscribe("*", (event) => {
-      if (event.record?.project === activeProject.id) void refreshChats();
-    }).then((unsub) => {
-      unsubChats = unsub;
-    });
-
-    void pb.collection("project_ai_chat_messages").subscribe("*", (event) => {
-      if (event.record?.project === activeProject.id) void refreshChats();
-    }).then((unsub) => {
-      unsubMessages = unsub;
+    void listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
+      if (
+        event.payload.projectId === activeProject.id
+        && (event.payload.entityType === "project_ai_chat" || event.payload.entityType === "project_ai_chat_message")
+      ) {
+        void refreshChats();
+      }
+    }).then((nextUnlisten) => {
+      unlisten = nextUnlisten;
     });
 
     return () => {
       cancelled = true;
-      unsubChats?.();
-      unsubMessages?.();
+      unlisten?.();
     };
-  }, [activeProject?.id, appRole, currentUserId, currentUserIdentifier, currentUserName, pb, userRole]);
+  }, [activeProject?.id, appRole, userRole]);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -455,7 +484,8 @@ export function AIAssistChatView() {
       setContextMenu(null);
       return;
     }
-    await deleteProjectAiChat(pb, chatId);
+    if (!activeProject) return;
+    await deleteProjectAiChat(activeProject.id, chatId);
     const remainingChats = chats.filter((chat) => chat.id !== chatId);
     const nextActiveChatId = activeChatId === chatId ? (remainingChats[0]?.id ?? null) : activeChatId;
     updateChats(remainingChats, nextActiveChatId);
@@ -509,10 +539,10 @@ export function AIAssistChatView() {
       return;
     }
 
-    if (citation.caseId && getCitationKind(citation) === "case") {
+    if ((citation.objectId || citation.caseId) && getCitationKind(citation) === "case") {
       setPendingAnnId(null);
       setPendingTextCitation(null);
-      setPendingCaseId(citation.caseId);
+      setPendingCaseId(citation.objectId ?? citation.caseId ?? null);
       setView("cases");
       setChatError("");
       return;
@@ -528,7 +558,8 @@ export function AIAssistChatView() {
     }
 
     const targetDocumentId =
-      citation.documentId
+      citation.sourceId
+      ?? citation.documentId
       ?? (citation.annotationId ? annotations.find((item) => item.id === citation.annotationId)?.documentId : undefined)
       ?? (citation.codeId ? annotations.find((item) => item.codeId === citation.codeId)?.documentId : undefined);
 
@@ -612,12 +643,14 @@ export function AIAssistChatView() {
     let conversationForRequest: Array<{ role: string; content: string }> = [];
     let targetChatTitle = shortenChatLabel(messageText);
     let createdChatId: string | null = null;
+    let chatFlowStep = "starting project chat";
     setSending(true);
     setChatError("");
 
     try {
       if (!activeChat) {
-        const createdChat = await createProjectAiChat(pb, {
+        chatFlowStep = "creating project AI chat";
+        const createdChat = await createProjectAiChat({
           projectId: activeProject.id,
           createdById: currentUserId,
           createdByIdentifier: currentUserIdentifier,
@@ -625,7 +658,8 @@ export function AIAssistChatView() {
           initialTitle: targetChatTitle,
         });
         createdChatId = createdChat.id;
-        const userMessage = await createProjectAiChatMessage(pb, {
+        chatFlowStep = "saving project AI chat user message";
+        const userMessage = await createProjectAiChatMessage({
           chatId: createdChat.id,
           projectId: activeProject.id,
           role: "user",
@@ -648,7 +682,8 @@ export function AIAssistChatView() {
           role: message.role,
           content: message.text,
         }));
-        const userMessage = await createProjectAiChatMessage(pb, {
+        chatFlowStep = "saving project AI chat user message";
+        const userMessage = await createProjectAiChatMessage({
           chatId: activeChat.id,
           projectId: activeProject.id,
           role: "user",
@@ -657,7 +692,9 @@ export function AIAssistChatView() {
           createdByIdentifier: currentUserIdentifier,
           createdByName: currentUserName,
         });
-        await touchProjectAiChat(pb, {
+        chatFlowStep = "updating project AI chat after user message";
+        await touchProjectAiChat({
+          projectId: activeProject.id,
           chatId: activeChat.id,
           lastMessageAt: userMessage.createdAt,
         });
@@ -673,7 +710,9 @@ export function AIAssistChatView() {
         nextChatId = activeChat.id;
       }
 
+      chatFlowStep = "updating local project AI chat state";
       updateChats(nextChats, nextChatId);
+      chatFlowStep = "logging project AI chat user message";
       await logAction(
         activeProject.id,
         "project.ai_chat.message",
@@ -694,6 +733,7 @@ export function AIAssistChatView() {
       );
       setDraft("");
 
+      chatFlowStep = "requesting project AI chat response";
       const response = await runProjectChat({
         projectId: activeProject.id,
         query: messageText,
@@ -708,8 +748,10 @@ export function AIAssistChatView() {
         setChatError(progressMessage);
       });
 
+      chatFlowStep = "resolving project AI chat runtime metadata";
       const activeRuntime = isLocalWorkspace ? assertActiveLlmRuntime(readAppSettings().llm, "using project chat") : null;
-      const assistantMessage = await createProjectAiChatMessage(pb, {
+      chatFlowStep = "saving project AI chat assistant message";
+      const assistantMessage = await createProjectAiChatMessage({
         chatId: nextChatId!,
         projectId: activeProject.id,
         role: "assistant",
@@ -721,10 +763,13 @@ export function AIAssistChatView() {
           citations: response.citations,
         },
       });
-      await touchProjectAiChat(pb, {
+      chatFlowStep = "updating project AI chat after assistant message";
+      await touchProjectAiChat({
+        projectId: activeProject.id,
         chatId: nextChatId!,
         lastMessageAt: assistantMessage.createdAt,
       });
+      chatFlowStep = "logging project AI chat assistant response";
       await logAction(
         activeProject.id,
         "project.ai_chat.response",
@@ -745,6 +790,7 @@ export function AIAssistChatView() {
         },
       );
 
+      chatFlowStep = "updating local project AI chat response state";
       const refreshedChats = nextChats.map((chat) => (
         chat.id === nextChatId
           ? {
@@ -757,8 +803,43 @@ export function AIAssistChatView() {
       updateChats(refreshedChats, nextChatId);
       setChatError("");
     } catch (error) {
-      console.error("Project chat failed:", error);
-      setChatError(error instanceof Error ? error.message : t("aiAssist.chat.errors.noResponse"));
+      const errorMessage = getChatFlowErrorMessage(error) || t("aiAssist.chat.errors.noResponse");
+      console.error("Project chat failed:", {
+        step: chatFlowStep,
+        projectId: activeProject.id,
+        chatId: nextChatId ?? createdChatId,
+        messageCharCount: messageText.length,
+        error,
+        errorMessage,
+      });
+      try {
+        await logAction(
+          activeProject.id,
+          "project.ai_chat.error",
+          `AI chat failed while ${chatFlowStep}`,
+          nextChatId ?? createdChatId ?? undefined,
+          {
+            entityType: "project_ai_chat",
+            chatId: nextChatId ?? createdChatId ?? null,
+            chatTitle: targetChatTitle,
+            step: chatFlowStep,
+            errorMessage,
+            messageCharCount: messageText.length,
+            contextMode: selectedContextMode,
+            selectedDocumentIds: selectedContext.documentIds,
+            selectedCaseIds: selectedContext.caseIds,
+            selectedCodeIds: selectedContext.codeIds,
+            selectedAnnotationIds: selectedContext.annotationIds,
+            selectedMemoIds: selectedContext.memoIds,
+          },
+        );
+      } catch (logError) {
+        console.error("Could not log project chat failure:", {
+          step: chatFlowStep,
+          error: logError,
+        });
+      }
+      setChatError(`AI chat failed while ${chatFlowStep}: ${errorMessage}`);
     } finally {
       setSending(false);
     }

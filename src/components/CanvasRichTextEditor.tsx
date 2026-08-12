@@ -6,7 +6,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import { FontSize as TiptapFontSize, TextStyle } from "@tiptap/extension-text-style";
 import Underline from "@tiptap/extension-underline";
 import StarterKit from "@tiptap/starter-kit";
-import type { PostgresExperimentCanvasShape } from "../lib/postgresExperiment";
+import type { PostgresCanvasShape } from "../lib/postgres";
 import { normalizeCanvasTextHtml } from "../lib/canvasTextHtml";
 
 export type CanvasRichTextTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
@@ -25,19 +25,19 @@ export function stripCanvasRichText(html: string): string {
 }
 
 export function CanvasRichTextEditor(props: {
-  shape: Extract<PostgresExperimentCanvasShape, { kind: "text" }>;
+  shape: Extract<PostgresCanvasShape, { kind: "text" }>;
   canvasScale: number;
   isReadOnly: boolean;
   canvasTool: CanvasRichTextTool;
   normalizeColor: (value: string) => string;
-  onBeginMove: (event: ReactPointerEvent<Element>, shape: PostgresExperimentCanvasShape) => void;
+  onBeginMove: (event: ReactPointerEvent<Element>, shape: PostgresCanvasShape) => void;
   onBeginEditing: (shapeId: string) => void;
   onDelete: (shapeId: string) => void;
   onSelect: () => void;
   onUpdate: (
     updater: (
-      shape: Extract<PostgresExperimentCanvasShape, { kind: "text" }>,
-    ) => Extract<PostgresExperimentCanvasShape, { kind: "text" }>,
+      shape: Extract<PostgresCanvasShape, { kind: "text" }>,
+    ) => Extract<PostgresCanvasShape, { kind: "text" }>,
   ) => void;
 }) {
   const {

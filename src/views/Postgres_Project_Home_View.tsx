@@ -34,67 +34,79 @@ import tagOutlineShapeSvg from "../assets/object-shapes/tag-outline.svg?raw";
 import starFilledShapeSvg from "../assets/object-shapes/star-filled.svg?raw";
 import starOutlineShapeSvg from "../assets/object-shapes/star-outline.svg?raw";
 import sourceTextOutlineShapeSvg from "../assets/object-shapes/source-text-outline.svg?raw";
+import sourceProcessedTranscriptOutlineShapeSvg from "../assets/object-shapes/source-processed-transcript-outline.svg?raw";
 import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline.svg?raw";
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import {
-  createPostgresExperimentProjectUser,
-  createPostgresExperimentRelationshipAttributeDefinition,
-  deletePostgresExperimentObject,
-  deletePostgresExperimentObjectType,
-  deletePostgresExperimentProjectUser,
-  deletePostgresExperimentRelationship,
-  deletePostgresExperimentRelationshipType,
-  deletePostgresExperimentSavedDrawing,
-  getPostgresExperimentProjectCanvasState,
-  getPostgresExperimentSavedDrawing,
-  importPostgresExperimentObjectImage,
-  importPostgresExperimentObjectTypeImage,
-  listPostgresExperimentAppUsers,
-  listPostgresExperimentObjects,
-  listPostgresExperimentObjectAttributeDefinitions,
-  listPostgresExperimentObjectTypes,
-  listPostgresExperimentProjectUsers,
-  listPostgresExperimentRelationshipAttributeDefinitions,
-  listPostgresExperimentRelationships,
-  listPostgresExperimentRelationshipTypes,
-  listPostgresExperimentSavedDrawingSummaries,
-  savePostgresExperimentObject,
-  savePostgresExperimentObjectType,
-  savePostgresExperimentProjectCanvasState,
-  savePostgresExperimentRelationship,
-  savePostgresExperimentRelationshipType,
-  savePostgresExperimentSavedDrawing,
-  removePostgresExperimentObjectImage,
-  removePostgresExperimentObjectTypeImage,
-  updatePostgresExperimentProjectUser,
-  updatePostgresExperimentRelationshipAttributeDefinition,
-  type PostgresExperimentAppUser,
-  type PostgresExperimentAuthSession,
-  type PostgresExperimentCanvasDisplayShape,
-  type PostgresExperimentCanvasNodeState,
-  type PostgresExperimentCanvasPoint,
-  type PostgresExperimentCanvasShape,
-  type PostgresExperimentObject,
-  type PostgresExperimentObjectAttributeDefinition,
-  type PostgresExperimentObjectType,
-  type PostgresExperimentProject,
-  type PostgresExperimentProjectChangeEvent,
-  type PostgresExperimentProjectUser,
-  type PostgresExperimentRelationship,
-  type PostgresExperimentRelationshipAttributeDefinition,
-  type PostgresExperimentRelationshipType,
-  type PostgresExperimentSavedDrawing,
-  type PostgresExperimentSavedDrawingSummary,
+  createPostgresProjectUser,
+  createPostgresObjectAttributeDefinition,
+  createPostgresRelationshipAttributeDefinition,
+  deletePostgresObject,
+  deletePostgresObjectType,
+  deletePostgresProjectUser,
+  deletePostgresRelationship,
+  deletePostgresRelationshipType,
+  deletePostgresSavedDrawing,
+  getPostgresProjectCanvasState,
+  getPostgresSavedDrawing,
+  importPostgresObjectImage,
+  importPostgresObjectTypeImage,
+  listPostgresAppUsers,
+  listPostgresObjects,
+  listPostgresObjectAttributeDefinitions,
+  listPostgresObjectTypes,
+  listPostgresProjectUsers,
+  listPostgresRelationshipAttributeDefinitions,
+  listPostgresRelationships,
+  listPostgresRelationshipTypes,
+  listPostgresSavedDrawingSummaries,
+  listPostgresSources,
+  savePostgresObject,
+  savePostgresObjectType,
+  savePostgresProjectCanvasState,
+  savePostgresRelationship,
+  savePostgresRelationshipType,
+  savePostgresSavedDrawing,
+  removePostgresObjectImage,
+  removePostgresObjectTypeImage,
+  updatePostgresProjectUser,
+  updatePostgresRelationshipAttributeDefinition,
+  type PostgresAppUser,
+  type PostgresAuthSession,
+  type PostgresCanvasDisplayShape,
+  type PostgresCanvasNodeState,
+  type PostgresCanvasPoint,
+  type PostgresCanvasShape,
+  type PostgresObject,
+  type PostgresObjectAttributeDefinition,
+  type PostgresObjectType,
+  type PostgresProject,
+  type PostgresProjectChangeEvent,
+  type PostgresProjectUser,
+  type PostgresRelationship,
+  type PostgresRelationshipAttributeDefinition,
+  type PostgresRelationshipType,
+  type PostgresSavedDrawing,
+  type PostgresSavedDrawingSummary,
+  type PostgresSource,
   POSTGRES_PROJECT_CHANGED_EVENT,
-} from "../lib/postgresExperiment";
+} from "../lib/postgres";
 import {
   AttributeValuesModal,
   type SharedAttributeDraft,
 } from "../components/AttributeValuesModal";
+import {
+  PostgresAttributeValueHistoryModal,
+  type PostgresAttributeValueHistoryTarget,
+} from "../components/PostgresAttributeValueHistoryModal";
 import { AttributeDefinitionModal } from "../components/AttributeDefinitionModal";
+import {
+  PostgresRelationshipModal,
+  type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
+} from "../components/PostgresRelationshipModal";
 import sidebarMarkLogo from "../assets/logo-mark-no-background.png";
 import sidebarLogo from "../assets/logo-no-background.png";
 import type { PostgresMemoDraftTarget } from "./Postgres_Project_Memos_View";
@@ -104,14 +116,14 @@ function normalizeCanvasSvgTextHtml(html: string): string {
   return trimmed ? html : "<div>Text</div>";
 }
 
-const PostgresAppSettingsExperimentViewLazy = lazy(
-  () => import("./Postgres_App_Settings_Experiment_View").then((m) => ({ default: m.PostgresAppSettingsExperimentView })),
+const PostgresAppSettingsViewLazy = lazy(
+  () => import("./Postgres_App_Settings_View").then((m) => ({ default: m.PostgresAppSettingsView })),
 );
-const PostgresUserSettingsExperimentViewLazy = lazy(
-  () => import("./Postgres_User_Settings_Experiment_View").then((m) => ({ default: m.PostgresUserSettingsExperimentView })),
+const PostgresUserSettingsViewLazy = lazy(
+  () => import("./Postgres_User_Settings_View").then((m) => ({ default: m.PostgresUserSettingsView })),
 );
-const PostgresProjectSettingsExperimentViewLazy = lazy(
-  () => import("./Postgres_Project_Settings_Experiment_View").then((m) => ({ default: m.PostgresProjectSettingsExperimentView })),
+const PostgresProjectSettingsViewLazy = lazy(
+  () => import("./Postgres_Project_Settings_View").then((m) => ({ default: m.PostgresProjectSettingsView })),
 );
 const PostgresProjectSourcesViewLazy = lazy(
   () => import("./Postgres_Project_Sources_View").then((m) => ({ default: m.PostgresProjectSourcesView })),
@@ -119,17 +131,38 @@ const PostgresProjectSourcesViewLazy = lazy(
 const PostgresAnalysisCodeSourcesViewLazy = lazy(
   () => import("./Postgres_Analysis_Code_Sources_View").then((m) => ({ default: m.PostgresAnalysisCodeSourcesView })),
 );
+const PostgresAiAssistAssistedCodingViewLazy = lazy(
+  () => import("./Postgres_AIAssist_Assisted_Coding_View").then((m) => ({ default: m.PostgresAiAssistAssistedCodingView })),
+);
 const PostgresFreeDrawCanvasViewLazy = lazy(
-  () => import("./Postgres_Free_Draw_Canvas_View").then((m) => ({ default: m.PostgresExperimentCanvasView })),
+  () => import("./Postgres_Free_Draw_Canvas_View").then((m) => ({ default: m.PostgresCanvasView })),
 );
 const PostgresExploreCanvasViewLazy = lazy(
-  () => import("./Postgres_Explore_Canvas_View").then((m) => ({ default: m.PostgresExperimentExploreCanvasView })),
+  () => import("./Postgres_Explore_Canvas_View").then((m) => ({ default: m.PostgresExploreCanvasView })),
 );
 const PostgresProjectMemosViewLazy = lazy(
   () => import("./Postgres_Project_Memos_View").then((m) => ({ default: m.PostgresProjectMemosView })),
 );
+const PostgresReportsViewLazy = lazy(
+  () => import("./Postgres_Reports_View").then((m) => ({ default: m.PostgresReportsView })),
+);
 const PostgresProjectLogViewLazy = lazy(
   () => import("./Postgres_Project_Log_View").then((m) => ({ default: m.PostgresProjectLogView })),
+);
+const PostgresAiAssistHomeViewLazy = lazy(
+  () => import("./Postgres_AIAssist_Home_View").then((m) => ({ default: m.PostgresAiAssistHomeView })),
+);
+const PostgresAiAssistChatViewLazy = lazy(
+  () => import("./Postgres_AIAssist_Chat_View").then((m) => ({ default: m.PostgresAiAssistChatView })),
+);
+const PostgresAiAssistAnalyzeViewLazy = lazy(
+  () => import("./Postgres_AIAssist_Analyze_View").then((m) => ({ default: m.PostgresAIAssistAnalyzeView })),
+);
+const PostgresAiAssistAttributesViewLazy = lazy(
+  () => import("./Postgres_AIAssist_Attributes_View").then((m) => ({ default: m.PostgresAIAssistAttributesView })),
+);
+const PostgresAiAssistProcessSourcesViewLazy = lazy(
+  () => import("./Postgres_AIAssist_ProcessSources_View").then((m) => ({ default: m.PostgresAiAssistProcessSourcesView })),
 );
 const CodebookViewLazy = lazy(
   () => import("./Project_Codebook_View").then((m) => ({
@@ -142,18 +175,18 @@ const AnnotationsViewLazy = lazy(
   })),
 );
 
-export type PostgresProjectHomeExperimentViewProps = {
-  project: PostgresExperimentProject;
-  authSession: PostgresExperimentAuthSession;
-  onAuthSessionUpdated: (session: PostgresExperimentAuthSession) => void;
+export type PostgresProjectHomeViewProps = {
+  project: PostgresProject;
+  authSession: PostgresAuthSession;
+  onAuthSessionUpdated: (session: PostgresAuthSession) => void;
   onAuthSessionInvalidated: () => void;
   onBack: () => void;
-  onProjectUpdated: (project: PostgresExperimentProject) => void;
+  onProjectUpdated: (project: PostgresProject) => void;
   onProjectDeleted: (projectId: string) => void;
   onSignOut: () => Promise<void>;
 };
 
-type PostgresExperimentObjectTypeShape =
+type PostgresObjectTypeShape =
   | "rounded"
   | "rectangle"
   | "triangle"
@@ -164,41 +197,103 @@ type PostgresExperimentObjectTypeShape =
   | "trapezoid"
   | "tag"
   | "star";
-type PostgresExperimentSourceObjectVisualKey =
+type PostgresSourceObjectVisualKey =
   | "source_text"
+  | "source_processed_transcript"
   | "source_pdf"
   | "source_image"
   | "source_audio"
   | "source_video";
-type PostgresExperimentObjectFill = "filled" | "outline";
-type PostgresExperimentObjectGraphicMode = "select" | "upload";
-type PostgresExperimentObjectInstanceGraphicMode = "inherit" | "select" | "upload";
-type PostgresExperimentRelationshipLineShape = "solid" | "dashed" | "dotted";
-type PostgresExperimentRelationshipArrowhead = "one_sided" | "double_sided" | "none";
-type PostgresExperimentObjectTypeSortCol = "objectType" | "count";
-type PostgresExperimentRelationshipAttributeDraft = SharedAttributeDraft;
+type PostgresObjectFill = "filled" | "outline";
+type PostgresObjectGraphicMode = "select" | "upload";
+type PostgresObjectInstanceGraphicMode = "inherit" | "select" | "upload";
+type PostgresRelationshipLineShape = "solid" | "dashed" | "dotted";
+type PostgresRelationshipArrowhead = "one_sided" | "double_sided" | "none";
+type PostgresProjectScreen =
+  | "home"
+  | "users"
+  | "sources"
+  | "annotations"
+  | "codebook"
+  | "code-text"
+  | "memos"
+  | "reports"
+  | "project-log"
+  | "objects"
+  | "relationships"
+  | "free-draw"
+  | "explore"
+  | "construct"
+  | "view"
+  | "ai-assist"
+  | "ai-assist-chat"
+  | "ai-assisted-coding"
+  | "ai-analyze"
+  | "ai-assist-source-attributes"
+  | "ai-assist-object-attributes"
+  | "ai-assist-process-documents"
+  | "app-settings"
+  | "project-settings"
+  | "user-settings";
+
+function PostgresAiAssistPortPlaceholderView({
+  title,
+  detail,
+}: {
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div className="view home-view ai-assist-home-view">
+      <header className="view-header">
+        <div>
+          <h1>{title}</h1>
+          <p className="view-subtitle">{detail}</p>
+        </div>
+      </header>
+      <section className="home-project-card ai-assist-home-card">
+        <div className="home-project-card-header">
+          <h2>PostgreSQL Port</h2>
+        </div>
+        <p className="home-project-description">
+          This destination is available in the PostgreSQL project shell and is ready for the next AI Assist view port.
+        </p>
+      </section>
+    </div>
+  );
+}
+type PostgresObjectTypeSortCol = "objectType" | "count";
+type PostgresRelationshipAttributeDraft = SharedAttributeDraft;
 type TypeAttributeDraft = SharedAttributeDraft & { localId: string };
-type PostgresExperimentCanvasTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
-type PostgresExperimentImageUploadDraft = {
+type TypeScopedAttributeDraft = SharedAttributeDraft & { typeIds: string[] };
+type PostgresRelationshipEndpointOption = SharedPostgresRelationshipEndpointOption & {
+  key: string;
+  entityType: "object" | "source";
+  entityId: string;
+  name: string;
+  type: string;
+};
+type PostgresCanvasTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
+type PostgresImageUploadDraft = {
   originalFileName: string;
   fileBytesBase64: string;
   previewUrl: string;
   fileSizeBytes: number;
 };
-type PostgresExperimentImageCropAspect = "original" | "1:1" | "4:3" | "16:9";
-type PostgresExperimentImageCropDraft = {
-  upload: PostgresExperimentImageUploadDraft;
+type PostgresImageCropAspect = "original" | "1:1" | "4:3" | "16:9";
+type PostgresImageCropDraft = {
+  upload: PostgresImageUploadDraft;
   mode: "full" | "crop";
-  aspect: PostgresExperimentImageCropAspect;
+  aspect: PostgresImageCropAspect;
   sizePercent: number;
   xPercent: number;
   yPercent: number;
   error: string;
 };
-type PostgresExperimentImageCropResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
-type PostgresExperimentImageCropDragState = {
+type PostgresImageCropResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+type PostgresImageCropDragState = {
   mode: "move" | "resize";
-  handle?: PostgresExperimentImageCropResizeHandle;
+  handle?: PostgresImageCropResizeHandle;
   startClientX: number;
   startClientY: number;
   startSizePercent: number;
@@ -211,8 +306,8 @@ type PostgresExperimentImageCropDragState = {
 
 const POSTGRES_OBJECT_TYPE_DEFAULT_COLOR = "#355070";
 const POSTGRES_RELATIONSHIP_DEFAULT_COLOR = "#355070";
-const POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-const POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS: { value: PostgresExperimentObjectTypeShape; label: string }[] = [
+const POSTGRES_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS: { value: PostgresObjectTypeShape; label: string }[] = [
   { value: "rounded", label: "Circle" },
   { value: "rectangle", label: "Rectangle" },
   { value: "triangle", label: "Triangle" },
@@ -224,11 +319,11 @@ const POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS: { value: PostgresExperimentObjectTypeS
   { value: "tag", label: "Tag" },
   { value: "star", label: "Star" },
 ];
-const POSTGRES_OBJECT_FILL_OPTIONS: { value: PostgresExperimentObjectFill; label: string }[] = [
+const POSTGRES_OBJECT_FILL_OPTIONS: { value: PostgresObjectFill; label: string }[] = [
   { value: "filled", label: "Filled" },
   { value: "outline", label: "Outline" },
 ];
-const POSTGRES_RELATIONSHIP_LINE_SHAPE_OPTIONS: { value: PostgresExperimentRelationshipLineShape; label: string }[] = [
+const POSTGRES_RELATIONSHIP_LINE_SHAPE_OPTIONS: { value: PostgresRelationshipLineShape; label: string }[] = [
   { value: "solid", label: "Solid" },
   { value: "dashed", label: "Dashed" },
   { value: "dotted", label: "Dotted" },
@@ -239,17 +334,30 @@ const POSTGRES_RELATIONSHIP_LINE_WEIGHT_OPTIONS = [
   { value: 3, label: "Bold" },
   { value: 4, label: "Heavy" },
 ] as const;
-const POSTGRES_RELATIONSHIP_ARROWHEAD_OPTIONS: { value: PostgresExperimentRelationshipArrowhead; label: string }[] = [
+const POSTGRES_RELATIONSHIP_ARROWHEAD_OPTIONS: { value: PostgresRelationshipArrowhead; label: string }[] = [
   { value: "one_sided", label: "One-sided" },
   { value: "double_sided", label: "Double-sided" },
   { value: "none", label: "No arrows" },
+];
+const POSTGRES_SOURCE_KIND_OPTIONS: Array<{
+  id: string;
+  label: string;
+  color: string;
+  sourceVisualKey: PostgresSourceObjectVisualKey;
+}> = [
+  { id: "Text", label: "Text", color: "#355070", sourceVisualKey: "source_text" },
+  { id: "Transcript", label: "Transcript", color: "#2a9d8f", sourceVisualKey: "source_processed_transcript" },
+  { id: "PDF", label: "PDF", color: "#7f5539", sourceVisualKey: "source_pdf" },
+  { id: "Image", label: "Image", color: "#6d597a", sourceVisualKey: "source_image" },
+  { id: "Audio", label: "Audio", color: "#b56576", sourceVisualKey: "source_audio" },
+  { id: "Video", label: "Video", color: "#457b9d", sourceVisualKey: "source_video" },
 ];
 function buildSvgDataUrl(svgMarkup: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}`;
 }
 
 const POSTGRES_OBJECT_SHAPE_ASSET_URLS: Record<
-  PostgresExperimentObjectTypeShape,
+  PostgresObjectTypeShape,
   { filled: string; outline: string }
 > = {
   rounded: { filled: buildSvgDataUrl(circleFilledShapeSvg), outline: buildSvgDataUrl(circleOutlineShapeSvg) },
@@ -264,33 +372,35 @@ const POSTGRES_OBJECT_SHAPE_ASSET_URLS: Record<
   star: { filled: buildSvgDataUrl(starFilledShapeSvg), outline: buildSvgDataUrl(starOutlineShapeSvg) },
 };
 const POSTGRES_SOURCE_OBJECT_SHAPE_ASSET_URLS: Record<
-  PostgresExperimentSourceObjectVisualKey,
+  PostgresSourceObjectVisualKey,
   string
 > = {
   source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
+  source_processed_transcript: buildSvgDataUrl(sourceProcessedTranscriptOutlineShapeSvg),
   source_pdf: buildSvgDataUrl(sourcePdfOutlineShapeSvg),
   source_image: buildSvgDataUrl(sourceImageOutlineShapeSvg),
   source_audio: buildSvgDataUrl(sourceAudioOutlineShapeSvg),
   source_video: buildSvgDataUrl(sourceVideoOutlineShapeSvg),
 };
 
-function isPostgresExperimentSourceObjectVisualKey(
+function isPostgresSourceObjectVisualKey(
   value: string | null | undefined,
-): value is PostgresExperimentSourceObjectVisualKey {
+): value is PostgresSourceObjectVisualKey {
   return value === "source_text"
+    || value === "source_processed_transcript"
     || value === "source_pdf"
     || value === "source_image"
     || value === "source_audio"
     || value === "source_video";
 }
 
-function getPostgresExperimentSourceObjectVisualKey(
+function getPostgresSourceObjectVisualKey(
   systemKey: string | null | undefined,
-): PostgresExperimentSourceObjectVisualKey | null {
-  return isPostgresExperimentSourceObjectVisualKey(systemKey) ? systemKey : null;
+): PostgresSourceObjectVisualKey | null {
+  return isPostgresSourceObjectVisualKey(systemKey) ? systemKey : null;
 }
 
-function normalizePostgresExperimentObjectTypeShape(value: string): PostgresExperimentObjectTypeShape {
+function normalizePostgresObjectTypeShape(value: string): PostgresObjectTypeShape {
   const normalized = value.trim().toLowerCase();
   if (normalized === "pill" || normalized === "circle") {
     return "rounded";
@@ -311,146 +421,146 @@ function normalizePostgresExperimentObjectTypeShape(value: string): PostgresExpe
   return "rounded";
 }
 
-function normalizePostgresExperimentRelationshipLineShape(value: string): PostgresExperimentRelationshipLineShape {
+function normalizePostgresRelationshipLineShape(value: string): PostgresRelationshipLineShape {
   const normalized = value.trim().toLowerCase();
   if (normalized === "dashed" || normalized === "dotted") return normalized;
   return "solid";
 }
 
-function normalizePostgresExperimentRelationshipLineWeight(value: number | null | undefined): number {
+function normalizePostgresRelationshipLineWeight(value: number | null | undefined): number {
   if (value === 1 || value === 3 || value === 4) return value;
   return 2;
 }
 
-function normalizePostgresExperimentRelationshipArrowhead(value: string): PostgresExperimentRelationshipArrowhead {
+function normalizePostgresRelationshipArrowhead(value: string): PostgresRelationshipArrowhead {
   const normalized = value.trim().toLowerCase();
   if (normalized === "double_sided" || normalized === "none") return normalized;
   return "one_sided";
 }
 
-function normalizePostgresExperimentObjectTypeColor(value: string): string {
+function normalizePostgresObjectTypeColor(value: string): string {
   const normalized = value.trim();
   return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : POSTGRES_OBJECT_TYPE_DEFAULT_COLOR;
 }
 
-function normalizePostgresExperimentObjectFill(value: string): PostgresExperimentObjectFill {
+function normalizePostgresObjectFill(value: string): PostgresObjectFill {
   return value.trim().toLowerCase() === "outline" ? "outline" : "filled";
 }
 
-function normalizeOptionalPostgresExperimentObjectTypeColor(value: string): string {
+function normalizeOptionalPostgresObjectTypeColor(value: string): string {
   const normalized = value.trim();
   if (!normalized) return "";
   return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : "";
 }
 
-function normalizePostgresExperimentRelationshipColor(value: string): string {
+function normalizePostgresRelationshipColor(value: string): string {
   const normalized = value.trim();
   return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : POSTGRES_RELATIONSHIP_DEFAULT_COLOR;
 }
 
-function normalizeOptionalPostgresExperimentRelationshipColor(value: string): string {
+function normalizeOptionalPostgresRelationshipColor(value: string): string {
   const normalized = value.trim();
   if (!normalized) return "";
   return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : "";
 }
 
-function resolvePostgresExperimentObjectShape(
-  object: Pick<PostgresExperimentObject, "shapeOverride">,
-  objectTypeRecord: Pick<PostgresExperimentObjectType, "shape"> | null,
-): PostgresExperimentObjectTypeShape {
-  return normalizePostgresExperimentObjectTypeShape(object.shapeOverride || objectTypeRecord?.shape || "");
+function resolvePostgresObjectShape(
+  object: Pick<PostgresObject, "shapeOverride">,
+  objectTypeRecord: Pick<PostgresObjectType, "shape"> | null,
+): PostgresObjectTypeShape {
+  return normalizePostgresObjectTypeShape(object.shapeOverride || objectTypeRecord?.shape || "");
 }
 
-function resolvePostgresExperimentObjectColor(
-  object: Pick<PostgresExperimentObject, "colorOverride">,
-  objectTypeRecord: Pick<PostgresExperimentObjectType, "color"> | null,
+function resolvePostgresObjectColor(
+  object: Pick<PostgresObject, "colorOverride">,
+  objectTypeRecord: Pick<PostgresObjectType, "color"> | null,
 ): string {
-  return normalizePostgresExperimentObjectTypeColor(object.colorOverride || objectTypeRecord?.color || "");
+  return normalizePostgresObjectTypeColor(object.colorOverride || objectTypeRecord?.color || "");
 }
 
-function resolvePostgresExperimentObjectFill(
-  object: Pick<PostgresExperimentObject, "fillOverride">,
-  objectTypeRecord: Pick<PostgresExperimentObjectType, "fill"> | null,
-): PostgresExperimentObjectFill {
-  return normalizePostgresExperimentObjectFill(object.fillOverride || objectTypeRecord?.fill || "");
+function resolvePostgresObjectFill(
+  object: Pick<PostgresObject, "fillOverride">,
+  objectTypeRecord: Pick<PostgresObjectType, "fill"> | null,
+): PostgresObjectFill {
+  return normalizePostgresObjectFill(object.fillOverride || objectTypeRecord?.fill || "");
 }
 
-function getPostgresExperimentObjectAppearance(
-  object: Pick<PostgresExperimentObject, "shapeOverride" | "colorOverride" | "fillOverride" | "imageStoragePath">,
-  objectTypeRecord: Pick<PostgresExperimentObjectType, "shape" | "color" | "fill" | "systemKey" | "imageStoragePath"> | null,
+function getPostgresObjectAppearance(
+  object: Pick<PostgresObject, "shapeOverride" | "colorOverride" | "fillOverride" | "imageStoragePath">,
+  objectTypeRecord: Pick<PostgresObjectType, "shape" | "color" | "fill" | "systemKey" | "imageStoragePath"> | null,
 ): {
-  shape: PostgresExperimentObjectTypeShape;
+  shape: PostgresObjectTypeShape;
   color: string;
-  fill: PostgresExperimentObjectFill;
+  fill: PostgresObjectFill;
   imageStoragePath: string;
-  sourceVisualKey: PostgresExperimentSourceObjectVisualKey | null;
+  sourceVisualKey: PostgresSourceObjectVisualKey | null;
   hasShapeOverride: boolean;
   hasColorOverride: boolean;
   hasFillOverride: boolean;
 } {
   return {
-    shape: resolvePostgresExperimentObjectShape(object, objectTypeRecord),
-    color: resolvePostgresExperimentObjectColor(object, objectTypeRecord),
-    fill: resolvePostgresExperimentObjectFill(object, objectTypeRecord),
+    shape: resolvePostgresObjectShape(object, objectTypeRecord),
+    color: resolvePostgresObjectColor(object, objectTypeRecord),
+    fill: resolvePostgresObjectFill(object, objectTypeRecord),
     imageStoragePath: object.imageStoragePath || objectTypeRecord?.imageStoragePath || "",
-    sourceVisualKey: getPostgresExperimentSourceObjectVisualKey(objectTypeRecord?.systemKey),
+    sourceVisualKey: getPostgresSourceObjectVisualKey(objectTypeRecord?.systemKey),
     hasShapeOverride: !!object.shapeOverride.trim(),
     hasColorOverride: !!object.colorOverride.trim(),
     hasFillOverride: !!object.fillOverride.trim(),
   };
 }
 
-function formatPostgresExperimentObjectShapeLabel(shape: PostgresExperimentObjectTypeShape): string {
+function formatPostgresObjectShapeLabel(shape: PostgresObjectTypeShape): string {
   return POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS.find((option) => option.value === shape)?.label ?? "Circle";
 }
 
-function formatPostgresExperimentObjectFillLabel(fill: PostgresExperimentObjectFill): string {
+function formatPostgresObjectFillLabel(fill: PostgresObjectFill): string {
   return POSTGRES_OBJECT_FILL_OPTIONS.find((option) => option.value === fill)?.label ?? "Filled";
 }
 
-function resolvePostgresExperimentRelationshipLineShape(
-  relationship: Pick<PostgresExperimentRelationship, "lineShapeOverride">,
-  relationshipTypeRecord: Pick<PostgresExperimentRelationshipType, "lineShape"> | null,
-): PostgresExperimentRelationshipLineShape {
-  return normalizePostgresExperimentRelationshipLineShape(
+function resolvePostgresRelationshipLineShape(
+  relationship: Pick<PostgresRelationship, "lineShapeOverride">,
+  relationshipTypeRecord: Pick<PostgresRelationshipType, "lineShape"> | null,
+): PostgresRelationshipLineShape {
+  return normalizePostgresRelationshipLineShape(
     relationship.lineShapeOverride || relationshipTypeRecord?.lineShape || "",
   );
 }
 
-function resolvePostgresExperimentRelationshipColor(
-  relationship: Pick<PostgresExperimentRelationship, "colorOverride">,
-  relationshipTypeRecord: Pick<PostgresExperimentRelationshipType, "color"> | null,
+function resolvePostgresRelationshipColor(
+  relationship: Pick<PostgresRelationship, "colorOverride">,
+  relationshipTypeRecord: Pick<PostgresRelationshipType, "color"> | null,
 ): string {
-  return normalizePostgresExperimentRelationshipColor(
+  return normalizePostgresRelationshipColor(
     relationship.colorOverride || relationshipTypeRecord?.color || "",
   );
 }
 
-function resolvePostgresExperimentRelationshipLineWeight(
-  relationship: Pick<PostgresExperimentRelationship, "lineWeightOverride">,
-  relationshipTypeRecord: Pick<PostgresExperimentRelationshipType, "lineWeight"> | null,
+function resolvePostgresRelationshipLineWeight(
+  relationship: Pick<PostgresRelationship, "lineWeightOverride">,
+  relationshipTypeRecord: Pick<PostgresRelationshipType, "lineWeight"> | null,
 ): number {
-  return normalizePostgresExperimentRelationshipLineWeight(
+  return normalizePostgresRelationshipLineWeight(
     relationship.lineWeightOverride ?? relationshipTypeRecord?.lineWeight,
   );
 }
 
-function resolvePostgresExperimentRelationshipArrowhead(
-  relationship: Pick<PostgresExperimentRelationship, "arrowheadOverride">,
-  relationshipTypeRecord: Pick<PostgresExperimentRelationshipType, "arrowhead"> | null,
-): PostgresExperimentRelationshipArrowhead {
-  return normalizePostgresExperimentRelationshipArrowhead(
+function resolvePostgresRelationshipArrowhead(
+  relationship: Pick<PostgresRelationship, "arrowheadOverride">,
+  relationshipTypeRecord: Pick<PostgresRelationshipType, "arrowhead"> | null,
+): PostgresRelationshipArrowhead {
+  return normalizePostgresRelationshipArrowhead(
     relationship.arrowheadOverride || relationshipTypeRecord?.arrowhead || "",
   );
 }
 
-function getPostgresExperimentRelationshipAppearance(
-  relationship: Pick<PostgresExperimentRelationship, "lineShapeOverride" | "lineWeightOverride" | "arrowheadOverride" | "colorOverride">,
-  relationshipTypeRecord: Pick<PostgresExperimentRelationshipType, "lineShape" | "lineWeight" | "arrowhead" | "color"> | null,
+function getPostgresRelationshipAppearance(
+  relationship: Pick<PostgresRelationship, "lineShapeOverride" | "lineWeightOverride" | "arrowheadOverride" | "colorOverride">,
+  relationshipTypeRecord: Pick<PostgresRelationshipType, "lineShape" | "lineWeight" | "arrowhead" | "color"> | null,
 ): {
-  lineShape: PostgresExperimentRelationshipLineShape;
+  lineShape: PostgresRelationshipLineShape;
   lineWeight: number;
-  arrowhead: PostgresExperimentRelationshipArrowhead;
+  arrowhead: PostgresRelationshipArrowhead;
   color: string;
   hasLineShapeOverride: boolean;
   hasLineWeightOverride: boolean;
@@ -458,10 +568,10 @@ function getPostgresExperimentRelationshipAppearance(
   hasColorOverride: boolean;
 } {
   return {
-    lineShape: resolvePostgresExperimentRelationshipLineShape(relationship, relationshipTypeRecord),
-    lineWeight: resolvePostgresExperimentRelationshipLineWeight(relationship, relationshipTypeRecord),
-    arrowhead: resolvePostgresExperimentRelationshipArrowhead(relationship, relationshipTypeRecord),
-    color: resolvePostgresExperimentRelationshipColor(relationship, relationshipTypeRecord),
+    lineShape: resolvePostgresRelationshipLineShape(relationship, relationshipTypeRecord),
+    lineWeight: resolvePostgresRelationshipLineWeight(relationship, relationshipTypeRecord),
+    arrowhead: resolvePostgresRelationshipArrowhead(relationship, relationshipTypeRecord),
+    color: resolvePostgresRelationshipColor(relationship, relationshipTypeRecord),
     hasLineShapeOverride: !!relationship.lineShapeOverride.trim(),
     hasLineWeightOverride: relationship.lineWeightOverride !== null && relationship.lineWeightOverride !== undefined,
     hasArrowheadOverride: !!relationship.arrowheadOverride.trim(),
@@ -469,20 +579,20 @@ function getPostgresExperimentRelationshipAppearance(
   };
 }
 
-function formatPostgresExperimentRelationshipLineShapeLabel(lineShape: PostgresExperimentRelationshipLineShape): string {
+function formatPostgresRelationshipLineShapeLabel(lineShape: PostgresRelationshipLineShape): string {
   return POSTGRES_RELATIONSHIP_LINE_SHAPE_OPTIONS.find((option) => option.value === lineShape)?.label ?? "Solid";
 }
 
-function formatPostgresExperimentRelationshipLineWeightLabel(lineWeight: number): string {
+function formatPostgresRelationshipLineWeightLabel(lineWeight: number): string {
   return POSTGRES_RELATIONSHIP_LINE_WEIGHT_OPTIONS.find((option) => option.value === lineWeight)?.label ?? "Regular";
 }
 
-function formatPostgresExperimentRelationshipArrowheadLabel(arrowhead: PostgresExperimentRelationshipArrowhead): string {
+function formatPostgresRelationshipArrowheadLabel(arrowhead: PostgresRelationshipArrowhead): string {
   return POSTGRES_RELATIONSHIP_ARROWHEAD_OPTIONS.find((option) => option.value === arrowhead)?.label ?? "One-sided";
 }
 
-function getPostgresExperimentRelationshipStrokeWidth(lineWeight: number): number {
-  const normalized = normalizePostgresExperimentRelationshipLineWeight(lineWeight);
+function getPostgresRelationshipStrokeWidth(lineWeight: number): number {
+  const normalized = normalizePostgresRelationshipLineWeight(lineWeight);
   if (normalized === 1) return 1.5;
   if (normalized === 3) return 4;
   if (normalized === 4) return 5.5;
@@ -490,14 +600,14 @@ function getPostgresExperimentRelationshipStrokeWidth(lineWeight: number): numbe
 }
 
 function RelationshipTypeLinePreview(props: {
-  lineShape: PostgresExperimentRelationshipLineShape;
+  lineShape: PostgresRelationshipLineShape;
   lineWeight: number;
-  arrowhead: PostgresExperimentRelationshipArrowhead;
+  arrowhead: PostgresRelationshipArrowhead;
   color: string;
 }) {
   const { lineShape, lineWeight, arrowhead, color } = props;
-  const strokeWidth = getPostgresExperimentRelationshipStrokeWidth(lineWeight);
-  const dasharray = getPostgresExperimentRelationshipStrokeDasharray(lineShape);
+  const strokeWidth = getPostgresRelationshipStrokeWidth(lineWeight);
+  const dasharray = getPostgresRelationshipStrokeDasharray(lineShape);
   const lineStartX = arrowhead === "double_sided" ? 14 : 8;
   const lineEndX = arrowhead === "none" ? 62 : 56;
 
@@ -529,11 +639,11 @@ function RelationshipTypeLinePreview(props: {
   );
 }
 
-function PostgresExperimentObjectShapePicker(props: {
-  value: PostgresExperimentObjectTypeShape | "";
-  onChange: (value: PostgresExperimentObjectTypeShape | "") => void;
+function PostgresObjectShapePicker(props: {
+  value: PostgresObjectTypeShape | "";
+  onChange: (value: PostgresObjectTypeShape | "") => void;
   previewColor: string;
-  previewFill?: PostgresExperimentObjectFill;
+  previewFill?: PostgresObjectFill;
   allowInherit?: boolean;
   inheritLabel?: string;
 }) {
@@ -597,11 +707,11 @@ function PostgresExperimentObjectShapePicker(props: {
   );
 }
 
-function PostgresExperimentObjectFillPicker(props: {
-  value: PostgresExperimentObjectFill | "";
-  onChange: (value: PostgresExperimentObjectFill | "") => void;
+function PostgresObjectFillPicker(props: {
+  value: PostgresObjectFill | "";
+  onChange: (value: PostgresObjectFill | "") => void;
   previewColor: string;
-  previewShape?: PostgresExperimentObjectTypeShape;
+  previewShape?: PostgresObjectTypeShape;
   allowInherit?: boolean;
   inheritLabel?: string;
 }) {
@@ -665,9 +775,9 @@ function PostgresExperimentObjectFillPicker(props: {
   );
 }
 
-function PostgresExperimentRelationshipLineShapePicker(props: {
-  value: PostgresExperimentRelationshipLineShape | "";
-  onChange: (value: PostgresExperimentRelationshipLineShape | "") => void;
+function PostgresRelationshipLineShapePicker(props: {
+  value: PostgresRelationshipLineShape | "";
+  onChange: (value: PostgresRelationshipLineShape | "") => void;
   previewColor: string;
   allowInherit?: boolean;
   inheritLabel?: string;
@@ -727,7 +837,7 @@ function PostgresExperimentRelationshipLineShapePicker(props: {
                 y2="9"
                 stroke={previewColor}
                 strokeWidth="3"
-                strokeDasharray={getPostgresExperimentRelationshipStrokeDasharray(option.value)}
+                strokeDasharray={getPostgresRelationshipStrokeDasharray(option.value)}
               />
             </svg>
           </div>
@@ -738,7 +848,7 @@ function PostgresExperimentRelationshipLineShapePicker(props: {
   );
 }
 
-function PostgresExperimentRelationshipLineWeightPicker(props: {
+function PostgresRelationshipLineWeightPicker(props: {
   value: number | null;
   onChange: (value: number | null) => void;
   previewColor: string;
@@ -794,7 +904,7 @@ function PostgresExperimentRelationshipLineWeightPicker(props: {
                 x2="98"
                 y2="12"
                 stroke={previewColor}
-                strokeWidth={getPostgresExperimentRelationshipStrokeWidth(option.value)}
+                strokeWidth={getPostgresRelationshipStrokeWidth(option.value)}
                 strokeLinecap="round"
               />
             </svg>
@@ -806,9 +916,9 @@ function PostgresExperimentRelationshipLineWeightPicker(props: {
   );
 }
 
-function PostgresExperimentRelationshipArrowheadPicker(props: {
-  value: PostgresExperimentRelationshipArrowhead | "";
-  onChange: (value: PostgresExperimentRelationshipArrowhead | "") => void;
+function PostgresRelationshipArrowheadPicker(props: {
+  value: PostgresRelationshipArrowhead | "";
+  onChange: (value: PostgresRelationshipArrowhead | "") => void;
   previewColor: string;
   allowInherit?: boolean;
   inheritLabel?: string;
@@ -874,77 +984,14 @@ function PostgresExperimentRelationshipArrowheadPicker(props: {
   );
 }
 
-function PostgresExperimentObjectTypeRestrictionPicker(props: {
-  value: string[];
-  onChange: (value: string[]) => void;
-  objectTypes: PostgresExperimentObjectType[];
-  emptyLabel: string;
-}) {
-  const { value, onChange, objectTypes, emptyLabel } = props;
-  const selected = new Set(value);
-  return (
-    <div
-      style={{
-        display: "grid",
-        gap: 8,
-        padding: 12,
-        borderRadius: 16,
-        border: "1px solid rgba(53, 80, 112, 0.16)",
-        background: "linear-gradient(180deg, rgba(53, 80, 112, 0.04), rgba(255, 255, 255, 0.96))",
-      }}
-    >
-      <button
-        type="button"
-        className="btn"
-        onClick={() => onChange([])}
-        style={{ justifySelf: "start" }}
-      >
-        {emptyLabel}
-      </button>
-      <div style={{ display: "grid", gap: 8 }}>
-        {objectTypes.map((objectType) => (
-          <label
-            key={objectType.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: `1px solid ${selected.has(objectType.id) ? hexToRgba(normalizePostgresExperimentObjectTypeColor(objectType.color), 0.42) : "rgba(53, 80, 112, 0.14)"}`,
-              background: selected.has(objectType.id)
-                ? `linear-gradient(180deg, ${hexToRgba(normalizePostgresExperimentObjectTypeColor(objectType.color), 0.12)}, rgba(255, 255, 255, 0.96))`
-                : "rgba(255, 255, 255, 0.92)",
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={selected.has(objectType.id)}
-              onChange={(event) => {
-                if (event.target.checked) {
-                  onChange([...value, objectType.id]);
-                  return;
-                }
-                onChange(value.filter((id) => id !== objectType.id));
-              }}
-            />
-            <span style={{ fontWeight: 600, color: "#1f2933" }}>{objectType.name}</span>
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function getPostgresExperimentRelationshipStrokeDasharray(lineShape: PostgresExperimentRelationshipLineShape): string | undefined {
+function getPostgresRelationshipStrokeDasharray(lineShape: PostgresRelationshipLineShape): string | undefined {
   if (lineShape === "dashed") return "8 6";
   if (lineShape === "dotted") return "2 6";
   return undefined;
 }
 
 function hexToRgba(hex: string, alpha: number): string {
-  const normalized = normalizePostgresExperimentObjectTypeColor(hex);
+  const normalized = normalizePostgresObjectTypeColor(hex);
   const red = Number.parseInt(normalized.slice(1, 3), 16);
   const green = Number.parseInt(normalized.slice(3, 5), 16);
   const blue = Number.parseInt(normalized.slice(5, 7), 16);
@@ -952,7 +999,7 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 function getCanvasNodeTextColor(hex: string): string {
-  const normalized = normalizePostgresExperimentObjectTypeColor(hex);
+  const normalized = normalizePostgresObjectTypeColor(hex);
   const red = Number.parseInt(normalized.slice(1, 3), 16) / 255;
   const green = Number.parseInt(normalized.slice(3, 5), 16) / 255;
   const blue = Number.parseInt(normalized.slice(5, 7), 16) / 255;
@@ -960,9 +1007,9 @@ function getCanvasNodeTextColor(hex: string): string {
   return luminance > 0.65 ? "#1f2933" : "#f8fafc";
 }
 
-function getPostgresExperimentObjectSurfaceStyle(
+function getPostgresObjectSurfaceStyle(
   color: string,
-  fill: PostgresExperimentObjectFill,
+  fill: PostgresObjectFill,
   selected = false,
 ): {
   background: string;
@@ -1008,7 +1055,7 @@ type CanvasNodeShapeConfig = {
   handleSource: React.CSSProperties;
 };
 
-const CANVAS_NODE_SHAPE_CONFIGS: Record<PostgresExperimentObjectTypeShape, CanvasNodeShapeConfig> = {
+const CANVAS_NODE_SHAPE_CONFIGS: Record<PostgresObjectTypeShape, CanvasNodeShapeConfig> = {
   rounded: {
     width: 184,
     height: 184,
@@ -1129,11 +1176,11 @@ const CANVAS_NODE_SHAPE_CONFIGS: Record<PostgresExperimentObjectTypeShape, Canva
   },
 };
 
-function getCanvasNodeShapeConfig(shape: PostgresExperimentObjectTypeShape): CanvasNodeShapeConfig {
+function getCanvasNodeShapeConfig(shape: PostgresObjectTypeShape): CanvasNodeShapeConfig {
   return CANVAS_NODE_SHAPE_CONFIGS[shape] ?? CANVAS_NODE_SHAPE_CONFIGS.rounded;
 }
 
-function getObjectShapePreviewStyle(shape: PostgresExperimentObjectTypeShape): {
+function getObjectShapePreviewStyle(shape: PostgresObjectTypeShape): {
   width: number;
   minHeight: number;
   borderRadius: number | string;
@@ -1148,7 +1195,7 @@ function getObjectShapePreviewStyle(shape: PostgresExperimentObjectTypeShape): {
   };
 }
 
-function getCanvasNodeDefaultDimensions(shape: PostgresExperimentObjectTypeShape): {
+function getCanvasNodeDefaultDimensions(shape: PostgresObjectTypeShape): {
   width: number;
   height: number;
 } {
@@ -1160,8 +1207,8 @@ function getCanvasNodeDefaultDimensions(shape: PostgresExperimentObjectTypeShape
 }
 
 function getCanvasNodeRenderedDimensions(
-  shape: PostgresExperimentObjectTypeShape,
-  _nodeState?: Pick<PostgresExperimentCanvasNodeState, "width" | "height"> | null,
+  shape: PostgresObjectTypeShape,
+  _nodeState?: Pick<PostgresCanvasNodeState, "width" | "height"> | null,
 ): {
   width: number;
   height: number;
@@ -1178,7 +1225,7 @@ function escapeSvgText(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function getSvgShapePoints(shape: PostgresExperimentObjectTypeShape, width: number, height: number): string | null {
+function getSvgShapePoints(shape: PostgresObjectTypeShape, width: number, height: number): string | null {
   switch (shape) {
     case "triangle":
       return `${width / 2},0 ${width},${height} 0,${height}`;
@@ -1248,7 +1295,7 @@ function getRayPolygonIntersection(
 }
 
 function getCanvasNodeBoundaryPoint(
-  shape: PostgresExperimentObjectTypeShape,
+  shape: PostgresObjectTypeShape,
   bounds: { x: number; y: number; width: number; height: number },
   toward: { x: number; y: number },
 ): { x: number; y: number } {
@@ -1284,12 +1331,12 @@ function getCanvasNodeBoundaryPoint(
 }
 
 function renderSvgObjectShape(
-  shape: PostgresExperimentObjectTypeShape,
+  shape: PostgresObjectTypeShape,
   width: number,
   height: number,
   color: string,
-  fill: PostgresExperimentObjectFill,
-  sourceVisualKey: PostgresExperimentSourceObjectVisualKey | null = null,
+  fill: PostgresObjectFill,
+  sourceVisualKey: PostgresSourceObjectVisualKey | null = null,
 ): string {
   if (sourceVisualKey) {
     const strokeColor = color;
@@ -1305,6 +1352,12 @@ function renderSvgObjectShape(
     switch (sourceVisualKey) {
       case "source_text":
         iconMarkup = `<text x="${width / 2}" y="${height * 0.63}" text-anchor="middle" font-size="${Math.max(20, width * 0.2)}" font-weight="800" font-family="Arial, sans-serif" letter-spacing="1" fill="${iconColor}">TXT</text>`;
+        break;
+      case "source_processed_transcript":
+        iconMarkup = [
+          `<path d="M${width * 0.28} ${height * 0.44} H${width * 0.72} M${width * 0.28} ${height * 0.54} H${width * 0.72} M${width * 0.28} ${height * 0.64} H${width * 0.56}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linecap="round" />`,
+          `<path d="M${width * 0.62} ${height * 0.66} L${width * 0.7} ${height * 0.74} L${width * 0.84} ${height * 0.58}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linecap="round" stroke-linejoin="round" />`,
+        ].join("");
         break;
       case "source_pdf": {
         const backInsetX = width * 0.18;
@@ -1349,25 +1402,25 @@ function renderSvgObjectShape(
   return `<rect x="0" y="0" width="${width}" height="${height}" rx="${Math.min(22, height / 3)}" ry="${Math.min(22, height / 3)}" fill="${fillColor}" stroke="${color}" stroke-width="2" />`;
 }
 
-function getCanvasSketchShapeType(shape: PostgresExperimentCanvasShape): PostgresExperimentCanvasDisplayShape {
+function getCanvasSketchShapeType(shape: PostgresCanvasShape): PostgresCanvasDisplayShape {
   if (shape.kind === "shape") return shape.shape;
   return "rectangle";
 }
 
 function getCanvasSketchShapeFill(
-  shape: Extract<PostgresExperimentCanvasShape, { kind: "rectangle" | "shape" }>,
-): PostgresExperimentObjectFill {
+  shape: Extract<PostgresCanvasShape, { kind: "rectangle" | "shape" }>,
+): PostgresObjectFill {
   return shape.fill === "outline" ? "outline" : "filled";
 }
 
 function getCanvasSketchLineStyle(
-  shape: Extract<PostgresExperimentCanvasShape, { kind: "pen" | "rectangle" | "shape" }>,
-): PostgresExperimentRelationshipLineShape {
-  return normalizePostgresExperimentRelationshipLineShape(shape.lineStyle ?? "");
+  shape: Extract<PostgresCanvasShape, { kind: "pen" | "rectangle" | "shape" }>,
+): PostgresRelationshipLineShape {
+  return normalizePostgresRelationshipLineShape(shape.lineStyle ?? "");
 }
 
-function formatCanvasSketchShapeLabel(shape: PostgresExperimentCanvasDisplayShape): string {
-  return formatPostgresExperimentObjectShapeLabel(shape);
+function formatCanvasSketchShapeLabel(shape: PostgresCanvasDisplayShape): string {
+  return formatPostgresObjectShapeLabel(shape);
 }
 
 function stripCanvasRichText(html: string): string {
@@ -1384,7 +1437,7 @@ function stripCanvasRichText(html: string): string {
 }
 
 function renderCanvasTextForeignObjectSvg(
-  shape: Extract<PostgresExperimentCanvasShape, { kind: "text" }>,
+  shape: Extract<PostgresCanvasShape, { kind: "text" }>,
   minX: number,
   minY: number,
 ): string {
@@ -1449,18 +1502,18 @@ function wrapCanvasTextLines(text: string, width: number, fontSize: number): str
 }
 
 /* function CanvasRichTextEditor(props: {
-  shape: Extract<PostgresExperimentCanvasShape, { kind: "text" }>;
+  shape: Extract<PostgresCanvasShape, { kind: "text" }>;
   canvasScale: number;
   isReadOnly: boolean;
-  canvasTool: PostgresExperimentCanvasTool;
-  onBeginMove: (event: React.PointerEvent<Element>, shape: PostgresExperimentCanvasShape) => void;
+  canvasTool: PostgresCanvasTool;
+  onBeginMove: (event: React.PointerEvent<Element>, shape: PostgresCanvasShape) => void;
   onBeginEditing: (shapeId: string) => void;
   onDelete: (shapeId: string) => void;
   onSelect: () => void;
   onUpdate: (
     updater: (
-      shape: Extract<PostgresExperimentCanvasShape, { kind: "text" }>,
-    ) => Extract<PostgresExperimentCanvasShape, { kind: "text" }>,
+      shape: Extract<PostgresCanvasShape, { kind: "text" }>,
+    ) => Extract<PostgresCanvasShape, { kind: "text" }>,
   ) => void;
 }) {
   const {
@@ -1691,7 +1744,7 @@ function wrapCanvasTextLines(text: string, width: number, fontSize: number): str
                   aria-label="Text color hex value"
                   onMouseDown={(event) => event.stopPropagation()}
                   onChange={(event) => {
-                    const nextColor = normalizePostgresExperimentObjectTypeColor(event.target.value);
+                    const nextColor = normalizePostgresObjectTypeColor(event.target.value);
                     onUpdate((current) => ({ ...current, color: nextColor }));
                     editor.chain().focus().setColor(nextColor).run();
                   }}
@@ -1734,12 +1787,12 @@ function wrapCanvasTextLines(text: string, width: number, fontSize: number): str
 } */
 
 function renderCanvasSketchShapeElement(
-  shape: Extract<PostgresExperimentCanvasShape, { kind: "rectangle" | "shape" }>,
+  shape: Extract<PostgresCanvasShape, { kind: "rectangle" | "shape" }>,
   selected: boolean,
 ) {
   const stroke = selected ? "#d62828" : shape.color;
   const strokeWidth = selected ? shape.strokeWidth + 1 : shape.strokeWidth;
-  const strokeDasharray = getPostgresExperimentRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
+  const strokeDasharray = getPostgresRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
   const fillMode = getCanvasSketchShapeFill(shape);
   const fill = selected
     ? "rgba(214, 40, 40, 0.08)"
@@ -1805,7 +1858,7 @@ function renderCanvasSketchShapeElement(
   );
 }
 
-function getCanvasShapeBounds(shape: PostgresExperimentCanvasShape): {
+function getCanvasShapeBounds(shape: PostgresCanvasShape): {
   x: number;
   y: number;
   width: number;
@@ -1834,10 +1887,10 @@ function getCanvasShapeBounds(shape: PostgresExperimentCanvasShape): {
 }
 
 function translateCanvasShape(
-  shape: PostgresExperimentCanvasShape,
+  shape: PostgresCanvasShape,
   deltaX: number,
   deltaY: number,
-): PostgresExperimentCanvasShape {
+): PostgresCanvasShape {
   if (shape.kind === "pen") {
     return {
       ...shape,
@@ -1852,9 +1905,9 @@ function translateCanvasShape(
 }
 
 function distancePointToSegment(
-  point: PostgresExperimentCanvasPoint,
-  start: PostgresExperimentCanvasPoint,
-  end: PostgresExperimentCanvasPoint,
+  point: PostgresCanvasPoint,
+  start: PostgresCanvasPoint,
+  end: PostgresCanvasPoint,
 ): number {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -1868,8 +1921,8 @@ function distancePointToSegment(
 }
 
 function isWorldPointInsideCanvasShape(
-  shape: PostgresExperimentCanvasShape,
-  point: PostgresExperimentCanvasPoint,
+  shape: PostgresCanvasShape,
+  point: PostgresCanvasPoint,
 ): boolean {
   if (shape.kind === "pen") {
     for (let index = 1; index < shape.points.length; index += 1) {
@@ -1890,11 +1943,11 @@ function isWorldPointInsideCanvasShape(
 }
 
 function resizeCanvasBoxShape(
-  shape: Extract<PostgresExperimentCanvasShape, { kind: "rectangle" | "shape" | "text" }>,
+  shape: Extract<PostgresCanvasShape, { kind: "rectangle" | "shape" | "text" }>,
   handle: "nw" | "ne" | "sw" | "se",
   currentX: number,
   currentY: number,
-): Extract<PostgresExperimentCanvasShape, { kind: "rectangle" | "shape" | "text" }> {
+): Extract<PostgresCanvasShape, { kind: "rectangle" | "shape" | "text" }> {
   const minSize = 24;
   const left = shape.x;
   const top = shape.y;
@@ -1919,14 +1972,14 @@ function resizeCanvasBoxShape(
 }
 
 function renderCanvasSketchShapeSvg(
-  shape: PostgresExperimentCanvasShape,
+  shape: PostgresCanvasShape,
   minX: number,
   minY: number,
   mode: "screen" | "pdf" = "screen",
 ): string {
   if (shape.kind === "pen") {
-    const strokeDasharray = getPostgresExperimentRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
-    return `<polyline points="${shape.points.map((point: PostgresExperimentCanvasPoint) => `${point.x - minX},${point.y - minY}`).join(" ")}" fill="none" stroke="${shape.color}" stroke-width="${shape.strokeWidth}"${strokeDasharray ? ` stroke-dasharray="${strokeDasharray}"` : ""} stroke-linecap="round" stroke-linejoin="round" />`;
+    const strokeDasharray = getPostgresRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
+    return `<polyline points="${shape.points.map((point: PostgresCanvasPoint) => `${point.x - minX},${point.y - minY}`).join(" ")}" fill="none" stroke="${shape.color}" stroke-width="${shape.strokeWidth}"${strokeDasharray ? ` stroke-dasharray="${strokeDasharray}"` : ""} stroke-linecap="round" stroke-linejoin="round" />`;
   }
   if (shape.kind === "text") {
     if (mode === "screen") {
@@ -1949,7 +2002,7 @@ function renderCanvasSketchShapeSvg(
   const shapeType = getCanvasSketchShapeType(shape);
   const x = shape.x - minX;
   const y = shape.y - minY;
-  const strokeDasharray = getPostgresExperimentRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
+  const strokeDasharray = getPostgresRelationshipStrokeDasharray(getCanvasSketchLineStyle(shape));
   const fillMode = getCanvasSketchShapeFill(shape);
   const fillColor = fillMode === "outline" ? "#ffffff" : hexToRgba(shape.color, 0.08);
   if (shapeType === "rectangle") {
@@ -1988,7 +2041,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function getPostgresExperimentImageMimeType(storagePath: string): string {
+function getPostgresImageMimeType(storagePath: string): string {
   const extension = storagePath.split(".").pop()?.toLowerCase() ?? "";
   if (extension === "svg") return "image/svg+xml";
   if (extension === "png") return "image/png";
@@ -1997,7 +2050,7 @@ function getPostgresExperimentImageMimeType(storagePath: string): string {
   return "image/jpeg";
 }
 
-function resolvePostgresExperimentStoragePath(projectStoragePath: string, relativeStoragePath: string): string {
+function resolvePostgresStoragePath(projectStoragePath: string, relativeStoragePath: string): string {
   const trimmedRelativePath = relativeStoragePath.trim();
   if (!trimmedRelativePath) return "";
   if (/^[a-zA-Z]:[\\/]/.test(trimmedRelativePath) || trimmedRelativePath.startsWith("\\\\")) {
@@ -2012,12 +2065,12 @@ function getFileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() || "image";
 }
 
-function formatPostgresExperimentFileSize(bytes: number): string {
+function formatPostgresFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(bytes >= 1024 * 1024 ? 1 : 2)} MB`;
 }
 
-function getPostgresExperimentCropAspectRatio(
-  aspect: PostgresExperimentImageCropAspect,
+function getPostgresCropAspectRatio(
+  aspect: PostgresImageCropAspect,
   imageWidth: number,
   imageHeight: number,
 ): number {
@@ -2027,15 +2080,15 @@ function getPostgresExperimentCropAspectRatio(
   return imageWidth / imageHeight;
 }
 
-function getPostgresExperimentCropRect(
+function getPostgresCropRect(
   imageWidth: number,
   imageHeight: number,
-  aspect: PostgresExperimentImageCropAspect,
+  aspect: PostgresImageCropAspect,
   sizePercent: number,
   xPercent: number,
   yPercent: number,
 ) {
-  const ratio = getPostgresExperimentCropAspectRatio(aspect, imageWidth, imageHeight);
+  const ratio = getPostgresCropAspectRatio(aspect, imageWidth, imageHeight);
   const imageRatio = imageWidth / imageHeight;
   const maxCropWidth = imageRatio > ratio ? imageHeight * ratio : imageWidth;
   const maxCropHeight = imageRatio > ratio ? imageHeight : imageWidth / ratio;
@@ -2047,7 +2100,7 @@ function getPostgresExperimentCropRect(
   return { x, y, width, height };
 }
 
-function loadPostgresExperimentImageElement(src: string): Promise<HTMLImageElement> {
+function loadPostgresImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
@@ -2056,7 +2109,7 @@ function loadPostgresExperimentImageElement(src: string): Promise<HTMLImageEleme
   });
 }
 
-function canvasToPostgresExperimentBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob> {
+function canvasToPostgresBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) {
@@ -2068,21 +2121,21 @@ function canvasToPostgresExperimentBlob(canvas: HTMLCanvasElement, mimeType: str
   });
 }
 
-function getPostgresExperimentCroppedImageFileName(originalFileName: string, mimeType: string): string {
+function getPostgresCroppedImageFileName(originalFileName: string, mimeType: string): string {
   const stem = sanitizeFileStem(originalFileName.replace(/\.[^.]+$/, "")) || "image";
   const extension = mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : "png";
   return `${stem}-cropped.${extension}`;
 }
 
-async function cropPostgresExperimentImageUpload(
-  upload: PostgresExperimentImageUploadDraft,
-  aspect: PostgresExperimentImageCropAspect,
+async function cropPostgresImageUpload(
+  upload: PostgresImageUploadDraft,
+  aspect: PostgresImageCropAspect,
   sizePercent: number,
   xPercent: number,
   yPercent: number,
-): Promise<PostgresExperimentImageUploadDraft> {
-  const image = await loadPostgresExperimentImageElement(upload.previewUrl);
-  const crop = getPostgresExperimentCropRect(image.naturalWidth, image.naturalHeight, aspect, sizePercent, xPercent, yPercent);
+): Promise<PostgresImageUploadDraft> {
+  const image = await loadPostgresImageElement(upload.previewUrl);
+  const crop = getPostgresCropRect(image.naturalWidth, image.naturalHeight, aspect, sizePercent, xPercent, yPercent);
   const maxOutputDimension = 1600;
   const outputScale = Math.min(1, maxOutputDimension / Math.max(crop.width, crop.height));
   const canvas = document.createElement("canvas");
@@ -2101,25 +2154,25 @@ async function cropPostgresExperimentImageUpload(
     canvas.width,
     canvas.height,
   );
-  const sourceMimeType = getPostgresExperimentImageMimeType(upload.originalFileName);
+  const sourceMimeType = getPostgresImageMimeType(upload.originalFileName);
   const outputMimeType = sourceMimeType === "image/jpeg" || sourceMimeType === "image/webp" ? sourceMimeType : "image/png";
-  const blob = await canvasToPostgresExperimentBlob(canvas, outputMimeType, 0.9);
+  const blob = await canvasToPostgresBlob(canvas, outputMimeType, 0.9);
   const bytes = new Uint8Array(await blob.arrayBuffer());
   return {
-    originalFileName: getPostgresExperimentCroppedImageFileName(upload.originalFileName, outputMimeType),
+    originalFileName: getPostgresCroppedImageFileName(upload.originalFileName, outputMimeType),
     fileBytesBase64: bytesToBase64(bytes),
     previewUrl: URL.createObjectURL(blob),
     fileSizeBytes: bytes.length,
   };
 }
 
-function usePostgresExperimentStoredImageUrl(projectStoragePath: string, imageStoragePath: string): string {
+function usePostgresStoredImageUrl(projectStoragePath: string, imageStoragePath: string): string {
   const [imageUrl, setImageUrl] = useState("");
 
   useEffect(() => {
     let active = true;
     let objectUrl = "";
-    const resolvedPath = resolvePostgresExperimentStoragePath(projectStoragePath, imageStoragePath);
+    const resolvedPath = resolvePostgresStoragePath(projectStoragePath, imageStoragePath);
     if (!resolvedPath) {
       setImageUrl("");
       return;
@@ -2127,7 +2180,7 @@ function usePostgresExperimentStoredImageUrl(projectStoragePath: string, imageSt
     void readTauriFile(resolvedPath)
       .then((bytes) => {
         if (!active) return;
-        const blob = new Blob([bytes], { type: getPostgresExperimentImageMimeType(imageStoragePath) });
+        const blob = new Blob([bytes], { type: getPostgresImageMimeType(imageStoragePath) });
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
       })
@@ -2157,10 +2210,10 @@ function getObjectShapeMaskStyle(assetUrl: string): React.CSSProperties {
 }
 
 function ObjectShapeSwatch(props: {
-  shape: PostgresExperimentObjectTypeShape;
-  fill: PostgresExperimentObjectFill;
+  shape: PostgresObjectTypeShape;
+  fill: PostgresObjectFill;
   color: string;
-  sourceVisualKey?: PostgresExperimentSourceObjectVisualKey | null;
+  sourceVisualKey?: PostgresSourceObjectVisualKey | null;
   imageStoragePath?: string;
   projectStoragePath?: string;
   width: number;
@@ -2180,10 +2233,10 @@ function ObjectShapeSwatch(props: {
     selected = false,
     style,
   } = props;
-  const imageUrl = usePostgresExperimentStoredImageUrl(projectStoragePath, imageStoragePath);
+  const imageUrl = usePostgresStoredImageUrl(projectStoragePath, imageStoragePath);
   const hasUploadedImage = Boolean(imageStoragePath);
   const frameWidth = hasUploadedImage ? minHeight : width;
-  const surfaceStyle = getPostgresExperimentObjectSurfaceStyle(color, fill, selected);
+  const surfaceStyle = getPostgresObjectSurfaceStyle(color, fill, selected);
   const sourceOutlineAsset = sourceVisualKey ? POSTGRES_SOURCE_OBJECT_SHAPE_ASSET_URLS[sourceVisualKey] : null;
   const shapeAssets = sourceVisualKey ? null : POSTGRES_OBJECT_SHAPE_ASSET_URLS[shape];
 
@@ -2246,17 +2299,135 @@ function ObjectShapeSwatch(props: {
   );
 }
 
-function PostgresExperimentObjectImageControls(props: {
+function PostgresRelationshipEndpointRestrictionColumn(props: {
+  title: string;
+  items: Array<{
+    id: string;
+    label: string;
+    color?: string;
+    shape?: PostgresObjectTypeShape;
+    fill?: PostgresObjectFill;
+    sourceVisualKey?: PostgresSourceObjectVisualKey | null;
+    imageStoragePath?: string;
+  }>;
+  value: string[];
+  onChange: (value: string[]) => void;
+  projectStoragePath: string;
+}) {
+  const { title, items, value, onChange, projectStoragePath } = props;
+  const selected = new Set(value);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minWidth: 0,
+        gap: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+          <span style={{ fontWeight: 700, color: "#1f2933" }}>{title}</span>
+          <span className="auth-hint" style={{ margin: 0 }}>
+            {`${value.length} selected`}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn--small"
+            onClick={() => onChange(items.map((item) => item.id))}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            className="btn btn--small"
+            onClick={() => onChange([])}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gap: 8,
+          maxHeight: 220,
+          overflowY: "auto",
+          padding: 10,
+          borderRadius: 12,
+          border: "1px solid rgba(53, 80, 112, 0.16)",
+          background: "rgba(255, 255, 255, 0.94)",
+        }}
+      >
+        {items.length === 0 ? (
+          <p className="auth-hint" style={{ margin: 0 }}>No options available.</p>
+        ) : items.map((item) => {
+          const checked = selected.has(item.id);
+          const accentColor = item.color || POSTGRES_RELATIONSHIP_DEFAULT_COLOR;
+          const swatchShape = item.shape ?? "rounded";
+          const swatchFill = item.fill ?? "outline";
+          return (
+            <label
+              key={item.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "9px 10px",
+                borderRadius: 10,
+                border: `1px solid ${checked ? hexToRgba(accentColor, 0.42) : "rgba(53, 80, 112, 0.12)"}`,
+                background: checked
+                  ? `linear-gradient(180deg, ${hexToRgba(accentColor, 0.12)}, rgba(255, 255, 255, 0.96))`
+                  : "rgba(255, 255, 255, 0.88)",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(event) => {
+                  if (event.target.checked) {
+                    onChange(Array.from(new Set([...value, item.id])));
+                    return;
+                  }
+                  onChange(value.filter((id) => id !== item.id));
+                }}
+              />
+              <ObjectShapeSwatch
+                shape={swatchShape}
+                fill={swatchFill}
+                color={accentColor}
+                sourceVisualKey={item.sourceVisualKey ?? null}
+                imageStoragePath={item.imageStoragePath ?? ""}
+                projectStoragePath={projectStoragePath}
+                width={28}
+                minHeight={22}
+                selected={checked}
+              />
+              <span style={{ fontWeight: 600, color: "#1f2933", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.label}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PostgresObjectImageControls(props: {
   projectStoragePath: string;
   imageStoragePath: string;
   previewUrl?: string;
-  graphicMode?: PostgresExperimentObjectGraphicMode;
+  graphicMode?: PostgresObjectGraphicMode;
   fallback: React.ReactNode;
   disabled: boolean;
   canUpload: boolean;
   onUpload?: () => void;
   onRemove?: () => void;
-  onGraphicModeChange?: (mode: PostgresExperimentObjectGraphicMode) => void;
+  onGraphicModeChange?: (mode: PostgresObjectGraphicMode) => void;
 }) {
   const {
     projectStoragePath,
@@ -2270,7 +2441,7 @@ function PostgresExperimentObjectImageControls(props: {
     onRemove,
     onGraphicModeChange,
   } = props;
-  const imageUrl = usePostgresExperimentStoredImageUrl(projectStoragePath, imageStoragePath);
+  const imageUrl = usePostgresStoredImageUrl(projectStoragePath, imageStoragePath);
   const displayImageUrl = previewUrl || imageUrl;
   const uploadModeActive = graphicMode ? graphicMode === "upload" : true;
   return (
@@ -2373,9 +2544,9 @@ function PostgresExperimentObjectImageControls(props: {
   );
 }
 
-function PostgresExperimentImageCropModal(props: {
-  draft: PostgresExperimentImageCropDraft;
-  onDraftChange: (draft: PostgresExperimentImageCropDraft) => void;
+function PostgresImageCropModal(props: {
+  draft: PostgresImageCropDraft;
+  onDraftChange: (draft: PostgresImageCropDraft) => void;
   onCancel: () => void;
   onUseFullImage: () => void;
   onUseCrop: () => void;
@@ -2383,7 +2554,7 @@ function PostgresExperimentImageCropModal(props: {
 }) {
   const { draft, onDraftChange, onCancel, onUseFullImage, onUseCrop, busy } = props;
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [cropDragState, setCropDragState] = useState<PostgresExperimentImageCropDragState | null>(null);
+  const [cropDragState, setCropDragState] = useState<PostgresImageCropDragState | null>(null);
   const cropFrameRef = useRef<HTMLDivElement | null>(null);
   const cropDisplay = imageDimensions
     ? (() => {
@@ -2392,7 +2563,7 @@ function PostgresExperimentImageCropModal(props: {
         const scale = Math.min(1, maxWidth / imageDimensions.width, maxHeight / imageDimensions.height);
         const width = Math.max(1, Math.round(imageDimensions.width * scale));
         const height = Math.max(1, Math.round(imageDimensions.height * scale));
-        const crop = getPostgresExperimentCropRect(
+        const crop = getPostgresCropRect(
           imageDimensions.width,
           imageDimensions.height,
           draft.aspect,
@@ -2417,7 +2588,7 @@ function PostgresExperimentImageCropModal(props: {
 
   useEffect(() => {
     let active = true;
-    void loadPostgresExperimentImageElement(draft.upload.previewUrl)
+    void loadPostgresImageElement(draft.upload.previewUrl)
       .then((image) => {
         if (active) setImageDimensions({ width: image.naturalWidth, height: image.naturalHeight });
       })
@@ -2429,14 +2600,14 @@ function PostgresExperimentImageCropModal(props: {
     };
   }, [draft.upload.previewUrl]);
 
-  const updateDraft = (patch: Partial<PostgresExperimentImageCropDraft>) => {
+  const updateDraft = (patch: Partial<PostgresImageCropDraft>) => {
     onDraftChange({ ...draft, ...patch, error: patch.error ?? "" });
   };
 
   useEffect(() => {
     if (!cropDragState) return;
     const handlePointerMove = (event: PointerEvent) => {
-      const crop = getPostgresExperimentCropRect(
+      const crop = getPostgresCropRect(
         cropDragState.imageWidth,
         cropDragState.imageHeight,
         draft.aspect,
@@ -2456,7 +2627,7 @@ function PostgresExperimentImageCropModal(props: {
         return;
       }
 
-      const ratio = getPostgresExperimentCropAspectRatio(draft.aspect, cropDragState.imageWidth, cropDragState.imageHeight);
+      const ratio = getPostgresCropAspectRatio(draft.aspect, cropDragState.imageWidth, cropDragState.imageHeight);
       const imageRatio = cropDragState.imageWidth / cropDragState.imageHeight;
       const maxCropWidth = imageRatio > ratio ? cropDragState.imageHeight * ratio : cropDragState.imageWidth;
       const maxCropHeight = imageRatio > ratio ? cropDragState.imageHeight : cropDragState.imageWidth / ratio;
@@ -2504,8 +2675,8 @@ function PostgresExperimentImageCropModal(props: {
 
   const startCropDrag = (
     event: React.PointerEvent,
-    mode: PostgresExperimentImageCropDragState["mode"],
-    handle?: PostgresExperimentImageCropResizeHandle,
+    mode: PostgresImageCropDragState["mode"],
+    handle?: PostgresImageCropResizeHandle,
   ) => {
     if (!imageDimensions || !cropDisplay || busy) return;
     event.preventDefault();
@@ -2640,7 +2811,7 @@ function PostgresExperimentImageCropModal(props: {
                       onPointerDown={(event) => startCropDrag(
                         event,
                         "resize",
-                        handle as PostgresExperimentImageCropResizeHandle,
+                        handle as PostgresImageCropResizeHandle,
                       )}
                       style={{
                         position: "absolute",
@@ -2674,7 +2845,7 @@ function PostgresExperimentImageCropModal(props: {
           </div>
           <div className="form" style={{ gap: 12 }}>
             <p className="auth-hint" style={{ margin: 0 }}>
-              {draft.upload.originalFileName} - {formatPostgresExperimentFileSize(draft.upload.fileSizeBytes)}
+              {draft.upload.originalFileName} - {formatPostgresFileSize(draft.upload.fileSizeBytes)}
             </p>
             {imageDimensions ? (
               <p className="auth-hint" style={{ margin: 0 }}>
@@ -2689,7 +2860,7 @@ function PostgresExperimentImageCropModal(props: {
                     className="form-input"
                     value={draft.aspect}
                     onChange={(event) => updateDraft({
-                      aspect: event.target.value as PostgresExperimentImageCropAspect,
+                      aspect: event.target.value as PostgresImageCropAspect,
                       sizePercent: 100,
                       xPercent: 50,
                       yPercent: 50,
@@ -2753,9 +2924,110 @@ function formatRelationshipTypeConstraintSummary(relationshipType: {
   return `From ${fromLabel} to ${toLabel}`;
 }
 
-function formatPostgresExperimentAttributeDisplay(
+function parsePostgresRelationshipEndpointKey(
+  key: string,
+): { entityType: "object" | "source"; entityId: string } | null {
+  const [entityType, ...idParts] = key.split(":");
+  const entityId = idParts.join(":");
+  if ((entityType !== "object" && entityType !== "source") || !entityId) return null;
+  return { entityType, entityId };
+}
+
+function normalizePostgresSourceKind(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/^source_/, "").replace(/_/g, " ");
+  return normalized === "processed transcript" ? "transcript" : normalized;
+}
+
+function postgresRelationshipTypeAllowsSourceEndpoint(
+  relationshipType: PostgresRelationshipType,
+  endpoint: "from" | "to",
+  sourceKind: string,
+): boolean {
+  const objectTypeIds = endpoint === "from" ? relationshipType.fromObjectTypeIds : relationshipType.toObjectTypeIds;
+  const sourceKinds = endpoint === "from" ? relationshipType.fromSourceKinds : relationshipType.toSourceKinds;
+  if (sourceKinds.length > 0) {
+    const normalizedSourceKind = normalizePostgresSourceKind(sourceKind);
+    return sourceKinds.some((allowed) => normalizePostgresSourceKind(allowed) === normalizedSourceKind);
+  }
+  return objectTypeIds.length === 0;
+}
+
+function postgresRelationshipTypeAllowsObjectEndpoint(
+  relationshipType: PostgresRelationshipType,
+  endpoint: "from" | "to",
+  objectTypeId: string,
+): boolean {
+  const objectTypeIds = endpoint === "from" ? relationshipType.fromObjectTypeIds : relationshipType.toObjectTypeIds;
+  const sourceKinds = endpoint === "from" ? relationshipType.fromSourceKinds : relationshipType.toSourceKinds;
+  if (objectTypeIds.length > 0) return objectTypeIds.includes(objectTypeId);
+  return sourceKinds.length === 0;
+}
+
+function PostgresRelationshipEndpointSingleSelect({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: PostgresRelationshipEndpointOption[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="form-label">
+      {label}
+      <div className="users-table-wrap" style={{ maxHeight: 188, overflowY: "auto", marginTop: 6 }}>
+        <table className="users-table">
+          <thead>
+            <tr>
+              <th className="users-th" style={{ width: "62%" }}>Name</th>
+              <th className="users-th" style={{ width: "38%" }}>Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {options.length === 0 ? (
+              <tr>
+                <td className="users-td-msg" colSpan={2}>No matching endpoints.</td>
+              </tr>
+            ) : options.map((option) => (
+              <tr
+                key={option.key}
+                className="users-row"
+                style={{
+                  background: value === option.key ? "rgba(53, 80, 112, 0.10)" : undefined,
+                  cursor: "pointer",
+                }}
+                onClick={() => onChange(option.key)}
+              >
+                <td className="users-td users-td--name">{option.name}</td>
+                <td className="users-td users-td--muted">{option.type}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </label>
+  );
+}
+
+function normalizePostgresRelationshipRestrictionSelection(selection: string[], allIds: string[]): string[] {
+  if (allIds.length > 0 && selection.length === allIds.length) {
+    const selected = new Set(selection);
+    if (allIds.every((id) => selected.has(id))) {
+      return [];
+    }
+  }
+  return selection;
+}
+
+function expandPostgresRelationshipRestrictionSelection(selection: string[] | undefined, allIds: string[]): string[] {
+  return selection && selection.length > 0 ? selection : allIds;
+}
+
+function formatPostgresAttributeDisplay(
   value: string,
-  dataType: PostgresExperimentObjectAttributeDefinition["dataType"],
+  dataType: PostgresObjectAttributeDefinition["dataType"],
 ): string {
   if (!value) return "";
   if (dataType === "datetime") {
@@ -2775,8 +3047,8 @@ function formatPostgresExperimentAttributeDisplay(
 }
 
 function areCanvasNodeMapsEqual(
-  left: Record<string, PostgresExperimentCanvasNodeState>,
-  right: Record<string, PostgresExperimentCanvasNodeState>,
+  left: Record<string, PostgresCanvasNodeState>,
+  right: Record<string, PostgresCanvasNodeState>,
 ): boolean {
   const leftKeys = Object.keys(left);
   const rightKeys = Object.keys(right);
@@ -2798,7 +3070,7 @@ function areCanvasNodeMapsEqual(
   return true;
 }
 
-function formatPostgresExperimentDateTime(iso: string): string {
+function formatPostgresDateTime(iso: string): string {
   if (!iso) return "-";
   try {
     return formatCurrentDateTime(iso, {
@@ -2826,7 +3098,7 @@ function formatCanvasKindLabel(kind: string): string {
   }
 }
 
-type PostgresExperimentSavedCanvasSession = {
+type PostgresSavedCanvasSession = {
   id: string;
   name: string;
   canvasKind: "free_draw" | "explore" | "construct";
@@ -2861,7 +3133,139 @@ function createTypeAttributeDraft(draft?: Partial<SharedAttributeDraft> & { id?:
   };
 }
 
-function PostgresExperimentStatCard({
+function normalizeAttributeModalOptions(options: string[]): string[] {
+  return options.map((option) => option.trim()).filter(Boolean);
+}
+
+function TypeScopedAttributeModal({
+  draft,
+  typeOptions,
+  title,
+  typeLabel,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  draft: TypeScopedAttributeDraft;
+  typeOptions: Array<{ id: string; label: string; count: number }>;
+  title: string;
+  typeLabel: string;
+  saving: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSave: (draft: TypeScopedAttributeDraft) => void;
+}) {
+  const [name, setName] = useState(draft.name);
+  const [dataType, setDataType] = useState<SharedAttributeDraft["dataType"]>(draft.dataType);
+  const [description, setDescription] = useState(draft.description);
+  const [options, setOptions] = useState<string[]>(draft.options.length > 0 ? draft.options : ["", ""]);
+  const [typeIds, setTypeIds] = useState<string[]>(draft.typeIds);
+  const normalizedOptions = normalizeAttributeModalOptions(options);
+  const dataTypeOptions: Array<{ value: SharedAttributeDraft["dataType"]; label: string }> = [
+    { value: "text", label: "Text" },
+    { value: "number", label: "Number" },
+    { value: "datetime", label: "Date/time" },
+    { value: "categorical", label: "Categorical" },
+  ];
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
+        <h2>{title}</h2>
+        <div className="attribute-values-details">
+          <label className="form-group">
+            <span className="form-label">Attribute name</span>
+            <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div className="form-group attribute-details-span">
+            <span className="form-label">Data type</span>
+            <div className="attribute-type-picker">
+              {dataTypeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
+                  onClick={() => setDataType(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="form-group attribute-details-span">
+            <span className="form-label">Description</span>
+            <textarea
+              className="form-input attribute-description-input"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={4}
+            />
+          </label>
+          {dataType === "categorical" ? (
+            <div className="form-group attribute-details-span">
+              <span className="form-label">Categories</span>
+              <div className="attribute-category-list">
+                {options.map((option, index) => (
+                  <input
+                    key={index}
+                    className="form-input"
+                    value={option}
+                    onChange={(event) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)))}
+                    placeholder={`Category ${index + 1}`}
+                  />
+                ))}
+              </div>
+              <button type="button" className="btn btn--small" onClick={() => setOptions((current) => [...current, ""])}>
+                Add more
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="attribute-values-list">
+          {typeOptions.length === 0 ? (
+            <p className="case-card-empty">No {typeLabel.toLowerCase()} types yet.</p>
+          ) : (
+            typeOptions.map((option) => (
+              <label key={option.id} className="attribute-value-row">
+                <span>{option.label}</span>
+                <input
+                  type="checkbox"
+                  checked={typeIds.includes(option.id)}
+                  onChange={(event) => {
+                    setTypeIds((current) => event.target.checked
+                      ? [...current, option.id]
+                      : current.filter((id) => id !== option.id));
+                  }}
+                />
+              </label>
+            ))
+          )}
+        </div>
+        {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
+        <div className="form-actions" style={{ marginTop: 20 }}>
+          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button
+            className="btn btn--primary"
+            onClick={() => onSave({
+              ...draft,
+              name: name.trim(),
+              dataType,
+              description: description.trim(),
+              options: normalizedOptions,
+              typeIds,
+            })}
+            disabled={saving || !name.trim() || typeIds.length === 0 || (dataType === "categorical" && normalizedOptions.length < 2)}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PostgresStatCard({
   title,
   count,
   stats,
@@ -2888,7 +3292,7 @@ function PostgresExperimentStatCard({
   );
 }
 
-export function PostgresProjectHomeExperimentView({
+export function PostgresProjectHomeView({
   project,
   authSession,
   onAuthSessionUpdated,
@@ -2897,18 +3301,18 @@ export function PostgresProjectHomeExperimentView({
   onProjectUpdated,
   onProjectDeleted,
   onSignOut,
-}: PostgresProjectHomeExperimentViewProps) {
+}: PostgresProjectHomeViewProps) {
   const PROJECT_ROLE_OPTIONS = ["owner", "editor", "coder", "viewer"] as const;
-  const [activeScreen, setActiveScreen] = useState<
-    "home" | "users" | "sources" | "annotations" | "codebook" | "code-text" | "memos" | "project-log" | "objects" | "relationships" | "free-draw" | "explore" | "construct" | "view" | "app-settings" | "project-settings" | "user-settings"
-  >("home");
+  const [activeScreen, setActiveScreen] = useState<PostgresProjectScreen>("home");
   const [postgresSourceNavigationTarget, setPostgresSourceNavigationTarget] = useState<{
     sourceId: string;
     annotationId: string | null;
+    textSegment: { startOffset: number; endOffset: number } | null;
   } | null>(null);
+  const [postgresAnnotationNavigationTargetId, setPostgresAnnotationNavigationTargetId] = useState<string | null>(null);
   const [postgresMemoDraftTarget, setPostgresMemoDraftTarget] = useState<PostgresMemoDraftTarget | null>(null);
-  const [users, setUsers] = useState<PostgresExperimentProjectUser[]>([]);
-  const [appUsers, setAppUsers] = useState<PostgresExperimentAppUser[]>([]);
+  const [users, setUsers] = useState<PostgresProjectUser[]>([]);
+  const [appUsers, setAppUsers] = useState<PostgresAppUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersSubmitting, setUsersSubmitting] = useState(false);
   const [usersError, setUsersError] = useState("");
@@ -2920,19 +3324,24 @@ export function PostgresProjectHomeExperimentView({
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState<(typeof PROJECT_ROLE_OPTIONS)[number]>("coder");
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
-  const [objectTypes, setObjectTypes] = useState<PostgresExperimentObjectType[]>([]);
-  const [objects, setObjects] = useState<PostgresExperimentObject[]>([]);
-  const [objectAttributeDefinitions, setObjectAttributeDefinitions] = useState<PostgresExperimentObjectAttributeDefinition[]>([]);
-  const [relationships, setRelationships] = useState<PostgresExperimentRelationship[]>([]);
-  const [relationshipAttributeDefinitions, setRelationshipAttributeDefinitions] = useState<PostgresExperimentRelationshipAttributeDefinition[]>([]);
-  const [savedDrawings, setSavedDrawings] = useState<PostgresExperimentSavedDrawingSummary[]>([]);
-  const [savedCanvasSession, setSavedCanvasSession] = useState<PostgresExperimentSavedCanvasSession | null>(null);
+  const [objectTypes, setObjectTypes] = useState<PostgresObjectType[]>([]);
+  const [objects, setObjects] = useState<PostgresObject[]>([]);
+  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [objectAttributeDefinitions, setObjectAttributeDefinitions] = useState<PostgresObjectAttributeDefinition[]>([]);
+  const [relationships, setRelationships] = useState<PostgresRelationship[]>([]);
+  const [relationshipAttributeDefinitions, setRelationshipAttributeDefinitions] = useState<PostgresRelationshipAttributeDefinition[]>([]);
+  const [savedDrawings, setSavedDrawings] = useState<PostgresSavedDrawingSummary[]>([]);
+  const [savedCanvasSession, setSavedCanvasSession] = useState<PostgresSavedCanvasSession | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphSubmitting, setGraphSubmitting] = useState(false);
   const [graphError, setGraphError] = useState("");
   const [graphNotice, setGraphNotice] = useState("");
-  const [relationshipAttributeEditorDraft, setRelationshipAttributeEditorDraft] = useState<PostgresExperimentRelationshipAttributeDraft | null>(null);
+  const [relationshipAttributeEditorDraft, setRelationshipAttributeEditorDraft] = useState<PostgresRelationshipAttributeDraft | null>(null);
   const [relationshipAttributeEditorError, setRelationshipAttributeEditorError] = useState("");
+  const [objectWorkspaceAttributeDraft, setObjectWorkspaceAttributeDraft] = useState<TypeScopedAttributeDraft | null>(null);
+  const [objectWorkspaceAttributeError, setObjectWorkspaceAttributeError] = useState("");
+  const [relationshipWorkspaceAttributeDraft, setRelationshipWorkspaceAttributeDraft] = useState<TypeScopedAttributeDraft | null>(null);
+  const [relationshipWorkspaceAttributeError, setRelationshipWorkspaceAttributeError] = useState("");
   const [relationshipTypeAttributeDrafts, setRelationshipTypeAttributeDrafts] = useState<TypeAttributeDraft[]>([]);
   const [relationshipTypeAttributeModalDraft, setRelationshipTypeAttributeModalDraft] = useState<TypeAttributeDraft | null>(null);
   const [typeAttributeModalError, setTypeAttributeModalError] = useState("");
@@ -2943,14 +3352,28 @@ export function PostgresProjectHomeExperimentView({
   const [objectColorOverride, setObjectColorOverride] = useState("");
   const [objectFillOverride, setObjectFillOverride] = useState("");
   const [objectAttributeValues, setObjectAttributeValues] = useState<Record<string, string>>({});
-  const [draftObjectPendingImage, setDraftObjectPendingImage] = useState<PostgresExperimentImageUploadDraft | null>(null);
+  const [draftObjectPendingImage, setDraftObjectPendingImage] = useState<PostgresImageUploadDraft | null>(null);
   const [selectedObjectTypeFilter, setSelectedObjectTypeFilter] = useState<string>("all");
   const [selectedObjectDetailsId, setSelectedObjectDetailsId] = useState<string | null>(null);
+  const [selectedRelationshipDetailsId, setSelectedRelationshipDetailsId] = useState<string | null>(null);
+  const [attributeHistoryTarget, setAttributeHistoryTarget] = useState<PostgresAttributeValueHistoryTarget | null>(null);
+  const [detailAttributeHistoryTarget, setDetailAttributeHistoryTarget] = useState<PostgresAttributeValueHistoryTarget | null>(null);
+  const [activeObjectAttributeHistoryCell, setActiveObjectAttributeHistoryCell] = useState<{
+    objectId: string;
+    attributeDefinitionId: string;
+  } | null>(null);
+  const [activeRelationshipAttributeHistoryCell, setActiveRelationshipAttributeHistoryCell] = useState<{
+    relationshipId: string;
+    attributeDefinitionId: string;
+  } | null>(null);
   const [showObjectAttributesTable, setShowObjectAttributesTable] = useState(false);
-  const [objectTypeSortCol, setObjectTypeSortCol] = useState<PostgresExperimentObjectTypeSortCol>("objectType");
+  const [showRelationshipAttributesTable, setShowRelationshipAttributesTable] = useState(false);
+  const [objectTypeSortCol, setObjectTypeSortCol] = useState<PostgresObjectTypeSortCol>("objectType");
   const [objectTypeSortDir, setObjectTypeSortDir] = useState<"asc" | "desc">("asc");
   const [objectAttributeSortCol, setObjectAttributeSortCol] = useState<"name" | string>("name");
   const [objectAttributeSortDir, setObjectAttributeSortDir] = useState<"asc" | "desc">("asc");
+  const [relationshipAttributeSortCol, setRelationshipAttributeSortCol] = useState<"name" | string>("name");
+  const [relationshipAttributeSortDir, setRelationshipAttributeSortDir] = useState<"asc" | "desc">("asc");
   const [openObjectTypeActionsMenu, setOpenObjectTypeActionsMenu] = useState<{
     id: string;
     left: number;
@@ -2962,12 +3385,12 @@ export function PostgresProjectHomeExperimentView({
   const [removingObjectTypeId, setRemovingObjectTypeId] = useState<string | null>(null);
   const [draftObjectTypeName, setDraftObjectTypeName] = useState("");
   const [draftObjectTypeDescription, setDraftObjectTypeDescription] = useState("");
-  const [draftObjectTypeShape, setDraftObjectTypeShape] = useState<PostgresExperimentObjectTypeShape>("rounded");
+  const [draftObjectTypeShape, setDraftObjectTypeShape] = useState<PostgresObjectTypeShape>("rounded");
   const [draftObjectTypeColor, setDraftObjectTypeColor] = useState(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
-  const [draftObjectTypeFill, setDraftObjectTypeFill] = useState<PostgresExperimentObjectFill>("filled");
+  const [draftObjectTypeFill, setDraftObjectTypeFill] = useState<PostgresObjectFill>("filled");
   const [draftObjectTypeImageStoragePath, setDraftObjectTypeImageStoragePath] = useState("");
-  const [draftObjectTypePendingImage, setDraftObjectTypePendingImage] = useState<PostgresExperimentImageUploadDraft | null>(null);
-  const [draftObjectTypeGraphicMode, setDraftObjectTypeGraphicMode] = useState<PostgresExperimentObjectGraphicMode>("select");
+  const [draftObjectTypePendingImage, setDraftObjectTypePendingImage] = useState<PostgresImageUploadDraft | null>(null);
+  const [draftObjectTypeGraphicMode, setDraftObjectTypeGraphicMode] = useState<PostgresObjectGraphicMode>("select");
   const [objectTypeModalTab, setObjectTypeModalTab] = useState<"details" | "graphics" | "attributes">("details");
   const [createObjectModalTab, setCreateObjectModalTab] = useState<"details" | "graphics" | "attributes">("details");
   const [objectTypeAttributeDrafts, setObjectTypeAttributeDrafts] = useState<TypeAttributeDraft[]>([]);
@@ -2982,11 +3405,11 @@ export function PostgresProjectHomeExperimentView({
   const [editingObjectFillOverride, setEditingObjectFillOverride] = useState("");
   const [objectImageStoragePath, setObjectImageStoragePath] = useState("");
   const [editingObjectImageStoragePath, setEditingObjectImageStoragePath] = useState("");
-  const [objectGraphicMode, setObjectGraphicMode] = useState<PostgresExperimentObjectInstanceGraphicMode>("inherit");
-  const [editingObjectGraphicMode, setEditingObjectGraphicMode] = useState<PostgresExperimentObjectInstanceGraphicMode>("inherit");
+  const [objectGraphicMode, setObjectGraphicMode] = useState<PostgresObjectInstanceGraphicMode>("inherit");
+  const [editingObjectGraphicMode, setEditingObjectGraphicMode] = useState<PostgresObjectInstanceGraphicMode>("inherit");
   const [imageUploadSubmitting, setImageUploadSubmitting] = useState(false);
   const [imageCropSubmitting, setImageCropSubmitting] = useState(false);
-  const [imageCropDraft, setImageCropDraft] = useState<PostgresExperimentImageCropDraft | null>(null);
+  const [imageCropDraft, setImageCropDraft] = useState<PostgresImageCropDraft | null>(null);
   const [editingObjectAttributeValues, setEditingObjectAttributeValues] = useState<Record<string, string>>({});
   const [removingObjectId, setRemovingObjectId] = useState<string | null>(null);
   const [openObjectActionsMenu, setOpenObjectActionsMenu] = useState<{
@@ -2996,14 +3419,14 @@ export function PostgresProjectHomeExperimentView({
   } | null>(null);
   const [fromObjectId, setFromObjectId] = useState("");
   const [toObjectId, setToObjectId] = useState("");
-  const [relationshipTypes, setRelationshipTypes] = useState<PostgresExperimentRelationshipType[]>([]);
+  const [relationshipTypes, setRelationshipTypes] = useState<PostgresRelationshipType[]>([]);
   const [createRelationshipTypeOpen, setCreateRelationshipTypeOpen] = useState(false);
   const [editingRelationshipTypeModalId, setEditingRelationshipTypeModalId] = useState<string | null>(null);
   const [removingRelationshipTypeId, setRemovingRelationshipTypeId] = useState<string | null>(null);
   const [draftRelationshipTypeName, setDraftRelationshipTypeName] = useState("");
-  const [draftRelationshipLineShape, setDraftRelationshipLineShape] = useState<PostgresExperimentRelationshipLineShape>("solid");
+  const [draftRelationshipLineShape, setDraftRelationshipLineShape] = useState<PostgresRelationshipLineShape>("solid");
   const [draftRelationshipLineWeight, setDraftRelationshipLineWeight] = useState(2);
-  const [draftRelationshipArrowhead, setDraftRelationshipArrowhead] = useState<PostgresExperimentRelationshipArrowhead>("one_sided");
+  const [draftRelationshipArrowhead, setDraftRelationshipArrowhead] = useState<PostgresRelationshipArrowhead>("one_sided");
   const [draftRelationshipColor, setDraftRelationshipColor] = useState(POSTGRES_RELATIONSHIP_DEFAULT_COLOR);
   const [selectedRelationshipTypeFilter, setSelectedRelationshipTypeFilter] = useState<string>("all");
   const [selectedCanvasViewKind, setSelectedCanvasViewKind] = useState<"free_draw" | "explore" | "construct">("free_draw");
@@ -3028,7 +3451,9 @@ export function PostgresProjectHomeExperimentView({
   } | null>(null);
   const [draftRelationshipFromObjectTypeIds, setDraftRelationshipFromObjectTypeIds] = useState<string[]>([]);
   const [draftRelationshipToObjectTypeIds, setDraftRelationshipToObjectTypeIds] = useState<string[]>([]);
-  const [relationshipTypeModalTab, setRelationshipTypeModalTab] = useState<"details" | "graphics" | "attributes">("details");
+  const [draftRelationshipFromSourceKinds, setDraftRelationshipFromSourceKinds] = useState<string[]>([]);
+  const [draftRelationshipToSourceKinds, setDraftRelationshipToSourceKinds] = useState<string[]>([]);
+  const [relationshipTypeModalTab, setRelationshipTypeModalTab] = useState<"details" | "object1" | "object2" | "attributes">("details");
   const [relationshipTypeId, setRelationshipTypeId] = useState("");
   const [relationshipDescription, setRelationshipDescription] = useState("");
   const [relationshipLineShapeOverride, setRelationshipLineShapeOverride] = useState("");
@@ -3051,11 +3476,11 @@ export function PostgresProjectHomeExperimentView({
   const [editingRelationshipAttributeValues, setEditingRelationshipAttributeValues] = useState<Record<string, string>>({});
   const [removingRelationshipId, setRemovingRelationshipId] = useState<string | null>(null);
   const [editingRelationshipAttributeTypeId, setEditingRelationshipAttributeTypeId] = useState<string | null>(null);
-  const [canvasTool, setCanvasTool] = useState<PostgresExperimentCanvasTool>("select");
+  const [canvasTool, setCanvasTool] = useState<PostgresCanvasTool>("select");
   const [canvasScale, setCanvasScale] = useState(1);
-  const [canvasOffset, setCanvasOffset] = useState<PostgresExperimentCanvasPoint>({ x: 140, y: 120 });
-  const [canvasNodes, setCanvasNodes] = useState<Record<string, PostgresExperimentCanvasNodeState>>({});
-  const [canvasShapes, setCanvasShapes] = useState<PostgresExperimentCanvasShape[]>([]);
+  const [canvasOffset, setCanvasOffset] = useState<PostgresCanvasPoint>({ x: 140, y: 120 });
+  const [canvasNodes, setCanvasNodes] = useState<Record<string, PostgresCanvasNodeState>>({});
+  const [canvasShapes, setCanvasShapes] = useState<PostgresCanvasShape[]>([]);
   const [hiddenCanvasRelationshipIds, setHiddenCanvasRelationshipIds] = useState<string[]>([]);
   const [canvasRelationshipTypeId, setCanvasRelationshipTypeId] = useState("");
   const [canvasStateLoaded, setCanvasStateLoaded] = useState(false);
@@ -3065,23 +3490,31 @@ export function PostgresProjectHomeExperimentView({
   const [freeDrawSavedDrawingId, setFreeDrawSavedDrawingId] = useState<string | null>(null);
   const [saveFreeDrawModalOpen, setSaveFreeDrawModalOpen] = useState(false);
   const [saveFreeDrawName, setSaveFreeDrawName] = useState("");
-  const [pendingCanvasNodePosition, setPendingCanvasNodePosition] = useState<PostgresExperimentCanvasPoint | null>(null);
+  const [pendingCanvasNodePosition, setPendingCanvasNodePosition] = useState<PostgresCanvasPoint | null>(null);
   const pendingLocalGraphRefreshSkipsRef = useRef(0);
-  const imageCropResolverRef = useRef<((upload: PostgresExperimentImageUploadDraft | null) => void) | null>(null);
+  const imageCropResolverRef = useRef<((upload: PostgresImageUploadDraft | null) => void) | null>(null);
   const objectById = new Map(objects.map((object) => [object.id, object]));
   const objectTypeById = new Map(objectTypes.map((objectType) => [objectType.id, objectType]));
   const relationshipTypeById = new Map(relationshipTypes.map((relationshipType) => [relationshipType.id, relationshipType]));
   const customObjects = useMemo(
-    () => objects.filter((object) => !object.sourceId && !isPostgresExperimentSourceObjectVisualKey(object.objectTypeSystemKey)),
+    () => objects,
     [objects],
   );
   const customObjectTypes = useMemo(
-    () => objectTypes.filter((objectType) => !isPostgresExperimentSourceObjectVisualKey(objectType.systemKey)),
+    () => objectTypes,
     [objectTypes],
   );
   const customObjectTypeIds = useMemo(
     () => new Set(customObjectTypes.map((objectType) => objectType.id)),
     [customObjectTypes],
+  );
+  const allObjectTypeIds = useMemo(
+    () => objectTypes.map((objectType) => objectType.id),
+    [objectTypes],
+  );
+  const allSourceKindIds = useMemo(
+    () => POSTGRES_SOURCE_KIND_OPTIONS.map((sourceKind) => sourceKind.id),
+    [],
   );
   const selectedCreateObjectType = objectTypeById.get(objectTypeId) ?? null;
   const selectedEditObjectType = objectTypeById.get(editingObjectTypeId) ?? null;
@@ -3151,6 +3584,14 @@ export function PostgresProjectHomeExperimentView({
       }),
     [customObjectTypes, customObjects, objectAttributeDefinitions, objectTypeSortCol, objectTypeSortDir],
   );
+  const objectWorkspaceAttributeTypeOptions = useMemo(
+    () => objectTypeSummaries.map((summary) => ({
+      id: summary.objectTypeId,
+      label: summary.objectType,
+      count: summary.count,
+    })),
+    [objectTypeSummaries],
+  );
   const resetFreeDrawCanvasSession = useCallback(() => {
     setCanvasScale(1);
     setCanvasOffset({ x: 140, y: 120 });
@@ -3184,7 +3625,7 @@ export function PostgresProjectHomeExperimentView({
     setCanvasSaveError("");
     setFreeDrawSaveNotice("");
     try {
-      const saved = await savePostgresExperimentSavedDrawing({
+      const saved = await savePostgresSavedDrawing({
         projectId: project.id,
         drawingId: freeDrawSavedDrawingId,
         name: trimmedName,
@@ -3251,21 +3692,21 @@ export function PostgresProjectHomeExperimentView({
           const otherObject = objectById.get(otherObjectId) ?? null;
           const otherObjectTypeRecord = otherObject ? objectTypeById.get(otherObject.objectTypeId) ?? null : null;
           const relationshipTypeRecord = relationshipTypeById.get(relationship.relationshipTypeId) ?? null;
-          const relationshipAppearance = getPostgresExperimentRelationshipAppearance(relationship, relationshipTypeRecord);
+          const relationshipAppearance = getPostgresRelationshipAppearance(relationship, relationshipTypeRecord);
           return {
             id: relationship.id,
             otherObjectName: otherObject?.title || otherObjectId,
             otherObjectType: otherObject?.objectType || "Unknown",
             otherObjectShape: otherObject
-              ? resolvePostgresExperimentObjectShape(otherObject, otherObjectTypeRecord)
+              ? resolvePostgresObjectShape(otherObject, otherObjectTypeRecord)
               : "rounded",
             otherObjectFill: otherObject
-              ? resolvePostgresExperimentObjectFill(otherObject, otherObjectTypeRecord)
+              ? resolvePostgresObjectFill(otherObject, otherObjectTypeRecord)
               : "filled",
             otherObjectColor: otherObject
-              ? resolvePostgresExperimentObjectColor(otherObject, otherObjectTypeRecord)
+              ? resolvePostgresObjectColor(otherObject, otherObjectTypeRecord)
               : POSTGRES_OBJECT_TYPE_DEFAULT_COLOR,
-            otherObjectSourceVisualKey: getPostgresExperimentSourceObjectVisualKey(otherObjectTypeRecord?.systemKey),
+            otherObjectSourceVisualKey: getPostgresSourceObjectVisualKey(otherObjectTypeRecord?.systemKey),
             otherObjectImageStoragePath: otherObject?.imageStoragePath || otherObjectTypeRecord?.imageStoragePath || "",
             relationshipName: relationship.relationshipType || relationshipTypeRecord?.name || "Relationship",
             relationshipLineShape: relationshipAppearance.lineShape,
@@ -3327,43 +3768,6 @@ export function PostgresProjectHomeExperimentView({
     objectAttributeSortCol,
     objectAttributeSortDir,
   ]);
-  const filteredSavedDrawings = savedDrawings.filter((drawing) => drawing.canvasKind === selectedCanvasViewKind);
-  useEffect(() => {
-    if (selectedObjectTypeFilter === "all") return;
-    if (customObjectTypeIds.has(selectedObjectTypeFilter)) return;
-    setSelectedObjectTypeFilter("all");
-  }, [customObjectTypeIds, selectedObjectTypeFilter]);
-
-  useEffect(() => {
-    if (!selectedObjectDetailsId) return;
-    if (filteredObjects.some((object) => object.id === selectedObjectDetailsId)) return;
-    setSelectedObjectDetailsId(null);
-  }, [filteredObjects, selectedObjectDetailsId]);
-
-  useEffect(() => {
-    if (objectAttributeSortCol === "name") return;
-    if (objectAttributeDefinitionsForWorkspace.some((definition) => definition.id === objectAttributeSortCol)) return;
-    setObjectAttributeSortCol("name");
-    setObjectAttributeSortDir("asc");
-  }, [objectAttributeDefinitionsForWorkspace, objectAttributeSortCol]);
-
-  function handleObjectAttributeSort(column: "name" | string) {
-    if (objectAttributeSortCol === column) {
-      setObjectAttributeSortDir((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setObjectAttributeSortCol(column);
-    setObjectAttributeSortDir("asc");
-  }
-
-  function handleObjectTypeSort(column: PostgresExperimentObjectTypeSortCol) {
-    if (objectTypeSortCol === column) {
-      setObjectTypeSortDir((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setObjectTypeSortCol(column);
-    setObjectTypeSortDir("asc");
-  }
   const relationshipTypeSummaries = relationshipTypes
     .map((relationshipType) => {
       const matchingRelationships = relationships.filter(
@@ -3378,22 +3782,176 @@ export function PostgresProjectHomeExperimentView({
         constraint: formatRelationshipTypeConstraintSummary(relationshipType),
         count: matchingRelationships.length,
         attributeDefinitionCount: matchingDefinitions.length,
-        lineShape: normalizePostgresExperimentRelationshipLineShape(relationshipType.lineShape),
-        lineWeight: normalizePostgresExperimentRelationshipLineWeight(relationshipType.lineWeight),
-        arrowhead: normalizePostgresExperimentRelationshipArrowhead(relationshipType.arrowhead),
-        color: normalizePostgresExperimentRelationshipColor(relationshipType.color),
+        lineShape: normalizePostgresRelationshipLineShape(relationshipType.lineShape),
+        lineWeight: normalizePostgresRelationshipLineWeight(relationshipType.lineWeight),
+        arrowhead: normalizePostgresRelationshipArrowhead(relationshipType.arrowhead),
+        color: normalizePostgresRelationshipColor(relationshipType.color),
       };
     })
     .sort((left, right) => left.relationshipType.localeCompare(right.relationshipType));
+  const relationshipWorkspaceAttributeTypeOptions = useMemo(
+    () => relationshipTypeSummaries.map((summary) => ({
+      id: summary.relationshipTypeId,
+      label: summary.relationshipType,
+      count: summary.count,
+    })),
+    [relationshipTypeSummaries],
+  );
   const filteredRelationships =
     selectedRelationshipTypeFilter === "all"
       ? relationships
       : relationships.filter((relationship) => relationship.relationshipTypeId === selectedRelationshipTypeFilter);
+  const selectedRelationshipDetails = selectedRelationshipDetailsId
+    ? relationships.find((relationship) => relationship.id === selectedRelationshipDetailsId) ?? null
+    : null;
+  const selectedRelationshipDetailsType = selectedRelationshipDetails
+    ? relationshipTypeById.get(selectedRelationshipDetails.relationshipTypeId) ?? null
+    : null;
+  const selectedRelationshipDetailsAppearance = selectedRelationshipDetails
+    ? getPostgresRelationshipAppearance(selectedRelationshipDetails, selectedRelationshipDetailsType)
+    : null;
+  const selectedRelationshipDetailsAttributeDefinitions = selectedRelationshipDetails
+    ? relationshipAttributeDefinitions
+      .filter((definition) => definition.relationshipTypeId === selectedRelationshipDetails.relationshipTypeId)
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name))
+    : [];
+  const relationshipAttributeDefinitionsForWorkspace = relationshipAttributeDefinitions
+    .filter((definition) => (
+      selectedRelationshipTypeFilter !== "all"
+      && definition.relationshipTypeId === selectedRelationshipTypeFilter
+    ))
+    .sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+      return left.name.localeCompare(right.name);
+    });
+  const sortedRelationshipAttributeRows = useMemo(() => {
+    const rows = filteredRelationships.map((relationship) => {
+      const fromObject = objectById.get(relationship.fromObjectId);
+      const toObject = objectById.get(relationship.toObjectId);
+      return {
+        id: relationship.id,
+        name: `${relationship.relationshipType}: ${fromObject?.title ?? relationship.fromEntityName ?? relationship.fromObjectId} -> ${toObject?.title ?? relationship.toEntityName ?? relationship.toObjectId}`,
+        valuesByDefinitionId: valuesForRelationship(relationship),
+      };
+    });
+    return rows.sort((left, right) => {
+      if (relationshipAttributeSortCol === "name") {
+        const comparison = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+        return relationshipAttributeSortDir === "asc" ? comparison : -comparison;
+      }
+      const definition = relationshipAttributeDefinitionsForWorkspace.find((entry) => entry.id === relationshipAttributeSortCol);
+      const leftValue = left.valuesByDefinitionId[relationshipAttributeSortCol] ?? "";
+      const rightValue = right.valuesByDefinitionId[relationshipAttributeSortCol] ?? "";
+      let comparison = 0;
+      if (definition?.dataType === "number") {
+        comparison = (Number(leftValue) || 0) - (Number(rightValue) || 0);
+      } else {
+        comparison = leftValue.localeCompare(rightValue, undefined, { sensitivity: "base" });
+      }
+      if (comparison === 0) {
+        comparison = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      }
+      return relationshipAttributeSortDir === "asc" ? comparison : -comparison;
+    });
+  }, [
+    filteredRelationships,
+    objectById,
+    relationshipAttributeDefinitionsForWorkspace,
+    relationshipAttributeSortCol,
+    relationshipAttributeSortDir,
+  ]);
   const filteredRelationshipTypeSummaries = relationshipTypeSummaries.filter((summary) => {
     const query = relationshipTypeSearchTerm.trim().toLowerCase();
     if (!query) return true;
     return summary.relationshipType.toLowerCase().includes(query) || summary.constraint.toLowerCase().includes(query);
   });
+  const filteredSavedDrawings = savedDrawings.filter((drawing) => drawing.canvasKind === selectedCanvasViewKind);
+  useEffect(() => {
+    if (selectedObjectTypeFilter === "all") return;
+    if (customObjectTypeIds.has(selectedObjectTypeFilter)) return;
+    setSelectedObjectTypeFilter("all");
+  }, [customObjectTypeIds, selectedObjectTypeFilter]);
+
+  useEffect(() => {
+    if (!selectedObjectDetailsId) return;
+    if (filteredObjects.some((object) => object.id === selectedObjectDetailsId)) return;
+    setSelectedObjectDetailsId(null);
+  }, [filteredObjects, selectedObjectDetailsId]);
+
+  useEffect(() => {
+    if (!selectedRelationshipDetailsId) return;
+    if (relationships.some((relationship) => relationship.id === selectedRelationshipDetailsId)) return;
+    setSelectedRelationshipDetailsId(null);
+  }, [relationships, selectedRelationshipDetailsId]);
+
+  useEffect(() => {
+    if (objectAttributeSortCol === "name") return;
+    if (objectAttributeDefinitionsForWorkspace.some((definition) => definition.id === objectAttributeSortCol)) return;
+    setObjectAttributeSortCol("name");
+    setObjectAttributeSortDir("asc");
+  }, [objectAttributeDefinitionsForWorkspace, objectAttributeSortCol]);
+
+  useEffect(() => {
+    if (relationshipAttributeSortCol === "name") return;
+    if (relationshipAttributeDefinitionsForWorkspace.some((definition) => definition.id === relationshipAttributeSortCol)) return;
+    setRelationshipAttributeSortCol("name");
+    setRelationshipAttributeSortDir("asc");
+  }, [relationshipAttributeDefinitionsForWorkspace, relationshipAttributeSortCol]);
+
+  function handleObjectAttributeSort(column: "name" | string) {
+    if (objectAttributeSortCol === column) {
+      setObjectAttributeSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setObjectAttributeSortCol(column);
+    setObjectAttributeSortDir("asc");
+  }
+
+  function handleRelationshipAttributeSort(column: "name" | string) {
+    if (relationshipAttributeSortCol === column) {
+      setRelationshipAttributeSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setRelationshipAttributeSortCol(column);
+    setRelationshipAttributeSortDir("asc");
+  }
+
+  function openObjectWorkspaceAttributeModal() {
+    const defaultTypeIds = selectedObjectTypeFilter !== "all"
+      ? [selectedObjectTypeFilter]
+      : objectWorkspaceAttributeTypeOptions.map((option) => option.id);
+    setObjectWorkspaceAttributeDraft({
+      name: "",
+      dataType: "text",
+      description: "",
+      options: [],
+      typeIds: defaultTypeIds,
+    });
+    setObjectWorkspaceAttributeError("");
+  }
+
+  function openRelationshipWorkspaceAttributeModal() {
+    const defaultTypeIds = selectedRelationshipTypeFilter !== "all"
+      ? [selectedRelationshipTypeFilter]
+      : relationshipWorkspaceAttributeTypeOptions.map((option) => option.id);
+    setRelationshipWorkspaceAttributeDraft({
+      name: "",
+      dataType: "text",
+      description: "",
+      options: [],
+      typeIds: defaultTypeIds,
+    });
+    setRelationshipWorkspaceAttributeError("");
+  }
+
+  function handleObjectTypeSort(column: PostgresObjectTypeSortCol) {
+    if (objectTypeSortCol === column) {
+      setObjectTypeSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setObjectTypeSortCol(column);
+    setObjectTypeSortDir("asc");
+  }
   const objectAttributeDefinitionsForCreateType = objectAttributeDefinitions.filter(
     (definition) => definition.objectTypeId === objectTypeId,
   );
@@ -3408,19 +3966,59 @@ export function PostgresProjectHomeExperimentView({
   );
   const selectedRelationshipType = relationshipTypeById.get(relationshipTypeId) ?? null;
   const editingRelationshipTypeRecord = relationshipTypeById.get(editingRelationshipTypeId) ?? null;
-  const availableFromObjects = selectedRelationshipType?.fromObjectTypeIds?.length
-    ? objects.filter((object) => selectedRelationshipType.fromObjectTypeIds.includes(object.objectTypeId))
-    : objects;
-  const availableToObjects = selectedRelationshipType?.toObjectTypeIds?.length
-    ? objects.filter((object) => selectedRelationshipType.toObjectTypeIds.includes(object.objectTypeId))
-    : objects;
+  const availableFromEndpointOptions = useMemo<PostgresRelationshipEndpointOption[]>(() => {
+    if (!selectedRelationshipType) return [];
+    return [
+      ...objects
+        .filter((object) => postgresRelationshipTypeAllowsObjectEndpoint(selectedRelationshipType, "from", object.objectTypeId))
+        .map((object) => ({
+          key: `object:${object.id}`,
+          entityType: "object" as const,
+          entityId: object.id,
+          name: object.title,
+          type: object.objectType || "Object",
+        })),
+      ...sources
+        .filter((source) => postgresRelationshipTypeAllowsSourceEndpoint(selectedRelationshipType, "from", source.sourceKind))
+        .map((source) => ({
+          key: `source:${source.id}`,
+          entityType: "source" as const,
+          entityId: source.id,
+          name: source.title,
+          type: POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.id === source.sourceKind)?.label ?? (source.sourceKind || "Source"),
+        })),
+    ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  }, [objects, selectedRelationshipType, sources]);
+  const availableToEndpointOptions = useMemo<PostgresRelationshipEndpointOption[]>(() => {
+    if (!selectedRelationshipType) return [];
+    return [
+      ...objects
+        .filter((object) => postgresRelationshipTypeAllowsObjectEndpoint(selectedRelationshipType, "to", object.objectTypeId))
+        .map((object) => ({
+          key: `object:${object.id}`,
+          entityType: "object" as const,
+          entityId: object.id,
+          name: object.title,
+          type: object.objectType || "Object",
+        })),
+      ...sources
+        .filter((source) => postgresRelationshipTypeAllowsSourceEndpoint(selectedRelationshipType, "to", source.sourceKind))
+        .map((source) => ({
+          key: `source:${source.id}`,
+          entityType: "source" as const,
+          entityId: source.id,
+          name: source.title,
+          type: POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.id === source.sourceKind)?.label ?? (source.sourceKind || "Source"),
+        })),
+    ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  }, [objects, selectedRelationshipType, sources]);
   const availableEditingFromObjects = editingRelationshipTypeRecord?.fromObjectTypeIds?.length
     ? objects.filter((object) => editingRelationshipTypeRecord.fromObjectTypeIds.includes(object.objectTypeId))
     : objects;
   const availableEditingToObjects = editingRelationshipTypeRecord?.toObjectTypeIds?.length
     ? objects.filter((object) => editingRelationshipTypeRecord.toObjectTypeIds.includes(object.objectTypeId))
     : objects;
-  function openCreateObjectModal(prefilledTypeId?: string, preferredPosition?: PostgresExperimentCanvasPoint) {
+  function openCreateObjectModal(prefilledTypeId?: string, preferredPosition?: PostgresCanvasPoint) {
     const nextTypeId = prefilledTypeId
       ?? (selectedObjectTypeFilter !== "all" ? selectedObjectTypeFilter : objectTypeId)
       ?? "";
@@ -3440,9 +4038,9 @@ export function PostgresProjectHomeExperimentView({
     setCreateObjectOpen(true);
   }
 
-  function openEditObjectModal(object: PostgresExperimentObject) {
+  function openEditObjectModal(object: PostgresObject, initialTab: "details" | "graphics" | "attributes" = "details") {
     setEditingObjectId(object.id);
-    setEditObjectModalTab("details");
+    setEditObjectModalTab(initialTab);
     setEditingObjectTypeId(object.objectTypeId);
     setEditingObjectTitle(object.title);
     setEditingObjectDescription(object.description);
@@ -3467,13 +4065,13 @@ export function PostgresProjectHomeExperimentView({
     setDraftObjectTypeName(objectTypeRecord.name);
     setDraftObjectTypeDescription(objectTypeRecord.description);
     setDraftObjectTypeShape(
-      normalizePostgresExperimentObjectTypeShape(objectTypeRecord.shape),
+      normalizePostgresObjectTypeShape(objectTypeRecord.shape),
     );
     setDraftObjectTypeColor(
-      normalizePostgresExperimentObjectTypeColor(objectTypeRecord.color),
+      normalizePostgresObjectTypeColor(objectTypeRecord.color),
     );
     setDraftObjectTypeFill(
-      normalizePostgresExperimentObjectFill(objectTypeRecord.fill),
+      normalizePostgresObjectFill(objectTypeRecord.fill),
     );
     setDraftObjectTypeImageStoragePath(objectTypeRecord.imageStoragePath ?? "");
     setDraftObjectTypePendingImage(null);
@@ -3485,8 +4083,8 @@ export function PostgresProjectHomeExperimentView({
     setCreateObjectTypeOpen(false);
   }
 
-  function openEditRelationshipModal(relationship: PostgresExperimentRelationship) {
-    setEditRelationshipModalTab("details");
+  function openEditRelationshipModal(relationship: PostgresRelationship, initialTab: "details" | "graphics" | "attributes" = "details") {
+    setEditRelationshipModalTab(initialTab);
     setEditingRelationshipId(relationship.id);
     setEditingRelationshipFromObjectId(relationship.fromObjectId);
     setEditingRelationshipToObjectId(relationship.toObjectId);
@@ -3511,6 +4109,23 @@ export function PostgresProjectHomeExperimentView({
     setRelationshipAttributeValues({});
     setGraphError("");
     setCreateRelationshipOpen(true);
+  }
+
+  function openCreateRelationshipTypeModal() {
+    setDraftRelationshipTypeName("");
+    setDraftRelationshipLineShape("solid");
+    setDraftRelationshipLineWeight(2);
+    setDraftRelationshipArrowhead("one_sided");
+    setDraftRelationshipColor(POSTGRES_RELATIONSHIP_DEFAULT_COLOR);
+    setDraftRelationshipFromObjectTypeIds(allObjectTypeIds);
+    setDraftRelationshipToObjectTypeIds(allObjectTypeIds);
+    setDraftRelationshipFromSourceKinds(allSourceKindIds);
+    setDraftRelationshipToSourceKinds(allSourceKindIds);
+    setRelationshipTypeModalTab("details");
+    initializeRelationshipTypeAttributeEditor(null);
+    setEditingRelationshipTypeModalId(null);
+    setGraphError("");
+    setCreateRelationshipTypeOpen(true);
   }
 
   function closeCreateRelationshipModal() {
@@ -3564,19 +4179,21 @@ export function PostgresProjectHomeExperimentView({
 
   function renderRelationshipTypeModal(config: {
     title: string;
-    hint: string;
+    hint?: string;
     submitLabel: string;
     ariaLabel: string;
     onClose: () => void;
     onSubmit: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
   }) {
     return (
-      <div className="modal-overlay" onClick={() => !graphSubmitting && config.onClose()}>
+      <div className="modal-overlay" style={{ zIndex: 120 }} onClick={() => !graphSubmitting && config.onClose()}>
         <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
           <h2>{config.title}</h2>
-          <p className="auth-hint" style={{ marginTop: 0 }}>
-            {config.hint}
-          </p>
+          {config.hint ? (
+            <p className="auth-hint" style={{ marginTop: 0 }}>
+              {config.hint}
+            </p>
+          ) : null}
           <form onSubmit={config.onSubmit} className="form">
             <div className="auth-tabs" role="tablist" aria-label={config.ariaLabel}>
               <button
@@ -3588,10 +4205,17 @@ export function PostgresProjectHomeExperimentView({
               </button>
               <button
                 type="button"
-                className={`auth-tab ${relationshipTypeModalTab === "graphics" ? "auth-tab--active" : ""}`}
-                onClick={() => setRelationshipTypeModalTab("graphics")}
+                className={`auth-tab ${relationshipTypeModalTab === "object1" ? "auth-tab--active" : ""}`}
+                onClick={() => setRelationshipTypeModalTab("object1")}
               >
-                Graphics
+                Object 1
+              </button>
+              <button
+                type="button"
+                className={`auth-tab ${relationshipTypeModalTab === "object2" ? "auth-tab--active" : ""}`}
+                onClick={() => setRelationshipTypeModalTab("object2")}
+              >
+                Object 2
               </button>
               <button
                 type="button"
@@ -3613,27 +4237,6 @@ export function PostgresProjectHomeExperimentView({
                   />
                 </label>
                 <label className="form-label">
-                  Allowed source object types
-                  <PostgresExperimentObjectTypeRestrictionPicker
-                    value={draftRelationshipFromObjectTypeIds}
-                    onChange={setDraftRelationshipFromObjectTypeIds}
-                    objectTypes={objectTypes}
-                    emptyLabel="No restriction"
-                  />
-                </label>
-                <label className="form-label">
-                  Allowed target object types
-                  <PostgresExperimentObjectTypeRestrictionPicker
-                    value={draftRelationshipToObjectTypeIds}
-                    onChange={setDraftRelationshipToObjectTypeIds}
-                    objectTypes={objectTypes}
-                    emptyLabel="No restriction"
-                  />
-                </label>
-              </>
-            ) : relationshipTypeModalTab === "graphics" ? (
-              <>
-                <label className="form-label">
                   Color
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <input
@@ -3651,15 +4254,15 @@ export function PostgresProjectHomeExperimentView({
                 </label>
                 <label className="form-label">
                   Line shape
-                  <PostgresExperimentRelationshipLineShapePicker
+                  <PostgresRelationshipLineShapePicker
                     value={draftRelationshipLineShape}
-                    onChange={(value) => setDraftRelationshipLineShape((value || "solid") as PostgresExperimentRelationshipLineShape)}
+                    onChange={(value) => setDraftRelationshipLineShape((value || "solid") as PostgresRelationshipLineShape)}
                     previewColor={draftRelationshipColor}
                   />
                 </label>
                 <label className="form-label">
                   Line weight
-                  <PostgresExperimentRelationshipLineWeightPicker
+                  <PostgresRelationshipLineWeightPicker
                     value={draftRelationshipLineWeight}
                     onChange={(value) => setDraftRelationshipLineWeight(value ?? 2)}
                     previewColor={draftRelationshipColor}
@@ -3667,53 +4270,118 @@ export function PostgresProjectHomeExperimentView({
                 </label>
                 <label className="form-label">
                   Arrowheads
-                  <PostgresExperimentRelationshipArrowheadPicker
+                  <PostgresRelationshipArrowheadPicker
                     value={draftRelationshipArrowhead}
-                    onChange={(value) => setDraftRelationshipArrowhead((value || "one_sided") as PostgresExperimentRelationshipArrowhead)}
+                    onChange={(value) => setDraftRelationshipArrowhead((value || "one_sided") as PostgresRelationshipArrowhead)}
                     previewColor={draftRelationshipColor}
                   />
                 </label>
               </>
-            ) : (
-              <div className="postgres-attribute-modal-section">
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    marginBottom: 12,
-                  }}
-                >
-                  <div className="postgres-attribute-modal-title">Attributes</div>
-                  <button type="button" className="btn btn--small" onClick={openNewRelationshipTypeAttributeModal}>
-                    Add attribute
-                  </button>
-                </div>
-                {relationshipTypeAttributeDrafts.length === 0 ? (
-                  <p className="auth-hint" style={{ margin: 0 }}>No attributes for this relationship type yet.</p>
-                ) : (
-                  <div className="postgres-attribute-multiselect">
-                    {relationshipTypeAttributeDrafts.map((draft) => (
-                      <div key={draft.localId} className="postgres-attribute-option">
-                        <span className="postgres-attribute-option-body">
-                          <strong>{draft.name}</strong>
-                          <span>{draft.dataType}</span>
-                          <span>{draft.description || (draft.options.length > 0 ? draft.options.join(", ") : "No description")}</span>
-                        </span>
-                        <div className="project-card-actions">
-                          <button type="button" className="btn btn--ghost" onClick={() => openEditRelationshipTypeAttributeModal(draft)}>
-                            Edit
-                          </button>
-                          <button type="button" className="btn btn--ghost-danger" onClick={() => deleteRelationshipTypeAttributeDraft(draft.localId)}>
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+            ) : relationshipTypeModalTab === "object1" ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+                  gap: 16,
+                }}
+              >
+                <PostgresRelationshipEndpointRestrictionColumn
+                  title="Objects"
+                  items={objectTypes.map((objectType) => ({
+                    id: objectType.id,
+                    label: objectType.name,
+                    color: normalizePostgresObjectTypeColor(objectType.color),
+                    shape: normalizePostgresObjectTypeShape(objectType.shape),
+                    fill: normalizePostgresObjectFill(objectType.fill),
+                    imageStoragePath: objectType.imageStoragePath ?? "",
+                  }))}
+                  value={draftRelationshipFromObjectTypeIds}
+                  onChange={setDraftRelationshipFromObjectTypeIds}
+                  projectStoragePath={project.storagePath}
+                />
+                <PostgresRelationshipEndpointRestrictionColumn
+                  title="Sources"
+                  items={POSTGRES_SOURCE_KIND_OPTIONS}
+                  value={draftRelationshipFromSourceKinds}
+                  onChange={setDraftRelationshipFromSourceKinds}
+                  projectStoragePath={project.storagePath}
+                />
               </div>
+            ) : relationshipTypeModalTab === "object2" ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+                  gap: 16,
+                }}
+              >
+                <PostgresRelationshipEndpointRestrictionColumn
+                  title="Objects"
+                  items={objectTypes.map((objectType) => ({
+                    id: objectType.id,
+                    label: objectType.name,
+                    color: normalizePostgresObjectTypeColor(objectType.color),
+                    shape: normalizePostgresObjectTypeShape(objectType.shape),
+                    fill: normalizePostgresObjectFill(objectType.fill),
+                    imageStoragePath: objectType.imageStoragePath ?? "",
+                  }))}
+                  value={draftRelationshipToObjectTypeIds}
+                  onChange={setDraftRelationshipToObjectTypeIds}
+                  projectStoragePath={project.storagePath}
+                />
+                <PostgresRelationshipEndpointRestrictionColumn
+                  title="Sources"
+                  items={POSTGRES_SOURCE_KIND_OPTIONS}
+                  value={draftRelationshipToSourceKinds}
+                  onChange={setDraftRelationshipToSourceKinds}
+                  projectStoragePath={project.storagePath}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="postgres-attribute-modal-section">
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div className="postgres-attribute-modal-title">Attributes</div>
+                    <button type="button" className="btn btn--small" onClick={openNewRelationshipTypeAttributeModal}>
+                      Add attribute
+                    </button>
+                  </div>
+                  {relationshipTypeAttributeDrafts.length === 0 ? (
+                    <p className="auth-hint" style={{ margin: 0 }}>No attributes for this relationship type yet.</p>
+                  ) : (
+                    <div className="postgres-attribute-multiselect">
+                      {relationshipTypeAttributeDrafts.map((draft) => (
+                        <div key={draft.localId} className="postgres-attribute-option">
+                          <span className="postgres-attribute-option-body">
+                            <strong>{draft.name}</strong>
+                            <span>{draft.dataType}</span>
+                            <span>{draft.description || (draft.options.length > 0 ? draft.options.join(", ") : "No description")}</span>
+                          </span>
+                          <div className="project-card-actions">
+                            <button type="button" className="btn btn--ghost" onClick={() => openEditRelationshipTypeAttributeModal(draft)}>
+                              Edit
+                            </button>
+                            <button type="button" className="btn btn--ghost-danger" onClick={() => deleteRelationshipTypeAttributeDraft(draft.localId)}>
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p className="auth-hint" style={{ marginTop: 16, marginBottom: 0 }}>
+                  Attribute changes will be saved when you save the relationship type.
+                </p>
+              </>
             )}
             <div className="form-actions">
               <button type="button" className="btn" onClick={config.onClose} disabled={graphSubmitting}>
@@ -3743,9 +4411,9 @@ export function PostgresProjectHomeExperimentView({
     fillOverride: string;
     imageStoragePath: string;
     imagePreviewUrl?: string;
-    graphicMode: PostgresExperimentObjectInstanceGraphicMode;
-    selectedType: PostgresExperimentObjectType | null;
-    attributeDefinitions: PostgresExperimentObjectAttributeDefinition[];
+    graphicMode: PostgresObjectInstanceGraphicMode;
+    selectedType: PostgresObjectType | null;
+    attributeDefinitions: PostgresObjectAttributeDefinition[];
     attributeValues: Record<string, string>;
     onClose: () => void;
     onSubmit: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
@@ -3756,19 +4424,19 @@ export function PostgresProjectHomeExperimentView({
     setShapeOverride: Dispatch<SetStateAction<string>>;
     setFillOverride: Dispatch<SetStateAction<string>>;
     setImageStoragePath: Dispatch<SetStateAction<string>>;
-    setGraphicMode: Dispatch<SetStateAction<PostgresExperimentObjectInstanceGraphicMode>>;
+    setGraphicMode: Dispatch<SetStateAction<PostgresObjectInstanceGraphicMode>>;
     setAttributeValues: Dispatch<SetStateAction<Record<string, string>>>;
     onImportImage?: () => void;
     onRemoveImage?: () => void;
     onClearPendingImage?: () => void;
   }) {
-    const inheritedColor = normalizePostgresExperimentObjectTypeColor(config.selectedType?.color || "");
-    const effectiveColor = resolvePostgresExperimentObjectColor({ colorOverride: config.colorOverride }, config.selectedType);
+    const inheritedColor = normalizePostgresObjectTypeColor(config.selectedType?.color || "");
+    const effectiveColor = resolvePostgresObjectColor({ colorOverride: config.colorOverride }, config.selectedType);
     const colorInherited = !config.colorOverride.trim();
-    const inheritedShape = resolvePostgresExperimentObjectShape({ shapeOverride: "" }, config.selectedType);
-    const effectiveShape = resolvePostgresExperimentObjectShape({ shapeOverride: config.shapeOverride }, config.selectedType);
-    const inheritedFill = resolvePostgresExperimentObjectFill({ fillOverride: "" }, config.selectedType);
-    const effectiveFill = resolvePostgresExperimentObjectFill({ fillOverride: config.fillOverride }, config.selectedType);
+    const inheritedShape = resolvePostgresObjectShape({ shapeOverride: "" }, config.selectedType);
+    const effectiveShape = resolvePostgresObjectShape({ shapeOverride: config.shapeOverride }, config.selectedType);
+    const inheritedFill = resolvePostgresObjectFill({ fillOverride: "" }, config.selectedType);
+    const effectiveFill = resolvePostgresObjectFill({ fillOverride: config.fillOverride }, config.selectedType);
     const effectiveImageStoragePath = config.imageStoragePath || config.selectedType?.imageStoragePath || "";
 
     return (
@@ -3891,7 +4559,7 @@ export function PostgresProjectHomeExperimentView({
                 ) : config.graphicMode === "upload" ? (
                   <label className="form-label">
                     Image
-                    <PostgresExperimentObjectImageControls
+                    <PostgresObjectImageControls
                       projectStoragePath={project.storagePath}
                       imageStoragePath={effectiveImageStoragePath}
                       previewUrl={config.imagePreviewUrl ?? ""}
@@ -3904,7 +4572,7 @@ export function PostgresProjectHomeExperimentView({
                           shape={effectiveShape}
                           fill={effectiveFill}
                           color={effectiveColor}
-                          sourceVisualKey={getPostgresExperimentSourceObjectVisualKey(config.selectedType?.systemKey)}
+                          sourceVisualKey={getPostgresSourceObjectVisualKey(config.selectedType?.systemKey)}
                           width={56}
                           minHeight={44}
                         />
@@ -3933,7 +4601,7 @@ export function PostgresProjectHomeExperimentView({
                     </label>
                     <label className="form-label">
                       Shape
-                      <PostgresExperimentObjectShapePicker
+                      <PostgresObjectShapePicker
                         value={effectiveShape}
                         onChange={(value) => config.setShapeOverride(value === inheritedShape ? "" : value)}
                         previewColor={effectiveColor}
@@ -3942,7 +4610,7 @@ export function PostgresProjectHomeExperimentView({
                     </label>
                     <label className="form-label">
                       Fill
-                      <PostgresExperimentObjectFillPicker
+                      <PostgresObjectFillPicker
                         value={effectiveFill}
                         onChange={(value) => config.setFillOverride(value === inheritedFill ? "" : value)}
                         previewColor={effectiveColor}
@@ -4075,10 +4743,12 @@ export function PostgresProjectHomeExperimentView({
     lineWeightOverride: number | null;
     arrowheadOverride: string;
     colorOverride: string;
-    availableFromObjects: PostgresExperimentObject[];
-    availableToObjects: PostgresExperimentObject[];
-    selectedType: PostgresExperimentRelationshipType | null;
-    attributeDefinitions: PostgresExperimentRelationshipAttributeDefinition[];
+    availableFromObjects: PostgresObject[];
+    availableToObjects: PostgresObject[];
+    availableFromEndpointOptions?: PostgresRelationshipEndpointOption[];
+    availableToEndpointOptions?: PostgresRelationshipEndpointOption[];
+    selectedType: PostgresRelationshipType | null;
+    attributeDefinitions: PostgresRelationshipAttributeDefinition[];
     attributeValues: Record<string, string>;
     onClose: () => void;
     onSubmit: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
@@ -4091,19 +4761,20 @@ export function PostgresProjectHomeExperimentView({
     setArrowheadOverride: Dispatch<SetStateAction<string>>;
     setColorOverride: Dispatch<SetStateAction<string>>;
     setAttributeValues: Dispatch<SetStateAction<Record<string, string>>>;
+    onNewRelationshipType?: () => void;
   }) {
-    const inheritedRelationshipColor = normalizePostgresExperimentRelationshipColor(config.selectedType?.color || "");
+    const inheritedRelationshipColor = normalizePostgresRelationshipColor(config.selectedType?.color || "");
     const relationshipColorIsInherited = !config.colorOverride.trim();
-    const effectiveRelationshipColor = resolvePostgresExperimentRelationshipColor({ colorOverride: config.colorOverride }, config.selectedType);
-    const inheritedRelationshipLineShape = resolvePostgresExperimentRelationshipLineShape({ lineShapeOverride: "" }, config.selectedType);
+    const effectiveRelationshipColor = resolvePostgresRelationshipColor({ colorOverride: config.colorOverride }, config.selectedType);
+    const inheritedRelationshipLineShape = resolvePostgresRelationshipLineShape({ lineShapeOverride: "" }, config.selectedType);
     const relationshipLineShapeIsInherited = !config.lineShapeOverride.trim();
-    const effectiveRelationshipLineShape = resolvePostgresExperimentRelationshipLineShape({ lineShapeOverride: config.lineShapeOverride }, config.selectedType);
-    const inheritedRelationshipLineWeight = resolvePostgresExperimentRelationshipLineWeight({ lineWeightOverride: null }, config.selectedType);
+    const effectiveRelationshipLineShape = resolvePostgresRelationshipLineShape({ lineShapeOverride: config.lineShapeOverride }, config.selectedType);
+    const inheritedRelationshipLineWeight = resolvePostgresRelationshipLineWeight({ lineWeightOverride: null }, config.selectedType);
     const relationshipLineWeightIsInherited = config.lineWeightOverride == null;
-    const effectiveRelationshipLineWeight = resolvePostgresExperimentRelationshipLineWeight({ lineWeightOverride: config.lineWeightOverride }, config.selectedType);
-    const inheritedRelationshipArrowhead = resolvePostgresExperimentRelationshipArrowhead({ arrowheadOverride: "" }, config.selectedType);
+    const effectiveRelationshipLineWeight = resolvePostgresRelationshipLineWeight({ lineWeightOverride: config.lineWeightOverride }, config.selectedType);
+    const inheritedRelationshipArrowhead = resolvePostgresRelationshipArrowhead({ arrowheadOverride: "" }, config.selectedType);
     const relationshipArrowheadIsInherited = !config.arrowheadOverride.trim();
-    const effectiveRelationshipArrowhead = resolvePostgresExperimentRelationshipArrowhead({ arrowheadOverride: config.arrowheadOverride }, config.selectedType);
+    const effectiveRelationshipArrowhead = resolvePostgresRelationshipArrowhead({ arrowheadOverride: config.arrowheadOverride }, config.selectedType);
 
     return (
       <div className="modal-overlay" onClick={() => !graphSubmitting && config.onClose()}>
@@ -4137,11 +4808,23 @@ export function PostgresProjectHomeExperimentView({
               <>
                 <label className="form-label">
                   Relationship type
-                  <select className="form-input" value={config.relationshipTypeId} onChange={(event) => config.setRelationshipTypeId(event.target.value)} autoFocus>
+                  <select
+                    className="form-input"
+                    value={config.relationshipTypeId}
+                    onChange={(event) => {
+                      if (event.target.value === "__new_relationship_type__") {
+                        config.onNewRelationshipType?.();
+                        return;
+                      }
+                      config.setRelationshipTypeId(event.target.value);
+                    }}
+                    autoFocus
+                  >
                     <option value="">Select relationship type</option>
                     {relationshipTypes.map((relationshipType) => (
                       <option key={relationshipType.id} value={relationshipType.id}>{relationshipType.name}</option>
                     ))}
+                    <option value="__new_relationship_type__">Add new relationship type...</option>
                   </select>
                 </label>
                 {config.selectedType ? (
@@ -4149,24 +4832,43 @@ export function PostgresProjectHomeExperimentView({
                     {`This relationship type rule is: ${formatRelationshipTypeConstraintSummary(config.selectedType)}.`}
                   </p>
                 ) : null}
-                <label className="form-label">
-                  From object
-                  <select className="form-input" value={config.fromObjectId} onChange={(event) => config.setFromObjectId(event.target.value)}>
-                    <option value="">Select object</option>
-                    {config.availableFromObjects.map((object) => (
-                      <option key={object.id} value={object.id}>{object.title}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="form-label">
-                  To object
-                  <select className="form-input" value={config.toObjectId} onChange={(event) => config.setToObjectId(event.target.value)}>
-                    <option value="">Select object</option>
-                    {config.availableToObjects.map((object) => (
-                      <option key={object.id} value={object.id}>{object.title}</option>
-                    ))}
-                  </select>
-                </label>
+                {config.availableFromEndpointOptions && config.availableToEndpointOptions ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+                    <PostgresRelationshipEndpointSingleSelect
+                      label="From"
+                      options={config.availableFromEndpointOptions}
+                      value={config.fromObjectId}
+                      onChange={config.setFromObjectId}
+                    />
+                    <PostgresRelationshipEndpointSingleSelect
+                      label="To"
+                      options={config.availableToEndpointOptions}
+                      value={config.toObjectId}
+                      onChange={config.setToObjectId}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <label className="form-label">
+                      From object
+                      <select className="form-input" value={config.fromObjectId} onChange={(event) => config.setFromObjectId(event.target.value)}>
+                        <option value="">Select object</option>
+                        {config.availableFromObjects.map((object) => (
+                          <option key={object.id} value={object.id}>{object.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="form-label">
+                      To object
+                      <select className="form-input" value={config.toObjectId} onChange={(event) => config.setToObjectId(event.target.value)}>
+                        <option value="">Select object</option>
+                        {config.availableToObjects.map((object) => (
+                          <option key={object.id} value={object.id}>{object.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
                 <label className="form-label">
                   Description
                   <textarea className="form-input form-textarea" rows={3} value={config.description} onChange={(event) => config.setDescription(event.target.value)} />
@@ -4201,7 +4903,7 @@ export function PostgresProjectHomeExperimentView({
                     inheritedFrom: "relationship type",
                     onReset: () => config.setLineShapeOverride(""),
                   })}
-                  <PostgresExperimentRelationshipLineShapePicker
+                  <PostgresRelationshipLineShapePicker
                     value={effectiveRelationshipLineShape}
                     onChange={(value) =>
                       config.setLineShapeOverride(value === inheritedRelationshipLineShape ? "" : value)
@@ -4215,7 +4917,7 @@ export function PostgresProjectHomeExperimentView({
                     inheritedFrom: "relationship type",
                     onReset: () => config.setLineWeightOverride(null),
                   })}
-                  <PostgresExperimentRelationshipLineWeightPicker
+                  <PostgresRelationshipLineWeightPicker
                     value={effectiveRelationshipLineWeight}
                     onChange={(value) =>
                       config.setLineWeightOverride(value === inheritedRelationshipLineWeight ? null : value)
@@ -4229,7 +4931,7 @@ export function PostgresProjectHomeExperimentView({
                     inheritedFrom: "relationship type",
                     onReset: () => config.setArrowheadOverride(""),
                   })}
-                  <PostgresExperimentRelationshipArrowheadPicker
+                  <PostgresRelationshipArrowheadPicker
                     value={effectiveRelationshipArrowhead}
                     onChange={(value) =>
                       config.setArrowheadOverride(value === inheritedRelationshipArrowhead ? "" : value)
@@ -4285,7 +4987,15 @@ export function PostgresProjectHomeExperimentView({
               <button type="button" className="btn" onClick={config.onClose} disabled={graphSubmitting}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn--primary" disabled={graphSubmitting || objects.length < 2}>
+              <button
+                type="submit"
+                className="btn btn--primary"
+                disabled={graphSubmitting || (
+                  config.availableFromEndpointOptions && config.availableToEndpointOptions
+                    ? !config.fromObjectId || !config.toObjectId
+                    : objects.length < 2
+                )}
+              >
                 {graphSubmitting ? "Saving..." : config.submitLabel}
               </button>
             </div>
@@ -4414,7 +5124,7 @@ export function PostgresProjectHomeExperimentView({
     [selectedUserRoleFilter, users],
   );
 
-  function getEditableRolesForUser(user: PostgresExperimentProjectUser) {
+  function getEditableRolesForUser(user: PostgresProjectUser) {
     if (!canChangeRoles) return [user.role];
     if (user.role === "owner" && !isProjectAdmin && ownerCount <= 1) return ["owner"];
     if (isProjectAdmin || currentProjectUser?.role === "owner") return [...PROJECT_ROLE_OPTIONS];
@@ -4426,7 +5136,7 @@ export function PostgresProjectHomeExperimentView({
     return PROJECT_ROLE_OPTIONS.filter((role) => role !== "owner");
   }
 
-  function getRemoveBlockReason(user: PostgresExperimentProjectUser) {
+  function getRemoveBlockReason(user: PostgresProjectUser) {
     if (!canRemoveUsers) return "You do not have permission to remove users from this project.";
     if (user.appUserId === authSession.user.id) return "You cannot remove your own account from this project.";
     if (user.role === "owner" && !isProjectAdmin && currentProjectUser?.role !== "owner") {
@@ -4444,8 +5154,8 @@ export function PostgresProjectHomeExperimentView({
       setUsersError("");
       try {
         const [nextUsers, nextAppUsers] = await Promise.all([
-          listPostgresExperimentProjectUsers(project.id),
-          listPostgresExperimentAppUsers(),
+          listPostgresProjectUsers(project.id),
+          listPostgresAppUsers(),
         ]);
         if (!cancelled) {
           setUsers(nextUsers);
@@ -4491,29 +5201,32 @@ export function PostgresProjectHomeExperimentView({
           nextObjectTypes,
           nextRelationshipTypes,
           nextObjects,
+          nextSources,
           nextRelationships,
           nextObjectAttributeDefinitions,
           nextRelationshipAttributeDefinitions,
           nextSavedDrawings,
         ] = await Promise.all([
-          listPostgresExperimentObjectTypes(project.id),
-          listPostgresExperimentRelationshipTypes(project.id),
-          listPostgresExperimentObjects(project.id),
-          listPostgresExperimentRelationships(project.id),
-          listPostgresExperimentObjectAttributeDefinitions(project.id),
-          listPostgresExperimentRelationshipAttributeDefinitions(project.id),
-          listPostgresExperimentSavedDrawingSummaries(project.id),
+          listPostgresObjectTypes(project.id),
+          listPostgresRelationshipTypes(project.id),
+          listPostgresObjects(project.id),
+          listPostgresSources(project.id),
+          listPostgresRelationships(project.id),
+          listPostgresObjectAttributeDefinitions(project.id),
+          listPostgresRelationshipAttributeDefinitions(project.id),
+          listPostgresSavedDrawingSummaries(project.id),
         ]);
         if (!cancelled) {
           setObjectTypes(nextObjectTypes);
           setRelationshipTypes(nextRelationshipTypes);
           setObjects(nextObjects);
+          setSources(nextSources);
           setRelationships(nextRelationships);
           setObjectAttributeDefinitions(nextObjectAttributeDefinitions);
           setRelationshipAttributeDefinitions(nextRelationshipAttributeDefinitions);
           setSavedDrawings(nextSavedDrawings);
-          setFromObjectId((current) => current || nextObjects[0]?.id || "");
-          setToObjectId((current) => current || nextObjects[1]?.id || nextObjects[0]?.id || "");
+          setFromObjectId((current) => current || (nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
+          setToObjectId((current) => current || (nextObjects[1] ? `object:${nextObjects[1].id}` : nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
           setRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
           setCanvasRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
         }
@@ -4522,6 +5235,7 @@ export function PostgresProjectHomeExperimentView({
           setObjectTypes([]);
           setRelationshipTypes([]);
           setObjects([]);
+          setSources([]);
           setRelationships([]);
           setObjectAttributeDefinitions([]);
           setRelationshipAttributeDefinitions([]);
@@ -4548,7 +5262,7 @@ export function PostgresProjectHomeExperimentView({
       setCanvasSaveError("");
       setCanvasStateLoaded(false);
       try {
-        const nextCanvasState = await getPostgresExperimentProjectCanvasState(project.id);
+        const nextCanvasState = await getPostgresProjectCanvasState(project.id);
         if (cancelled) return;
         setCanvasScale(nextCanvasState.viewport.zoom || 1);
         setCanvasOffset({
@@ -4581,8 +5295,8 @@ export function PostgresProjectHomeExperimentView({
     setUsersError("");
     try {
       const [nextUsers, nextAppUsers] = await Promise.all([
-        listPostgresExperimentProjectUsers(project.id),
-        listPostgresExperimentAppUsers(),
+        listPostgresProjectUsers(project.id),
+        listPostgresAppUsers(),
       ]);
       setUsers(nextUsers);
       setAppUsers(nextAppUsers);
@@ -4597,7 +5311,7 @@ export function PostgresProjectHomeExperimentView({
 
   const refreshSavedDrawings = useCallback(async () => {
     try {
-      const nextSavedDrawings = await listPostgresExperimentSavedDrawingSummaries(project.id);
+      const nextSavedDrawings = await listPostgresSavedDrawingSummaries(project.id);
       setSavedDrawings(nextSavedDrawings);
     } catch (loadError) {
       setGraphError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -4610,7 +5324,7 @@ export function PostgresProjectHomeExperimentView({
       setGraphNotice("");
       setGraphSubmitting(true);
       try {
-        const drawing = await getPostgresExperimentSavedDrawing(project.id, drawingId);
+        const drawing = await getPostgresSavedDrawing(project.id, drawingId);
         if (drawing.canvasKind !== "free_draw") {
           setGraphError(`Opening saved ${formatCanvasKindLabel(drawing.canvasKind)} canvases is not wired yet.`);
           return;
@@ -4643,8 +5357,8 @@ export function PostgresProjectHomeExperimentView({
     [project.id],
   );
 
-  function buildSavedDrawingSvg(drawing: PostgresExperimentSavedDrawing, mode: "screen" | "pdf" = "screen") {
-    const visibleNodeStates: PostgresExperimentCanvasNodeState[] = drawing.state.nodes;
+  function buildSavedDrawingSvg(drawing: PostgresSavedDrawing, mode: "screen" | "pdf" = "screen") {
+    const visibleNodeStates: PostgresCanvasNodeState[] = drawing.state.nodes;
     const visibleNodeIds = new Set(visibleNodeStates.map((node) => node.id));
     const visibleObjects = visibleNodeStates
       .map((nodeState) => {
@@ -4656,9 +5370,9 @@ export function PostgresProjectHomeExperimentView({
       .filter((
         entry,
       ): entry is {
-        nodeState: PostgresExperimentCanvasNodeState;
-        object: PostgresExperimentObject;
-        objectTypeRecord: PostgresExperimentObjectType | null;
+        nodeState: PostgresCanvasNodeState;
+        object: PostgresObject;
+        objectTypeRecord: PostgresObjectType | null;
       } => !!entry);
     const visibleRelationships = relationships.filter(
       (relationship) =>
@@ -4667,10 +5381,10 @@ export function PostgresProjectHomeExperimentView({
         && visibleNodeIds.has(relationship.toObjectId),
     );
 
-    const shapeBounds = drawing.state.shapes.map((shape: PostgresExperimentCanvasShape) => {
+    const shapeBounds = drawing.state.shapes.map((shape: PostgresCanvasShape) => {
       if (shape.kind === "pen") {
-        const xs = shape.points.map((point: PostgresExperimentCanvasPoint) => point.x);
-        const ys = shape.points.map((point: PostgresExperimentCanvasPoint) => point.y);
+        const xs = shape.points.map((point: PostgresCanvasPoint) => point.x);
+        const ys = shape.points.map((point: PostgresCanvasPoint) => point.y);
         return {
           left: Math.min(...xs, 0),
           top: Math.min(...ys, 0),
@@ -4686,7 +5400,7 @@ export function PostgresProjectHomeExperimentView({
       };
     });
 
-    const nodeBounds = visibleObjects.map(({ nodeState }: { nodeState: PostgresExperimentCanvasNodeState }) => ({
+    const nodeBounds = visibleObjects.map(({ nodeState }: { nodeState: PostgresCanvasNodeState }) => ({
       left: nodeState.x,
       top: nodeState.y,
       right: nodeState.x + (nodeState.width || 220),
@@ -4694,8 +5408,8 @@ export function PostgresProjectHomeExperimentView({
     }));
 
     const relationshipBounds = visibleRelationships.map((relationship) => {
-      const source = visibleNodeStates.find((node: PostgresExperimentCanvasNodeState) => node.id === relationship.fromObjectId);
-      const target = visibleNodeStates.find((node: PostgresExperimentCanvasNodeState) => node.id === relationship.toObjectId);
+      const source = visibleNodeStates.find((node: PostgresCanvasNodeState) => node.id === relationship.fromObjectId);
+      const target = visibleNodeStates.find((node: PostgresCanvasNodeState) => node.id === relationship.toObjectId);
       if (!source || !target) {
         return { left: 0, top: 0, right: 0, bottom: 0 };
       }
@@ -4721,15 +5435,15 @@ export function PostgresProjectHomeExperimentView({
     const height = Math.max(240, maxY - minY);
 
     const relationshipSvg = visibleRelationships.map((relationship, index) => {
-      const source = visibleNodeStates.find((node: PostgresExperimentCanvasNodeState) => node.id === relationship.fromObjectId);
-      const target = visibleNodeStates.find((node: PostgresExperimentCanvasNodeState) => node.id === relationship.toObjectId);
+      const source = visibleNodeStates.find((node: PostgresCanvasNodeState) => node.id === relationship.fromObjectId);
+      const target = visibleNodeStates.find((node: PostgresCanvasNodeState) => node.id === relationship.toObjectId);
       if (!source || !target) return "";
       const sourceX = source.x + (source.width || 220) / 2 - minX;
       const sourceY = source.y + (source.height || 110) / 2 - minY;
       const targetX = target.x + (target.width || 220) / 2 - minX;
       const targetY = target.y + (target.height || 110) / 2 - minY;
       const relationshipTypeRecord = relationshipTypeById.get(relationship.relationshipTypeId) ?? null;
-      const appearance = getPostgresExperimentRelationshipAppearance(relationship, relationshipTypeRecord);
+      const appearance = getPostgresRelationshipAppearance(relationship, relationshipTypeRecord);
       const markerEndId = `saved-end-${index}`;
       const markerStartId = `saved-start-${index}`;
       return `
@@ -4743,8 +5457,8 @@ export function PostgresProjectHomeExperimentView({
           x2="${targetX}"
           y2="${targetY}"
           stroke="${appearance.color}"
-          stroke-width="${getPostgresExperimentRelationshipStrokeWidth(appearance.lineWeight)}"
-          ${getPostgresExperimentRelationshipStrokeDasharray(appearance.lineShape) ? `stroke-dasharray="${getPostgresExperimentRelationshipStrokeDasharray(appearance.lineShape)}"` : ""}
+          stroke-width="${getPostgresRelationshipStrokeWidth(appearance.lineWeight)}"
+          ${getPostgresRelationshipStrokeDasharray(appearance.lineShape) ? `stroke-dasharray="${getPostgresRelationshipStrokeDasharray(appearance.lineShape)}"` : ""}
           ${appearance.arrowhead === "none" ? "" : `marker-end="url(#${markerEndId})"`}
           ${appearance.arrowhead === "double_sided" ? `marker-start="url(#${markerStartId})"` : ""}
         />
@@ -4752,16 +5466,16 @@ export function PostgresProjectHomeExperimentView({
       `;
     }).join("");
 
-    const shapeSvg = drawing.state.shapes.map((shape: PostgresExperimentCanvasShape) => {
+    const shapeSvg = drawing.state.shapes.map((shape: PostgresCanvasShape) => {
       return renderCanvasSketchShapeSvg(shape, minX, minY, mode);
     }).join("");
 
     const objectSvg = visibleObjects.map(({ nodeState, object, objectTypeRecord }: {
-      nodeState: PostgresExperimentCanvasNodeState;
-      object: PostgresExperimentObject;
-      objectTypeRecord: PostgresExperimentObjectType | null;
+      nodeState: PostgresCanvasNodeState;
+      object: PostgresObject;
+      objectTypeRecord: PostgresObjectType | null;
     }) => {
-      const appearance = getPostgresExperimentObjectAppearance(object, objectTypeRecord);
+      const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
       const nodeWidth = nodeState.width || 220;
       const nodeHeight = nodeState.height || 110;
       const x = nodeState.x - minX;
@@ -4791,7 +5505,7 @@ export function PostgresProjectHomeExperimentView({
     };
   }
 
-  async function renderSavedDrawingCanvas(drawing: PostgresExperimentSavedDrawing): Promise<{
+  async function renderSavedDrawingCanvas(drawing: PostgresSavedDrawing): Promise<{
     canvas: HTMLCanvasElement;
     width: number;
     height: number;
@@ -4824,7 +5538,7 @@ export function PostgresProjectHomeExperimentView({
     }
   }
 
-  async function renderSavedDrawingPngBytes(drawing: PostgresExperimentSavedDrawing): Promise<Uint8Array> {
+  async function renderSavedDrawingPngBytes(drawing: PostgresSavedDrawing): Promise<Uint8Array> {
     const { canvas } = await renderSavedDrawingCanvas(drawing);
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((nextBlob) => {
@@ -4841,7 +5555,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphError("");
     setSavedDrawingExportBusyFormat(format);
     try {
-      const drawing = await getPostgresExperimentSavedDrawing(project.id, drawingSummary.id);
+      const drawing = await getPostgresSavedDrawing(project.id, drawingSummary.id);
       const fileStem = sanitizeFileStem(drawing.name);
       if (format === "png") {
         const path = await save({
@@ -4898,7 +5612,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphNotice("");
     setGraphSubmitting(true);
     try {
-      await deletePostgresExperimentSavedDrawing(project.id, drawingId);
+      await deletePostgresSavedDrawing(project.id, drawingId);
       setSavedDrawings((current) => current.filter((drawing) => drawing.id !== drawingId));
       if (savedCanvasSession?.id === drawingId) {
         clearSavedCanvasSession();
@@ -4923,7 +5637,7 @@ export function PostgresProjectHomeExperimentView({
 
     setUsersSubmitting(true);
     try {
-      const created = await createPostgresExperimentProjectUser({
+      const created = await createPostgresProjectUser({
         projectId: project.id,
         appUserId: selectedAppUserId,
         role: userRole,
@@ -4941,12 +5655,12 @@ export function PostgresProjectHomeExperimentView({
     }
   }
 
-  async function handleSaveUserRole(user: PostgresExperimentProjectUser) {
+  async function handleSaveUserRole(user: PostgresProjectUser) {
     setUsersError("");
     setUserNotice("");
     setUsersSubmitting(true);
     try {
-      const updated = await updatePostgresExperimentProjectUser({
+      const updated = await updatePostgresProjectUser({
         projectId: project.id,
         projectUserId: user.id,
         role: editRole,
@@ -4961,7 +5675,7 @@ export function PostgresProjectHomeExperimentView({
     }
   }
 
-  async function handleRemoveUser(user: PostgresExperimentProjectUser) {
+  async function handleRemoveUser(user: PostgresProjectUser) {
     const blockReason = getRemoveBlockReason(user);
     if (blockReason) {
       setUsersError(blockReason);
@@ -4972,7 +5686,7 @@ export function PostgresProjectHomeExperimentView({
     setUserNotice("");
     setUsersSubmitting(true);
     try {
-      await deletePostgresExperimentProjectUser(project.id, user.id);
+      await deletePostgresProjectUser(project.id, user.id);
       setUsers((current) => current.filter((entry) => entry.id !== user.id));
       setRemovingUserId(null);
       setUserNotice(`Removed ${user.name} from this PostgreSQL project.`);
@@ -4991,30 +5705,33 @@ export function PostgresProjectHomeExperimentView({
         nextObjectTypes,
         nextRelationshipTypes,
         nextObjects,
+        nextSources,
         nextRelationships,
         nextObjectAttributeDefinitions,
         nextRelationshipAttributeDefinitions,
         nextSavedDrawings,
         nextCanvasState,
       ] = await Promise.all([
-        listPostgresExperimentObjectTypes(project.id),
-        listPostgresExperimentRelationshipTypes(project.id),
-        listPostgresExperimentObjects(project.id),
-        listPostgresExperimentRelationships(project.id),
-        listPostgresExperimentObjectAttributeDefinitions(project.id),
-        listPostgresExperimentRelationshipAttributeDefinitions(project.id),
-        listPostgresExperimentSavedDrawingSummaries(project.id),
-        getPostgresExperimentProjectCanvasState(project.id),
+        listPostgresObjectTypes(project.id),
+        listPostgresRelationshipTypes(project.id),
+        listPostgresObjects(project.id),
+        listPostgresSources(project.id),
+        listPostgresRelationships(project.id),
+        listPostgresObjectAttributeDefinitions(project.id),
+        listPostgresRelationshipAttributeDefinitions(project.id),
+        listPostgresSavedDrawingSummaries(project.id),
+        getPostgresProjectCanvasState(project.id),
       ]);
       setObjectTypes(nextObjectTypes);
       setRelationshipTypes(nextRelationshipTypes);
       setObjects(nextObjects);
+      setSources(nextSources);
       setRelationships(nextRelationships);
       setObjectAttributeDefinitions(nextObjectAttributeDefinitions);
       setRelationshipAttributeDefinitions(nextRelationshipAttributeDefinitions);
       setSavedDrawings(nextSavedDrawings);
-      setFromObjectId((current) => current || nextObjects[0]?.id || "");
-      setToObjectId((current) => current || nextObjects[1]?.id || nextObjects[0]?.id || "");
+      setFromObjectId((current) => current || (nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
+      setToObjectId((current) => current || (nextObjects[1] ? `object:${nextObjects[1].id}` : nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
       setRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
       setCanvasRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
       if (activeScreen !== "free-draw") {
@@ -5032,6 +5749,7 @@ export function PostgresProjectHomeExperimentView({
       setObjectTypes([]);
       setRelationshipTypes([]);
       setObjects([]);
+      setSources([]);
       setRelationships([]);
       setObjectAttributeDefinitions([]);
       setRelationshipAttributeDefinitions([]);
@@ -5049,7 +5767,7 @@ export function PostgresProjectHomeExperimentView({
     let unlisten: (() => void) | undefined;
 
     async function subscribeToProjectChanges() {
-      unlisten = await listen<PostgresExperimentProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
+      unlisten = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
         if (disposed) return;
         if (event.payload.projectId !== project.id) return;
 
@@ -5148,14 +5866,14 @@ export function PostgresProjectHomeExperimentView({
   }, [canvasRelationshipTypeId, relationshipTypes]);
 
   useEffect(() => {
-    if (fromObjectId && availableFromObjects.some((object) => object.id === fromObjectId)) return;
-    setFromObjectId(availableFromObjects[0]?.id ?? "");
-  }, [availableFromObjects, fromObjectId]);
+    if (fromObjectId && availableFromEndpointOptions.some((option) => option.key === fromObjectId)) return;
+    setFromObjectId(availableFromEndpointOptions[0]?.key ?? "");
+  }, [availableFromEndpointOptions, fromObjectId]);
 
   useEffect(() => {
-    if (toObjectId && availableToObjects.some((object) => object.id === toObjectId)) return;
-    setToObjectId(availableToObjects[0]?.id ?? "");
-  }, [availableToObjects, toObjectId]);
+    if (toObjectId && availableToEndpointOptions.some((option) => option.key === toObjectId)) return;
+    setToObjectId(availableToEndpointOptions[0]?.key ?? "");
+  }, [availableToEndpointOptions, toObjectId]);
 
   useEffect(() => {
     if (editingRelationshipId === null) return;
@@ -5173,7 +5891,7 @@ export function PostgresProjectHomeExperimentView({
     if (activeScreen !== "explore") return;
     setCanvasNodes((current) => {
       const objectTypeById = new Map(objectTypes.map((objectType) => [objectType.id, objectType]));
-      const next: Record<string, PostgresExperimentCanvasNodeState> = {};
+      const next: Record<string, PostgresCanvasNodeState> = {};
       objects.forEach((object, index) => {
         const existing = current[object.id];
         if (existing) {
@@ -5181,7 +5899,7 @@ export function PostgresProjectHomeExperimentView({
           return;
         }
         const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
-        const shape = getPostgresExperimentObjectAppearance(object, objectTypeRecord).shape;
+        const shape = getPostgresObjectAppearance(object, objectTypeRecord).shape;
         const defaultDimensions = getCanvasNodeDefaultDimensions(shape);
         const column = index % 4;
         const row = Math.floor(index / 4);
@@ -5200,7 +5918,7 @@ export function PostgresProjectHomeExperimentView({
   useEffect(() => {
     if (!canvasStateLoaded || activeScreen !== "explore") return;
     const timeoutId = window.setTimeout(() => {
-      void savePostgresExperimentProjectCanvasState({
+      void savePostgresProjectCanvasState({
         projectId: project.id,
         state: {
           viewport: {
@@ -5235,7 +5953,7 @@ export function PostgresProjectHomeExperimentView({
   }, [relationships]);
 
   function toObjectAttributePayload(
-    definitions: PostgresExperimentObjectAttributeDefinition[],
+    definitions: PostgresObjectAttributeDefinition[],
     valuesByDefinitionId: Record<string, string>,
   ) {
     return definitions.map((definition) => ({
@@ -5244,7 +5962,7 @@ export function PostgresProjectHomeExperimentView({
     }));
   }
 
-  function valuesForObject(object: PostgresExperimentObject): Record<string, string> {
+  function valuesForObject(object: PostgresObject): Record<string, string> {
     const valuesByDefinitionId: Record<string, string> = {};
     for (const value of object.attributeValues) {
       valuesByDefinitionId[value.attributeDefinitionId] = value.value;
@@ -5253,7 +5971,7 @@ export function PostgresProjectHomeExperimentView({
   }
 
   function toRelationshipAttributePayload(
-    definitions: PostgresExperimentRelationshipAttributeDefinition[],
+    definitions: PostgresRelationshipAttributeDefinition[],
     valuesByDefinitionId: Record<string, string>,
   ) {
     return definitions.map((definition) => ({
@@ -5262,7 +5980,7 @@ export function PostgresProjectHomeExperimentView({
     }));
   }
 
-  function valuesForRelationship(relationship: PostgresExperimentRelationship): Record<string, string> {
+  function valuesForRelationship(relationship: PostgresRelationship): Record<string, string> {
     const valuesByDefinitionId: Record<string, string> = {};
     for (const value of relationship.attributeValues) {
       valuesByDefinitionId[value.attributeDefinitionId] = value.value;
@@ -5271,7 +5989,7 @@ export function PostgresProjectHomeExperimentView({
   }
 
   async function handleSaveRelationshipAttributeDefinition(
-    draft: PostgresExperimentRelationshipAttributeDraft,
+    draft: PostgresRelationshipAttributeDraft,
     valuesByRelationshipId: Record<string, string>,
   ) {
     if (!editingRelationshipAttributeTypeId) {
@@ -5284,7 +6002,7 @@ export function PostgresProjectHomeExperimentView({
     setRelationshipAttributeEditorError("");
     try {
       const savedDefinition = draft.id
-        ? await updatePostgresExperimentRelationshipAttributeDefinition({
+        ? await updatePostgresRelationshipAttributeDefinition({
             projectId: project.id,
             attributeDefinitionId: draft.id,
             relationshipTypeId: editingRelationshipAttributeTypeId,
@@ -5293,7 +6011,7 @@ export function PostgresProjectHomeExperimentView({
             description: draft.description,
             options: draft.options,
           })
-        : await createPostgresExperimentRelationshipAttributeDefinition({
+        : await createPostgresRelationshipAttributeDefinition({
             projectId: project.id,
             relationshipTypeId: editingRelationshipAttributeTypeId,
             name: draft.name,
@@ -5306,7 +6024,7 @@ export function PostgresProjectHomeExperimentView({
         relationships
           .filter((relationship) => relationship.relationshipTypeId === editingRelationshipAttributeTypeId)
           .map((relationship) =>
-          savePostgresExperimentRelationship({
+          savePostgresRelationship({
             projectId: project.id,
             relationshipId: relationship.id,
             fromObjectId: relationship.fromObjectId,
@@ -5346,6 +6064,74 @@ export function PostgresProjectHomeExperimentView({
     }
   }
 
+  async function handleCreateObjectWorkspaceAttribute(draft: TypeScopedAttributeDraft) {
+    setGraphSubmitting(true);
+    setGraphError("");
+    setGraphNotice("");
+    setObjectWorkspaceAttributeError("");
+    try {
+      await Promise.all(
+        draft.typeIds.map((objectTypeId) =>
+          createPostgresObjectAttributeDefinition({
+            projectId: project.id,
+            objectTypeId,
+            name: draft.name,
+            dataType: draft.dataType,
+            description: draft.description,
+            options: draft.options,
+          }),
+        ),
+      );
+      await refreshGraph();
+      setObjectWorkspaceAttributeDraft(null);
+      setGraphNotice(
+        draft.typeIds.length === 1
+          ? `Created object attribute "${draft.name}".`
+          : `Created object attribute "${draft.name}" for ${draft.typeIds.length} object types.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setObjectWorkspaceAttributeError(message);
+      setGraphError(message);
+    } finally {
+      setGraphSubmitting(false);
+    }
+  }
+
+  async function handleCreateRelationshipWorkspaceAttribute(draft: TypeScopedAttributeDraft) {
+    setGraphSubmitting(true);
+    setGraphError("");
+    setGraphNotice("");
+    setRelationshipWorkspaceAttributeError("");
+    try {
+      await Promise.all(
+        draft.typeIds.map((relationshipTypeId) =>
+          createPostgresRelationshipAttributeDefinition({
+            projectId: project.id,
+            relationshipTypeId,
+            name: draft.name,
+            dataType: draft.dataType,
+            description: draft.description,
+            options: draft.options,
+          }),
+        ),
+      );
+      await refreshGraph();
+      setRelationshipWorkspaceAttributeDraft(null);
+      setGraphNotice(
+        draft.typeIds.length === 1
+          ? `Created relationship attribute "${draft.name}".`
+          : `Created relationship attribute "${draft.name}" for ${draft.typeIds.length} relationship types.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRelationshipWorkspaceAttributeError(message);
+      setGraphError(message);
+    } finally {
+      setGraphSubmitting(false);
+    }
+  }
+
   async function handleCreateObject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setGraphError("");
@@ -5358,21 +6144,21 @@ export function PostgresProjectHomeExperimentView({
     setGraphSubmitting(true);
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      let created = await savePostgresExperimentObject({
+      let created = await savePostgresObject({
         projectId: project.id,
         objectId: null,
         objectTypeId,
         title: objectTitle.trim(),
         description: objectDescription.trim(),
         shapeOverride: objectGraphicMode === "select" ? objectShapeOverride.trim() || null : null,
-        colorOverride: objectGraphicMode === "select" ? normalizeOptionalPostgresExperimentObjectTypeColor(objectColorOverride) || null : null,
+        colorOverride: objectGraphicMode === "select" ? normalizeOptionalPostgresObjectTypeColor(objectColorOverride) || null : null,
         fillOverride: objectGraphicMode === "select" ? objectFillOverride.trim() || null : null,
         imageStoragePath: objectGraphicMode === "upload" ? objectImageStoragePath.trim() || null : null,
         attributeValues: toObjectAttributePayload(objectAttributeDefinitionsForCreateType, objectAttributeValues),
       });
       if (objectGraphicMode === "upload" && draftObjectPendingImage) {
         try {
-          created = await importPostgresExperimentObjectImage({
+          created = await importPostgresObjectImage({
             projectId: project.id,
             objectId: created.id,
             originalFileName: draftObjectPendingImage.originalFileName,
@@ -5396,7 +6182,7 @@ export function PostgresProjectHomeExperimentView({
       closeCreateObjectModal();
       if (pendingCanvasNodePosition) {
         const objectTypeRecord = objectTypeById.get(created.objectTypeId) ?? null;
-        const shape = getPostgresExperimentObjectAppearance(created, objectTypeRecord).shape;
+        const shape = getPostgresObjectAppearance(created, objectTypeRecord).shape;
         const defaultDimensions = getCanvasNodeDefaultDimensions(shape);
         setCanvasNodes((current) => ({
           ...current,
@@ -5457,13 +6243,13 @@ export function PostgresProjectHomeExperimentView({
     setGraphSubmitting(true);
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const saved = await savePostgresExperimentObjectType({
+      const saved = await savePostgresObjectType({
         projectId: project.id,
         objectTypeId: null,
         name: resolvedType,
         description: draftObjectTypeDescription.trim(),
         shape: draftObjectTypeShape,
-        color: normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor),
+        color: normalizePostgresObjectTypeColor(draftObjectTypeColor),
         fill: draftObjectTypeFill,
         imageStoragePath: draftObjectTypeImageStoragePath.trim() || null,
         attributes: objectTypeAttributeDrafts.map((draft) => ({
@@ -5477,7 +6263,7 @@ export function PostgresProjectHomeExperimentView({
       let savedObjectType = saved.objectType;
       if (draftObjectTypePendingImage) {
         try {
-          savedObjectType = await importPostgresExperimentObjectTypeImage({
+          savedObjectType = await importPostgresObjectTypeImage({
             projectId: project.id,
             objectTypeId: saved.objectType.id,
             originalFileName: draftObjectTypePendingImage.originalFileName,
@@ -5513,7 +6299,7 @@ export function PostgresProjectHomeExperimentView({
     }
   }
 
-  function requestPostgresExperimentImageCropChoice(upload: PostgresExperimentImageUploadDraft): Promise<PostgresExperimentImageUploadDraft | null> {
+  function requestPostgresImageCropChoice(upload: PostgresImageUploadDraft): Promise<PostgresImageUploadDraft | null> {
     return new Promise((resolve) => {
       imageCropResolverRef.current = resolve;
       setImageCropDraft({
@@ -5528,52 +6314,52 @@ export function PostgresProjectHomeExperimentView({
     });
   }
 
-  function resolvePostgresExperimentImageCropChoice(upload: PostgresExperimentImageUploadDraft | null) {
+  function resolvePostgresImageCropChoice(upload: PostgresImageUploadDraft | null) {
     imageCropResolverRef.current?.(upload);
     imageCropResolverRef.current = null;
     setImageCropDraft(null);
   }
 
-  function handleCancelPostgresExperimentImageCropChoice() {
+  function handleCancelPostgresImageCropChoice() {
     if (imageCropDraft?.upload.previewUrl) {
       URL.revokeObjectURL(imageCropDraft.upload.previewUrl);
     }
-    resolvePostgresExperimentImageCropChoice(null);
+    resolvePostgresImageCropChoice(null);
   }
 
-  function handleUseFullPostgresExperimentImage() {
+  function handleUseFullPostgresImage() {
     if (!imageCropDraft) return;
-    if (imageCropDraft.upload.fileSizeBytes > POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES) {
+    if (imageCropDraft.upload.fileSizeBytes > POSTGRES_IMAGE_MAX_BYTES) {
       setImageCropDraft({
         ...imageCropDraft,
-        error: `This image is ${formatPostgresExperimentFileSize(imageCropDraft.upload.fileSizeBytes)}. Choose a file smaller than 5 MB or select a smaller region.`,
+        error: `This image is ${formatPostgresFileSize(imageCropDraft.upload.fileSizeBytes)}. Choose a file smaller than 5 MB or select a smaller region.`,
       });
       return;
     }
-    resolvePostgresExperimentImageCropChoice(imageCropDraft.upload);
+    resolvePostgresImageCropChoice(imageCropDraft.upload);
   }
 
-  async function handleUseCroppedPostgresExperimentImage() {
+  async function handleUseCroppedPostgresImage() {
     if (!imageCropDraft) return;
     setImageCropSubmitting(true);
     try {
-      const cropped = await cropPostgresExperimentImageUpload(
+      const cropped = await cropPostgresImageUpload(
         imageCropDraft.upload,
         imageCropDraft.aspect,
         imageCropDraft.sizePercent,
         imageCropDraft.xPercent,
         imageCropDraft.yPercent,
       );
-      if (cropped.fileSizeBytes > POSTGRES_EXPERIMENT_IMAGE_MAX_BYTES) {
+      if (cropped.fileSizeBytes > POSTGRES_IMAGE_MAX_BYTES) {
         URL.revokeObjectURL(cropped.previewUrl);
         setImageCropDraft({
           ...imageCropDraft,
-          error: `The selected region is still ${formatPostgresExperimentFileSize(cropped.fileSizeBytes)}. Select a smaller region or choose a smaller file.`,
+          error: `The selected region is still ${formatPostgresFileSize(cropped.fileSizeBytes)}. Select a smaller region or choose a smaller file.`,
         });
         return;
       }
       URL.revokeObjectURL(imageCropDraft.upload.previewUrl);
-      resolvePostgresExperimentImageCropChoice(cropped);
+      resolvePostgresImageCropChoice(cropped);
     } catch (error) {
       setImageCropDraft({
         ...imageCropDraft,
@@ -5584,7 +6370,7 @@ export function PostgresProjectHomeExperimentView({
     }
   }
 
-  async function pickObjectImageUpload(): Promise<PostgresExperimentImageUploadDraft | null> {
+  async function pickObjectImageUpload(): Promise<PostgresImageUploadDraft | null> {
     const selected = await open({
       multiple: false,
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg"] }],
@@ -5592,14 +6378,14 @@ export function PostgresProjectHomeExperimentView({
     if (!selected || Array.isArray(selected)) return null;
     const bytes = await readTauriFile(selected);
     const originalFileName = getFileNameFromPath(selected);
-    const previewBlob = new Blob([bytes], { type: getPostgresExperimentImageMimeType(originalFileName) });
+    const previewBlob = new Blob([bytes], { type: getPostgresImageMimeType(originalFileName) });
     const upload = {
       originalFileName,
       fileBytesBase64: bytesToBase64(bytes),
       previewUrl: URL.createObjectURL(previewBlob),
       fileSizeBytes: bytes.length,
     };
-    return requestPostgresExperimentImageCropChoice(upload);
+    return requestPostgresImageCropChoice(upload);
   }
 
   async function handlePickPendingObjectTypeImage() {
@@ -5647,7 +6433,7 @@ export function PostgresProjectHomeExperimentView({
     setObjectImageStoragePath("");
   }
 
-  function handleSetObjectTypeGraphicMode(mode: PostgresExperimentObjectGraphicMode) {
+  function handleSetObjectTypeGraphicMode(mode: PostgresObjectGraphicMode) {
     setDraftObjectTypeGraphicMode(mode);
     if (mode === "select") {
       if (editingObjectTypeModalId && draftObjectTypeImageStoragePath) {
@@ -5660,9 +6446,9 @@ export function PostgresProjectHomeExperimentView({
   }
 
   function handleSetObjectGraphicMode(
-    mode: PostgresExperimentObjectInstanceGraphicMode,
+    mode: PostgresObjectInstanceGraphicMode,
     config: {
-      setMode: Dispatch<SetStateAction<PostgresExperimentObjectInstanceGraphicMode>>;
+      setMode: Dispatch<SetStateAction<PostgresObjectInstanceGraphicMode>>;
       setShapeOverride: Dispatch<SetStateAction<string>>;
       setColorOverride: Dispatch<SetStateAction<string>>;
       setFillOverride: Dispatch<SetStateAction<string>>;
@@ -5705,7 +6491,7 @@ export function PostgresProjectHomeExperimentView({
     try {
       const upload = await pickObjectImageUpload();
       if (!upload) return;
-      const updated = await importPostgresExperimentObjectTypeImage({
+      const updated = await importPostgresObjectTypeImage({
         projectId: project.id,
         objectTypeId,
         ...upload,
@@ -5727,7 +6513,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphNotice("");
     setImageUploadSubmitting(true);
     try {
-      const updated = await removePostgresExperimentObjectTypeImage(project.id, objectTypeId);
+      const updated = await removePostgresObjectTypeImage(project.id, objectTypeId);
       setObjectTypes((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
       setDraftObjectTypeImageStoragePath("");
       setDraftObjectTypeGraphicMode("select");
@@ -5746,7 +6532,7 @@ export function PostgresProjectHomeExperimentView({
     try {
       const upload = await pickObjectImageUpload();
       if (!upload) return;
-      const updated = await importPostgresExperimentObjectImage({
+      const updated = await importPostgresObjectImage({
         projectId: project.id,
         objectId,
         ...upload,
@@ -5768,7 +6554,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphNotice("");
     setImageUploadSubmitting(true);
     try {
-      const updated = await removePostgresExperimentObjectImage(project.id, objectId);
+      const updated = await removePostgresObjectImage(project.id, objectId);
       setObjects((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
       setEditingObjectImageStoragePath("");
       setEditingObjectGraphicMode(
@@ -5796,13 +6582,13 @@ export function PostgresProjectHomeExperimentView({
     setGraphSubmitting(true);
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const saved = await savePostgresExperimentObjectType({
+      const saved = await savePostgresObjectType({
         projectId: project.id,
         objectTypeId: editingObjectTypeModalId,
         name: nextType,
         description: draftObjectTypeDescription.trim(),
         shape: draftObjectTypeShape,
-        color: normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor),
+        color: normalizePostgresObjectTypeColor(draftObjectTypeColor),
         fill: draftObjectTypeFill,
         imageStoragePath: draftObjectTypeImageStoragePath.trim() || null,
         attributes: objectTypeAttributeDrafts.map((draft) => ({
@@ -5838,7 +6624,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphNotice("");
     try {
       const objectTypeRecord = objectTypeById.get(objectTypeId);
-      await deletePostgresExperimentObjectType(project.id, objectTypeId);
+      await deletePostgresObjectType(project.id, objectTypeId);
       await refreshGraph();
       setOpenObjectTypeActionsMenu(null);
       setRemovingObjectTypeId(null);
@@ -5870,14 +6656,14 @@ export function PostgresProjectHomeExperimentView({
         attributeValueKeys: Object.keys(editingObjectAttributeValues),
       });
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const updated = await savePostgresExperimentObject({
+      const updated = await savePostgresObject({
         projectId: project.id,
         objectId: editingObjectId,
         objectTypeId: editingObjectTypeId,
         title: editingObjectTitle.trim(),
         description: editingObjectDescription.trim(),
         shapeOverride: editingObjectGraphicMode === "select" ? editingObjectShapeOverride.trim() || null : null,
-        colorOverride: editingObjectGraphicMode === "select" ? normalizeOptionalPostgresExperimentObjectTypeColor(editingObjectColorOverride) || null : null,
+        colorOverride: editingObjectGraphicMode === "select" ? normalizeOptionalPostgresObjectTypeColor(editingObjectColorOverride) || null : null,
         fillOverride: editingObjectGraphicMode === "select" ? editingObjectFillOverride.trim() || null : null,
         imageStoragePath: editingObjectGraphicMode === "upload" ? editingObjectImageStoragePath.trim() || null : null,
         attributeValues: toObjectAttributePayload(objectAttributeDefinitionsForEditingType, editingObjectAttributeValues),
@@ -5904,7 +6690,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphError("");
     setGraphNotice("");
     try {
-      await deletePostgresExperimentObject(project.id, objectId);
+      await deletePostgresObject(project.id, objectId);
       setObjects((current) => current.filter((entry) => entry.id !== objectId));
       setRelationships((current) =>
         current.filter((entry) => entry.fromObjectId !== objectId && entry.toObjectId !== objectId),
@@ -5918,8 +6704,8 @@ export function PostgresProjectHomeExperimentView({
   }
 
   function applySavedObjectTypeState(
-    savedObjectType: PostgresExperimentObjectType,
-    savedAttributeDefinitions: PostgresExperimentObjectAttributeDefinition[],
+    savedObjectType: PostgresObjectType,
+    savedAttributeDefinitions: PostgresObjectAttributeDefinition[],
   ) {
     setObjectTypes((current) => {
       const next = current.some((entry) => entry.id === savedObjectType.id)
@@ -5973,8 +6759,8 @@ export function PostgresProjectHomeExperimentView({
   }
 
   function applySavedRelationshipTypeState(
-    savedRelationshipType: PostgresExperimentRelationshipType,
-    savedAttributeDefinitions: PostgresExperimentRelationshipAttributeDefinition[],
+    savedRelationshipType: PostgresRelationshipType,
+    savedAttributeDefinitions: PostgresRelationshipAttributeDefinition[],
   ) {
     setRelationshipTypes((current) => {
       const next = current.some((entry) => entry.id === savedRelationshipType.id)
@@ -6024,8 +6810,10 @@ export function PostgresProjectHomeExperimentView({
       setDraftRelationshipLineWeight(2);
       setDraftRelationshipArrowhead("one_sided");
       setDraftRelationshipColor(POSTGRES_RELATIONSHIP_DEFAULT_COLOR);
-      setDraftRelationshipFromObjectTypeIds([]);
-      setDraftRelationshipToObjectTypeIds([]);
+      setDraftRelationshipFromObjectTypeIds(allObjectTypeIds);
+      setDraftRelationshipToObjectTypeIds(allObjectTypeIds);
+      setDraftRelationshipFromSourceKinds(allSourceKindIds);
+      setDraftRelationshipToSourceKinds(allSourceKindIds);
       initializeRelationshipTypeAttributeEditor(null);
       setCreateRelationshipTypeOpen(false);
       setRelationshipTypeId(existingType.id);
@@ -6036,7 +6824,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphSubmitting(true);
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const saved = await savePostgresExperimentRelationshipType({
+      const saved = await savePostgresRelationshipType({
         projectId: project.id,
         relationshipTypeId: null,
         name: nextType,
@@ -6044,9 +6832,11 @@ export function PostgresProjectHomeExperimentView({
         lineShape: draftRelationshipLineShape,
         lineWeight: draftRelationshipLineWeight,
         arrowhead: draftRelationshipArrowhead,
-        color: normalizePostgresExperimentRelationshipColor(draftRelationshipColor),
-        fromObjectTypeIds: draftRelationshipFromObjectTypeIds,
-        toObjectTypeIds: draftRelationshipToObjectTypeIds,
+        color: normalizePostgresRelationshipColor(draftRelationshipColor),
+        fromObjectTypeIds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipFromObjectTypeIds, allObjectTypeIds),
+        toObjectTypeIds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipToObjectTypeIds, allObjectTypeIds),
+        fromSourceKinds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipFromSourceKinds, allSourceKindIds),
+        toSourceKinds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipToSourceKinds, allSourceKindIds),
         attributes: relationshipTypeAttributeDrafts.map((draft) => ({
           id: draft.id || null,
           name: draft.name,
@@ -6061,8 +6851,10 @@ export function PostgresProjectHomeExperimentView({
       setDraftRelationshipLineWeight(2);
       setDraftRelationshipArrowhead("one_sided");
       setDraftRelationshipColor(POSTGRES_RELATIONSHIP_DEFAULT_COLOR);
-      setDraftRelationshipFromObjectTypeIds([]);
-      setDraftRelationshipToObjectTypeIds([]);
+      setDraftRelationshipFromObjectTypeIds(allObjectTypeIds);
+      setDraftRelationshipToObjectTypeIds(allObjectTypeIds);
+      setDraftRelationshipFromSourceKinds(allSourceKindIds);
+      setDraftRelationshipToSourceKinds(allSourceKindIds);
       initializeRelationshipTypeAttributeEditor(null);
       setCreateRelationshipTypeOpen(false);
       setRelationshipTypeId(saved.relationshipType.id);
@@ -6090,7 +6882,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphSubmitting(true);
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const saved = await savePostgresExperimentRelationshipType({
+      const saved = await savePostgresRelationshipType({
         projectId: project.id,
         relationshipTypeId: editingRelationshipTypeModalId,
         name: nextType,
@@ -6098,9 +6890,11 @@ export function PostgresProjectHomeExperimentView({
         lineShape: draftRelationshipLineShape,
         lineWeight: draftRelationshipLineWeight,
         arrowhead: draftRelationshipArrowhead,
-        color: normalizePostgresExperimentRelationshipColor(draftRelationshipColor),
-        fromObjectTypeIds: draftRelationshipFromObjectTypeIds,
-        toObjectTypeIds: draftRelationshipToObjectTypeIds,
+        color: normalizePostgresRelationshipColor(draftRelationshipColor),
+        fromObjectTypeIds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipFromObjectTypeIds, allObjectTypeIds),
+        toObjectTypeIds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipToObjectTypeIds, allObjectTypeIds),
+        fromSourceKinds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipFromSourceKinds, allSourceKindIds),
+        toSourceKinds: normalizePostgresRelationshipRestrictionSelection(draftRelationshipToSourceKinds, allSourceKindIds),
         attributes: relationshipTypeAttributeDrafts.map((draft) => ({
           id: draft.id || null,
           name: draft.name,
@@ -6116,8 +6910,10 @@ export function PostgresProjectHomeExperimentView({
       setDraftRelationshipLineWeight(2);
       setDraftRelationshipArrowhead("one_sided");
       setDraftRelationshipColor(POSTGRES_RELATIONSHIP_DEFAULT_COLOR);
-      setDraftRelationshipFromObjectTypeIds([]);
-      setDraftRelationshipToObjectTypeIds([]);
+      setDraftRelationshipFromObjectTypeIds(allObjectTypeIds);
+      setDraftRelationshipToObjectTypeIds(allObjectTypeIds);
+      setDraftRelationshipFromSourceKinds(allSourceKindIds);
+      setDraftRelationshipToSourceKinds(allSourceKindIds);
       initializeRelationshipTypeAttributeEditor(null);
       setGraphNotice(`Updated relationship type "${saved.relationshipType.name}".`);
     } catch (error) {
@@ -6134,7 +6930,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphNotice("");
     try {
       const relationshipTypeRecord = relationshipTypeById.get(relationshipTypeId);
-      await deletePostgresExperimentRelationshipType(project.id, relationshipTypeId);
+      await deletePostgresRelationshipType(project.id, relationshipTypeId);
       await refreshGraph();
       setOpenRelationshipTypeActionsMenu(null);
       setRemovingRelationshipTypeId(null);
@@ -6153,25 +6949,29 @@ export function PostgresProjectHomeExperimentView({
     event.preventDefault();
     setGraphError("");
     setGraphNotice("");
-    if (!fromObjectId || !toObjectId || !relationshipTypeId) {
-      setGraphError("Choose two objects and a relationship type.");
+    const fromEndpoint = parsePostgresRelationshipEndpointKey(fromObjectId);
+    const toEndpoint = parsePostgresRelationshipEndpointKey(toObjectId);
+    if (!fromEndpoint || !toEndpoint || !relationshipTypeId) {
+      setGraphError("Choose two endpoints and a relationship type.");
       return;
     }
 
     setGraphSubmitting(true);
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const created = await savePostgresExperimentRelationship({
+      const created = await savePostgresRelationship({
         projectId: project.id,
         relationshipId: null,
-        fromObjectId,
-        toObjectId,
+        fromEntityType: fromEndpoint.entityType,
+        fromEntityId: fromEndpoint.entityId,
+        toEntityType: toEndpoint.entityType,
+        toEntityId: toEndpoint.entityId,
         relationshipTypeId,
         description: relationshipDescription.trim(),
         lineShapeOverride: relationshipLineShapeOverride.trim() || null,
         lineWeightOverride: relationshipLineWeightOverride,
         arrowheadOverride: relationshipArrowheadOverride.trim() || null,
-        colorOverride: normalizeOptionalPostgresExperimentRelationshipColor(relationshipColorOverride) || null,
+        colorOverride: normalizeOptionalPostgresRelationshipColor(relationshipColorOverride) || null,
         attributeValues: toRelationshipAttributePayload(relationshipAttributeDefinitionsForCreateType, relationshipAttributeValues),
       });
       setRelationships((current) => [...current, created]);
@@ -6208,7 +7008,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphNotice("");
     try {
       pendingLocalGraphRefreshSkipsRef.current = 1;
-      const updated = await savePostgresExperimentRelationship({
+      const updated = await savePostgresRelationship({
         projectId: project.id,
         relationshipId: editingRelationshipId,
         fromObjectId: editingRelationshipFromObjectId,
@@ -6218,7 +7018,7 @@ export function PostgresProjectHomeExperimentView({
         lineShapeOverride: editingRelationshipLineShapeOverride.trim() || null,
         lineWeightOverride: editingRelationshipLineWeightOverride,
         arrowheadOverride: editingRelationshipArrowheadOverride.trim() || null,
-        colorOverride: normalizeOptionalPostgresExperimentRelationshipColor(editingRelationshipColorOverride) || null,
+        colorOverride: normalizeOptionalPostgresRelationshipColor(editingRelationshipColorOverride) || null,
         attributeValues: toRelationshipAttributePayload(relationshipAttributeDefinitionsForEditingType, editingRelationshipAttributeValues),
       });
       setRelationships((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
@@ -6242,7 +7042,7 @@ export function PostgresProjectHomeExperimentView({
     setGraphError("");
     setGraphNotice("");
     try {
-      await deletePostgresExperimentRelationship(project.id, relationshipId);
+      await deletePostgresRelationship(project.id, relationshipId);
       setRelationships((current) => current.filter((entry) => entry.id !== relationshipId));
       setRemovingRelationshipId(null);
       setGraphNotice("Deleted relationship.");
@@ -6255,7 +7055,7 @@ export function PostgresProjectHomeExperimentView({
 
   return (
     <div className="app-shell">
-      <PostgresExperimentSidebar
+      <PostgresSidebar
         activeScreen={activeScreen}
         activeProject={project}
         authSession={authSession}
@@ -6267,9 +7067,16 @@ export function PostgresProjectHomeExperimentView({
         onShowProjectCodebook={() => setActiveScreen("codebook")}
         onShowProjectCodeText={() => setActiveScreen("code-text")}
         onShowProjectMemos={() => setActiveScreen("memos")}
+        onShowProjectReports={() => setActiveScreen("reports")}
         onShowProjectLog={() => setActiveScreen("project-log")}
         onShowProjectObjects={() => setActiveScreen("objects")}
         onShowProjectRelationships={() => setActiveScreen("relationships")}
+        onShowAiAssistHome={() => setActiveScreen("ai-assist")}
+        onShowAiAssistChat={() => setActiveScreen("ai-assist-chat")}
+        onShowAiAssistedCoding={() => setActiveScreen("ai-assisted-coding")}
+        onShowAiAnalyze={() => setActiveScreen("ai-analyze")}
+        onShowAiAssistSourceAttributes={() => setActiveScreen("ai-assist-source-attributes")}
+        onShowAiAssistProcessDocuments={() => setActiveScreen("ai-assist-process-documents")}
         onShowFreeDraw={() => {
           clearSavedCanvasSession();
           setActiveScreen("free-draw");
@@ -6328,18 +7135,18 @@ export function PostgresProjectHomeExperimentView({
                     </div>
                     <div className="home-restricted-item">
                       <span className="home-restricted-label">Created</span>
-                      <span className="home-restricted-value">{formatPostgresExperimentDateTime(project.createdAt)}</span>
+                      <span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span>
                     </div>
                     <div className="home-restricted-item">
                       <span className="home-restricted-label">Last updated</span>
-                      <span className="home-restricted-value">{formatPostgresExperimentDateTime(lastProjectActivityAt)}</span>
+                      <span className="home-restricted-value">{formatPostgresDateTime(lastProjectActivityAt)}</span>
                     </div>
                   </div>
                 </section>
               </div>
 
               <div className="home-stats-grid postgres-experiment-home-stats-grid">
-                <PostgresExperimentStatCard
+                <PostgresStatCard
                   title="Users"
                   count={users.length}
                   stats={[
@@ -6351,7 +7158,7 @@ export function PostgresProjectHomeExperimentView({
                   onClick={() => setActiveScreen("users")}
                 />
 
-                <PostgresExperimentStatCard
+                <PostgresStatCard
                   title="Objects"
                   count={objects.length}
                   stats={[
@@ -6362,7 +7169,7 @@ export function PostgresProjectHomeExperimentView({
                   onClick={() => setActiveScreen("objects")}
                 />
 
-                <PostgresExperimentStatCard
+                <PostgresStatCard
                   title="Relationships"
                   count={relationships.length}
                   stats={[
@@ -6730,8 +7537,10 @@ export function PostgresProjectHomeExperimentView({
                 canKickSourceLocks={canManageSources}
                 canManageAnnotations={canManageAnnotations}
                 canManageMemos={canManageMemos}
+                canCreateCodes={canManageAnnotations}
                 initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
                 initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
+                initialTextSegment={null}
                 onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
                 onOpenPostgresMemoDraft={(payload) => {
                   setPostgresMemoDraftTarget(payload);
@@ -6748,8 +7557,10 @@ export function PostgresProjectHomeExperimentView({
                 canKickSourceLocks={canManageSources}
                 canManageAnnotations={canManageAnnotations}
                 canManageMemos={canManageMemos}
+                canCreateCodes={canManageAnnotations}
                 initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
                 initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
+                initialTextSegment={postgresSourceNavigationTarget?.textSegment ?? null}
                 onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
                 onOpenPostgresMemoDraft={(payload) => {
                   setPostgresMemoDraftTarget(payload);
@@ -6763,12 +7574,15 @@ export function PostgresProjectHomeExperimentView({
                 postgresProjectId={project.id}
                 postgresProjectStoragePath={project.storagePath}
                 postgresCurrentUserId={authSession.user.id}
+                initialPostgresAnnotationId={postgresAnnotationNavigationTargetId}
+                onInitialPostgresAnnotationHandled={() => setPostgresAnnotationNavigationTargetId(null)}
                 onOpenPostgresSourceAnnotation={({ sourceId, annotationId }) => {
                   setPostgresSourceNavigationTarget({
                     sourceId,
                     annotationId,
+                    textSegment: null,
                   });
-                  setActiveScreen("sources");
+                  setActiveScreen("code-text");
                 }}
               />
             </Suspense>
@@ -6785,6 +7599,7 @@ export function PostgresProjectHomeExperimentView({
                   setPostgresSourceNavigationTarget({
                     sourceId,
                     annotationId,
+                    textSegment: null,
                   });
                   setActiveScreen("sources");
                 }}
@@ -6806,10 +7621,120 @@ export function PostgresProjectHomeExperimentView({
                 onDraftHandled={() => setPostgresMemoDraftTarget(null)}
               />
             </Suspense>
+          ) : activeScreen === "reports" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresReportsViewLazy projectId={project.id} projectStoragePath={project.storagePath} />
+            </Suspense>
           ) : activeScreen === "project-log" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
               <PostgresProjectLogViewLazy
                 projectId={project.id}
+              />
+            </Suspense>
+          ) : activeScreen === "ai-assist" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAiAssistHomeViewLazy
+                project={project}
+                authSession={authSession}
+                canManageProject={canManageProjectSettings}
+                canManageEmbeddings={canManageSources}
+              />
+            </Suspense>
+          ) : activeScreen === "ai-assist-chat" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAiAssistChatViewLazy
+                project={project}
+                currentProjectUser={currentProjectUser}
+                isProjectAdmin={isProjectAdmin}
+                onNavigate={(screen, target) => {
+                  if (screen === "sources" && target?.sourceId) {
+                    setPostgresSourceNavigationTarget({
+                      sourceId: target.sourceId,
+                      annotationId: target.annotationId ?? null,
+                      textSegment: null,
+                    });
+                  }
+                  if (screen === "code-text" && target?.sourceId) {
+                    setPostgresSourceNavigationTarget({
+                      sourceId: target.sourceId,
+                      annotationId: target.annotationId ?? null,
+                      textSegment:
+                        typeof target.startOffset === "number"
+                        && typeof target.endOffset === "number"
+                        && target.endOffset > target.startOffset
+                          ? { startOffset: target.startOffset, endOffset: target.endOffset }
+                          : null,
+                    });
+                  }
+                  if (screen === "annotations" && target?.annotationId) {
+                    setPostgresAnnotationNavigationTargetId(target.annotationId);
+                  }
+                  if (screen === "objects" && target?.objectId) {
+                    setSelectedObjectTypeFilter("all");
+                    setSelectedObjectDetailsId(target.objectId);
+                  }
+                  if (screen === "relationships" && target?.relationshipId) {
+                    const relationship = relationships.find((entry) => entry.id === target.relationshipId);
+                    setSelectedRelationshipTypeFilter(relationship?.relationshipTypeId ?? "all");
+                    setSelectedRelationshipDetailsId(target.relationshipId);
+                  }
+                  setActiveScreen(screen);
+                }}
+              />
+            </Suspense>
+          ) : activeScreen === "ai-assisted-coding" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAiAssistAssistedCodingViewLazy
+                projectId={project.id}
+                currentUserId={authSession.user.id}
+                canManageSources={canManageSources}
+                canKickSourceLocks={canManageSources}
+                canManageAnnotations={canManageAnnotations}
+                canManageMemos={canManageMemos}
+                canCreateCodes={canManageAnnotations}
+                initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
+                initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
+                initialTextSegment={postgresSourceNavigationTarget?.textSegment ?? null}
+                onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
+                onOpenPostgresMemoDraft={(payload) => {
+                  setPostgresMemoDraftTarget(payload);
+                  setActiveScreen("memos");
+                }}
+              />
+            </Suspense>
+          ) : activeScreen === "ai-analyze" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAiAssistAnalyzeViewLazy
+                projectId={project.id}
+                canUseAiAnalyzeTools={canManageAnnotations}
+                onOpenAnnotation={(target) => {
+                  setPostgresSourceNavigationTarget({
+                    sourceId: target.sourceId,
+                    annotationId: target.annotationId,
+                    textSegment: null,
+                  });
+                  setActiveScreen("code-text");
+                }}
+              />
+            </Suspense>
+          ) : activeScreen === "ai-assist-source-attributes" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAiAssistAttributesViewLazy
+                projectId={project.id}
+                canUseAiAttributeTools={canManageAnnotations}
+              />
+            </Suspense>
+          ) : activeScreen === "ai-assist-object-attributes" ? (
+            <PostgresAiAssistPortPlaceholderView
+              title="Object Attributes"
+              detail="AI attribute suggestions for PostgreSQL objects will mount here."
+            />
+          ) : activeScreen === "ai-assist-process-documents" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAiAssistProcessSourcesViewLazy
+                projectId={project.id}
+                canUseAiProcessDocuments={canManageSources}
+                canReviewProcessedDocuments={canManageAnnotations}
               />
             </Suspense>
           ) : activeScreen === "objects" && selectedObjectDetails ? (
@@ -6850,10 +7775,10 @@ export function PostgresProjectHomeExperimentView({
                         <h3 className="case-card-title">Graphics</h3>
                         <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
                           <ObjectShapeSwatch
-                            shape={resolvePostgresExperimentObjectShape(selectedObjectDetails, selectedObjectDetailsType)}
-                            fill={resolvePostgresExperimentObjectFill(selectedObjectDetails, selectedObjectDetailsType)}
-                            color={resolvePostgresExperimentObjectColor(selectedObjectDetails, selectedObjectDetailsType)}
-                            sourceVisualKey={getPostgresExperimentSourceObjectVisualKey(selectedObjectDetailsType?.systemKey)}
+                            shape={resolvePostgresObjectShape(selectedObjectDetails, selectedObjectDetailsType)}
+                            fill={resolvePostgresObjectFill(selectedObjectDetails, selectedObjectDetailsType)}
+                            color={resolvePostgresObjectColor(selectedObjectDetails, selectedObjectDetailsType)}
+                            sourceVisualKey={getPostgresSourceObjectVisualKey(selectedObjectDetailsType?.systemKey)}
                             imageStoragePath={selectedObjectDetails.imageStoragePath || selectedObjectDetailsType?.imageStoragePath || ""}
                             projectStoragePath={project.storagePath}
                             width={48}
@@ -6874,7 +7799,7 @@ export function PostgresProjectHomeExperimentView({
                                   height: 18,
                                   borderRadius: 6,
                                   border: "1px solid rgba(53, 80, 112, 0.18)",
-                                  background: resolvePostgresExperimentObjectColor(selectedObjectDetails, selectedObjectDetailsType),
+                                  background: resolvePostgresObjectColor(selectedObjectDetails, selectedObjectDetailsType),
                                 }}
                               />
                               {selectedObjectDetails.colorOverride?.trim() || "Inherited"}
@@ -6883,13 +7808,13 @@ export function PostgresProjectHomeExperimentView({
                           <dt>Shape</dt>
                           <dd>
                             {selectedObjectDetails.shapeOverride?.trim()
-                              ? formatPostgresExperimentObjectShapeLabel(resolvePostgresExperimentObjectShape(selectedObjectDetails, selectedObjectDetailsType))
+                              ? formatPostgresObjectShapeLabel(resolvePostgresObjectShape(selectedObjectDetails, selectedObjectDetailsType))
                               : "Inherited"}
                           </dd>
                           <dt>Fill</dt>
                           <dd>
                             {selectedObjectDetails.fillOverride?.trim()
-                              ? formatPostgresExperimentObjectFillLabel(resolvePostgresExperimentObjectFill(selectedObjectDetails, selectedObjectDetailsType))
+                              ? formatPostgresObjectFillLabel(resolvePostgresObjectFill(selectedObjectDetails, selectedObjectDetailsType))
                               : "Inherited"}
                           </dd>
                         </dl>
@@ -6898,23 +7823,45 @@ export function PostgresProjectHomeExperimentView({
                       <div className="case-card">
                         <h3 className="case-card-title">Attributes</h3>
                         {selectedObjectDetailsAttributeDefinitions.length > 0 ? (
-                          <dl className="user-detail-meta case-detail-meta">
-                            {selectedObjectDetailsAttributeDefinitions.map((definition) => {
-                              const rawValue = selectedObjectDetails.attributeValues.find(
-                                (value) => value.attributeDefinitionId === definition.id,
-                              )?.value ?? "";
-                              return (
-                                <div key={definition.id} style={{ display: "contents" }}>
-                                  <dt>{definition.name}</dt>
-                                  <dd>
-                                    {rawValue
-                                      ? formatPostgresExperimentAttributeDisplay(rawValue, definition.dataType)
-                                      : <span className="cases-no-docs">-</span>}
-                                  </dd>
-                                </div>
-                              );
-                            })}
-                          </dl>
+                          <div className="case-detail-attributes-table-wrap">
+                            <table className="case-detail-attributes-table">
+                              <thead>
+                                <tr>
+                                  <th className="case-detail-attributes-label" scope="col">Attribute</th>
+                                  <th className="case-detail-attributes-value" scope="col">Value</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {selectedObjectDetailsAttributeDefinitions.map((definition) => {
+                                  const rawValue = selectedObjectDetails.attributeValues.find(
+                                    (value) => value.attributeDefinitionId === definition.id,
+                                  )?.value ?? "";
+                                  return (
+                                    <tr key={definition.id}>
+                                      <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                                      <td className="case-detail-attributes-value">
+                                        <button
+                                          type="button"
+                                          className="case-detail-attribute-value-button"
+                                          onClick={() => setDetailAttributeHistoryTarget({
+                                            projectId: project.id,
+                                            ownerKind: "object",
+                                            ownerId: selectedObjectDetails.id,
+                                            ownerName: selectedObjectDetails.title || "Untitled object",
+                                            attributeDefinitionId: definition.id,
+                                            attributeName: definition.name,
+                                          })}
+                                          title="View attribute value history"
+                                        >
+                                          {rawValue ? formatPostgresAttributeDisplay(rawValue, definition.dataType) : "-"}
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
                         ) : (
                           <p className="case-card-empty">No shared attributes for this object type yet.</p>
                         )}
@@ -7052,6 +7999,12 @@ export function PostgresProjectHomeExperimentView({
                     );
                   })()
                 ) : null}
+                {detailAttributeHistoryTarget ? (
+                  <PostgresAttributeValueHistoryModal
+                    target={detailAttributeHistoryTarget}
+                    onClose={() => setDetailAttributeHistoryTarget(null)}
+                  />
+                ) : null}
               </div>
             </>
           ) : activeScreen === "objects" ? (
@@ -7062,34 +8015,47 @@ export function PostgresProjectHomeExperimentView({
                     <h1>Research Objects</h1>
                   </div>
                   <div className="view-header-actions">
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setEditingObjectTypeModalId(null);
-                        setDraftObjectTypeName("");
-                        setDraftObjectTypeDescription("");
-                        setDraftObjectTypeShape("rounded");
-                        setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
-                        setDraftObjectTypeFill("filled");
-                        setDraftObjectTypeImageStoragePath("");
-                        setDraftObjectTypePendingImage(null);
-                        setDraftObjectTypeGraphicMode("select");
-                        initializeObjectTypeAttributeEditor(null);
-                        setObjectTypeModalTab("details");
-                        setGraphError("");
-                        setCreateObjectTypeOpen(true);
-                      }}
-                    >
-                      Add object type
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={() => openCreateObjectModal()}
-                    >
-                      New object
-                    </button>
+                    {showObjectAttributesTable && selectedObjectTypeFilter !== "all" ? (
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={openObjectWorkspaceAttributeModal}
+                        disabled={graphSubmitting || objectWorkspaceAttributeTypeOptions.length === 0}
+                      >
+                        Add Attribute
+                      </button>
+                    ) : !showObjectAttributesTable ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => {
+                            setEditingObjectTypeModalId(null);
+                            setDraftObjectTypeName("");
+                            setDraftObjectTypeDescription("");
+                            setDraftObjectTypeShape("rounded");
+                            setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
+                            setDraftObjectTypeFill("filled");
+                            setDraftObjectTypeImageStoragePath("");
+                            setDraftObjectTypePendingImage(null);
+                            setDraftObjectTypeGraphicMode("select");
+                            initializeObjectTypeAttributeEditor(null);
+                            setObjectTypeModalTab("details");
+                            setGraphError("");
+                            setCreateObjectTypeOpen(true);
+                          }}
+                        >
+                          Add object type
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          onClick={() => openCreateObjectModal()}
+                        >
+                          New object
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </header>
 
@@ -7232,10 +8198,10 @@ export function PostgresProjectHomeExperimentView({
                                 >
                                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                     <ObjectShapeSwatch
-                                      shape={normalizePostgresExperimentObjectTypeShape(summary.shape)}
-                                      fill={normalizePostgresExperimentObjectFill(summary.fill)}
-                                      color={normalizePostgresExperimentObjectTypeColor(summary.color)}
-                                      sourceVisualKey={getPostgresExperimentSourceObjectVisualKey(summary.systemKey)}
+                                      shape={normalizePostgresObjectTypeShape(summary.shape)}
+                                      fill={normalizePostgresObjectFill(summary.fill)}
+                                      color={normalizePostgresObjectTypeColor(summary.color)}
+                                      sourceVisualKey={getPostgresSourceObjectVisualKey(summary.systemKey)}
                                       imageStoragePath={summary.imageStoragePath}
                                       projectStoragePath={project.storagePath}
                                       width={24}
@@ -7416,14 +8382,42 @@ export function PostgresProjectHomeExperimentView({
                                   </tr>
                                 ) : (
                                   sortedObjectAttributeRows.map((row) => (
-                                    <tr key={row.id} className="users-row">
+                                    <tr key={row.id} className="case-attributes-row">
                                       <td className="users-td users-td--name case-attributes-case-cell">{row.name}</td>
                                       {objectAttributeDefinitionsForWorkspace.map((definition) => {
                                         const rawValue = row.valuesByDefinitionId[definition.id] ?? "";
+                                        const cellActive = activeObjectAttributeHistoryCell?.objectId === row.id
+                                          && activeObjectAttributeHistoryCell.attributeDefinitionId === definition.id;
+                                        const openHistory = () => {
+                                          setActiveObjectAttributeHistoryCell({
+                                            objectId: row.id,
+                                            attributeDefinitionId: definition.id,
+                                          });
+                                          setAttributeHistoryTarget({
+                                            projectId: project.id,
+                                            ownerKind: "object",
+                                            ownerId: row.id,
+                                            ownerName: row.name || "Untitled object",
+                                            attributeDefinitionId: definition.id,
+                                            attributeName: definition.name,
+                                          });
+                                        };
                                         return (
-                                          <td key={definition.id} className="users-td case-attributes-value-cell">
+                                          <td
+                                            key={definition.id}
+                                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}`}
+                                            role="button"
+                                            tabIndex={0}
+                                            title="View attribute value history"
+                                            onClick={openHistory}
+                                            onKeyDown={(event) => {
+                                              if (event.key !== "Enter" && event.key !== " ") return;
+                                              event.preventDefault();
+                                              openHistory();
+                                            }}
+                                          >
                                             {rawValue
-                                              ? formatPostgresExperimentAttributeDisplay(rawValue, definition.dataType)
+                                              ? formatPostgresAttributeDisplay(rawValue, definition.dataType)
                                               : <span className="cases-no-docs">-</span>}
                                           </td>
                                         );
@@ -7587,7 +8581,7 @@ export function PostgresProjectHomeExperimentView({
                           <>
                             <label className="form-label">
                               Image
-                              <PostgresExperimentObjectImageControls
+                              <PostgresObjectImageControls
                                 projectStoragePath={project.storagePath}
                                 imageStoragePath={draftObjectTypeImageStoragePath}
                                 previewUrl={draftObjectTypePendingImage?.previewUrl ?? ""}
@@ -7601,7 +8595,7 @@ export function PostgresProjectHomeExperimentView({
                                   <ObjectShapeSwatch
                                     shape={draftObjectTypeShape}
                                     fill={draftObjectTypeFill}
-                                    color={normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor)}
+                                    color={normalizePostgresObjectTypeColor(draftObjectTypeColor)}
                                     width={56}
                                     minHeight={44}
                                   />
@@ -7630,18 +8624,18 @@ export function PostgresProjectHomeExperimentView({
                             </label>
                             <label className="form-label">
                               Shape
-                              <PostgresExperimentObjectShapePicker
+                              <PostgresObjectShapePicker
                                 value={draftObjectTypeShape}
-                                onChange={(value) => setDraftObjectTypeShape((value || "rounded") as PostgresExperimentObjectTypeShape)}
+                                onChange={(value) => setDraftObjectTypeShape((value || "rounded") as PostgresObjectTypeShape)}
                                 previewColor={draftObjectTypeColor}
                                 previewFill={draftObjectTypeFill}
                               />
                             </label>
                             <label className="form-label">
                               Fill
-                              <PostgresExperimentObjectFillPicker
+                              <PostgresObjectFillPicker
                                 value={draftObjectTypeFill}
-                                onChange={(value) => setDraftObjectTypeFill((value || "filled") as PostgresExperimentObjectFill)}
+                                onChange={(value) => setDraftObjectTypeFill((value || "filled") as PostgresObjectFill)}
                                 previewColor={draftObjectTypeColor}
                                 previewShape={draftObjectTypeShape}
                               />
@@ -7765,7 +8759,7 @@ export function PostgresProjectHomeExperimentView({
                           <>
                             <label className="form-label">
                               Image
-                              <PostgresExperimentObjectImageControls
+                              <PostgresObjectImageControls
                                 projectStoragePath={project.storagePath}
                                 imageStoragePath={draftObjectTypeImageStoragePath}
                                 graphicMode={draftObjectTypeGraphicMode}
@@ -7778,7 +8772,7 @@ export function PostgresProjectHomeExperimentView({
                                   <ObjectShapeSwatch
                                     shape={draftObjectTypeShape}
                                     fill={draftObjectTypeFill}
-                                    color={normalizePostgresExperimentObjectTypeColor(draftObjectTypeColor)}
+                                    color={normalizePostgresObjectTypeColor(draftObjectTypeColor)}
                                     width={56}
                                     minHeight={44}
                                   />
@@ -7807,18 +8801,18 @@ export function PostgresProjectHomeExperimentView({
                             </label>
                             <label className="form-label">
                               Shape
-                              <PostgresExperimentObjectShapePicker
+                              <PostgresObjectShapePicker
                                 value={draftObjectTypeShape}
-                                onChange={(value) => setDraftObjectTypeShape((value || "rounded") as PostgresExperimentObjectTypeShape)}
+                                onChange={(value) => setDraftObjectTypeShape((value || "rounded") as PostgresObjectTypeShape)}
                                 previewColor={draftObjectTypeColor}
                                 previewFill={draftObjectTypeFill}
                               />
                             </label>
                             <label className="form-label">
                               Fill
-                              <PostgresExperimentObjectFillPicker
+                              <PostgresObjectFillPicker
                                 value={draftObjectTypeFill}
-                                onChange={(value) => setDraftObjectTypeFill((value || "filled") as PostgresExperimentObjectFill)}
+                                onChange={(value) => setDraftObjectTypeFill((value || "filled") as PostgresObjectFill)}
                                 previewColor={draftObjectTypeColor}
                                 previewShape={draftObjectTypeShape}
                               />
@@ -7898,6 +8892,24 @@ export function PostgresProjectHomeExperimentView({
                     onSave={saveObjectTypeAttributeDraft}
                   />
                 ) : null}
+                {objectWorkspaceAttributeDraft ? (
+                  <TypeScopedAttributeModal
+                    draft={objectWorkspaceAttributeDraft}
+                    typeOptions={objectWorkspaceAttributeTypeOptions}
+                    title="Create object attribute"
+                    typeLabel="Object"
+                    saving={graphSubmitting}
+                    error={objectWorkspaceAttributeError}
+                    onCancel={() => {
+                      if (graphSubmitting) return;
+                      setObjectWorkspaceAttributeDraft(null);
+                      setObjectWorkspaceAttributeError("");
+                    }}
+                    onSave={(draft) => {
+                      void handleCreateObjectWorkspaceAttribute(draft);
+                    }}
+                  />
+                ) : null}
                 {removingObjectId ? (
                   (() => {
                     const object = objects.find((entry) => entry.id === removingObjectId);
@@ -7930,8 +8942,181 @@ export function PostgresProjectHomeExperimentView({
                     );
                   })()
                 ) : null}
+                {attributeHistoryTarget ? (
+                  <PostgresAttributeValueHistoryModal
+                    target={attributeHistoryTarget}
+                    onClose={() => {
+                      setAttributeHistoryTarget(null);
+                      setActiveObjectAttributeHistoryCell(null);
+                      setActiveRelationshipAttributeHistoryCell(null);
+                    }}
+                  />
+                ) : null}
               </div>
             </>
+          ) : activeScreen === "relationships" && selectedRelationshipDetails ? (
+            (() => {
+              const fromObject = objectById.get(selectedRelationshipDetails.fromObjectId);
+              const toObject = objectById.get(selectedRelationshipDetails.toObjectId);
+              return (
+                <div className="view users-view">
+                  {graphNotice ? <p className="settings-success">{graphNotice}</p> : null}
+                  {graphError ? <p className="auth-error">{graphError}</p> : null}
+                  <div className="view doc-detail-view" style={{ padding: 0 }}>
+                    <div className="workspace-back-row workspace-back-row--split">
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => setSelectedRelationshipDetailsId(null)}
+                      >
+                        Back
+                      </button>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => openEditRelationshipModal(selectedRelationshipDetails)}
+                        >
+                          Edit Relationship
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--danger"
+                          onClick={() => setRemovingRelationshipId(selectedRelationshipDetails.id)}
+                        >
+                          Delete Relationship
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="doc-detail-layout">
+                      <div className="doc-detail-left">
+                        <div className="case-card">
+                          <h3 className="case-card-title">Appearance</h3>
+                          {selectedRelationshipDetailsAppearance ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+                              <RelationshipTypeLinePreview
+                                lineShape={selectedRelationshipDetailsAppearance.lineShape}
+                                lineWeight={selectedRelationshipDetailsAppearance.lineWeight}
+                                arrowhead={selectedRelationshipDetailsAppearance.arrowhead}
+                                color={selectedRelationshipDetailsAppearance.color}
+                              />
+                              <p className="case-card-value" style={{ margin: 0 }}>
+                                {selectedRelationshipDetails.relationshipType || "Relationship"}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="case-card">
+                          <h3 className="case-card-title">Attributes</h3>
+                          {selectedRelationshipDetailsAttributeDefinitions.length > 0 ? (
+                            <div className="case-detail-attributes-table-wrap">
+                              <table className="case-detail-attributes-table">
+                                <thead>
+                                  <tr>
+                                    <th className="case-detail-attributes-label" scope="col">Attribute</th>
+                                    <th className="case-detail-attributes-value" scope="col">Value</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {selectedRelationshipDetailsAttributeDefinitions.map((definition) => {
+                                    const rawValue = selectedRelationshipDetails.attributeValues.find(
+                                      (value) => value.attributeDefinitionId === definition.id,
+                                    )?.value ?? "";
+                                    return (
+                                      <tr key={definition.id}>
+                                        <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                                        <td className="case-detail-attributes-value">
+                                          <button
+                                            type="button"
+                                            className="case-detail-attribute-value-button"
+                                            onClick={() => setAttributeHistoryTarget({
+                                              projectId: project.id,
+                                              ownerKind: "relationship",
+                                              ownerId: selectedRelationshipDetails.id,
+                                              ownerName: selectedRelationshipDetails.relationshipType || "Relationship",
+                                              attributeDefinitionId: definition.id,
+                                              attributeName: definition.name,
+                                            })}
+                                            title="View attribute value history"
+                                          >
+                                            {rawValue ? formatPostgresAttributeDisplay(rawValue, definition.dataType) : "-"}
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p className="case-card-empty">No shared attributes for this relationship type yet.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="doc-detail-right doc-detail-right--annotation">
+                        <div className="case-card">
+                          <h3 className="case-card-title">Details</h3>
+                          <p className="case-card-value">{selectedRelationshipDetails.relationshipType || "Relationship"}</p>
+                          <dl className="user-detail-meta case-detail-meta" style={{ marginTop: 16 }}>
+                            <dt>From</dt>
+                            <dd>{fromObject ? `${fromObject.title} (${fromObject.objectType})` : selectedRelationshipDetails.fromEntityName || selectedRelationshipDetails.fromObjectId}</dd>
+                            <dt>To</dt>
+                            <dd>{toObject ? `${toObject.title} (${toObject.objectType})` : selectedRelationshipDetails.toEntityName || selectedRelationshipDetails.toObjectId}</dd>
+                            <dt>Relationship type</dt>
+                            <dd>{selectedRelationshipDetailsType?.name ?? selectedRelationshipDetails.relationshipType ?? "-"}</dd>
+                            <dt>Created</dt>
+                            <dd>
+                              {formatCurrentDateTime(selectedRelationshipDetails.createdAt, {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
+                            </dd>
+                            <dt>Updated</dt>
+                            <dd>
+                              {formatCurrentDateTime(selectedRelationshipDetails.updatedAt, {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
+                            </dd>
+                          </dl>
+                          <div style={{ marginTop: 18 }}>
+                            <h3 className="case-card-title">Description</h3>
+                            {selectedRelationshipDetails.description.trim() ? (
+                              <p style={{ margin: 0, lineHeight: 1.6, overflowWrap: "anywhere" }}>
+                                {selectedRelationshipDetails.description}
+                              </p>
+                            ) : (
+                              <p className="case-card-empty">No description yet.</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {attributeHistoryTarget ? (
+                    <PostgresAttributeValueHistoryModal
+                      target={attributeHistoryTarget}
+                      onClose={() => {
+                        setAttributeHistoryTarget(null);
+                        setActiveObjectAttributeHistoryCell(null);
+                        setActiveRelationshipAttributeHistoryCell(null);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              );
+            })()
           ) : activeScreen === "relationships" ? (
             <>
               <div className="view users-view">
@@ -7940,29 +9125,29 @@ export function PostgresProjectHomeExperimentView({
                     <h1>Relationships</h1>
                   </div>
                   <div className="view-header-actions">
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setDraftRelationshipTypeName("");
-                        setDraftRelationshipLineShape("solid");
-                        setDraftRelationshipLineWeight(2);
-                        setDraftRelationshipArrowhead("one_sided");
-                        setDraftRelationshipColor(POSTGRES_RELATIONSHIP_DEFAULT_COLOR);
-                        setDraftRelationshipFromObjectTypeIds([]);
-                        setDraftRelationshipToObjectTypeIds([]);
-                        setRelationshipTypeModalTab("details");
-                        initializeRelationshipTypeAttributeEditor(null);
-                        setEditingRelationshipTypeModalId(null);
-                        setGraphError("");
-                        setCreateRelationshipTypeOpen(true);
-                      }}
-                    >
-                      Add relationship type
-                    </button>
-                    <button type="button" className="btn btn--primary" onClick={() => openCreateRelationshipModal()}>
-                      New relationship
-                    </button>
+                    {showRelationshipAttributesTable && selectedRelationshipTypeFilter !== "all" ? (
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={openRelationshipWorkspaceAttributeModal}
+                        disabled={graphSubmitting || relationshipWorkspaceAttributeTypeOptions.length === 0}
+                      >
+                        Add Attribute
+                      </button>
+                    ) : !showRelationshipAttributesTable ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={openCreateRelationshipTypeModal}
+                        >
+                          Add relationship type
+                        </button>
+                        <button type="button" className="btn btn--primary" onClick={() => openCreateRelationshipModal()}>
+                          New relationship
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </header>
 
@@ -8095,11 +9280,11 @@ export function PostgresProjectHomeExperimentView({
                                         {summary.relationshipType}
                                       </span>
                                       <span className="postgres-users-meta" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                        {formatPostgresExperimentRelationshipLineShapeLabel(summary.lineShape)}
+                                        {formatPostgresRelationshipLineShapeLabel(summary.lineShape)}
                                         {" / "}
-                                        {formatPostgresExperimentRelationshipLineWeightLabel(summary.lineWeight)}
+                                        {formatPostgresRelationshipLineWeightLabel(summary.lineWeight)}
                                         {" / "}
-                                        {formatPostgresExperimentRelationshipArrowheadLabel(summary.arrowhead)}
+                                        {formatPostgresRelationshipArrowheadLabel(summary.arrowhead)}
                                         {" / "}
                                         {summary.attributeDefinitionCount} attributes
                                       </span>
@@ -8149,12 +9334,14 @@ export function PostgresProjectHomeExperimentView({
                                 if (!relationshipType) return;
                                 setEditingRelationshipTypeModalId(relationshipType.id);
                                 setDraftRelationshipTypeName(relationshipType.name);
-                                setDraftRelationshipLineShape(normalizePostgresExperimentRelationshipLineShape(relationshipType.lineShape));
-                                setDraftRelationshipLineWeight(normalizePostgresExperimentRelationshipLineWeight(relationshipType.lineWeight));
-                                setDraftRelationshipArrowhead(normalizePostgresExperimentRelationshipArrowhead(relationshipType.arrowhead));
-                                setDraftRelationshipColor(normalizePostgresExperimentRelationshipColor(relationshipType.color));
-                                setDraftRelationshipFromObjectTypeIds(relationshipType.fromObjectTypeIds || []);
-                                setDraftRelationshipToObjectTypeIds(relationshipType.toObjectTypeIds || []);
+                                setDraftRelationshipLineShape(normalizePostgresRelationshipLineShape(relationshipType.lineShape));
+                                setDraftRelationshipLineWeight(normalizePostgresRelationshipLineWeight(relationshipType.lineWeight));
+                                setDraftRelationshipArrowhead(normalizePostgresRelationshipArrowhead(relationshipType.arrowhead));
+                                setDraftRelationshipColor(normalizePostgresRelationshipColor(relationshipType.color));
+                                setDraftRelationshipFromObjectTypeIds(expandPostgresRelationshipRestrictionSelection(relationshipType.fromObjectTypeIds, allObjectTypeIds));
+                                setDraftRelationshipToObjectTypeIds(expandPostgresRelationshipRestrictionSelection(relationshipType.toObjectTypeIds, allObjectTypeIds));
+                                setDraftRelationshipFromSourceKinds(expandPostgresRelationshipRestrictionSelection(relationshipType.fromSourceKinds, allSourceKindIds));
+                                setDraftRelationshipToSourceKinds(expandPostgresRelationshipRestrictionSelection(relationshipType.toSourceKinds, allSourceKindIds));
                                 setRelationshipTypeModalTab("details");
                                 initializeRelationshipTypeAttributeEditor(relationshipType.id);
                                 setGraphError("");
@@ -8215,10 +9402,131 @@ export function PostgresProjectHomeExperimentView({
                     {graphNotice ? <p className="settings-success">{graphNotice}</p> : null}
                     {graphError ? <p className="auth-error">{graphError}</p> : null}
 
+                    <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
+                      <div className="segmented-control" role="tablist" aria-label="Relationship workspace views">
+                        <button
+                          type="button"
+                          className={showRelationshipAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+                          role="tab"
+                          aria-selected={!showRelationshipAttributesTable}
+                          onClick={() => setShowRelationshipAttributesTable(false)}
+                        >
+                          Details
+                        </button>
+                        <button
+                          type="button"
+                          className={showRelationshipAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                          role="tab"
+                          aria-selected={showRelationshipAttributesTable}
+                          onClick={() => setShowRelationshipAttributesTable(true)}
+                        >
+                          Attributes
+                        </button>
+                      </div>
+                    </div>
+
                     {graphLoading ? (
                       <div className="empty-state postgres-users-empty-state">
                         <p>Loading relationships...</p>
                       </div>
+                    ) : showRelationshipAttributesTable ? (
+                      <>
+                        {selectedRelationshipTypeFilter === "all" ? (
+                          <div className="empty-state postgres-users-empty-state">
+                            <p>Select a relationship type in the left column to view its attributes.</p>
+                          </div>
+                        ) : relationshipAttributeDefinitionsForWorkspace.length === 0 ? (
+                          <div className="empty-state postgres-users-empty-state">
+                            <p>
+                              {`${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "Selected relationship type"} has no attributes.`}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="users-table-wrap case-attributes-table-wrap">
+                            <table className="users-table case-attributes-table">
+                              <thead>
+                                <tr>
+                                  <th
+                                    className={`users-th case-attributes-case-col${relationshipAttributeSortCol === "name" ? " users-th--sorted" : ""}`}
+                                    onClick={() => handleRelationshipAttributeSort("name")}
+                                  >
+                                    Relationship
+                                    <span className="users-sort-icon">
+                                      {relationshipAttributeSortCol === "name" ? (relationshipAttributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
+                                    </span>
+                                  </th>
+                                  {relationshipAttributeDefinitionsForWorkspace.map((definition) => (
+                                    <th
+                                      key={definition.id}
+                                      className={`users-th case-attributes-value-col${relationshipAttributeSortCol === definition.id ? " users-th--sorted" : ""}`}
+                                      onClick={() => handleRelationshipAttributeSort(definition.id)}
+                                    >
+                                      {definition.name}
+                                      <span className="users-sort-icon">
+                                        {relationshipAttributeSortCol === definition.id ? (relationshipAttributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
+                                      </span>
+                                      <span className="case-attribute-type-label">{definition.dataType}</span>
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sortedRelationshipAttributeRows.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={Math.max(relationshipAttributeDefinitionsForWorkspace.length + 1, 1)} className="users-td-msg">
+                                      {`No ${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "selected"} relationships yet.`}
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  sortedRelationshipAttributeRows.map((row) => (
+                                    <tr key={row.id} className="case-attributes-row">
+                                      <td className="users-td users-td--name case-attributes-case-cell">{row.name}</td>
+                                      {relationshipAttributeDefinitionsForWorkspace.map((definition) => {
+                                        const rawValue = row.valuesByDefinitionId[definition.id] ?? "";
+                                        const cellActive = activeRelationshipAttributeHistoryCell?.relationshipId === row.id
+                                          && activeRelationshipAttributeHistoryCell.attributeDefinitionId === definition.id;
+                                        const openHistory = () => {
+                                          setActiveRelationshipAttributeHistoryCell({
+                                            relationshipId: row.id,
+                                            attributeDefinitionId: definition.id,
+                                          });
+                                          setAttributeHistoryTarget({
+                                            projectId: project.id,
+                                            ownerKind: "relationship",
+                                            ownerId: row.id,
+                                            ownerName: row.name || "Relationship",
+                                            attributeDefinitionId: definition.id,
+                                            attributeName: definition.name,
+                                          });
+                                        };
+                                        return (
+                                          <td
+                                            key={definition.id}
+                                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}`}
+                                            role="button"
+                                            tabIndex={0}
+                                            title="View attribute value history"
+                                            onClick={openHistory}
+                                            onKeyDown={(event) => {
+                                              if (event.key !== "Enter" && event.key !== " ") return;
+                                              event.preventDefault();
+                                              openHistory();
+                                            }}
+                                          >
+                                            {rawValue
+                                              ? formatPostgresAttributeDisplay(rawValue, definition.dataType)
+                                              : <span className="cases-no-docs">-</span>}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </>
                     ) : filteredRelationships.length === 0 ? (
                       <div className="empty-state postgres-users-empty-state">
                         <p>
@@ -8232,11 +9540,10 @@ export function PostgresProjectHomeExperimentView({
                         <table className="users-table">
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "24%" }}>Type</th>
-                              <th className="users-th" style={{ width: "24%" }}>From</th>
-                              <th className="users-th" style={{ width: "24%" }}>To</th>
-                              <th className="users-th" style={{ width: "14%" }}>Updated</th>
-                              <th className="users-th" style={{ width: "14%" }}>Actions</th>
+                              <th className="users-th" style={{ width: "28%" }}>Type</th>
+                              <th className="users-th" style={{ width: "28%" }}>From</th>
+                              <th className="users-th" style={{ width: "28%" }}>To</th>
+                              <th className="users-th" style={{ width: "16%" }}>Updated</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -8244,45 +9551,24 @@ export function PostgresProjectHomeExperimentView({
                               const fromObject = objectById.get(relationship.fromObjectId);
                               const toObject = objectById.get(relationship.toObjectId);
                               return (
-                                <tr key={relationship.id} className="users-row">
-                                  <td className="users-td users-td--name">{relationship.relationshipType}</td>
-                                  <td className="users-td users-td--muted">
-                                    {fromObject ? `${fromObject.title} (${fromObject.objectType})` : relationship.fromObjectId}
-                                  </td>
-                                  <td className="users-td users-td--muted">
-                                    {toObject ? `${toObject.title} (${toObject.objectType})` : relationship.toObjectId}
-                                  </td>
-                                  <td className="users-td users-td--muted">
-                                    {formatCurrentDateTime(relationship.updatedAt, {
-                                      year: "numeric",
-                                      month: "short",
-                                      day: "numeric",
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                      second: "2-digit",
-                                    })}
-                                  </td>
-                                  <td className="users-td">
-                                    <button
-                                      type="button"
-                                      className="btn btn--ghost"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        const rect = event.currentTarget.getBoundingClientRect();
-                                        setOpenRelationshipTypeActionsMenu(null);
-                                        setOpenRelationshipActionsMenu((current) =>
-                                          current?.id === relationship.id
-                                            ? null
-                                            : {
-                                                id: relationship.id,
-                                                left: Math.min(rect.right - 140, window.innerWidth - 156),
-                                                top: Math.min(rect.bottom + 4, window.innerHeight - 96),
-                                              },
-                                        );
-                                      }}
-                                    >
-                                      Actions
-                                    </button>
+                                <tr
+                                  key={relationship.id}
+                                  className="users-row"
+                                  style={{ cursor: "pointer" }}
+                                  onClick={() => setSelectedRelationshipDetailsId(relationship.id)}
+                                  onContextMenu={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setOpenRelationshipTypeActionsMenu(null);
+                                    setOpenRelationshipActionsMenu({
+                                      id: relationship.id,
+                                      left: Math.min(event.clientX, window.innerWidth - 180),
+                                      top: Math.min(event.clientY, window.innerHeight - 112),
+                                    });
+                                  }}
+                                >
+                                  <td className="users-td users-td--name">
+                                    {relationship.relationshipType}
                                     {openRelationshipActionsMenu?.id === relationship.id ? (
                                       <div
                                         role="menu"
@@ -8348,6 +9634,22 @@ export function PostgresProjectHomeExperimentView({
                                         </button>
                                       </div>
                                     ) : null}
+                                  </td>
+                                  <td className="users-td users-td--muted">
+                                    {fromObject ? `${fromObject.title} (${fromObject.objectType})` : relationship.fromObjectId}
+                                  </td>
+                                  <td className="users-td users-td--muted">
+                                    {toObject ? `${toObject.title} (${toObject.objectType})` : relationship.toObjectId}
+                                  </td>
+                                  <td className="users-td users-td--muted">
+                                    {formatCurrentDateTime(relationship.updatedAt, {
+                                      year: "numeric",
+                                      month: "short",
+                                      day: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                      second: "2-digit",
+                                    })}
                                   </td>
                                 </tr>
                               );
@@ -8447,6 +9749,7 @@ export function PostgresProjectHomeExperimentView({
                   saving={graphSubmitting}
                   error={typeAttributeModalError}
                   title={relationshipTypeAttributeModalDraft.id ? "Edit relationship attribute" : "Create relationship attribute"}
+                  overlayStyle={{ zIndex: 300 }}
                   onCancel={() => {
                     if (graphSubmitting) return;
                     setRelationshipTypeAttributeModalDraft(null);
@@ -8479,6 +9782,34 @@ export function PostgresProjectHomeExperimentView({
                     void handleSaveRelationshipAttributeDefinition(draft, valuesByOwner);
                   }}
                   emptyStateLabel="Create a relationship first to start assigning attribute values."
+                />
+              ) : null}
+              {relationshipWorkspaceAttributeDraft ? (
+                <TypeScopedAttributeModal
+                  draft={relationshipWorkspaceAttributeDraft}
+                  typeOptions={relationshipWorkspaceAttributeTypeOptions}
+                  title="Create relationship attribute"
+                  typeLabel="Relationship"
+                  saving={graphSubmitting}
+                  error={relationshipWorkspaceAttributeError}
+                  onCancel={() => {
+                    if (graphSubmitting) return;
+                    setRelationshipWorkspaceAttributeDraft(null);
+                    setRelationshipWorkspaceAttributeError("");
+                  }}
+                  onSave={(draft) => {
+                    void handleCreateRelationshipWorkspaceAttribute(draft);
+                  }}
+                />
+              ) : null}
+              {attributeHistoryTarget ? (
+                <PostgresAttributeValueHistoryModal
+                  target={attributeHistoryTarget}
+                  onClose={() => {
+                    setAttributeHistoryTarget(null);
+                    setActiveObjectAttributeHistoryCell(null);
+                    setActiveRelationshipAttributeHistoryCell(null);
+                  }}
                 />
               ) : null}
             </>
@@ -8536,16 +9867,16 @@ export function PostgresProjectHomeExperimentView({
                 onEditRelationship={openEditRelationshipModal}
                 onDeleteRelationship={(relationshipId) => setRemovingRelationshipId(relationshipId)}
                 ObjectShapeSwatchComponent={ObjectShapeSwatch}
-                getPostgresExperimentObjectAppearance={getPostgresExperimentObjectAppearance}
-                getPostgresExperimentObjectSurfaceStyle={getPostgresExperimentObjectSurfaceStyle}
+                getPostgresObjectAppearance={getPostgresObjectAppearance}
+                getPostgresObjectSurfaceStyle={getPostgresObjectSurfaceStyle}
                 getCanvasNodeDefaultDimensions={getCanvasNodeDefaultDimensions}
                 getCanvasNodeRenderedDimensions={getCanvasNodeRenderedDimensions}
-                getPostgresExperimentRelationshipAppearance={getPostgresExperimentRelationshipAppearance}
-                getPostgresExperimentRelationshipStrokeWidth={getPostgresExperimentRelationshipStrokeWidth}
-                normalizePostgresExperimentObjectTypeColor={normalizePostgresExperimentObjectTypeColor}
-                normalizePostgresExperimentRelationshipLineShape={normalizePostgresExperimentRelationshipLineShape}
-                normalizePostgresExperimentObjectTypeShape={normalizePostgresExperimentObjectTypeShape}
-                normalizePostgresExperimentObjectFill={normalizePostgresExperimentObjectFill}
+                getPostgresRelationshipAppearance={getPostgresRelationshipAppearance}
+                getPostgresRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
+                normalizePostgresObjectTypeColor={normalizePostgresObjectTypeColor}
+                normalizePostgresRelationshipLineShape={normalizePostgresRelationshipLineShape}
+                normalizePostgresObjectTypeShape={normalizePostgresObjectTypeShape}
+                normalizePostgresObjectFill={normalizePostgresObjectFill}
                 hexToRgba={hexToRgba}
                 translateCanvasShape={translateCanvasShape}
                 resizeCanvasBoxShape={resizeCanvasBoxShape}
@@ -8556,14 +9887,14 @@ export function PostgresProjectHomeExperimentView({
                 getCanvasSketchShapeType={getCanvasSketchShapeType}
                 getCanvasSketchShapeFill={getCanvasSketchShapeFill}
                 getCanvasSketchLineStyle={getCanvasSketchLineStyle}
-                getPostgresExperimentRelationshipStrokeDasharray={getPostgresExperimentRelationshipStrokeDasharray}
-                formatPostgresExperimentObjectShapeLabel={formatPostgresExperimentObjectShapeLabel}
-                formatPostgresExperimentObjectFillLabel={formatPostgresExperimentObjectFillLabel}
-                formatPostgresExperimentRelationshipLineShapeLabel={formatPostgresExperimentRelationshipLineShapeLabel}
-                formatPostgresExperimentRelationshipLineWeightLabel={formatPostgresExperimentRelationshipLineWeightLabel}
-                formatPostgresExperimentRelationshipArrowheadLabel={formatPostgresExperimentRelationshipArrowheadLabel}
+                getPostgresRelationshipStrokeDasharray={getPostgresRelationshipStrokeDasharray}
+                formatPostgresObjectShapeLabel={formatPostgresObjectShapeLabel}
+                formatPostgresObjectFillLabel={formatPostgresObjectFillLabel}
+                formatPostgresRelationshipLineShapeLabel={formatPostgresRelationshipLineShapeLabel}
+                formatPostgresRelationshipLineWeightLabel={formatPostgresRelationshipLineWeightLabel}
+                formatPostgresRelationshipArrowheadLabel={formatPostgresRelationshipArrowheadLabel}
                 formatCanvasSketchShapeLabel={formatCanvasSketchShapeLabel}
-                postgreRelationshipLineShapePickerComponent={PostgresExperimentRelationshipLineShapePicker}
+                postgreRelationshipLineShapePickerComponent={PostgresRelationshipLineShapePicker}
                 objectTypeShapeOptions={POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS}
                 objectFillOptions={POSTGRES_OBJECT_FILL_OPTIONS}
                 relationshipLineShapeOptions={POSTGRES_RELATIONSHIP_LINE_SHAPE_OPTIONS}
@@ -8581,16 +9912,16 @@ export function PostgresProjectHomeExperimentView({
                 canvasNodes={canvasNodes}
                 setCanvasNodes={setCanvasNodes}
                 hiddenCanvasRelationshipIds={hiddenCanvasRelationshipIds}
-                getObjectAppearance={getPostgresExperimentObjectAppearance}
-                getObjectSurfaceStyle={getPostgresExperimentObjectSurfaceStyle}
-                getRelationshipAppearance={getPostgresExperimentRelationshipAppearance}
-                getRelationshipStrokeWidth={getPostgresExperimentRelationshipStrokeWidth}
+                getObjectAppearance={getPostgresObjectAppearance}
+                getObjectSurfaceStyle={getPostgresObjectSurfaceStyle}
+                getRelationshipAppearance={getPostgresRelationshipAppearance}
+                getRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
                 getNodeDefaultDimensions={(object, objectTypeRecord) => {
-                  const shape = getPostgresExperimentObjectAppearance(object, objectTypeRecord).shape;
+                  const shape = getPostgresObjectAppearance(object, objectTypeRecord).shape;
                   return getCanvasNodeDefaultDimensions(shape);
                 }}
                 getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
-                  const shape = getPostgresExperimentObjectAppearance(object, objectTypeRecord).shape;
+                  const shape = getPostgresObjectAppearance(object, objectTypeRecord).shape;
                   return getCanvasNodeRenderedDimensions(shape, nodeState);
                 }}
               />
@@ -8890,11 +10221,11 @@ export function PostgresProjectHomeExperimentView({
             </div>
           ) : activeScreen === "app-settings" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
-              <PostgresAppSettingsExperimentViewLazy authSession={authSession} />
+              <PostgresAppSettingsViewLazy authSession={authSession} />
             </Suspense>
           ) : activeScreen === "project-settings" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
-              <PostgresProjectSettingsExperimentViewLazy
+              <PostgresProjectSettingsViewLazy
                 project={project}
                 canManageProject={canManageProjectSettings}
                 memberCount={users.length}
@@ -8907,7 +10238,7 @@ export function PostgresProjectHomeExperimentView({
             </Suspense>
           ) : (
             <Suspense fallback={<ViewLoadingFallback />}>
-              <PostgresUserSettingsExperimentViewLazy
+              <PostgresUserSettingsViewLazy
                 authSession={authSession}
                 onAuthSessionUpdated={onAuthSessionUpdated}
                 onAuthSessionInvalidated={onAuthSessionInvalidated}
@@ -8917,7 +10248,6 @@ export function PostgresProjectHomeExperimentView({
           {createRelationshipTypeOpen ? (
             renderRelationshipTypeModal({
               title: "Add relationship type",
-              hint: "Create a project-specific relationship type now, then use it to define shared relationship attributes.",
               submitLabel: "Add relationship type",
               ariaLabel: "Add relationship type tabs",
               onClose: () => setCreateRelationshipTypeOpen(false),
@@ -9047,12 +10377,12 @@ export function PostgresProjectHomeExperimentView({
             })()
           ) : null}
           {imageCropDraft ? (
-            <PostgresExperimentImageCropModal
+            <PostgresImageCropModal
               draft={imageCropDraft}
               onDraftChange={setImageCropDraft}
-              onCancel={handleCancelPostgresExperimentImageCropChoice}
-              onUseFullImage={handleUseFullPostgresExperimentImage}
-              onUseCrop={() => void handleUseCroppedPostgresExperimentImage()}
+              onCancel={handleCancelPostgresImageCropChoice}
+              onUseFullImage={handleUseFullPostgresImage}
+              onUseCrop={() => void handleUseCroppedPostgresImage()}
               busy={imageCropSubmitting}
             />
           ) : null}
@@ -9125,37 +10455,41 @@ export function PostgresProjectHomeExperimentView({
             })
           ) : null}
           {createRelationshipOpen ? (
-            renderRelationshipModal({
-              title: "Create relationship",
-              ariaLabel: "Create relationship tabs",
-              tab: createRelationshipModalTab,
-              setTab: setCreateRelationshipModalTab,
-              submitLabel: "Add relationship",
-              fromObjectId,
-              toObjectId,
-              relationshipTypeId,
-              description: relationshipDescription,
-              lineShapeOverride: relationshipLineShapeOverride,
-              lineWeightOverride: relationshipLineWeightOverride,
-              arrowheadOverride: relationshipArrowheadOverride,
-              colorOverride: relationshipColorOverride,
-              availableFromObjects,
-              availableToObjects,
-              selectedType: selectedRelationshipType,
-              attributeDefinitions: relationshipAttributeDefinitionsForCreateType,
-              attributeValues: relationshipAttributeValues,
-              onClose: closeCreateRelationshipModal,
-              onSubmit: handleCreateRelationship,
-              setFromObjectId,
-              setToObjectId,
-              setRelationshipTypeId,
-              setDescription: setRelationshipDescription,
-              setLineShapeOverride: setRelationshipLineShapeOverride,
-              setLineWeightOverride: setRelationshipLineWeightOverride,
-              setArrowheadOverride: setRelationshipArrowheadOverride,
-              setColorOverride: setRelationshipColorOverride,
-              setAttributeValues: setRelationshipAttributeValues,
-            })
+            <PostgresRelationshipModal
+              title="Create relationship"
+              ariaLabel="Create relationship tabs"
+              tab={createRelationshipModalTab}
+              setTab={setCreateRelationshipModalTab}
+              submitLabel="Add relationship"
+              relationshipTypes={relationshipTypes}
+              relationshipTypeId={relationshipTypeId}
+              setRelationshipTypeId={setRelationshipTypeId}
+              selectedType={selectedRelationshipType}
+              fromEndpointKey={fromObjectId}
+              setFromEndpointKey={setFromObjectId}
+              toEndpointKey={toObjectId}
+              setToEndpointKey={setToObjectId}
+              availableFromEndpoints={availableFromEndpointOptions}
+              availableToEndpoints={availableToEndpointOptions}
+              description={relationshipDescription}
+              setDescription={setRelationshipDescription}
+              lineShapeOverride={relationshipLineShapeOverride}
+              setLineShapeOverride={setRelationshipLineShapeOverride}
+              lineWeightOverride={relationshipLineWeightOverride}
+              setLineWeightOverride={setRelationshipLineWeightOverride}
+              arrowheadOverride={relationshipArrowheadOverride}
+              setArrowheadOverride={setRelationshipArrowheadOverride}
+              colorOverride={relationshipColorOverride}
+              setColorOverride={setRelationshipColorOverride}
+              attributeDefinitions={relationshipAttributeDefinitionsForCreateType}
+              attributeValues={relationshipAttributeValues}
+              setAttributeValues={setRelationshipAttributeValues}
+              submitting={graphSubmitting}
+              submitDisabled={!fromObjectId || !toObjectId}
+              onClose={closeCreateRelationshipModal}
+              onSubmit={handleCreateRelationship}
+              onNewRelationshipType={openCreateRelationshipTypeModal}
+            />
           ) : null}
           {activeScreen !== "objects" && removingObjectId ? (
             (() => {
@@ -9224,7 +10558,7 @@ export function PostgresProjectHomeExperimentView({
               setAttributeValues: setEditingRelationshipAttributeValues,
             })
           ) : null}
-          {activeScreen !== "relationships" && removingRelationshipId ? (
+          {(activeScreen !== "relationships" || selectedRelationshipDetails) && removingRelationshipId ? (
             (() => {
               const relationship = relationships.find((entry) => entry.id === removingRelationshipId);
               if (!relationship) return null;
@@ -9267,7 +10601,7 @@ export function PostgresProjectHomeExperimentView({
   );
 }
 
-function PostgresExperimentSidebar({
+function PostgresSidebar({
   activeScreen,
   activeProject,
   authSession,
@@ -9279,9 +10613,16 @@ function PostgresExperimentSidebar({
   onShowProjectCodebook,
   onShowProjectCodeText,
   onShowProjectMemos,
+  onShowProjectReports,
   onShowProjectLog,
   onShowProjectObjects,
   onShowProjectRelationships,
+  onShowAiAssistHome,
+  onShowAiAssistChat,
+  onShowAiAssistedCoding,
+  onShowAiAnalyze,
+  onShowAiAssistSourceAttributes,
+  onShowAiAssistProcessDocuments,
   onShowFreeDraw,
   onShowExplore,
   onShowConstruct,
@@ -9292,9 +10633,9 @@ function PostgresExperimentSidebar({
   onBackToGate,
   onSignOut,
 }: {
-  activeScreen: "projects" | "home" | "users" | "sources" | "annotations" | "codebook" | "code-text" | "memos" | "project-log" | "objects" | "relationships" | "free-draw" | "explore" | "construct" | "view" | "app-settings" | "project-settings" | "user-settings";
-  activeProject: PostgresExperimentProject | null;
-  authSession: PostgresExperimentAuthSession;
+  activeScreen: "projects" | PostgresProjectScreen;
+  activeProject: PostgresProject | null;
+  authSession: PostgresAuthSession;
   onShowProjects?: () => void;
   onShowProjectHome?: () => void;
   onShowProjectUsers?: () => void;
@@ -9303,9 +10644,16 @@ function PostgresExperimentSidebar({
   onShowProjectCodebook?: () => void;
   onShowProjectCodeText?: () => void;
   onShowProjectMemos?: () => void;
+  onShowProjectReports?: () => void;
   onShowProjectLog?: () => void;
   onShowProjectObjects?: () => void;
   onShowProjectRelationships?: () => void;
+  onShowAiAssistHome?: () => void;
+  onShowAiAssistChat?: () => void;
+  onShowAiAssistedCoding?: () => void;
+  onShowAiAnalyze?: () => void;
+  onShowAiAssistSourceAttributes?: () => void;
+  onShowAiAssistProcessDocuments?: () => void;
   onShowFreeDraw?: () => void;
   onShowExplore?: () => void;
   onShowConstruct?: () => void;
@@ -9316,15 +10664,27 @@ function PostgresExperimentSidebar({
   onBackToGate: () => void;
   onSignOut: () => Promise<void>;
 }) {
+  const [collapsedSidebarSections, setCollapsedSidebarSections] = useState<Set<string>>(() => new Set());
+  const toggleSidebarSection = (sectionId: string) => {
+    setCollapsedSidebarSections((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
+  };
   const projectItems = [
     { id: "home", label: "Home", disabled: !activeProject, onClick: onShowProjectHome },
     { id: "users", label: "Users", disabled: !activeProject, onClick: onShowProjectUsers },
     { id: "sources", label: "Sources", disabled: !activeProject, onClick: onShowProjectSources },
-    { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
-    { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
-    { id: "project-log", label: "Log", disabled: !activeProject, onClick: onShowProjectLog },
     { id: "objects", label: "Objects", disabled: !activeProject, onClick: onShowProjectObjects },
     { id: "relationships", label: "Relationships", disabled: !activeProject, onClick: onShowProjectRelationships },
+    { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
+    { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
+    { id: "project-log", label: "Log", disabled: !activeProject, onClick: onShowProjectLog },
   ];
   const canvasItems = [
     { id: "free-draw", label: "Free Draw", disabled: !activeProject, onClick: onShowFreeDraw },
@@ -9335,6 +10695,15 @@ function PostgresExperimentSidebar({
   const analysisItems = [
     { id: "code-text", label: "Code Sources", disabled: !activeProject, onClick: onShowProjectCodeText },
     { id: "memos", label: "Memos", disabled: !activeProject, onClick: onShowProjectMemos },
+    { id: "reports", label: "Reports", disabled: !activeProject, onClick: onShowProjectReports },
+  ];
+  const aiAssistItems = [
+    { id: "ai-assist", label: "Home", disabled: !activeProject, onClick: onShowAiAssistHome },
+    { id: "ai-assist-chat", label: "Chat", disabled: !activeProject, onClick: onShowAiAssistChat },
+    { id: "ai-assisted-coding", label: "Assisted Coding", disabled: !activeProject, onClick: onShowAiAssistedCoding },
+    { id: "ai-analyze", label: "Analyze Codes", disabled: !activeProject, onClick: onShowAiAnalyze },
+    { id: "ai-assist-source-attributes", label: "Attributes", disabled: !activeProject, onClick: onShowAiAssistSourceAttributes },
+    { id: "ai-assist-process-documents", label: "Transcripts", disabled: !activeProject, onClick: onShowAiAssistProcessDocuments },
   ];
   const settingsItems = [
     { id: "app-settings", label: "App Settings", disabled: false, onClick: onShowAppSettings },
@@ -9373,11 +10742,20 @@ function PostgresExperimentSidebar({
 
       <nav className="sidebar-nav">
         <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
+          <button
+            type="button"
+            className="sidebar-section-header"
+            aria-expanded={!collapsedSidebarSections.has("project")}
+            onClick={() => toggleSidebarSection("project")}
+          >
             <span>Project</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
+            <span className="sidebar-section-chevron">
+              {collapsedSidebarSections.has("project") ? "\u25b8" : "\u25be"}
+            </span>
           </button>
-          <div className="sidebar-section-items">
+          <div
+            className={`sidebar-section-items ${collapsedSidebarSections.has("project") ? "sidebar-section-items--collapsed" : ""}`}
+          >
             {projectItems.map((item) => (
               <button
                 key={item.id}
@@ -9385,7 +10763,7 @@ function PostgresExperimentSidebar({
                 className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
-                title={item.disabled ? "Not wired into the PostgreSQL experiment yet." : undefined}
+                title={undefined}
               >
                 {item.label}
               </button>
@@ -9394,11 +10772,20 @@ function PostgresExperimentSidebar({
         </div>
 
         <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
+          <button
+            type="button"
+            className="sidebar-section-header"
+            aria-expanded={!collapsedSidebarSections.has("analysis")}
+            onClick={() => toggleSidebarSection("analysis")}
+          >
             <span>Analysis</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
+            <span className="sidebar-section-chevron">
+              {collapsedSidebarSections.has("analysis") ? "\u25b8" : "\u25be"}
+            </span>
           </button>
-          <div className="sidebar-section-items">
+          <div
+            className={`sidebar-section-items ${collapsedSidebarSections.has("analysis") ? "sidebar-section-items--collapsed" : ""}`}
+          >
             {analysisItems.map((item) => (
               <button
                 key={item.id}
@@ -9406,7 +10793,7 @@ function PostgresExperimentSidebar({
                 className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
-                title={item.disabled ? "Not wired into the PostgreSQL experiment yet." : undefined}
+                title={undefined}
               >
                 {item.label}
               </button>
@@ -9415,11 +10802,50 @@ function PostgresExperimentSidebar({
         </div>
 
         <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
-            <span>Settings</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
+          <button
+            type="button"
+            className="sidebar-section-header"
+            aria-expanded={!collapsedSidebarSections.has("ai-assist")}
+            onClick={() => toggleSidebarSection("ai-assist")}
+          >
+            <span>AI Assist</span>
+            <span className="sidebar-section-chevron">
+              {collapsedSidebarSections.has("ai-assist") ? "\u25b8" : "\u25be"}
+            </span>
           </button>
-          <div className="sidebar-section-items">
+          <div
+            className={`sidebar-section-items ${collapsedSidebarSections.has("ai-assist") ? "sidebar-section-items--collapsed" : ""}`}
+          >
+            {aiAssistItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
+                onClick={() => item.onClick?.()}
+                disabled={item.disabled}
+                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="sidebar-section">
+          <button
+            type="button"
+            className="sidebar-section-header"
+            aria-expanded={!collapsedSidebarSections.has("settings")}
+            onClick={() => toggleSidebarSection("settings")}
+          >
+            <span>Settings</span>
+            <span className="sidebar-section-chevron">
+              {collapsedSidebarSections.has("settings") ? "\u25b8" : "\u25be"}
+            </span>
+          </button>
+          <div
+            className={`sidebar-section-items ${collapsedSidebarSections.has("settings") ? "sidebar-section-items--collapsed" : ""}`}
+          >
             {settingsItems.map((item) => (
               <button
                 key={item.id}
@@ -9435,11 +10861,20 @@ function PostgresExperimentSidebar({
           </div>
         </div>
         <div className="sidebar-section">
-          <button type="button" className="sidebar-section-header" aria-expanded="true">
+          <button
+            type="button"
+            className="sidebar-section-header"
+            aria-expanded={!collapsedSidebarSections.has("canvas")}
+            onClick={() => toggleSidebarSection("canvas")}
+          >
             <span>Canvas</span>
-            <span className="sidebar-section-chevron">{"\u25be"}</span>
+            <span className="sidebar-section-chevron">
+              {collapsedSidebarSections.has("canvas") ? "\u25b8" : "\u25be"}
+            </span>
           </button>
-          <div className="sidebar-section-items">
+          <div
+            className={`sidebar-section-items ${collapsedSidebarSections.has("canvas") ? "sidebar-section-items--collapsed" : ""}`}
+          >
             {canvasItems.map((item) => (
               <button
                 key={item.id}

@@ -13,7 +13,7 @@ export interface RemoteSession {
 
 export const LOCAL_ACCOUNTS_KEY = "mc_local_accounts";
 export const REMOTE_SESSIONS_KEY = "mc_remote_sessions";
-export const POSTGRES_EXPERIMENT_ACCOUNTS_KEY = "kq_postgres_experiment_accounts";
+export const POSTGRES_ACCOUNTS_KEY = "kq_postgres_experiment_accounts";
 export const LOCAL_PB_URL = "http://127.0.0.1:8090";
 
 export function getLocalAccounts(): AccountHistory[] {
@@ -54,33 +54,33 @@ export function clearRemoteSessions(): void {
   localStorage.removeItem(REMOTE_SESSIONS_KEY);
 }
 
-export function getPostgresExperimentAccounts(): AccountHistory[] {
+export function getPostgresAccounts(): AccountHistory[] {
   try {
-    return JSON.parse(localStorage.getItem(POSTGRES_EXPERIMENT_ACCOUNTS_KEY) ?? "[]");
+    return JSON.parse(localStorage.getItem(POSTGRES_ACCOUNTS_KEY) ?? "[]");
   } catch {
     return [];
   }
 }
 
-export function savePostgresExperimentAccount(email: string, name: string): void {
+export function savePostgresAccount(email: string, name: string): void {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) return;
-  const list = getPostgresExperimentAccounts().filter((account) => account.email !== normalizedEmail);
+  const list = getPostgresAccounts().filter((account) => account.email !== normalizedEmail);
   list.unshift({ email: normalizedEmail, name, lastLogin: new Date().toISOString() });
-  localStorage.setItem(POSTGRES_EXPERIMENT_ACCOUNTS_KEY, JSON.stringify(list.slice(0, 20)));
+  localStorage.setItem(POSTGRES_ACCOUNTS_KEY, JSON.stringify(list.slice(0, 20)));
 }
 
-export function updatePostgresExperimentAccount(previousEmail: string, nextEmail: string, nextName: string): void {
+export function updatePostgresAccount(previousEmail: string, nextEmail: string, nextName: string): void {
   const normalizedPreviousEmail = previousEmail.trim().toLowerCase();
   const normalizedNextEmail = nextEmail.trim().toLowerCase();
   if (!normalizedNextEmail) return;
-  const list = getPostgresExperimentAccounts().filter(
+  const list = getPostgresAccounts().filter(
     (account) => account.email !== normalizedPreviousEmail && account.email !== normalizedNextEmail,
   );
   list.unshift({ email: normalizedNextEmail, name: nextName, lastLogin: new Date().toISOString() });
-  localStorage.setItem(POSTGRES_EXPERIMENT_ACCOUNTS_KEY, JSON.stringify(list.slice(0, 20)));
+  localStorage.setItem(POSTGRES_ACCOUNTS_KEY, JSON.stringify(list.slice(0, 20)));
 }
 
-export function clearPostgresExperimentAccounts(): void {
-  localStorage.removeItem(POSTGRES_EXPERIMENT_ACCOUNTS_KEY);
+export function clearPostgresAccounts(): void {
+  localStorage.removeItem(POSTGRES_ACCOUNTS_KEY);
 }
