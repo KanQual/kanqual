@@ -2081,11 +2081,11 @@ function NewDocumentModal({
         <div className="doc-upload-modal-title-row">
           <h2>{t("projectDocuments.createModal.title")}</h2>
           {!initialMode && (
-            <div className="doc-mode-toggle">
+            <div className="segmented-control">
               {allowedModes.includes("upload") && (
                 <button
                   type="button"
-                  className={`doc-mode-toggle-btn${mode === "upload" ? " doc-mode-toggle-btn--active" : ""}`}
+                  className={`segmented-control-option${mode === "upload" ? " segmented-control-option--active" : ""}`}
                   onClick={() => setModeAndReset("upload")}
                 >
                   {t("projectDocuments.createModal.upload")}
@@ -2094,7 +2094,7 @@ function NewDocumentModal({
               {allowedModes.includes("paste") && (
                 <button
                   type="button"
-                  className={`doc-mode-toggle-btn${mode === "paste" ? " doc-mode-toggle-btn--active" : ""}`}
+                  className={`segmented-control-option${mode === "paste" ? " segmented-control-option--active" : ""}`}
                   onClick={() => setModeAndReset("paste")}
                 >
                   {t("projectDocuments.createModal.textEntry")}
@@ -2103,7 +2103,7 @@ function NewDocumentModal({
               {allowedModes.includes("batch") && (
                 <button
                   type="button"
-                  className={`doc-mode-toggle-btn${mode === "batch" ? " doc-mode-toggle-btn--active" : ""}`}
+                  className={`segmented-control-option${mode === "batch" ? " segmented-control-option--active" : ""}`}
                   onClick={() => setModeAndReset("batch")}
                 >
                   {t("projectDocuments.createModal.batchUpload")}
@@ -2112,7 +2112,7 @@ function NewDocumentModal({
               {allowedModes.includes("csv") && (
                 <button
                   type="button"
-                  className={`doc-mode-toggle-btn${mode === "csv" ? " doc-mode-toggle-btn--active" : ""}`}
+                  className={`segmented-control-option${mode === "csv" ? " segmented-control-option--active" : ""}`}
                   onClick={() => setModeAndReset("csv")}
                 >
                   {t("projectDocuments.createModal.spreadsheet")}

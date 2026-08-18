@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/provider";
-import startupLogo from "../assets/logo-outline.png";
 import { ComputerIcon, HelpIcon, NetworkIcon } from "../components/AppIcons";
+import { LoadingCard } from "../components/LoadingCard";
 import {
   getLocalAccounts,
   getRemoteSessions,
@@ -153,12 +153,8 @@ export function AuthView() {
   if (status === "loading") {
     return (
       <div className="auth-screen">
-        <div className="auth-card auth-card--startup">
-          <img src={startupLogo} alt="Kanqual" className="auth-logo" />
-          <div className="auth-brand">Kanqual</div>
-          <p className="auth-starting">{t("auth.startup.startingUp")}</p>
-          {helpModal}
-        </div>
+        <LoadingCard />
+        {helpModal}
       </div>
     );
   }
@@ -427,17 +423,17 @@ export function AuthView() {
 
         <form onSubmit={handleSubmit} className="form">
           {!showRegisterOnly && (
-            <div className="auth-tabs">
+            <div className="segmented-control">
               <button
                 type="button"
-                className={`auth-tab ${panel === "login" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${panel === "login" ? "segmented-control-option--active" : ""}`}
                 onClick={() => setPanel("login")}
               >
                 {t("auth.form.signIn")}
               </button>
               <button
                 type="button"
-                className={`auth-tab ${panel === "register" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${panel === "register" ? "segmented-control-option--active" : ""}`}
                 onClick={() => setPanel("register")}
               >
                 {t("auth.form.createAccount")}

@@ -45,12 +45,16 @@ export type LlmSettings = {
   cloudProvider: CloudLlmProvider;
   cloudApiSecret: string;
   cloudSelectedModel: string;
+  cloudSelectedModelsByProvider: Partial<Record<CloudLlmProvider, string>>;
+  cloudEnabledModelsByProvider: Partial<Record<CloudLlmProvider, string[]>>;
   localProvider: LocalLlmProvider;
   ollamaEnabled: boolean;
   ollamaProtocol: "http" | "https";
   ollamaHost: string;
   ollamaPort: number;
   ollamaSelectedModel: string;
+  localSelectedModelsByProvider: Partial<Record<LocalLlmProvider, string>>;
+  localEnabledModelsByProvider: Partial<Record<LocalLlmProvider, string[]>>;
   ollamaRequestTimeoutSeconds: number;
   ollamaDocumentProcessingTimeoutSeconds: number;
   ollamaTemperature: number;
@@ -72,6 +76,9 @@ export type AppSettings = {
 export const APP_SETTINGS_KEY = "kq_app_settings_v1";
 export const LAST_PROJECT_ID_KEY = "kq_last_project_id";
 export const RECENT_PROJECTS_KEY = "kq_recent_projects";
+
+const CLOUD_LLM_PROVIDERS: CloudLlmProvider[] = ["openai", "anthropic", "copilot", "blablador", "ollama"];
+const LOCAL_LLM_PROVIDERS: LocalLlmProvider[] = ["ollama", "llamacpp", "custom"];
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   ui: {
@@ -107,12 +114,16 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     cloudProvider: "openai",
     cloudApiSecret: "",
     cloudSelectedModel: "",
+    cloudSelectedModelsByProvider: {},
+    cloudEnabledModelsByProvider: {},
     localProvider: "ollama",
     ollamaEnabled: false,
     ollamaProtocol: "http",
     ollamaHost: "127.0.0.1",
     ollamaPort: 11434,
     ollamaSelectedModel: "",
+    localSelectedModelsByProvider: {},
+    localEnabledModelsByProvider: {},
     ollamaRequestTimeoutSeconds: 120,
     ollamaDocumentProcessingTimeoutSeconds: 1800,
     ollamaTemperature: 0.2,
@@ -127,6 +138,35 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function normalizeProviderModelMap<K extends string>(value: unknown, allowedKeys: readonly K[]): Partial<Record<K, string>> {
+  const result: Partial<Record<K, string>> = {};
+  if (!value || typeof value !== "object") return result;
+  const record = value as Record<string, unknown>;
+  allowedKeys.forEach((key) => {
+    const model = record[key];
+    if (typeof model === "string" && model.trim()) {
+      result[key] = model.trim();
+    }
+  });
+  return result;
+}
+
+function normalizeProviderModelListMap<K extends string>(value: unknown, allowedKeys: readonly K[]): Partial<Record<K, string[]>> {
+  const result: Partial<Record<K, string[]>> = {};
+  if (!value || typeof value !== "object") return result;
+  const record = value as Record<string, unknown>;
+  allowedKeys.forEach((key) => {
+    const models = record[key];
+    if (Array.isArray(models)) {
+      result[key] = models
+        .filter((model): model is string => typeof model === "string")
+        .map((model) => model.trim())
+        .filter(Boolean);
+    }
+  });
+  return result;
 }
 
 function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSettings {
@@ -158,6 +198,42 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
     value?.localProvider === "llamacpp" || value?.localProvider === "custom" || value?.localProvider === "ollama"
       ? value.localProvider
       : DEFAULT_APP_SETTINGS.llm.localProvider;
+  const cloudProvider =
+    value?.cloudProvider === "anthropic"
+    || value?.cloudProvider === "copilot"
+    || value?.cloudProvider === "blablador"
+    || value?.cloudProvider === "ollama"
+    || value?.cloudProvider === "openai"
+      ? value.cloudProvider
+      : DEFAULT_APP_SETTINGS.llm.cloudProvider;
+  const cloudSelectedModelsByProvider = normalizeProviderModelMap(
+    value?.cloudSelectedModelsByProvider,
+    CLOUD_LLM_PROVIDERS,
+  );
+  const cloudEnabledModelsByProvider = normalizeProviderModelListMap(
+    value?.cloudEnabledModelsByProvider,
+    CLOUD_LLM_PROVIDERS,
+  );
+  const localSelectedModelsByProvider = normalizeProviderModelMap(
+    value?.localSelectedModelsByProvider,
+    LOCAL_LLM_PROVIDERS,
+  );
+  const localEnabledModelsByProvider = normalizeProviderModelListMap(
+    value?.localEnabledModelsByProvider,
+    LOCAL_LLM_PROVIDERS,
+  );
+  let cloudSelectedModel = typeof value?.cloudSelectedModel === "string" ? value.cloudSelectedModel.trim() : "";
+  if (cloudSelectedModel) {
+    cloudSelectedModelsByProvider[cloudProvider] = cloudSelectedModel;
+  } else {
+    cloudSelectedModel = cloudSelectedModelsByProvider[cloudProvider] ?? "";
+  }
+  let ollamaSelectedModel = typeof value?.ollamaSelectedModel === "string" ? value.ollamaSelectedModel.trim() : "";
+  if (ollamaSelectedModel) {
+    localSelectedModelsByProvider[localProvider] = ollamaSelectedModel;
+  } else {
+    ollamaSelectedModel = localSelectedModelsByProvider[localProvider] ?? "";
+  }
   return {
     chunkSize,
     overlapSize,
@@ -166,15 +242,11 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
     prefixQueries: value?.prefixQueries ?? DEFAULT_APP_SETTINGS.llm.prefixQueries,
     normalizeWhitespace: value?.normalizeWhitespace ?? DEFAULT_APP_SETTINGS.llm.normalizeWhitespace,
     connectionMode,
-    cloudProvider:
-      value?.cloudProvider === "anthropic"
-      || value?.cloudProvider === "copilot"
-      || value?.cloudProvider === "blablador"
-      || value?.cloudProvider === "ollama"
-        ? value.cloudProvider
-        : DEFAULT_APP_SETTINGS.llm.cloudProvider,
+    cloudProvider,
     cloudApiSecret: typeof value?.cloudApiSecret === "string" ? value.cloudApiSecret : "",
-    cloudSelectedModel: typeof value?.cloudSelectedModel === "string" ? value.cloudSelectedModel : "",
+    cloudSelectedModel,
+    cloudSelectedModelsByProvider,
+    cloudEnabledModelsByProvider,
     localProvider,
     ollamaEnabled: connectionMode === "local",
     ollamaProtocol: value?.ollamaProtocol === "https" ? "https" : DEFAULT_APP_SETTINGS.llm.ollamaProtocol,
@@ -184,7 +256,9 @@ function normalizeLlmSettings(value: Partial<LlmSettings> | undefined): LlmSetti
     ollamaPort: localProvider === "custom" && (value?.ollamaPort == null || Number(value.ollamaPort) === 0)
       ? 0
       : clampInteger(value?.ollamaPort, DEFAULT_APP_SETTINGS.llm.ollamaPort, 1, 65535),
-    ollamaSelectedModel: typeof value?.ollamaSelectedModel === "string" ? value.ollamaSelectedModel : "",
+    ollamaSelectedModel,
+    localSelectedModelsByProvider,
+    localEnabledModelsByProvider,
     ollamaRequestTimeoutSeconds: clampInteger(
       value?.ollamaRequestTimeoutSeconds,
       DEFAULT_APP_SETTINGS.llm.ollamaRequestTimeoutSeconds,

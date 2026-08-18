@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
+import { SettingsModal } from "../components/SettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
 import {
   changePostgresAppUserPassword,
-  clearPostgresUserProjectState,
   getPostgresUserPreferences,
-  getPostgresUserProjectState,
   renamePostgresRememberedAccount,
   savePostgresUserPreferences,
   updatePostgresAppUserProfile,
   type PostgresAuthSession,
-  type PostgresRecentProject,
   type PostgresUserPreferences,
 } from "../lib/postgres";
 import {
@@ -32,6 +30,8 @@ export type PostgresUserSettingsViewProps = {
   authSession: PostgresAuthSession;
   onAuthSessionUpdated: (session: PostgresAuthSession) => void;
   onAuthSessionInvalidated: () => void;
+  embedded?: boolean;
+  includeAppearance?: boolean;
 };
 
 function describeUnknownError(error: unknown): string {
@@ -54,28 +54,15 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferenc
   initTheme();
 }
 
-function formatPostgresDateTime(iso: string): string {
-  if (!iso) return "-";
-  try {
-    return new Intl.DateTimeFormat([], {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(iso));
-  } catch {
-    return "-";
-  }
-}
-
 export function PostgresUserSettingsView({
   authSession,
   onAuthSessionUpdated,
   onAuthSessionInvalidated,
+  embedded = false,
+  includeAppearance = true,
 }: PostgresUserSettingsViewProps) {
   const { locale, setLocale } = useI18n();
-  const [activeModal, setActiveModal] = useState<"profile" | "password" | "appearance" | "recent" | "account" | null>(null);
+  const [activeModal, setActiveModal] = useState<"profile" | "password" | "appearance" | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
   const [name, setName] = useState(authSession.user.name);
   const [email, setEmail] = useState(authSession.user.email);
@@ -89,7 +76,6 @@ export function PostgresUserSettingsView({
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
-  const [recentProjects, setRecentProjects] = useState<PostgresRecentProject[]>([]);
 
   useEffect(() => {
     setName(authSession.user.name);
@@ -101,16 +87,12 @@ export function PostgresUserSettingsView({
 
     async function loadUserPreferences() {
       try {
-        const [nextPreferences, projectState] = await Promise.all([
-          getPostgresUserPreferences(),
-          getPostgresUserProjectState(),
-        ]);
+        const nextPreferences = await getPostgresUserPreferences();
         if (cancelled) return;
         setTheme(nextPreferences.theme);
         setDensity(nextPreferences.density);
         setFontSize(nextPreferences.fontSize);
         setRecentProjectLimit(nextPreferences.recentProjectLimit);
-        setRecentProjects(projectState.recentProjects);
         if (nextPreferences.locale !== locale) {
           setLocale(nextPreferences.locale);
         }
@@ -288,12 +270,14 @@ export function PostgresUserSettingsView({
   }
 
   return (
-    <div className="view user-settings-view">
-      <header className="view-header">
-        <div className="view-title-with-help">
-          <h1>User Settings</h1>
-        </div>
-      </header>
+    <div className={embedded ? "user-settings-view user-settings-view--embedded" : "view user-settings-view"}>
+      {!embedded ? (
+        <header className="view-header">
+          <div className="view-title-with-help">
+            <h1>User Settings</h1>
+          </div>
+        </header>
+      ) : null}
 
       {notice ? <p className="settings-success">{notice}</p> : null}
       {error ? <p className="auth-error">{error}</p> : null}
@@ -302,69 +286,57 @@ export function PostgresUserSettingsView({
         <div className="app-settings-overview-stack">
           <div className="app-settings-overview-sections">
             <section className="app-settings-overview-section">
-              <div className="app-settings-overview-section-header">
-                <p className="app-settings-overview-section-heading">Account</p>
-              </div>
+              {!embedded ? (
+                <div className="app-settings-overview-section-header">
+                  <p className="app-settings-overview-section-heading">Account</p>
+                </div>
+              ) : null}
               <div className="app-settings-overview-grid">
                 <button
                   type="button"
                   className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => setActiveModal(authSession.authKind === "app_user" ? "profile" : "account")}
+                  onClick={() => setActiveModal("profile")}
                 >
-                  <h3>{authSession.authKind === "app_user" ? "Profile" : "Local Administrator"}</h3>
-                  <p>
-                    {authSession.authKind === "app_user"
-                      ? "Update your PostgreSQL display name and email."
-                      : "Review the built-in PostgreSQL administrator account for this device."}
-                  </p>
+                  <h3>Profile</h3>
+                  <p>Update your display name. Email is your PostgreSQL login username.</p>
                 </button>
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--admin"
-                  onClick={() => setActiveModal(authSession.authKind === "app_user" ? "password" : "account")}
-                >
-                  <h3>Password</h3>
-                  <p>
-                    {authSession.authKind === "app_user"
-                      ? "Change your PostgreSQL account password."
-                      : "Administrator password changes are handled through PostgreSQL setup."}
-                  </p>
-                </button>
+                {authSession.authKind !== "postgres_admin" ? (
+                  <button
+                    type="button"
+                    className="app-settings-overview-card app-settings-overview-card--default"
+                    onClick={() => setActiveModal("password")}
+                  >
+                    <h3>Password</h3>
+                    <p>Change your PostgreSQL account password.</p>
+                  </button>
+                ) : null}
               </div>
             </section>
-            <section className="app-settings-overview-section">
-              <div className="app-settings-overview-section-header">
-                <p className="app-settings-overview-section-heading">Preferences</p>
-              </div>
-              <div className="app-settings-overview-grid">
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => setActiveModal("appearance")}
-                >
-                  <h3>Appearance</h3>
-                  <p>Adjust theme, density, and text size for this device.</p>
-                </button>
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => setActiveModal("recent")}
-                >
-                  <h3>Recent Projects</h3>
-                  <p>Control how many recent projects are shown and clear the remembered list.</p>
-                </button>
-              </div>
-            </section>
+            {includeAppearance ? (
+              <section className="app-settings-overview-section">
+                {!embedded ? (
+                  <div className="app-settings-overview-section-header">
+                    <p className="app-settings-overview-section-heading">Preferences</p>
+                  </div>
+                ) : null}
+                <div className="app-settings-overview-grid">
+                  <button
+                    type="button"
+                    className="app-settings-overview-card app-settings-overview-card--default"
+                    onClick={() => setActiveModal("appearance")}
+                  >
+                    <h3>Appearance</h3>
+                    <p>Adjust theme, density, and text size for this device.</p>
+                  </button>
+                </div>
+              </section>
+            ) : null}
           </div>
         </div>
       </div>
 
       {activeModal === "profile" ? (
-        <div className="modal-overlay" onClick={() => submitting !== "profile" && setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Profile</h2></div>
-            </div>
+        <SettingsModal title="Profile" onClose={() => setActiveModal(null)} closeDisabled={submitting === "profile"}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -375,7 +347,7 @@ export function PostgresUserSettingsView({
                         <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
                       </label>
                       <label className="form-label">Email
-                        <input className="form-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+                        <input className="form-input" type="email" value={email} readOnly />
                       </label>
                       <div className="form-actions">
                         <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "profile"}>Cancel</button>
@@ -388,16 +360,11 @@ export function PostgresUserSettingsView({
                 </section>
               </div>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "password" ? (
-        <div className="modal-overlay" onClick={() => submitting !== "password" && setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Password</h2></div>
-            </div>
+        <SettingsModal title="Password" onClose={() => setActiveModal(null)} closeDisabled={submitting === "password"}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -409,6 +376,7 @@ export function PostgresUserSettingsView({
                       </label>
                       <label className="form-label">New password
                         <input className="form-input" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+                        <p className="password-requirement-note">Minimum 8 characters.</p>
                       </label>
                       <label className="form-label">Confirm new password
                         <input className="form-input" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
@@ -424,47 +392,11 @@ export function PostgresUserSettingsView({
                 </section>
               </div>
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {activeModal === "account" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Local Administrator</h2></div>
-            </div>
-            <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Administrator Account</h3></div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Name</span><span className="home-restricted-value">{authSession.user.name}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Email</span><span className="home-restricted-value">{authSession.user.email}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Role</span><span className="home-restricted-value">Local administrator</span></div>
-                    </div>
-                    <p className="auth-hint" style={{ marginTop: 16 }}>
-                      This built-in account is the PostgreSQL superuser identity for the device. Its credentials are managed during PostgreSQL bootstrap and handoff rather than in this screen.
-                    </p>
-                  </div>
-                </section>
-              </div>
-            </div>
-            <div className="app-settings-modal-footer">
-              <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "appearance" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Appearance</h2></div>
-            </div>
+        <SettingsModal title="Appearance" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -545,95 +477,7 @@ export function PostgresUserSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {activeModal === "recent" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Recent Projects</h2></div>
-            </div>
-            <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>History</h3></div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Projects to show</div>
-                        <div className="settings-row-desc">Limit how many remembered projects Kanqual surfaces in this account's recent history.</div>
-                      </div>
-                      <select
-                        className="form-input"
-                        value={recentProjectLimit}
-                        onChange={(event) => {
-                          const nextRecentProjectLimit = Number(event.target.value);
-                          void persistUserPreferences({
-                            theme,
-                            density,
-                            fontSize,
-                            locale,
-                            recentProjectLimit: nextRecentProjectLimit,
-                            themeState: getStoredThemeState(),
-                          }, "Recent project preferences saved.");
-                        }}
-                      >
-                        {[5, 10, 15, 25].map((limit) => (
-                          <option key={limit} value={limit}>{limit}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {recentProjects.length === 0 ? (
-                      <p className="auth-hint">No recent PostgreSQL projects are currently remembered for this account.</p>
-                    ) : (
-                      <div className="users-table-wrap postgres-users-table-wrap" style={{ marginTop: 16, maxHeight: 280 }}>
-                        <table className="users-table">
-                          <thead><tr><th className="users-th">Project</th><th className="users-th">Description</th><th className="users-th">Opened</th></tr></thead>
-                          <tbody>
-                            {recentProjects.slice(0, recentProjectLimit).map((project) => (
-                              <tr key={project.id} className="users-row">
-                                <td className="users-td users-td--name">{project.name}</td>
-                                <td className="users-td users-td--muted">{project.description || "-"}</td>
-                                <td className="users-td users-td--muted">{formatPostgresDateTime(project.openedAt)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    <div className="form-actions" style={{ marginTop: 16 }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={recentProjects.length === 0}
-                        onClick={() => {
-                          void (async () => {
-                            try {
-                              await clearPostgresUserProjectState();
-                              setRecentProjects([]);
-                              setNotice("Recent PostgreSQL project history cleared.");
-                              setError("");
-                            } catch (clearError) {
-                              setError(describeUnknownError(clearError));
-                            }
-                          })();
-                        }}
-                      >
-                        Clear history
-                      </button>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            </div>
-            <div className="app-settings-modal-footer">
-              <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {showThemeManager ? (

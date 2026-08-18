@@ -7,6 +7,7 @@ import {
   type PostgresReport,
 } from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { LoadingCard } from "../components/LoadingCard";
 import type { CodeReportKind } from "./Reports_Codes_View";
 import type { CoderReportKind } from "./Reports_Users_View";
 
@@ -168,7 +169,11 @@ function getReportFilterType(report: PostgresReport): Exclude<ReportTypeFilter, 
 }
 
 function ReportBuilderLoading() {
-  return <div className="view-loading-state">Loading report builder...</div>;
+  return (
+    <div className="view-loading-state">
+      <LoadingCard />
+    </div>
+  );
 }
 
 function ReportBuilderShell({

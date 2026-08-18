@@ -1341,45 +1341,45 @@ function SourceImportModal({
         >
         <div className="doc-upload-modal-title-row">
           <h2>New Source</h2>
-          <div className="doc-mode-toggle">
+          <div className="segmented-control">
             <button
               type="button"
-              className={`doc-mode-toggle-btn${mode === "upload" && uploadTab === "text" ? " doc-mode-toggle-btn--active" : ""}`}
+              className={`segmented-control-option${mode === "upload" && uploadTab === "text" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("text")}
             >
               Text
             </button>
             <button
               type="button"
-              className={`doc-mode-toggle-btn${mode === "upload" && uploadTab === "pdf" ? " doc-mode-toggle-btn--active" : ""}`}
+              className={`segmented-control-option${mode === "upload" && uploadTab === "pdf" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("pdf")}
             >
               PDF
             </button>
             <button
               type="button"
-              className={`doc-mode-toggle-btn${mode === "upload" && uploadTab === "image" ? " doc-mode-toggle-btn--active" : ""}`}
+              className={`segmented-control-option${mode === "upload" && uploadTab === "image" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("image")}
             >
               Image
             </button>
             <button
               type="button"
-              className={`doc-mode-toggle-btn${mode === "upload" && uploadTab === "audio" ? " doc-mode-toggle-btn--active" : ""}`}
+              className={`segmented-control-option${mode === "upload" && uploadTab === "audio" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("audio")}
             >
               Audio
             </button>
             <button
               type="button"
-              className={`doc-mode-toggle-btn${mode === "upload" && uploadTab === "video" ? " doc-mode-toggle-btn--active" : ""}`}
+              className={`segmented-control-option${mode === "upload" && uploadTab === "video" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("video")}
             >
               Video
             </button>
             <button
               type="button"
-              className={`doc-mode-toggle-btn${mode === "paste" ? " doc-mode-toggle-btn--active" : ""}`}
+              className={`segmented-control-option${mode === "paste" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("paste")}
             >
               Text Entry
@@ -1623,17 +1623,17 @@ function SourceEditorModal({
     <div className="modal-overlay" onClick={() => !saving && onCancel()}>
       <div className="modal modal--wide assoc-doc-modal" onClick={(event) => event.stopPropagation()}>
         <h2>{title}</h2>
-        <div className="auth-tabs" role="tablist" aria-label="Source editor tabs">
+        <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Source editor tabs">
           <button
             type="button"
-            className={activeTab === "details" ? "auth-tab auth-tab--active" : "auth-tab"}
+            className={activeTab === "details" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             onClick={() => setActiveTab("details")}
           >
             Details
           </button>
           <button
             type="button"
-            className={activeTab === "attributes" ? "auth-tab auth-tab--active" : "auth-tab"}
+            className={activeTab === "attributes" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             onClick={() => setActiveTab("attributes")}
           >
             Attributes

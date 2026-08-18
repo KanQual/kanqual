@@ -1169,17 +1169,21 @@ export function AIAssistChatView() {
             </p>
             <div className="form-label" style={{ marginBottom: 16 }}>
               <span style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>Context Mode</span>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="segmented-control" role="tablist" aria-label="Context mode">
                 <button
                   type="button"
-                  className={`btn${selectedContextMode === "prioritize" ? " btn--primary" : ""}`}
+                  role="tab"
+                  aria-selected={selectedContextMode === "prioritize"}
+                  className={`segmented-control-option${selectedContextMode === "prioritize" ? " segmented-control-option--active" : ""}`}
                   onClick={() => setSelectedContextMode("prioritize")}
                 >
                   Prioritize
                 </button>
                 <button
                   type="button"
-                  className={`btn${selectedContextMode === "restrict" ? " btn--primary" : ""}`}
+                  role="tab"
+                  aria-selected={selectedContextMode === "restrict"}
+                  className={`segmented-control-option${selectedContextMode === "restrict" ? " segmented-control-option--active" : ""}`}
                   onClick={() => setSelectedContextMode("restrict")}
                 >
                   Restrict
@@ -1191,7 +1195,7 @@ export function AIAssistChatView() {
                   : t("aiAssist.chat.preferModeHelp")}
               </p>
             </div>
-            <div className="ai-chat-context-modal-tabs" role="tablist" aria-label={t("aiAssist.chat.contextItemTypes")}>
+            <div className="segmented-control ai-chat-context-modal-tabs" role="tablist" aria-label={t("aiAssist.chat.contextItemTypes")}>
               {([
                 ["document", `Documents (${documents.length})`],
                 ["case", `Cases (${cases.length})`],
@@ -1202,7 +1206,9 @@ export function AIAssistChatView() {
                 <button
                   key={tab}
                   type="button"
-                  className={`btn${contextTab === tab ? " btn--primary" : ""}`}
+                  role="tab"
+                  aria-selected={contextTab === tab}
+                  className={`segmented-control-option${contextTab === tab ? " segmented-control-option--active" : ""}`}
                   onClick={() => setContextTab(tab)}
                 >
                   {label}

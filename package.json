@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "prepare:pb-sidecar": "node scripts/prepare-pocketbase-sidecar.mjs",
+    "prepare:bundled-postgres": "node scripts/stage-bundled-postgres.mjs",
+    "prepare:bundled-postgres:strict": "node scripts/stage-bundled-postgres.mjs --strict",
     "check:locales": "node scripts/check-locales.mjs",
     "validate:roles": "node scripts/validate-role-matrix.mjs",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",

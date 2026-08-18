@@ -700,9 +700,9 @@ export function AppSettingsView() {
       setPostgresSchemaResult(null);
       setPostgresProjects([]);
       setPostgresNotice(
-        result.appRoleReady
-          ? `Created or updated ${result.appRoleName} and verified access to ${result.appDatabase}.`
-          : `Created or updated ${result.appRoleName}, but the app-role verification step still needs review.`,
+        result.databaseReady
+          ? `Verified access to ${result.appDatabase}.`
+          : `Created or updated ${result.appDatabase}, but the verification step still needs review.`,
       );
       setPostgresSuperuserPassword("");
       await refreshPostgres();
@@ -1537,7 +1537,7 @@ export function AppSettingsView() {
 
             <SettingsModalSection
               title="PostgreSQL"
-              description="Bootstrap a local PostgreSQL app role and database without changing the current PocketBase runtime yet."
+              description="Finish or repair the local PostgreSQL database setup."
             >
               <div className="settings-row">
                 <div className="settings-row-info">
@@ -1566,29 +1566,29 @@ export function AppSettingsView() {
 
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <div className="settings-row-label">Planned app role</div>
+                  <div className="settings-row-label">Control database</div>
                   <div className="settings-row-desc settings-code-line">
                     {postgresStatus
-                      ? `${postgresStatus.appRoleName} -> ${postgresStatus.appDatabase}`
+                      ? postgresStatus.appDatabase
                       : "Loading..."}
                   </div>
                 </div>
               </div>
 
               <label className="form-label">
-                Current PostgreSQL superuser password
+                Administrator Password
                 <input
                   className="form-input"
                   type="password"
                   value={postgresSuperuserPassword}
                   onChange={(e) => setPostgresSuperuserPassword(e.target.value)}
                   autoComplete="current-password"
-                  placeholder="Enter the current postgres password"
+                  placeholder="Administrator password"
                 />
               </label>
 
               <div className="settings-warning">
-                This bootstrap step uses the current PostgreSQL superuser credential once to create or rotate the restricted Kanqual app role and ensure the local `kanqual` database exists.
+                This setup step uses the PostgreSQL administrator credential once to finish creating the KanQual control database.
               </div>
 
               {postgresError ? <p className="auth-error">{postgresError}</p> : null}
@@ -1599,11 +1599,9 @@ export function AppSettingsView() {
                   <div className="settings-row-info">
                     <div className="settings-row-label">Last bootstrap result</div>
                     <div className="settings-row-desc settings-code-line">
-                      {postgresBootstrapResult.appRoleName}
-                      {" | "}
                       {postgresBootstrapResult.appDatabase}
                       {" | "}
-                      {postgresBootstrapResult.appRoleReady ? "verified" : "needs review"}
+                      {postgresBootstrapResult.databaseReady ? "verified" : "needs review"}
                     </div>
                   </div>
                 </div>
@@ -2404,7 +2402,7 @@ export function AppSettingsView() {
           <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
             <h2>App Settings Help</h2>
             <p className="users-guide-copy">
-                Manage network mode, configure AI runtime details, download, clear, or inspect embedding models, customize appearance, review storage and diagnostics, and perform administrator-only maintenance.
+                Manage LAN mode, configure AI runtime details, download, clear, or inspect embedding models, customize appearance, review storage and diagnostics, and perform administrator-only maintenance.
             </p>
             <p className="users-guide-copy">
                 Use App Settings for device-wide or host-runtime behavior rather than project-shared behavior. Open the card that matches the area you want to manage.

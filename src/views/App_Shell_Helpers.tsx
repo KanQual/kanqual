@@ -12,7 +12,12 @@ import { useStore } from "../context/StoreContext";
 import { useI18n } from "../i18n/provider";
 import { APP_SETTINGS_KEY } from "../lib/appSettings";
 import {
+  cancelPostgresEmbeddingModelDownload,
+  downloadPostgresCustomEmbeddingModel,
+  downloadPostgresEmbeddingModel,
+  getPostgresEmbeddingModelDownloadStatus,
   cancelPostgresProjectEmbeddingStoreBuild,
+  type PostgresEmbeddingModelDownloadStatus,
   type PostgresProject,
   type PostgresProjectChangeEvent,
   POSTGRES_PROJECT_CHANGED_EVENT,
@@ -179,6 +184,42 @@ function formatGigabytes(value: number): string {
 
 function formatPercent(value: number | null): string {
   return value == null ? "--" : `${Math.max(0, Math.min(100, value)).toFixed(0)}%`;
+}
+
+export const POSTGRES_EMBEDDING_MODEL_DOWNLOAD_CHANGED_EVENT = "kanqual:postgres-embedding-model-download-changed";
+
+type PostgresEmbeddingModelRetryRequest =
+  | { kind: "default" }
+  | { kind: "custom"; modelUrl: string };
+
+type PostgresEmbeddingModelDownloadChangedDetail = {
+  status?: PostgresEmbeddingModelDownloadStatus;
+  retry?: PostgresEmbeddingModelRetryRequest;
+};
+
+let latestEmbeddingModelDownloadDetail: PostgresEmbeddingModelDownloadChangedDetail | null = null;
+
+export function notifyPostgresEmbeddingModelDownloadChanged(
+  detail?: PostgresEmbeddingModelDownloadChangedDetail,
+) {
+  latestEmbeddingModelDownloadDetail = detail ?? null;
+  window.dispatchEvent(new CustomEvent(POSTGRES_EMBEDDING_MODEL_DOWNLOAD_CHANGED_EVENT, { detail }));
+}
+
+function getEmbeddingModelDownloadStatusKey(status: PostgresEmbeddingModelDownloadStatus): string {
+  return [
+    status.phase,
+    status.downloadedBytes ?? 0,
+    status.totalBytes ?? "",
+    status.downloadedFiles ?? 0,
+    status.totalFiles ?? 0,
+    status.currentFile ?? "",
+    status.message ?? "",
+  ].join("|");
+}
+
+function isTerminalEmbeddingModelDownloadPhase(phase: PostgresEmbeddingModelDownloadStatus["phase"]): boolean {
+  return phase === "completed" || phase === "cancelled" || phase === "error";
 }
 
 export type ReleaseCheckResult = {
@@ -420,7 +461,7 @@ export function ProjectEmbeddingBuildBanner() {
     if (!isActive) return;
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
-  }, [isActive]);
+  }, [isActive, open]);
 
   if (!projectEmbeddingBuildBannerOpen || !projectEmbeddingBuildStatus) return null;
   const progressPercent = Math.max(0, Math.min(100, projectEmbeddingBuildStatus.progressPercent ?? 0));
@@ -516,7 +557,7 @@ export function PostgresProjectEmbeddingBuildBanner({
     setStatus(nextStatus);
     previousPhaseRef.current = nextStatus.phase;
 
-    if (nextIsActive || previousWasActive) {
+    if (nextIsActive || previousWasActive || nextStatus.phase === "error" || nextStatus.phase === "completed" || nextStatus.phase === "cancelled") {
       setOpen(nextStatus.phase !== "idle");
     }
   }
@@ -537,7 +578,7 @@ export function PostgresProjectEmbeddingBuildBanner({
     void refreshStatus();
     const intervalId = window.setInterval(() => {
       void refreshStatus();
-    }, isActive ? 1500 : 5000);
+    }, isActive || !open ? 1000 : 5000);
 
     return () => {
       cancelled = true;
@@ -650,6 +691,276 @@ export function PostgresProjectEmbeddingBuildBanner({
           </button>
         ) : (
           <button type="button" className="btn" onClick={() => setOpen(false)}>
+            {t("common.dismiss")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function PostgresEmbeddingModelDownloadBanner() {
+  const { t, formatNumber } = useI18n();
+  const [status, setStatus] = useState<PostgresEmbeddingModelDownloadStatus | null>(null);
+  const [open, setOpen] = useState(false);
+  const [retryRequest, setRetryRequest] = useState<PostgresEmbeddingModelRetryRequest | null>(null);
+  const previousPhaseRef = useRef<PostgresEmbeddingModelDownloadStatus["phase"] | null>(null);
+  const dismissedStatusKeyRef = useRef<string | null>(null);
+  const staleTerminalStatusKeyRef = useRef<string | null>(null);
+  const cancelRequestedRef = useRef(false);
+  const phase = status?.phase ?? "idle";
+  const isActive = phase === "downloading" || phase === "cancelling";
+
+  function applyNextStatus(
+    nextStatus: PostgresEmbeddingModelDownloadStatus,
+    options: { fromEvent?: boolean } = {},
+  ) {
+    const previousPhase = previousPhaseRef.current;
+    const incomingIsActive = nextStatus.phase === "downloading" || nextStatus.phase === "cancelling";
+    const incomingIsTerminal = isTerminalEmbeddingModelDownloadPhase(nextStatus.phase);
+    const incomingStatusKey = getEmbeddingModelDownloadStatusKey(nextStatus);
+
+    if (options.fromEvent) {
+      dismissedStatusKeyRef.current = null;
+      if (incomingIsActive && status && isTerminalEmbeddingModelDownloadPhase(status.phase)) {
+        staleTerminalStatusKeyRef.current = getEmbeddingModelDownloadStatusKey(status);
+      }
+    }
+
+    if (
+      incomingIsTerminal
+      && staleTerminalStatusKeyRef.current === incomingStatusKey
+      && previousPhase !== null
+      && (previousPhase === "downloading" || previousPhase === "cancelling")
+    ) {
+      return;
+    }
+
+    const normalizedStatus = cancelRequestedRef.current && nextStatus.phase === "downloading"
+      ? {
+          ...nextStatus,
+          phase: "cancelling" as const,
+          message: nextStatus.message ?? "Cancelling download...",
+        }
+      : nextStatus;
+    const nextIsActive = normalizedStatus.phase === "downloading" || normalizedStatus.phase === "cancelling";
+    const previousWasActive = previousPhase === "downloading" || previousPhase === "cancelling";
+    const nextIsTerminal = isTerminalEmbeddingModelDownloadPhase(normalizedStatus.phase);
+    const nextStatusKey = getEmbeddingModelDownloadStatusKey(normalizedStatus);
+
+    if (nextIsActive) {
+      dismissedStatusKeyRef.current = null;
+      if (!options.fromEvent) {
+        staleTerminalStatusKeyRef.current = null;
+      }
+    }
+    if (nextIsTerminal) {
+      latestEmbeddingModelDownloadDetail = null;
+      staleTerminalStatusKeyRef.current = null;
+      cancelRequestedRef.current = false;
+    }
+
+    setStatus(normalizedStatus);
+    previousPhaseRef.current = normalizedStatus.phase;
+
+    if (
+      nextIsActive
+      || previousWasActive
+      || nextIsTerminal
+    ) {
+      setOpen(normalizedStatus.phase !== "idle" && dismissedStatusKeyRef.current !== nextStatusKey);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshStatus() {
+      try {
+        const nextStatus = await getPostgresEmbeddingModelDownloadStatus();
+        if (cancelled) return;
+        applyNextStatus(nextStatus);
+      } catch (error) {
+        console.warn("Could not load PostgreSQL embedding model download status:", describeUnknownError(error));
+      }
+    }
+
+    if (latestEmbeddingModelDownloadDetail?.retry) {
+      setRetryRequest(latestEmbeddingModelDownloadDetail.retry);
+    }
+    if (latestEmbeddingModelDownloadDetail?.status) {
+      applyNextStatus(latestEmbeddingModelDownloadDetail.status, { fromEvent: true });
+    }
+    void refreshStatus();
+    const intervalId = window.setInterval(() => {
+      void refreshStatus();
+    }, isActive || !open ? 1000 : 5000);
+
+    function handleChanged(event: Event) {
+      const detail = (event as CustomEvent<PostgresEmbeddingModelDownloadChangedDetail>).detail;
+      if (detail?.retry) {
+        setRetryRequest(detail.retry);
+      }
+      if (detail?.status) {
+        applyNextStatus(detail.status, { fromEvent: true });
+        return;
+      }
+      void refreshStatus();
+      window.setTimeout(() => {
+        void refreshStatus();
+      }, 250);
+    }
+
+    window.addEventListener(POSTGRES_EMBEDDING_MODEL_DOWNLOAD_CHANGED_EVENT, handleChanged);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener(POSTGRES_EMBEDDING_MODEL_DOWNLOAD_CHANGED_EVENT, handleChanged);
+    };
+  }, [isActive, open]);
+
+  if (!open || !status || phase === "idle") return null;
+
+  const progressPercent = Math.max(0, Math.min(100, status.progressPercent ?? 0));
+  const progressFillPercent = isActive ? Math.max(8, progressPercent) : progressPercent;
+  const showIndeterminateProgress = isActive && progressPercent <= 0;
+  const downloadedBytes = status.downloadedBytes ?? 0;
+  const totalBytes = status.totalBytes ?? 0;
+  const remainingBytes = totalBytes > 0 ? Math.max(0, totalBytes - downloadedBytes) : 0;
+  const remainingFiles =
+    isActive && status.totalFiles > 0
+      ? Math.max(0, status.totalFiles - status.downloadedFiles)
+      : null;
+
+  async function handleCancel() {
+    cancelRequestedRef.current = true;
+    try {
+      const nextStatus = await cancelPostgresEmbeddingModelDownload();
+      applyNextStatus(nextStatus);
+      setOpen(true);
+    } catch (error) {
+      setStatus((current) => current
+        ? {
+            ...current,
+            phase: "error",
+            message: describeUnknownError(error),
+          }
+        : current);
+      setOpen(true);
+    }
+  }
+
+  async function handleRetry() {
+    if (!retryRequest || isActive) return;
+    dismissedStatusKeyRef.current = null;
+    cancelRequestedRef.current = false;
+    const preparingStatus: PostgresEmbeddingModelDownloadStatus = {
+      phase: "downloading",
+      downloadedBytes: 0,
+      totalBytes: null,
+      downloadedFiles: 0,
+      totalFiles: 0,
+      currentFile: null,
+      progressPercent: null,
+      message: retryRequest.kind === "custom"
+        ? `Preparing download from ${retryRequest.modelUrl}...`
+        : "Preparing download...",
+    };
+    applyNextStatus(preparingStatus);
+    try {
+      if (retryRequest.kind === "custom") {
+        await downloadPostgresCustomEmbeddingModel(retryRequest.modelUrl);
+      } else {
+        await downloadPostgresEmbeddingModel();
+      }
+      const nextStatus = await getPostgresEmbeddingModelDownloadStatus();
+      applyNextStatus(nextStatus);
+    } catch (error) {
+      const nextStatus = await getPostgresEmbeddingModelDownloadStatus().catch(() => null);
+      applyNextStatus(nextStatus && nextStatus.phase !== "idle" ? nextStatus : {
+        ...preparingStatus,
+        phase: "error",
+        message: describeUnknownError(error),
+      });
+    }
+  }
+
+  return (
+    <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
+      <div className="embedding-build-banner-copy">
+        <strong>
+          {phase === "downloading" && t("app.embeddingDownload.downloadingTitle")}
+          {phase === "cancelling" && t("app.embeddingDownload.cancellingTitle")}
+          {phase === "completed" && t("app.embeddingDownload.completedTitle")}
+          {phase === "cancelled" && t("app.embeddingDownload.cancelledTitle")}
+          {phase === "error" && t("app.embeddingDownload.errorTitle")}
+        </strong>
+        <span>
+          {status.message ??
+            (status.progressPercent != null
+              ? t("app.embeddingDownload.downloadedPercent", { percent: Math.round(status.progressPercent) })
+              : t("app.embeddingDownload.preparing"))}
+        </span>
+        {status.progressPercent != null ? (
+          <span>{t("app.embeddingDownload.downloadProgress", { percent: Math.round(status.progressPercent) })}</span>
+        ) : null}
+        {totalBytes > 0 ? (
+          <>
+            <span>{t("app.embeddingDownload.totalSize", { size: formatGigabytes(totalBytes) })}</span>
+            <span>{t("app.embeddingDownload.alreadyOnDevice", { size: formatGigabytes(downloadedBytes) })}</span>
+            <span>{t("app.embeddingDownload.remainingToDownload", { size: formatGigabytes(remainingBytes) })}</span>
+          </>
+        ) : null}
+        {remainingFiles != null ? (
+          <span>{t("app.embeddingDownload.remainingFileCount", { count: formatNumber(remainingFiles) })}</span>
+        ) : null}
+        {status.currentFile ? (
+          <span>{t("app.embeddingDownload.currentFile", { name: status.currentFile })}</span>
+        ) : null}
+        {isActive ? (
+          <div className="embedding-build-banner-progress">
+            <div className={`model-download-progress-track${showIndeterminateProgress ? " model-download-progress-track--indeterminate" : ""}`} aria-hidden="true">
+              <div className="model-download-progress-fill model-download-progress-fill--active" style={{ width: showIndeterminateProgress ? "34%" : `${progressFillPercent}%` }} />
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <div className="embedding-build-banner-actions">
+        {isActive ? (
+          <button type="button" className="btn" onClick={() => void handleCancel()} disabled={phase === "cancelling"}>
+            {phase === "cancelling" ? t("app.embeddingDownload.cancellingAction") : t("app.embeddingDownload.cancelAction")}
+          </button>
+        ) : phase === "error" && retryRequest ? (
+          <>
+            <button type="button" className="btn btn--primary" onClick={() => void handleRetry()}>
+              Retry
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                if (status) {
+                  dismissedStatusKeyRef.current = getEmbeddingModelDownloadStatusKey(status);
+                }
+                latestEmbeddingModelDownloadDetail = null;
+                setOpen(false);
+              }}
+            >
+              {t("common.dismiss")}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              if (status) {
+                dismissedStatusKeyRef.current = getEmbeddingModelDownloadStatusKey(status);
+              }
+              latestEmbeddingModelDownloadDetail = null;
+              setOpen(false);
+            }}
+          >
             {t("common.dismiss")}
           </button>
         )}

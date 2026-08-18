@@ -40,6 +40,7 @@ import {
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { notifyPostgresEmbeddingModelDownloadChanged } from "./App_Shell_Helpers";
 
 type OllamaModelSummary = {
   name: string;
@@ -369,17 +370,41 @@ export function PostgresAiAssistHomeView({
     ?? CLOUD_PROVIDER_OPTIONS[0];
   const selectedLocalProvider = LOCAL_PROVIDER_OPTIONS.find((provider) => provider.value === appSettings.llm.localProvider)
     ?? LOCAL_PROVIDER_OPTIONS[0];
+  const rememberedGenerationModel = llmConnectionMode === "cloud"
+    ? appSettings.llm.cloudSelectedModelsByProvider[appSettings.llm.cloudProvider] ?? appSettings.llm.cloudSelectedModel
+    : llmConnectionMode === "local"
+      ? appSettings.llm.localSelectedModelsByProvider[appSettings.llm.localProvider] ?? appSettings.llm.ollamaSelectedModel
+      : "";
+  const rememberedGenerationProviderLabel = llmConnectionMode === "cloud"
+    ? selectedCloudProvider.label
+    : llmConnectionMode === "local"
+      ? selectedLocalProvider.label
+      : "";
+  const aiAssistAllowedByAdministrator =
+    installationSettings == null
+      ? true
+      : installationSettings.aiAssistPolicy.mode === "enabled"
+        ? true
+        : installationSettings.aiAssistPolicy.mode === "project"
+          ? installationSettings.aiAssistPolicy.projectOverrides[project.id] ?? true
+          : false;
   const runtimeConnectionModeLabel = llmConnectionMode === "none"
     ? "None"
     : llmConnectionMode === "cloud"
       ? "Cloud"
       : "Local";
+  const allowedCloudModels = appSettings.llm.cloudEnabledModelsByProvider[appSettings.llm.cloudProvider];
+  const allowedLocalModels = appSettings.llm.localEnabledModelsByProvider[appSettings.llm.localProvider];
   const generationModelOptions = llmConnectionMode === "cloud"
-    ? cloudModels.map((model) => ({
+    ? cloudModels
+      .filter((model) => allowedCloudModels === undefined || allowedCloudModels.includes(model.id))
+      .map((model) => ({
       id: model.id,
       label: `${model.name}${model.publisher ? ` (${model.publisher})` : ""}`,
     }))
-    : ollamaModels.map((model) => ({
+    : ollamaModels
+      .filter((model) => allowedLocalModels === undefined || allowedLocalModels.includes(model.name))
+      .map((model) => ({
       id: model.name,
       label: model.name,
     }));
@@ -624,7 +649,7 @@ export function PostgresAiAssistHomeView({
       llm: {
         ...appSettings.llm,
         cloudProvider: provider,
-        cloudSelectedModel: "",
+        cloudSelectedModel: appSettings.llm.cloudSelectedModelsByProvider[provider] ?? "",
       },
     });
   }
@@ -642,7 +667,7 @@ export function PostgresAiAssistHomeView({
         ...appSettings.llm,
         ...profile.defaults,
         localProvider: provider,
-        ollamaSelectedModel: "",
+        ollamaSelectedModel: appSettings.llm.localSelectedModelsByProvider[provider] ?? "",
       },
     });
   }
@@ -688,11 +713,16 @@ export function PostgresAiAssistHomeView({
       if (result.models.length > 0) {
         const hasSelectedModel = result.models.some((model) => model.name === appSettings.llm.ollamaSelectedModel);
         if (!hasSelectedModel) {
+          const selectedModel = result.models[0].name;
           await persistAppSettings({
             ...appSettings,
             llm: {
               ...appSettings.llm,
-              ollamaSelectedModel: result.models[0].name,
+              ollamaSelectedModel: selectedModel,
+              localSelectedModelsByProvider: {
+                ...appSettings.llm.localSelectedModelsByProvider,
+                [appSettings.llm.localProvider]: selectedModel,
+              },
             },
           });
         }
@@ -702,6 +732,10 @@ export function PostgresAiAssistHomeView({
           llm: {
             ...appSettings.llm,
             ollamaSelectedModel: "",
+            localSelectedModelsByProvider: {
+              ...appSettings.llm.localSelectedModelsByProvider,
+              [appSettings.llm.localProvider]: "",
+            },
           },
         });
       }
@@ -737,11 +771,16 @@ export function PostgresAiAssistHomeView({
       if (result.models.length > 0) {
         const hasSelectedModel = result.models.some((model) => model.id === appSettings.llm.cloudSelectedModel);
         if (!hasSelectedModel) {
+          const selectedModel = result.models[0].id;
           await persistAppSettings({
             ...appSettings,
             llm: {
               ...appSettings.llm,
-              cloudSelectedModel: result.models[0].id,
+              cloudSelectedModel: selectedModel,
+              cloudSelectedModelsByProvider: {
+                ...appSettings.llm.cloudSelectedModelsByProvider,
+                [appSettings.llm.cloudProvider]: selectedModel,
+              },
             },
           });
         }
@@ -751,6 +790,10 @@ export function PostgresAiAssistHomeView({
           llm: {
             ...appSettings.llm,
             cloudSelectedModel: "",
+            cloudSelectedModelsByProvider: {
+              ...appSettings.llm.cloudSelectedModelsByProvider,
+              [appSettings.llm.cloudProvider]: "",
+            },
           },
         });
       }
@@ -780,13 +823,21 @@ export function PostgresAiAssistHomeView({
       message: "Preparing download...",
     };
     setEmbeddingModelDownloadStatus(pendingStatus);
+    notifyPostgresEmbeddingModelDownloadChanged({ status: pendingStatus, retry: { kind: "default" } });
     void downloadPostgresEmbeddingModel()
       .then((nextStatus) => {
         setEmbeddingModelStatus(nextStatus);
         setNotice("Embedding model downloaded.");
       })
       .catch((downloadError) => {
-        setError(describeUnknownError(downloadError));
+        notifyPostgresEmbeddingModelDownloadChanged({
+          status: {
+            ...pendingStatus,
+            phase: "error",
+            message: describeUnknownError(downloadError),
+          },
+          retry: { kind: "default" },
+        });
       })
       .finally(() => {
         setSubmitting(null);
@@ -922,6 +973,14 @@ export function PostgresAiAssistHomeView({
       {notice ? <p className="settings-success">{notice}</p> : null}
       {error ? <p className="auth-error">{error}</p> : null}
 
+      {!aiAssistAllowedByAdministrator ? (
+        <section className="home-project-card ai-assist-home-card">
+          <div className="home-project-card-header">
+            <h2>AI Assist unavailable</h2>
+          </div>
+          <p className="auth-hint">The administrator has disallowed AI Assist usage for this server or project.</p>
+        </section>
+      ) : (
       <div className="ai-assist-home-layout">
         <div className="ai-assist-home-info-column">
           <section
@@ -1113,7 +1172,7 @@ export function PostgresAiAssistHomeView({
                 <section className="home-project-card ai-assist-home-card ai-assist-home-card--balanced ai-assist-compact-setup-card">
                   <div className="home-project-card-header">
                     <div>
-                      <h2>AI Runtime</h2>
+                      <h2>Embedding Model</h2>
                     </div>
                   </div>
                   <div className="project-model-card">
@@ -1281,29 +1340,56 @@ export function PostgresAiAssistHomeView({
                     <h2>LLM Model</h2>
                   </div>
                 </div>
-                <fieldset className="llm-settings-grid llm-settings-grid--single ai-assist-llm-model-selector" disabled={!canManageLlmSettings || !generationDefaultsAvailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-                  <label className="form-label">
-                    <select
-                      className="form-input"
-                      value={llmConnectionMode === "cloud" ? appSettings.llm.cloudSelectedModel : appSettings.llm.ollamaSelectedModel}
-                      onChange={(event) => void persistAppSettings({
-                        ...appSettings,
-                        llm: {
-                          ...appSettings.llm,
-                          ...(llmConnectionMode === "cloud"
-                            ? { cloudSelectedModel: event.target.value }
-                            : { ollamaSelectedModel: event.target.value }),
-                        },
-                      })}
-                      disabled={generationModelOptions.length === 0}
-                    >
-                      <option value="">{generationModelOptions.length === 0 ? "No models loaded yet" : "Select model"}</option>
-                      {generationModelOptions.map((model) => (
-                        <option key={model.id} value={model.id}>{model.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                </fieldset>
+                <div className="ai-assist-llm-model-selection-stack">
+                  {generationDefaultsAvailable ? (
+                    <div className="project-model-card ai-assist-llm-model-memory-card">
+                      <div>
+                        <div className="project-model-name">Last selected</div>
+                        <p className="project-model-description">
+                          {rememberedGenerationProviderLabel}: {rememberedGenerationModel || "None"}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+                  <fieldset className="llm-settings-grid llm-settings-grid--single ai-assist-llm-model-selector" disabled={!canManageLlmSettings || !generationDefaultsAvailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                    <label className="form-label">
+                      <select
+                        className="form-input"
+                        value={llmConnectionMode === "cloud" ? appSettings.llm.cloudSelectedModel : appSettings.llm.ollamaSelectedModel}
+                        onChange={(event) => {
+                          const selectedModel = event.target.value;
+                          void persistAppSettings({
+                            ...appSettings,
+                            llm: {
+                              ...appSettings.llm,
+                              ...(llmConnectionMode === "cloud"
+                                ? {
+                                  cloudSelectedModel: selectedModel,
+                                  cloudSelectedModelsByProvider: {
+                                    ...appSettings.llm.cloudSelectedModelsByProvider,
+                                    [appSettings.llm.cloudProvider]: selectedModel,
+                                  },
+                                }
+                                : {
+                                  ollamaSelectedModel: selectedModel,
+                                  localSelectedModelsByProvider: {
+                                    ...appSettings.llm.localSelectedModelsByProvider,
+                                    [appSettings.llm.localProvider]: selectedModel,
+                                  },
+                                }),
+                            },
+                          });
+                        }}
+                        disabled={generationModelOptions.length === 0}
+                      >
+                        <option value="">{generationModelOptions.length === 0 ? "No models loaded yet" : "Select model"}</option>
+                        {generationModelOptions.map((model) => (
+                          <option key={model.id} value={model.id}>{model.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </fieldset>
+                </div>
                 {!generationDefaultsAvailable ? <div className="users-permission-note ai-assist-home-disabled-note">Set up an LLM connection first.</div> : null}
                 <div className="project-export-actions project-export-actions--modal ai-assist-llm-model-actions">
                   <button type="button" className="btn" onClick={() => setActiveDeviceModal("generation-defaults")} disabled={!generationDefaultsAvailable}>
@@ -1361,6 +1447,7 @@ export function PostgresAiAssistHomeView({
           )}
         </div>
       </div>
+      )}
 
       <DeviceDetailsModal
         open={activeDeviceModal === "download-details"}

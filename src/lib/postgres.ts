@@ -10,6 +10,10 @@ export const POSTGRES_PROJECT_CHANGED_EVENT = "postgres-project-changed";
 export type PostgresStatus = {
   host: string;
   port: number;
+  networkMode: "device" | "network" | "internet";
+  localIp: string | null;
+  localReachable: boolean;
+  lanReachable: boolean;
   psqlPath: string;
   postgresqlConfPath: string;
   psqlExists: boolean;
@@ -19,23 +23,163 @@ export type PostgresStatus = {
   serviceReachable: boolean;
   superuserName: string;
   appDatabase: string;
-  appRoleName: string;
   bootstrapApplied: boolean;
   adminHandoffCompleted: boolean;
 };
+
+export type BundledPostgresPaths = {
+  distribution: "installed" | "portable";
+  expectedVersion: string;
+  appResourceDir: string | null;
+  executableDir: string;
+  runtimeRoot: string;
+  binDir: string;
+  postgresBinary: string;
+  initdbBinary: string;
+  pgCtlBinary: string;
+  psqlBinary: string;
+  pgDumpBinary: string;
+  dataRoot: string;
+  appLogsDir: string;
+  runtimeDiagnosticsLog: string;
+  postgresRoot: string;
+  dataDir: string;
+  logsDir: string;
+  runDir: string;
+  configDir: string;
+  backupsRoot: string;
+  automaticBackupsDir: string;
+  manualBackupsDir: string;
+  upgradeBackupsDir: string;
+  exportsRoot: string;
+};
+
+export type BundledPostgresStatus = {
+  paths: BundledPostgresPaths;
+  runtimeRootExists: boolean;
+  binDirExists: boolean;
+  postgresBinaryExists: boolean;
+  initdbBinaryExists: boolean;
+  pgCtlBinaryExists: boolean;
+  psqlBinaryExists: boolean;
+  pgDumpBinaryExists: boolean;
+  dataRootExists: boolean;
+  postgresRootExists: boolean;
+  dataDirExists: boolean;
+  initialized: boolean;
+  initializedVersion: string | null;
+  expectedVersionMatches: boolean | null;
+  reachable: boolean;
+  probeHost: string;
+  probePort: number;
+  postmasterPidExists: boolean;
+  postmasterPid: number | null;
+  postmasterPidRunning: boolean | null;
+  latestLogPath: string | null;
+};
+
+export type PostgresUpgradeBackupResult = {
+  path: string;
+  createdAtMs: number;
+  kanqualVersion: string;
+  postgresVersion: string;
+  controlDatabase: string;
+  projectCount: number;
+  storageFileCount: number;
+  bytes: number;
+};
+
+export type RestorePostgresUpgradeBackupResult = {
+  restoredAtMs: number;
+  kanqualVersion: string;
+  backupKanqualVersion: string;
+  backupPostgresVersion: string;
+  projectCount: number;
+  storageFileCount: number;
+  userCount: number;
+};
+
+export type BundledPostgresInitPreflight = {
+  status: BundledPostgresStatus;
+  dataRootWritable: boolean;
+  dataDirEmptyOrMissing: boolean;
+  requiredBinariesAvailable: boolean;
+  defaultPortAvailable: boolean;
+  canInitialize: boolean;
+  issues: string[];
+};
+
+export type BundledPostgresInitializeResult = {
+  status: BundledPostgresStatus;
+  postgresqlConfPath: string;
+  pgHbaConfPath: string;
+  initdbStdout: string;
+  initdbStderr: string;
+};
+
+export type BundledPostgresRuntimeResult = {
+  status: BundledPostgresStatus;
+  processManaged: boolean;
+  processId: number | null;
+  started: boolean;
+  stopped: boolean;
+  recoveredStalePid: boolean;
+  message: string;
+};
+
+export async function getBundledPostgresPaths(): Promise<BundledPostgresPaths> {
+  return invoke<BundledPostgresPaths>("get_bundled_postgres_paths_command");
+}
+
+export async function getBundledPostgresStatus(): Promise<BundledPostgresStatus> {
+  return invoke<BundledPostgresStatus>("get_bundled_postgres_status_command");
+}
+
+export async function getBundledPostgresInitPreflight(): Promise<BundledPostgresInitPreflight> {
+  return invoke<BundledPostgresInitPreflight>("get_bundled_postgres_init_preflight_command");
+}
+
+export async function prepareBundledPostgresRuntimeDirs(): Promise<BundledPostgresPaths> {
+  return invoke<BundledPostgresPaths>("prepare_bundled_postgres_runtime_dirs_command");
+}
+
+export async function startBundledPostgresRuntime(): Promise<BundledPostgresRuntimeResult> {
+  return invoke<BundledPostgresRuntimeResult>("start_bundled_postgres_runtime_command");
+}
+
+export async function stopBundledPostgresRuntime(): Promise<BundledPostgresRuntimeResult> {
+  return invoke<BundledPostgresRuntimeResult>("stop_bundled_postgres_runtime_command");
+}
+
+export async function initializeBundledPostgresCluster(
+  superuserPassword: string,
+): Promise<BundledPostgresInitializeResult> {
+  return invoke<BundledPostgresInitializeResult>("initialize_bundled_postgres_cluster_command", {
+    request: {
+      superuserPassword,
+    },
+  });
+}
 
 export async function getPostgresStatus(): Promise<PostgresStatus> {
   return invoke<PostgresStatus>("get_postgres_experiment_status_command");
 }
 
+export async function setPostgresNetworkMode(mode: "device" | "network" | "internet"): Promise<PostgresStatus> {
+  return invoke<PostgresStatus>("set_postgres_experiment_network_mode_command", {
+    request: { mode },
+  });
+}
+
 export type BootstrapPostgresResult = {
   appDatabase: string;
-  appRoleName: string;
   bootstrapIdentityPath: string;
-  appRoleReady: boolean;
+  databaseReady: boolean;
 };
 
-export async function bootstrapPostgres(superuserPassword: string): Promise<BootstrapPostgresResult> {
+export async function bootstrapPostgres(
+  superuserPassword: string,
+): Promise<BootstrapPostgresResult> {
   return invoke<BootstrapPostgresResult>("bootstrap_postgres_experiment_command", {
     request: {
       superuserPassword,
@@ -44,7 +188,6 @@ export async function bootstrapPostgres(superuserPassword: string): Promise<Boot
 }
 
 export async function completePostgresAdminHandoff(data: {
-  newSuperuserName: string;
   newSuperuserPassword: string;
 }): Promise<PostgresStatus> {
   return invoke<PostgresStatus>("complete_postgres_admin_handoff_command", {
@@ -62,8 +205,12 @@ export type PostgresAppUser = {
   name: string;
   email: string;
   role: string;
+  active: boolean;
+  disabledAt: string | null;
+  mustChangePassword: boolean;
   createdAt: string;
   updatedAt: string;
+  lastLoginAt: string | null;
 };
 
 export type PostgresAuthSession = {
@@ -92,6 +239,12 @@ export type PostgresInstallationSettings = {
   privacyClearRecentProjectsOnSignOut: boolean;
   privacyForgetLoginIdentitiesOnLogout: boolean;
   updatesAutoCheck: boolean;
+  updatesBannerEnabled: boolean;
+  aiAssistPolicy: {
+    mode: "disabled" | "project" | "enabled";
+    serverEnabled: boolean;
+    projectOverrides: Record<string, boolean>;
+  };
   llm: {
     chunkSize: number;
     overlapSize: number;
@@ -103,12 +256,16 @@ export type PostgresInstallationSettings = {
     cloudProvider: "openai" | "anthropic" | "copilot" | "blablador" | "ollama";
     cloudApiSecret: string;
     cloudSelectedModel: string;
+    cloudSelectedModelsByProvider: Partial<Record<"openai" | "anthropic" | "copilot" | "blablador" | "ollama", string>>;
+    cloudEnabledModelsByProvider: Partial<Record<"openai" | "anthropic" | "copilot" | "blablador" | "ollama", string[]>>;
     localProvider: "ollama" | "llamacpp" | "custom";
     ollamaEnabled: boolean;
     ollamaProtocol: "http" | "https";
     ollamaHost: string;
     ollamaPort: number;
     ollamaSelectedModel: string;
+    localSelectedModelsByProvider: Partial<Record<"ollama" | "llamacpp" | "custom", string>>;
+    localEnabledModelsByProvider: Partial<Record<"ollama" | "llamacpp" | "custom", string[]>>;
     ollamaRequestTimeoutSeconds: number;
     ollamaDocumentProcessingTimeoutSeconds: number;
     ollamaTemperature: number;
@@ -170,7 +327,10 @@ export type PostgresProject = {
   description: string;
   databaseName: string;
   storagePath: string;
+  creationSource: "manual" | "snapshot" | "kanqual_export" | "refi_qda" | string;
   accessMode: "local" | "remote";
+  active: boolean;
+  disabledAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -780,6 +940,25 @@ export type PostgresProjectLogEntry = {
   restoredAt?: string;
 };
 
+export type PostgresAdminProjectLogEntry = PostgresProjectLogEntry & {
+  projectName: string;
+};
+
+export type PostgresAuthAuditEntry = {
+  id: string;
+  timestampMs: number;
+  event: string;
+  outcome: string;
+  message: string;
+  authKind?: string;
+  userId?: string;
+  username?: string;
+  clientIp?: string;
+  role?: string;
+  reason?: string;
+  detailsJson?: string;
+};
+
 export async function ensurePostgresSchema(): Promise<PostgresSchemaMigrationResult> {
   return invoke<PostgresSchemaMigrationResult>("ensure_postgres_experiment_schema_command");
 }
@@ -799,6 +978,25 @@ export async function savePostgresInstallationSettings(
   return invoke<PostgresInstallationSettings>("save_postgres_experiment_installation_settings_command", {
     settings,
     projectId,
+  });
+}
+
+export async function createPostgresUpgradeBackup(
+  adminPassword: string,
+  outputPath?: string,
+): Promise<PostgresUpgradeBackupResult> {
+  return invoke<PostgresUpgradeBackupResult>("create_postgres_experiment_upgrade_backup_command", {
+    request: { adminPassword, outputPath },
+  });
+}
+
+export async function restorePostgresUpgradeBackup(data: {
+  backupPath: string;
+  backupPassword: string;
+  newAdminPassword: string;
+}): Promise<RestorePostgresUpgradeBackupResult> {
+  return invoke<RestorePostgresUpgradeBackupResult>("restore_postgres_experiment_upgrade_backup_command", {
+    request: data,
   });
 }
 
@@ -865,6 +1063,14 @@ export async function rememberPostgresProjectOpened(
   });
 }
 
+export async function rememberPostgresProjectClosed(
+  projectId: string,
+): Promise<void> {
+  await invoke("remember_postgres_experiment_project_closed_command", {
+    projectId,
+  });
+}
+
 export async function removePostgresProjectFromState(
   projectId: string,
 ): Promise<PostgresUserProjectState> {
@@ -877,13 +1083,13 @@ export async function clearPostgresUserProjectState(): Promise<void> {
   await invoke("clear_postgres_experiment_user_project_state_command");
 }
 
-export async function registerPostgresAppUser(data: {
+export async function createPostgresAppUser(data: {
   name: string;
   email: string;
   password: string;
-  rememberSession: boolean;
-}): Promise<PostgresAuthSession> {
-  return invoke<PostgresAuthSession>("register_postgres_experiment_app_user_command", {
+  mustChangePassword?: boolean;
+}): Promise<PostgresAppUser> {
+  return invoke<PostgresAppUser>("create_postgres_experiment_app_user_command", {
     request: data,
   });
 }
@@ -899,7 +1105,6 @@ export async function loginPostgresAppUser(data: {
 }
 
 export async function loginPostgresAdmin(data: {
-  username: string;
   password: string;
   rememberSession: boolean;
 }): Promise<PostgresAuthSession> {
@@ -930,6 +1135,27 @@ export async function changePostgresAppUserPassword(data: {
   });
 }
 
+export async function deactivatePostgresAppUser(userId: string): Promise<PostgresAppUser> {
+  return invoke<PostgresAppUser>("deactivate_postgres_experiment_app_user_command", {
+    request: { userId },
+  });
+}
+
+export async function reactivatePostgresAppUser(userId: string): Promise<PostgresAppUser> {
+  return invoke<PostgresAppUser>("reactivate_postgres_experiment_app_user_command", {
+    request: { userId },
+  });
+}
+
+export async function resetPostgresAppUserPassword(data: {
+  userId: string;
+  newPassword: string;
+}): Promise<PostgresAppUser> {
+  return invoke<PostgresAppUser>("reset_postgres_experiment_app_user_password_command", {
+    request: data,
+  });
+}
+
 export async function listPostgresAppUsers(): Promise<PostgresAppUser[]> {
   return invoke<PostgresAppUser[]>("list_postgres_experiment_app_users_command");
 }
@@ -954,6 +1180,16 @@ export async function updatePostgresProject(data: {
 }): Promise<PostgresProject> {
   return invoke<PostgresProject>("update_postgres_experiment_project_command", {
     request: data,
+  });
+}
+
+export async function setPostgresProjectActive(
+  projectId: string,
+  active: boolean,
+): Promise<PostgresProject> {
+  return invoke<PostgresProject>("set_postgres_experiment_project_active_command", {
+    projectId,
+    active,
   });
 }
 
@@ -1045,6 +1281,24 @@ export async function getPostgresEmbeddingModelDownloadStatus(): Promise<Postgre
 export async function downloadPostgresEmbeddingModel(): Promise<PostgresEmbeddingModelStatus> {
   return invoke<PostgresEmbeddingModelStatus>(
     "download_postgres_experiment_multilingual_e5_model_command",
+  );
+}
+
+export async function downloadPostgresCustomEmbeddingModel(modelUrl: string): Promise<PostgresEmbeddingModelStatus> {
+  return invoke<PostgresEmbeddingModelStatus>(
+    "download_postgres_experiment_custom_embedding_model_command",
+    {
+      request: { modelUrl },
+    },
+  );
+}
+
+export async function importPostgresEmbeddingModelFolder(sourceDir: string): Promise<PostgresEmbeddingModelStatus> {
+  return invoke<PostgresEmbeddingModelStatus>(
+    "import_postgres_experiment_embedding_model_folder_command",
+    {
+      request: { sourceDir },
+    },
   );
 }
 
@@ -1487,6 +1741,14 @@ export async function listPostgresProjectLog(
   return invoke<PostgresProjectLogEntry[]>("list_postgres_experiment_project_log_command", {
     projectId,
   });
+}
+
+export async function listPostgresAdminProjectAuditLog(): Promise<PostgresAdminProjectLogEntry[]> {
+  return invoke<PostgresAdminProjectLogEntry[]>("list_postgres_experiment_admin_project_audit_log_command");
+}
+
+export async function listPostgresAdminAuthAuditLog(): Promise<PostgresAuthAuditEntry[]> {
+  return invoke<PostgresAuthAuditEntry[]>("list_postgres_experiment_admin_auth_audit_log_command");
 }
 
 export async function listPostgresMemos(projectId: string): Promise<PostgresMemo[]> {

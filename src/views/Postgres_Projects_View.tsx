@@ -8,6 +8,7 @@ import {
   getPostgresUserProjectState,
   listPostgresProjects,
   POSTGRES_PROJECT_CHANGED_EVENT,
+  rememberPostgresProjectClosed,
   rememberPostgresProjectOpened,
   removePostgresProjectFromState,
   type PostgresProject,
@@ -15,6 +16,7 @@ import {
   type PostgresRecentProject,
   updatePostgresProject,
 } from "../lib/postgres";
+import { LogoutIcon, PlusIcon } from "../components/AppIcons";
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -27,17 +29,20 @@ function describeUnknownError(error: unknown): string {
 }
 
 export type PostgresProjectsViewProps = {
+  onSignOut: () => void | Promise<void>;
   renderProjectHome: (
     project: PostgresProject,
     helpers: {
       onBack: () => void;
       onProjectUpdated: (project: PostgresProject) => void;
       onProjectDeleted: (projectId: string) => void;
+      onProjectOpened: (project: PostgresProject) => void | Promise<void>;
     },
   ) => ReactNode;
 };
 
 export function PostgresProjectsView({
+  onSignOut,
   renderProjectHome,
 }: PostgresProjectsViewProps) {
   const [projects, setProjects] = useState<PostgresProject[]>([]);
@@ -69,6 +74,14 @@ export function PostgresProjectsView({
       await rememberPostgresProjectOpened(recentProject);
     } catch (rememberError) {
       console.warn("Could not persist PostgreSQL recent project state:", describeUnknownError(rememberError));
+    }
+  }, []);
+
+  const recordProjectClosed = useCallback(async (project: PostgresProject) => {
+    try {
+      await rememberPostgresProjectClosed(project.id);
+    } catch (closeError) {
+      console.warn("Could not persist PostgreSQL project close log:", describeUnknownError(closeError));
     }
   }, []);
 
@@ -247,7 +260,10 @@ export function PostgresProjectsView({
 
   if (openedProject) {
     return renderProjectHome(openedProject, {
-      onBack: () => setOpenedProjectId(null),
+      onBack: () => {
+        void recordProjectClosed(openedProject);
+        setOpenedProjectId(null);
+      },
       onProjectUpdated: (updatedProject) => {
         setProjects((current) => current.map((project) => (project.id === updatedProject.id ? updatedProject : project)));
         setSelectedProjectId(updatedProject.id);
@@ -257,31 +273,56 @@ export function PostgresProjectsView({
         setSelectedProjectId((current) => (current === projectId ? null : current));
         setOpenedProjectId((current) => (current === projectId ? null : current));
       },
+      onProjectOpened: async (project) => {
+        if (openedProject.id !== project.id) {
+          await recordProjectClosed(openedProject);
+        }
+        setProjects((current) => {
+          if (current.some((item) => item.id === project.id)) {
+            return current.map((item) => (item.id === project.id ? project : item));
+          }
+          return [project, ...current];
+        });
+        setSelectedProjectId(project.id);
+        setOpenedProjectId(project.id);
+        await recordProjectOpened(project);
+      },
     });
   }
 
   return (
-    <div className="app-shell">
-      <main className="app-main">
-        <div className="view projects-view">
+    <div className="auth-screen projects-auth-screen">
+      <div className="auth-card projects-auth-card">
+        <button
+          type="button"
+          className="projects-logout-button"
+          onClick={() => void onSignOut()}
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogoutIcon className="projects-logout-icon" />
+        </button>
+        <div className="projects-view">
           <header className="view-header">
             <div className="view-title-with-help">
               <h1>Projects</h1>
             </div>
             <div className="view-header-actions">
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={() => {
-                  setError("");
-                  setNotice("");
-                  setName("");
-                  setDescription("");
-                  setCreateProjectOpen(true);
-                }}
-              >
-                New Project
-              </button>
+              {projects.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    setError("");
+                    setNotice("");
+                    setName("");
+                    setDescription("");
+                    setCreateProjectOpen(true);
+                  }}
+                >
+                  New Project
+                </button>
+              ) : null}
             </div>
           </header>
 
@@ -294,11 +335,13 @@ export function PostgresProjectsView({
             </div>
           ) : projects.length === 0 ? (
             <div className="empty-state">
-              <p>No PostgreSQL projects yet.</p>
+              <p>No projects yet</p>
               <div className="form-actions" style={{ justifyContent: "center", marginTop: 16 }}>
                 <button
                   type="button"
-                  className="btn btn--primary"
+                  className="btn btn--primary project-create-icon-button"
+                  aria-label="Create your first project"
+                  title="Create your first project"
                   onClick={() => {
                     setError("");
                     setNotice("");
@@ -307,7 +350,7 @@ export function PostgresProjectsView({
                     setCreateProjectOpen(true);
                   }}
                 >
-                  Create your first project
+                  <PlusIcon className="project-create-icon" />
                 </button>
               </div>
             </div>
@@ -550,7 +593,7 @@ export function PostgresProjectsView({
             </div>
           ) : null}
         </div>
-      </main>
+      </div>
     </div>
   );
 }

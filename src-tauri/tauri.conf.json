@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "node scripts/dev-with-cleanup.mjs",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run prepare:bundled-postgres:strict && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -47,6 +47,7 @@
       "icons/icon.icns",
       "icons/icon2.ico"
     ],
-    "externalBin": ["binaries/local/pocketbase"]
+    "externalBin": ["binaries/local/pocketbase"],
+    "resources": ["resources/runtime/postgresql-17/**/*"]
   }
 }

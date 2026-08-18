@@ -1,17 +1,25 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   completePostgresAdminHandoff,
+  createPostgresAppUser,
+  getBundledPostgresInitPreflight,
+  initializeBundledPostgresCluster,
   listPostgresRememberedAccounts,
   loginPostgresAdmin,
   loginPostgresAppUser,
   rememberPostgresAccount,
-  registerPostgresAppUser,
+  restorePostgresUpgradeBackup,
+  type BundledPostgresInitPreflight,
   type PostgresAuthSession,
   type PostgresAuthStatus,
   type PostgresRememberedAccount,
+  type RestorePostgresUpgradeBackupResult,
   type PostgresStatus,
 } from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { ComputerIcon, NetworkIcon } from "../components/AppIcons";
+import { LoadingCard } from "../components/LoadingCard";
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -21,6 +29,59 @@ function describeUnknownError(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+function PostgresStartupLoadingView() {
+  return (
+    <div className="auth-screen">
+      <LoadingCard />
+    </div>
+  );
+}
+
+function AuthSlideCard({
+  stage,
+  children,
+  className = "",
+}: {
+  stage: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const lastCardRef = useRef<{ stage: string; content: ReactNode }>({ stage, content: children });
+  const [exitingCard, setExitingCard] = useState<{ stage: string; content: ReactNode } | null>(null);
+
+  useEffect(() => {
+    if (lastCardRef.current.stage === stage) {
+      lastCardRef.current = { stage, content: children };
+      return;
+    }
+
+    setExitingCard(lastCardRef.current);
+    lastCardRef.current = { stage, content: children };
+    const timeout = window.setTimeout(() => setExitingCard(null), 280);
+    return () => window.clearTimeout(timeout);
+  }, [stage, children]);
+
+  return (
+    <div className="auth-card-transition-shell">
+      {exitingCard ? (
+        <div
+          key={`exit-${exitingCard.stage}`}
+          className={`auth-card auth-card-transition-card auth-card-transition-card--exit ${className}`}
+          aria-hidden="true"
+        >
+          {exitingCard.content}
+        </div>
+      ) : null}
+      <div
+        key={stage}
+        className={`auth-card auth-card-transition-card auth-card-transition-card--enter ${className}`}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function formatRecentLogin(iso: string): string {
@@ -43,6 +104,26 @@ function accountInitials(name: string): string {
     .toUpperCase();
 }
 
+function defaultNameFromUsername(username: string): string {
+  return username.trim() || username;
+}
+
+function PasswordVisibilityIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
+      <path
+        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
 export type PostgresAdminHandoffViewProps = {
   status: PostgresStatus;
   onComplete: (nextStatus: PostgresStatus) => void | Promise<void>;
@@ -52,19 +133,16 @@ export function PostgresAdminHandoffView({
   status,
   onComplete,
 }: PostgresAdminHandoffViewProps) {
-  const [username, setUsername] = useState(status.superuserName);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    if (!username.trim()) {
-      setError("Enter the new PostgreSQL admin username.");
-      return;
-    }
     if (!password || !confirmPassword) {
       setError("Enter the new PostgreSQL admin password twice.");
       return;
@@ -81,10 +159,8 @@ export function PostgresAdminHandoffView({
     setSaving(true);
     try {
       const nextStatus = await completePostgresAdminHandoff({
-        newSuperuserName: username.trim(),
         newSuperuserPassword: password,
       });
-      setUsername(nextStatus.superuserName);
       setPassword("");
       setConfirmPassword("");
       await onComplete(nextStatus);
@@ -102,44 +178,56 @@ export function PostgresAdminHandoffView({
         <form onSubmit={handleSubmit} className="form">
           <h2 className="auth-panel-title">Finish local database admin setup</h2>
           <p className="auth-hint">
-            Kanqual has already bootstrapped the restricted app role{" "}
-            <code>{status.appRoleName}</code>{" "}
-            for the local database{" "}
-            <code>{status.appDatabase}</code>
-            .
+            KanQual has already initialized the local database{" "}
+            <code>{status.appDatabase}</code>.
           </p>
           <div className="settings-warning settings-warning--danger">
             Set the PostgreSQL administrator password now. Kanqual will not be able to recover it for you after this handoff completes.
           </div>
           <label className="form-label">
-            New PostgreSQL admin username
-            <input
-              className="form-input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoFocus
-              autoComplete="username"
-            />
-          </label>
-          <label className="form-label">
             New PostgreSQL admin password
-            <input
-              className="form-input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-            />
+            <div className="password-input-wrap">
+              <input
+                className="form-input password-input-field"
+                type={passwordVisible ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                name="new-postgres-admin-password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="password-visibility-btn"
+                aria-label={passwordVisible ? "Hide password" : "Show password"}
+                aria-pressed={passwordVisible}
+                onClick={() => setPasswordVisible((current) => !current)}
+              >
+                <PasswordVisibilityIcon />
+              </button>
+            </div>
+            <p className="password-requirement-note">Minimum 8 characters.</p>
           </label>
           <label className="form-label">
             Confirm PostgreSQL admin password
-            <input
-              className="form-input"
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              autoComplete="new-password"
-            />
+            <div className="password-input-wrap">
+              <input
+                className="form-input password-input-field"
+                type={confirmPasswordVisible ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                name="confirm-postgres-admin-password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="password-visibility-btn"
+                aria-label={confirmPasswordVisible ? "Hide password" : "Show password"}
+                aria-pressed={confirmPasswordVisible}
+                onClick={() => setConfirmPasswordVisible((current) => !current)}
+              >
+                <PasswordVisibilityIcon />
+              </button>
+            </div>
           </label>
           {error ? <p className="auth-error">{error}</p> : null}
           <div className="form-actions">
@@ -156,33 +244,186 @@ export function PostgresAdminHandoffView({
 export type PostgresLaunchViewProps = {
   status: PostgresStatus | null;
   loading: boolean;
-  onRefresh: () => void;
   onBootstrap: (superuserPassword: string) => Promise<void>;
+  onRestored?: () => Promise<void> | void;
+  onAuthenticated: (session: PostgresAuthSession) => void | Promise<void>;
+  onFirstAccountCreated?: (session: PostgresAuthSession) => void | Promise<void>;
   onOpenPostgresProjects: () => void;
 };
 
 export function PostgresLaunchView({
   status,
   loading,
-  onRefresh,
   onBootstrap,
+  onRestored,
+  onAuthenticated,
+  onFirstAccountCreated,
   onOpenPostgresProjects,
 }: PostgresLaunchViewProps) {
   const [superuserPassword, setSuperuserPassword] = useState("");
+  const [initialAdminPassword, setInitialAdminPassword] = useState("");
+  const [confirmInitialAdminPassword, setConfirmInitialAdminPassword] = useState("");
+  const [showFirstAccountSetup, setShowFirstAccountSetup] = useState(false);
+  const [firstAccountPassword, setFirstAccountPassword] = useState("");
+  const [confirmFirstAccountPassword, setConfirmFirstAccountPassword] = useState("");
+  const [firstAccountEmail, setFirstAccountEmail] = useState("");
+  const [firstAccountPasswordVisible, setFirstAccountPasswordVisible] = useState(false);
+  const [confirmFirstAccountPasswordVisible, setConfirmFirstAccountPasswordVisible] = useState(false);
+  const [superuserPasswordVisible, setSuperuserPasswordVisible] = useState(false);
+  const [initialAdminPasswordVisible, setInitialAdminPasswordVisible] = useState(false);
+  const [confirmInitialAdminPasswordVisible, setConfirmInitialAdminPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [bundledPreflight, setBundledPreflight] = useState<BundledPostgresInitPreflight | null>(null);
+  const [bundledPreflightLoading, setBundledPreflightLoading] = useState(true);
+  const [firstRunSetupMode, setFirstRunSetupMode] = useState<"setup" | "restore">("setup");
+  const [restoreBackupPath, setRestoreBackupPath] = useState("");
+  const [restoreBackupPassword, setRestoreBackupPassword] = useState("");
+  const [restoreBackupPasswordVisible, setRestoreBackupPasswordVisible] = useState(false);
+  const [restoreAdminPassword, setRestoreAdminPassword] = useState("");
+  const [confirmRestoreAdminPassword, setConfirmRestoreAdminPassword] = useState("");
+  const [restoreAdminPasswordVisible, setRestoreAdminPasswordVisible] = useState(false);
+  const [confirmRestoreAdminPasswordVisible, setConfirmRestoreAdminPasswordVisible] = useState(false);
+  const [restoreSuccess, setRestoreSuccess] = useState<RestorePostgresUpgradeBackupResult | null>(null);
 
   const bootstrapApplied = !!status?.bootstrapApplied;
   const adminHandoffCompleted = !!status?.adminHandoffCompleted;
-  const appRoleReady = bootstrapApplied && adminHandoffCompleted;
+  const databaseReady = bootstrapApplied && adminHandoffCompleted;
+  const bundledClusterInitialized = !!bundledPreflight?.status.initialized;
+  const showingFirstAccountSetup = showFirstAccountSetup;
+  const initializingBundledCluster =
+    submitting && !showingFirstAccountSetup && !bundledClusterInitialized && !!bundledPreflight;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBundledPreflight() {
+      setBundledPreflightLoading(true);
+      try {
+        const nextPreflight = await getBundledPostgresInitPreflight();
+        if (!cancelled) {
+          setBundledPreflight(nextPreflight);
+        }
+      } catch (preflightError) {
+        if (!cancelled) {
+          setError(describeUnknownError(preflightError));
+          setBundledPreflight(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setBundledPreflightLoading(false);
+        }
+      }
+    }
+
+    void loadBundledPreflight();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleInitializeBundledPostgres(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (initialAdminPassword.length < 8) {
+      setError("Choose a PostgreSQL administrator password with at least 8 characters.");
+      return;
+    }
+    if (initialAdminPassword !== confirmInitialAdminPassword) {
+      setError("The PostgreSQL administrator passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await initializeBundledPostgresCluster(initialAdminPassword);
+      setShowFirstAccountSetup(true);
+      setInitialAdminPassword("");
+      setConfirmInitialAdminPassword("");
+      const nextPreflight = await getBundledPostgresInitPreflight();
+      setBundledPreflight(nextPreflight);
+      setNotice("");
+    } catch (initializeError) {
+      setError(describeUnknownError(initializeError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function chooseRestoreBackupFile() {
+    setError("");
+    const selected = await openDialog({
+      multiple: false,
+      directory: false,
+      title: "Choose KanQual upgrade backup",
+      filters: [
+        {
+          name: "KanQual upgrade backup",
+          extensions: ["kanqual-upgrade-backup"],
+        },
+      ],
+    });
+    if (typeof selected === "string") {
+      setRestoreBackupPath(selected);
+    }
+  }
+
+  async function handleRestoreUpgradeBackup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (!restoreBackupPath.trim()) {
+      setError("Choose a KanQual upgrade backup file.");
+      return;
+    }
+    if (!restoreBackupPassword.trim()) {
+      setError("Enter the password for the upgrade backup.");
+      return;
+    }
+    if (restoreAdminPassword.length < 8) {
+      setError("Choose a new administrator password with at least 8 characters.");
+      return;
+    }
+    if (restoreAdminPassword !== confirmRestoreAdminPassword) {
+      setError("The new administrator passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await restorePostgresUpgradeBackup({
+        backupPath: restoreBackupPath,
+        backupPassword: restoreBackupPassword,
+        newAdminPassword: restoreAdminPassword,
+      });
+      setRestoreBackupPath("");
+      setRestoreBackupPassword("");
+      setRestoreAdminPassword("");
+      setConfirmRestoreAdminPassword("");
+      setRestoreBackupPasswordVisible(false);
+      setRestoreAdminPasswordVisible(false);
+      setConfirmRestoreAdminPasswordVisible(false);
+      setRestoreSuccess(result);
+    } catch (restoreError) {
+      setError(describeUnknownError(restoreError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function finishRestoreSuccess() {
+    setRestoreSuccess(null);
+    await onRestored?.();
+  }
 
   async function handleBootstrapSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setNotice("");
     if (!superuserPassword) {
-      setError("Enter the current PostgreSQL superuser password to bootstrap PostgreSQL.");
+      setError("Enter the PostgreSQL administrator password to finish setup.");
       return;
     }
 
@@ -190,7 +431,7 @@ export function PostgresLaunchView({
     try {
       await onBootstrap(superuserPassword);
       setSuperuserPassword("");
-      setNotice("PostgreSQL bootstrap completed. You can continue the admin handoff on the next screen.");
+      setNotice("Database setup is complete.");
     } catch (bootstrapError) {
       setError(bootstrapError instanceof Error ? bootstrapError.message : String(bootstrapError));
     } finally {
@@ -198,81 +439,473 @@ export function PostgresLaunchView({
     }
   }
 
+  async function handleFirstAccountSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const email = firstAccountEmail.trim().toLowerCase();
+    if (!email) {
+      setError("Enter a username.");
+      return;
+    }
+    if (/\s/.test(email)) {
+      setError("Usernames cannot contain spaces.");
+      return;
+    }
+    if (firstAccountPassword.length < 8) {
+      setError("Choose a password with at least 8 characters.");
+      return;
+    }
+    if (firstAccountPassword !== confirmFirstAccountPassword) {
+      setError("The passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await createPostgresAppUser({
+        name: defaultNameFromUsername(email),
+        email,
+        password: firstAccountPassword,
+      });
+      const session = await loginPostgresAppUser({
+        email,
+        password: firstAccountPassword,
+        rememberSession: false,
+      });
+      try {
+        await rememberPostgresAccount(email, session.user.name || email);
+      } catch (rememberError) {
+        console.warn("Could not remember PostgreSQL account:", describeUnknownError(rememberError));
+      }
+      setShowFirstAccountSetup(false);
+      setFirstAccountPassword("");
+      setConfirmFirstAccountPassword("");
+      setFirstAccountEmail("");
+      await (onFirstAccountCreated ?? onAuthenticated)(session);
+    } catch (setupError) {
+      setError(describeUnknownError(setupError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (bundledPreflightLoading) {
+    return <PostgresStartupLoadingView />;
+  }
+
+  if (initializingBundledCluster) {
+    return <PostgresStartupLoadingView />;
+  }
+
+  const launchStage = restoreSuccess
+    ? "restore-success"
+    : showingFirstAccountSetup
+      ? "first-account"
+      : bundledPreflight && !bundledClusterInitialized
+        ? firstRunSetupMode === "restore" ? "restore-backup" : "admin-password"
+        : bundledClusterInitialized && !bootstrapApplied
+          ? "resume-bootstrap"
+          : bootstrapApplied && !adminHandoffCompleted
+            ? "incomplete-handoff"
+            : databaseReady
+              ? "database-ready"
+              : "launch-idle";
+  const initialAdminPasswordMismatch =
+    confirmInitialAdminPassword.length > 0 && initialAdminPassword !== confirmInitialAdminPassword;
+  const firstAccountPasswordMismatch =
+    confirmFirstAccountPassword.length > 0 && firstAccountPassword !== confirmFirstAccountPassword;
+  const restoreAdminPasswordMismatch =
+    confirmRestoreAdminPassword.length > 0 && restoreAdminPassword !== confirmRestoreAdminPassword;
+
   return (
     <div className="auth-screen">
-      <div className="auth-card" style={{ maxWidth: 820 }}>
-        <div className="auth-brand">Kanqual</div>
+      <AuthSlideCard stage={launchStage}>
+        <div className="auth-brand-row">
+          <img src="/logo.png" alt="" className="auth-brand-row-logo" />
+          <div className="auth-brand">KanQual</div>
+        </div>
         <div className="form">
-          <h2 className="auth-panel-title">Local database launch check</h2>
-          <p className="auth-hint">
-            PostgreSQL can now be bootstrapped and checked before the project workspace opens.
-          </p>
-
-          <div className="settings-warning">
-            <strong>Current runtime state</strong>
-            <br />
-            {status
-              ? (status.serviceReachable
-                ? `PostgreSQL is reachable at ${status.host}:${status.port}.`
-                : `PostgreSQL is not reachable at ${status.host}:${status.port}.`)
-              : "Loading PostgreSQL status..."}
-            <br />
-            {status
-              ? `App role: ${status.appRoleName} on database ${status.appDatabase}.`
-              : "Reading planned app role and database..."}
-          </div>
-
-          {!bootstrapApplied && (
-            <form onSubmit={handleBootstrapSubmit} className="form">
+          {restoreSuccess ? (
+            <div className="form" role="status" aria-live="polite">
+              <div className="auth-admin-notice">
+                <strong>Import Complete</strong>
+                <span>KanQual finished importing the backup.</span>
+              </div>
+              <div className="settings-diagnostics-grid settings-diagnostics-grid--compact">
+                <div>
+                  <span>Backup Version</span>
+                  <strong>{restoreSuccess.backupKanqualVersion}</strong>
+                </div>
+                <div>
+                  <span>Projects</span>
+                  <strong>{restoreSuccess.projectCount}</strong>
+                </div>
+                <div>
+                  <span>Files</span>
+                  <strong>{restoreSuccess.storageFileCount}</strong>
+                </div>
+                <div>
+                  <span>Users</span>
+                  <strong>{restoreSuccess.userCount}</strong>
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn btn--primary" onClick={() => void finishRestoreSuccess()}>
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : showingFirstAccountSetup ? (
+            <form onSubmit={handleFirstAccountSubmit} className="form">
               <div className="settings-warning settings-warning--danger">
-                Bootstrap has not been applied yet. Enter the current PostgreSQL superuser password to create the restricted app role and database.
+                Create your local KanQual user account.
+                <br />
+                <br />
+                This account is separate from the administrator password you just created.
               </div>
               <label className="form-label">
-                Current PostgreSQL superuser password
+                Username
                 <input
                   className="form-input"
-                  type="password"
-                  value={superuserPassword}
-                  onChange={(e) => setSuperuserPassword(e.target.value)}
-                  autoFocus
-                  autoComplete="current-password"
+                  type="text"
+                  value={firstAccountEmail}
+                  onChange={(e) => setFirstAccountEmail(e.target.value)}
+                  autoComplete="username"
                 />
               </label>
+              <label className="form-label">
+                Password
+                <div className="password-input-wrap">
+                  <input
+                    className="form-input password-input-field"
+                    type={firstAccountPasswordVisible ? "text" : "password"}
+                    value={firstAccountPassword}
+                    onChange={(e) => setFirstAccountPassword(e.target.value)}
+                    autoFocus
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="password-visibility-btn"
+                    aria-label={firstAccountPasswordVisible ? "Hide password" : "Show password"}
+                    aria-pressed={firstAccountPasswordVisible}
+                    onClick={() => setFirstAccountPasswordVisible((current) => !current)}
+                  >
+                    <PasswordVisibilityIcon />
+                  </button>
+                </div>
+                <p className="password-requirement-note">Minimum 8 characters.</p>
+              </label>
+              <label className="form-label">
+                Confirm Password
+                <div className="password-input-wrap">
+                  <input
+                    className="form-input password-input-field"
+                    type={confirmFirstAccountPasswordVisible ? "text" : "password"}
+                    value={confirmFirstAccountPassword}
+                    onChange={(e) => setConfirmFirstAccountPassword(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="password-visibility-btn"
+                    aria-label={confirmFirstAccountPasswordVisible ? "Hide password" : "Show password"}
+                    aria-pressed={confirmFirstAccountPasswordVisible}
+                    onClick={() => setConfirmFirstAccountPasswordVisible((current) => !current)}
+                  >
+                    <PasswordVisibilityIcon />
+                  </button>
+                </div>
+              </label>
+              {firstAccountPasswordMismatch ? (
+                <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
+                  The password entries do not match.
+                </p>
+              ) : null}
               <div className="form-actions">
-                <button type="button" className="btn" onClick={onRefresh} disabled={loading || submitting}>
-                  Refresh status
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  disabled={
+                    submitting ||
+                    !firstAccountEmail.trim() ||
+                    firstAccountPassword.length < 8 ||
+                    !confirmFirstAccountPassword ||
+                    firstAccountPasswordMismatch
+                  }
+                >
+                  {submitting ? "Creating..." : "Create account"}
                 </button>
+              </div>
+            </form>
+          ) : !bundledPreflightLoading && bundledPreflight && !bundledClusterInitialized && (
+            <>
+              <div className="segmented-control modal-segmented-control" role="group" aria-label="First launch setup mode">
+                {[
+                  { value: "setup", label: "New" },
+                  { value: "restore", label: "Restore" },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={firstRunSetupMode === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                    onClick={() => {
+                      setFirstRunSetupMode(option.value as "setup" | "restore");
+                      setError("");
+                      setNotice("");
+                    }}
+                    disabled={submitting}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              {firstRunSetupMode === "restore" ? (
+                <form onSubmit={handleRestoreUpgradeBackup} className="form">
+                  <div className="settings-warning settings-warning--danger">
+                    Restore a KanQual upgrade backup into this fresh installation. The backup password only unlocks the file; set a new administrator password for this installation. Restored users must have their passwords reset by an administrator before signing in.
+                  </div>
+                  {bundledPreflight.issues.length ? (
+                    <div className="settings-warning">
+                      {bundledPreflight.issues.join(" ")}
+                    </div>
+                  ) : null}
+                  <label className="form-label">
+                    Backup File
+                    <div className="form-inline-action-row">
+                      <input
+                        className="form-input"
+                        type="text"
+                        value={restoreBackupPath}
+                        readOnly
+                        placeholder="No backup selected"
+                      />
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => void chooseRestoreBackupFile()}
+                        disabled={submitting}
+                      >
+                        Choose
+                      </button>
+                    </div>
+                  </label>
+                  <label className="form-label">
+                    Backup Password
+                    <div className="password-input-wrap">
+                      <input
+                        className="form-input password-input-field"
+                        type={restoreBackupPasswordVisible ? "text" : "password"}
+                        value={restoreBackupPassword}
+                        onChange={(e) => setRestoreBackupPassword(e.target.value)}
+                        autoComplete="current-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-visibility-btn"
+                        aria-label={restoreBackupPasswordVisible ? "Hide password" : "Show password"}
+                        aria-pressed={restoreBackupPasswordVisible}
+                        onClick={() => setRestoreBackupPasswordVisible((current) => !current)}
+                      >
+                        <PasswordVisibilityIcon />
+                      </button>
+                    </div>
+                  </label>
+                  <label className="form-label">
+                    New Administrator Password
+                    <div className="password-input-wrap">
+                      <input
+                        className="form-input password-input-field"
+                        type={restoreAdminPasswordVisible ? "text" : "password"}
+                        value={restoreAdminPassword}
+                        onChange={(e) => setRestoreAdminPassword(e.target.value)}
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-visibility-btn"
+                        aria-label={restoreAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-pressed={restoreAdminPasswordVisible}
+                        onClick={() => setRestoreAdminPasswordVisible((current) => !current)}
+                      >
+                        <PasswordVisibilityIcon />
+                      </button>
+                    </div>
+                    <p className="password-requirement-note">Minimum 8 characters.</p>
+                  </label>
+                  <label className="form-label">
+                    Confirm Password
+                    <div className="password-input-wrap">
+                      <input
+                        className="form-input password-input-field"
+                        type={confirmRestoreAdminPasswordVisible ? "text" : "password"}
+                        value={confirmRestoreAdminPassword}
+                        onChange={(e) => setConfirmRestoreAdminPassword(e.target.value)}
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-visibility-btn"
+                        aria-label={confirmRestoreAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-pressed={confirmRestoreAdminPasswordVisible}
+                        onClick={() => setConfirmRestoreAdminPasswordVisible((current) => !current)}
+                      >
+                        <PasswordVisibilityIcon />
+                      </button>
+                    </div>
+                  </label>
+                  {restoreAdminPasswordMismatch ? (
+                    <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
+                      The password entries do not match.
+                    </p>
+                  ) : null}
+                  <div className="form-actions">
+                    <button
+                      type="submit"
+                      className="btn btn--primary"
+                      disabled={
+                        loading ||
+                        submitting ||
+                        !bundledPreflight.canInitialize ||
+                        !restoreBackupPath.trim() ||
+                        !restoreBackupPassword.trim() ||
+                        restoreAdminPassword.length < 8 ||
+                        !confirmRestoreAdminPassword ||
+                        restoreAdminPasswordMismatch
+                      }
+                    >
+                      {submitting ? "Restoring..." : "Restore"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleInitializeBundledPostgres} className="form">
+                  <div className="settings-warning settings-warning--danger">
+                    This is the first time KanQual is starting. Set an administrator password to finish setup. These credentials are critical and cannot be recovered. Please make sure you retain them securely.
+                  </div>
+                  {bundledPreflight.issues.length ? (
+                    <div className="settings-warning">
+                      {bundledPreflight.issues.join(" ")}
+                    </div>
+                  ) : null}
+                  <label className="form-label">
+                    Administrator Password
+                    <div className="password-input-wrap">
+                      <input
+                        className="form-input password-input-field"
+                        type={initialAdminPasswordVisible ? "text" : "password"}
+                        value={initialAdminPassword}
+                        onChange={(e) => setInitialAdminPassword(e.target.value)}
+                        name="postgres-admin-password"
+                        autoFocus
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-visibility-btn"
+                        aria-label={initialAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-pressed={initialAdminPasswordVisible}
+                        onClick={() => setInitialAdminPasswordVisible((current) => !current)}
+                      >
+                        <PasswordVisibilityIcon />
+                      </button>
+                    </div>
+                    <p className="password-requirement-note">Minimum 8 characters.</p>
+                  </label>
+                  <label className="form-label">
+                    Confirm Password
+                    <div className="password-input-wrap">
+                      <input
+                        className="form-input password-input-field"
+                        type={confirmInitialAdminPasswordVisible ? "text" : "password"}
+                        value={confirmInitialAdminPassword}
+                        onChange={(e) => setConfirmInitialAdminPassword(e.target.value)}
+                        name="confirm-postgres-admin-password"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-visibility-btn"
+                        aria-label={confirmInitialAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-pressed={confirmInitialAdminPasswordVisible}
+                        onClick={() => setConfirmInitialAdminPasswordVisible((current) => !current)}
+                      >
+                        <PasswordVisibilityIcon />
+                      </button>
+                    </div>
+                  </label>
+                  {initialAdminPasswordMismatch ? (
+                    <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
+                      The password entries do not match.
+                    </p>
+                  ) : null}
+                  <div className="form-actions">
+                    <button
+                      type="submit"
+                      className="btn btn--primary"
+                      disabled={loading || submitting || !bundledPreflight.canInitialize || initialAdminPasswordMismatch}
+                    >
+                      {submitting ? "Submitting..." : "Submit"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
+          )}
+
+          {!showingFirstAccountSetup && bundledClusterInitialized && !bootstrapApplied && (
+            <form onSubmit={handleBootstrapSubmit} className="form">
+              <div className="settings-warning settings-warning--danger">
+                Database setup did not finish. Enter the administrator password you created when KanQual first started.
+              </div>
+              <label className="form-label">
+                Administrator Password
+                <div className="password-input-wrap">
+                  <input
+                    className="form-input password-input-field"
+                    type={superuserPasswordVisible ? "text" : "password"}
+                    value={superuserPassword}
+                    onChange={(e) => setSuperuserPassword(e.target.value)}
+                    name="postgres-superuser-password"
+                    autoFocus
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="password-visibility-btn"
+                    aria-label={superuserPasswordVisible ? "Hide password" : "Show password"}
+                    aria-pressed={superuserPasswordVisible}
+                    onClick={() => setSuperuserPasswordVisible((current) => !current)}
+                  >
+                    <PasswordVisibilityIcon />
+                  </button>
+                </div>
+              </label>
+              <div className="form-actions">
                 <button type="submit" className="btn btn--primary" disabled={loading || submitting}>
-                  {submitting ? "Bootstrapping..." : "Bootstrap PostgreSQL"}
+                  {submitting ? "Finishing..." : "Finish setup"}
                 </button>
               </div>
             </form>
           )}
 
-          {bootstrapApplied && !adminHandoffCompleted && (
+          {!showingFirstAccountSetup && bootstrapApplied && !adminHandoffCompleted && (
             <>
               <div className="settings-warning settings-warning--danger">
-                Bootstrap is complete, but the PostgreSQL admin password handoff still needs to be finalized before setup is ready.
-              </div>
-              <div className="form-actions">
-                <button type="button" className="btn" onClick={onRefresh} disabled={loading}>
-                  Refresh status
-                </button>
+                Database setup is incomplete. Refresh the status, then finish setup if Kanqual asks for the administrator password again.
               </div>
             </>
           )}
 
-          {appRoleReady && (
+          {!showingFirstAccountSetup && databaseReady && (
             <>
               <div className="settings-warning">
                 <strong>Ready</strong>
                 <br />
-                The PostgreSQL bootstrap and admin handoff are complete. Continue into PostgreSQL projects to sign in and open a workspace.
+                The bundled PostgreSQL runtime is ready. Continue into projects to sign in and open a workspace.
               </div>
               <div className="form-actions">
-                <button type="button" className="btn" onClick={onRefresh} disabled={loading}>
-                  Refresh status
-                </button>
                 <button type="button" className="btn btn--primary" onClick={onOpenPostgresProjects}>
                   Open PostgreSQL projects
                 </button>
@@ -282,14 +915,8 @@ export function PostgresLaunchView({
 
           {notice ? <p className="settings-success">{notice}</p> : null}
           {error ? <p className="auth-error">{error}</p> : null}
-
-          {status ? (
-            <p className="auth-hint settings-code-line">
-              {status.bootstrapIdentityPath}
-            </p>
-          ) : null}
         </div>
-      </div>
+      </AuthSlideCard>
     </div>
   );
 }
@@ -297,30 +924,34 @@ export function PostgresLaunchView({
 export type PostgresAuthViewProps = {
   authStatus: PostgresAuthStatus | null;
   onRefresh: () => Promise<void>;
-  onAuthenticated: (session: PostgresAuthSession) => void;
+  onAuthenticated: (session: PostgresAuthSession, currentPassword?: string) => void | Promise<void>;
+  onFirstAccountCreated?: (session: PostgresAuthSession) => void | Promise<void>;
 };
 
 export function PostgresAuthView({
   authStatus,
-  onRefresh,
   onAuthenticated,
+  onFirstAccountCreated,
 }: PostgresAuthViewProps) {
-  const [mode, setMode] = useState<"admin" | "login" | "register">("admin");
-  const [name, setName] = useState("");
-  const [adminUsername, setAdminUsername] = useState("");
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [signInStep, setSignInStep] = useState<"username" | "password">("username");
   const [email, setEmail] = useState("");
   const [recentAccounts, setRecentAccounts] = useState<PostgresRememberedAccount[]>([]);
   const [selectedRecentEmail, setSelectedRecentEmail] = useState("");
   const [showManualEmailEntry, setShowManualEmailEntry] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmFirstAccountPassword, setConfirmFirstAccountPassword] = useState("");
+  const [confirmFirstAccountPasswordVisible, setConfirmFirstAccountPasswordVisible] = useState(false);
+  const [firstAccountEmail, setFirstAccountEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const effectiveMode = mode;
   const selectedRecentAccount = selectedRecentEmail
     ? recentAccounts.find((account) => account.email === selectedRecentEmail) ?? null
     : null;
+  const firstAccountPasswordMismatch =
+    confirmFirstAccountPassword.length > 0 && password !== confirmFirstAccountPassword;
 
   useEffect(() => {
     let cancelled = false;
@@ -344,28 +975,72 @@ export function PostgresAuthView({
     };
   }, []);
 
+  async function handleFirstAccountSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const email = firstAccountEmail.trim().toLowerCase();
+    if (!email) {
+      setError("Enter a username.");
+      return;
+    }
+    if (/\s/.test(email)) {
+      setError("Usernames cannot contain spaces.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Choose a password with at least 8 characters.");
+      return;
+    }
+    if (password !== confirmFirstAccountPassword) {
+      setError("The passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await createPostgresAppUser({
+        name: defaultNameFromUsername(email),
+        email,
+        password,
+      });
+      const session = await loginPostgresAppUser({
+        email,
+        password,
+        rememberSession: false,
+      });
+      try {
+        await rememberPostgresAccount(email, session.user.name || email);
+      } catch (rememberError) {
+        console.warn("Could not remember PostgreSQL account:", describeUnknownError(rememberError));
+      }
+      setFirstAccountEmail("");
+      setPassword("");
+      setConfirmFirstAccountPassword("");
+      await (onFirstAccountCreated ?? onAuthenticated)(session);
+    } catch (setupError) {
+      setError(describeUnknownError(setupError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
 
-    if (effectiveMode === "admin") {
-      if (!adminUsername.trim()) {
-        setError("Enter the PostgreSQL administrator username.");
-        return;
-      }
-      if (password.length < 8) {
+    if (showAdminLogin) {
+      if (!password) {
         setError("Enter the PostgreSQL administrator password.");
         return;
       }
       setSubmitting(true);
       try {
         const session = await loginPostgresAdmin({
-          username: adminUsername.trim(),
           password,
           rememberSession: false,
         });
         setPassword("");
-        onAuthenticated(session);
+        await onAuthenticated(session);
       } catch (authError) {
         setError(describeUnknownError(authError));
       } finally {
@@ -375,37 +1050,51 @@ export function PostgresAuthView({
     }
 
     const trimmedEmail = email.trim().toLowerCase();
-    if (effectiveMode === "register" && !name.trim()) {
-      setError("Enter your name.");
+    if (signInStep === "username") {
+      if (!trimmedEmail) {
+        setError("Enter your username.");
+        return;
+      }
+      if (/\s/.test(trimmedEmail)) {
+        setError("Usernames cannot contain spaces.");
+        return;
+      }
+      setEmail(trimmedEmail);
+      setPassword("");
+      setPasswordVisible(false);
+      setSignInStep("password");
       return;
     }
+
     if (!trimmedEmail) {
-      setError("Enter your email.");
+      setError("Enter your username.");
       return;
     }
-    if (password.length < 8) {
-      setError("Choose a password with at least 8 characters.");
+    if (/\s/.test(trimmedEmail)) {
+      setError("Usernames cannot contain spaces.");
+      return;
+    }
+    if (!password) {
+      setError("Enter your password.");
       return;
     }
 
     setSubmitting(true);
     try {
-      const session = effectiveMode === "register"
-        ? await registerPostgresAppUser({
-            name: name.trim(),
-            email: trimmedEmail,
-            password,
-            rememberSession: false,
-          })
-        : await loginPostgresAppUser({
-            email: trimmedEmail,
-            password,
-            rememberSession: false,
-          });
-      await rememberPostgresAccount(trimmedEmail, session.user.name || name.trim() || trimmedEmail);
-      setRecentAccounts(await listPostgresRememberedAccounts());
+      const session = await loginPostgresAppUser({
+        email: trimmedEmail,
+        password,
+        rememberSession: false,
+      });
+      try {
+        await rememberPostgresAccount(trimmedEmail, session.user.name || trimmedEmail);
+        setRecentAccounts(await listPostgresRememberedAccounts());
+      } catch (rememberError) {
+        console.warn("Could not update PostgreSQL remembered accounts:", describeUnknownError(rememberError));
+      }
+      const submittedPassword = password;
       setPassword("");
-      onAuthenticated(session);
+      onAuthenticated(session, submittedPassword);
     } catch (authError) {
       setError(describeUnknownError(authError));
     } finally {
@@ -413,84 +1102,175 @@ export function PostgresAuthView({
     }
   }
 
-  return (
-    <div className="auth-screen">
-      <div className="auth-card" style={{ maxWidth: 720 }}>
-        <div className="auth-brand">Kanqual</div>
-        <form onSubmit={handleSubmit} className="form">
-          <h2 className="auth-panel-title">Sign in to the PostgreSQL workspace</h2>
-          <p className="auth-hint">
-            PostgreSQL bootstrap is complete. The local PostgreSQL administrator is now the built-in Kanqual administrator for this device.
-          </p>
-
-          <div className="auth-tabs">
-            <button
-              type="button"
-              className={`auth-tab ${effectiveMode === "admin" ? "auth-tab--active" : ""}`}
-              onClick={() => setMode("admin")}
-            >
-              Local administrator
-            </button>
-            <button
-              type="button"
-              className={`auth-tab ${effectiveMode === "login" ? "auth-tab--active" : ""}`}
-              onClick={() => {
-                setMode("login");
-                setError("");
-                setShowManualEmailEntry(false);
-              }}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              className={`auth-tab ${effectiveMode === "register" ? "auth-tab--active" : ""}`}
-              onClick={() => {
-                setMode("register");
-                setSelectedRecentEmail("");
-                setShowManualEmailEntry(false);
-                setError("");
-              }}
-            >
-              Create account
-            </button>
+  if (authStatus?.requiresAccountSetup && authStatus.currentSession?.authKind === "postgres_admin") {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card" style={{ maxWidth: 720 }}>
+          <div className="auth-brand-row">
+            <img src="/logo.png" alt="" className="auth-brand-row-logo" />
+            <div className="auth-brand">KanQual</div>
           </div>
+          <form onSubmit={handleFirstAccountSubmit} className="form">
+            <div className="settings-warning settings-warning--danger">
+              Create your local KanQual user account.
+              <br />
+              <br />
+              This account is separate from the administrator password you just created.
+            </div>
+            <label className="form-label">
+              Username
+              <input
+                className="form-input"
+                type="text"
+                value={firstAccountEmail}
+                onChange={(event) => setFirstAccountEmail(event.target.value)}
+                autoFocus
+                autoComplete="username"
+              />
+            </label>
+            <label className="form-label">
+              Password
+              <div className="password-input-wrap">
+                <input
+                  className="form-input password-input-field"
+                  type={passwordVisible ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  aria-pressed={passwordVisible}
+                  onClick={() => setPasswordVisible((current) => !current)}
+                >
+                  <PasswordVisibilityIcon />
+                </button>
+              </div>
+              <p className="password-requirement-note">Minimum 8 characters.</p>
+            </label>
+            <label className="form-label">
+              Confirm Password
+              <div className="password-input-wrap">
+                <input
+                  className="form-input password-input-field"
+                  type={confirmFirstAccountPasswordVisible ? "text" : "password"}
+                  value={confirmFirstAccountPassword}
+                  onChange={(event) => setConfirmFirstAccountPassword(event.target.value)}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={confirmFirstAccountPasswordVisible ? "Hide password" : "Show password"}
+                  aria-pressed={confirmFirstAccountPasswordVisible}
+                  onClick={() => setConfirmFirstAccountPasswordVisible((current) => !current)}
+                >
+                  <PasswordVisibilityIcon />
+                </button>
+              </div>
+            </label>
+            {firstAccountPasswordMismatch ? (
+              <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
+                The password entries do not match.
+              </p>
+            ) : null}
+            {error ? <p className="auth-error">{error}</p> : null}
+            <div className="form-actions">
+              <button
+                type="submit"
+                className="btn btn--primary"
+                disabled={
+                  submitting ||
+                  !firstAccountEmail.trim() ||
+                  password.length < 8 ||
+                  !confirmFirstAccountPassword ||
+                  firstAccountPasswordMismatch
+                }
+              >
+                {submitting ? "Creating..." : "Create account"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
-          {effectiveMode === "admin" && (
+  if (showAdminLogin) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card" style={{ maxWidth: 720 }}>
+          <div className="auth-brand-row">
+            <img src="/logo.png" alt="" className="auth-brand-row-logo" />
+            <div className="auth-brand">KanQual</div>
+          </div>
+          <form onSubmit={handleSubmit} className="form">
             <div className="auth-admin-notice">
               <strong>Built-in local administrator</strong>
               <span>
-                Sign in with the PostgreSQL superuser account to get full access across all local PostgreSQL projects.
-              </span>
-              <span>
-                Local administrator sessions are only kept for the current app run and are not restored after restart.
+                Sign in with the administrator credentials you created when you first launched KanQual.
               </span>
             </div>
-          )}
 
-          {effectiveMode === "register" && (
-            <div className="auth-admin-notice">
-              <strong>Regular PostgreSQL app account</strong>
-              <span>
-                Accounts created here are standard Kanqual users. They are separate from the built-in PostgreSQL administrator.
-              </span>
-            </div>
-          )}
-
-          {effectiveMode === "register" && (
             <label className="form-label">
-              Name
-              <input
-                className="form-input"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Your name"
-                autoFocus
-              />
+              PostgreSQL administrator password
+              <div className="password-input-wrap">
+                <input
+                  className="form-input password-input-field"
+                  type={passwordVisible ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoFocus
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  aria-pressed={passwordVisible}
+                  onClick={() => setPasswordVisible((current) => !current)}
+                >
+                  <PasswordVisibilityIcon />
+                </button>
+              </div>
             </label>
-          )}
 
-          {effectiveMode === "login" && recentAccounts.length > 0 && !selectedRecentAccount && !showManualEmailEntry ? (
+            {error ? <p className="auth-error">{error}</p> : null}
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setShowAdminLogin(false);
+                  setPassword("");
+                  setError("");
+                }}
+                disabled={submitting}
+              >
+                Back
+              </button>
+              <button type="submit" className="btn btn--primary" disabled={submitting}>
+                {submitting ? "Please wait..." : "Sign in"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-screen">
+      <div className="auth-card" style={{ maxWidth: 720 }}>
+        <div className="auth-brand-row">
+          <img src="/logo.png" alt="" className="auth-brand-row-logo" />
+          <div className="auth-brand">KanQual</div>
+        </div>
+        <form onSubmit={handleSubmit} className="form">
+          {signInStep === "username" && recentAccounts.length > 0 && !selectedRecentAccount && !showManualEmailEntry ? (
             <div className="form-label">
               Recent accounts
               <ul className="account-list" style={{ marginTop: 10, marginBottom: 12 }}>
@@ -502,6 +1282,7 @@ export function PostgresAuthView({
                       setEmail(account.email);
                       setSelectedRecentEmail(account.email);
                       setShowManualEmailEntry(false);
+                      setSignInStep("password");
                       setPassword("");
                       setError("");
                     }}
@@ -523,124 +1304,176 @@ export function PostgresAuthView({
                     setEmail("");
                     setSelectedRecentEmail("");
                     setShowManualEmailEntry(true);
+                    setSignInStep("username");
                     setError("");
                   }}
                 >
-                  Use different email
+                  Use different username
                 </button>
               </div>
             </div>
           ) : null}
 
-          {effectiveMode === "login" && selectedRecentAccount ? (
-            <div className="auth-admin-notice">
-              <strong>{selectedRecentAccount.name}</strong>
-              <span>{selectedRecentAccount.email}</span>
-              <div className="form-actions" style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={() => {
-                    setEmail("");
-                    setSelectedRecentEmail("");
-                    setShowManualEmailEntry(true);
-                    setPassword("");
-                    setError("");
-                  }}
-                >
-                  Use different email
-                </button>
+          {signInStep === "password" ? (
+            <div className="auth-admin-notice auth-user-notice">
+              <div className="account-avatar">{accountInitials(selectedRecentAccount?.name || email)}</div>
+              <div className="account-info">
+                <div className="account-name">{selectedRecentAccount?.name || email}</div>
+                <div className="account-email">{selectedRecentAccount?.email || email}</div>
               </div>
             </div>
           ) : null}
 
-          {(effectiveMode === "register" || (effectiveMode === "login" && (!selectedRecentAccount && (showManualEmailEntry || recentAccounts.length === 0)))) ? (
+          {signInStep === "username" && (!selectedRecentAccount && (showManualEmailEntry || recentAccounts.length === 0)) ? (
             <label className="form-label">
-              Email
+              Username
               <input
                 className="form-input"
-                type="email"
+                type="text"
                 value={email}
                 onChange={(event) => {
                   setEmail(event.target.value);
                   setSelectedRecentEmail("");
                   setShowManualEmailEntry(true);
+                  setSignInStep("username");
                 }}
-                placeholder="you@example.com"
-                autoFocus={effectiveMode === "login"}
-              />
-            </label>
-          ) : null}
-
-          {effectiveMode === "admin" && (
-            <label className="form-label">
-              PostgreSQL administrator username
-              <input
-                className="form-input"
-                value={adminUsername}
-                onChange={(event) => setAdminUsername(event.target.value)}
                 autoFocus
                 autoComplete="username"
               />
             </label>
-          )}
+          ) : null}
 
-          <label className="form-label">
-            {effectiveMode === "admin" ? "PostgreSQL administrator password" : "Password"}
-            <div className="password-input-wrap">
-              <input
-                className="form-input password-input-field"
-                type={passwordVisible ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoFocus={effectiveMode !== "admin"}
-              />
-              <button
-                type="button"
-                className="password-visibility-btn"
-                aria-label={passwordVisible ? "Hide password" : "Show password"}
-                aria-pressed={passwordVisible}
-                onClick={() => setPasswordVisible((current) => !current)}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
-                  <path
-                    d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-                </svg>
-              </button>
-            </div>
-          </label>
-
-          {authStatus ? (
-            <p className="auth-hint">
-              Registered PostgreSQL app users: {authStatus.registeredUserCount}
-              <br />
-              Sessions end when Kanqual closes.
-            </p>
+          {signInStep === "password" ? (
+            <label className="form-label">
+              Password
+              <div className="password-input-wrap">
+                <input
+                  className="form-input password-input-field"
+                  type={passwordVisible ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoFocus
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  aria-pressed={passwordVisible}
+                  onClick={() => setPasswordVisible((current) => !current)}
+                >
+                  <PasswordVisibilityIcon />
+                </button>
+              </div>
+            </label>
           ) : null}
 
           {error ? <p className="auth-error">{error}</p> : null}
 
-          <div className="form-actions">
-            <button type="button" className="btn" onClick={() => void onRefresh()} disabled={submitting}>
-              Refresh
-            </button>
+          <div className="form-actions auth-actions--split">
+            {signInStep === "password" ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setSignInStep("username");
+                  setPassword("");
+                  setPasswordVisible(false);
+                  setSelectedRecentEmail("");
+                  setShowManualEmailEntry(true);
+                  setError("");
+                }}
+                disabled={submitting}
+              >
+                Back
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setShowAdminLogin(true);
+                  setPassword("");
+                  setError("");
+                }}
+                disabled={submitting}
+              >
+                Administrator
+              </button>
+            )}
             <button type="submit" className="btn btn--primary" disabled={submitting}>
-              {submitting
-                ? "Please wait..."
-                : effectiveMode === "register"
-                  ? "Create account"
-                  : "Sign in"}
+              {submitting ? "Please wait..." : signInStep === "username" ? "Next" : "Sign in"}
             </button>
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+export type PostgresWorkspaceModeChoiceViewProps = {
+  onUseLocal: () => void;
+};
+
+export function PostgresWorkspaceModeChoiceView({
+  onUseLocal,
+}: PostgresWorkspaceModeChoiceViewProps) {
+  const [showRemoteForm, setShowRemoteForm] = useState(false);
+  const [remoteAddress, setRemoteAddress] = useState("");
+
+  return (
+    <div className="auth-screen">
+      <AuthSlideCard stage={showRemoteForm ? "remote-connection" : "workspace-mode"}>
+        <div className="auth-brand-row">
+          <img src="/logo.png" alt="" className="auth-brand-row-logo" />
+          <div className="auth-brand">KanQual</div>
+        </div>
+        {!showRemoteForm ? (
+          <div className="form">
+            <div className="mode-options mode-options--auth-card">
+              <button type="button" className="mode-option" onClick={onUseLocal}>
+                <ComputerIcon className="mode-option-icon" />
+                <span className="mode-option-title">Local</span>
+                <span className="mode-option-desc">Work with projects stored on this machine.</span>
+              </button>
+              <button type="button" className="mode-option" onClick={() => setShowRemoteForm(true)}>
+                <NetworkIcon className="mode-option-icon" />
+                <span className="mode-option-title">Remote</span>
+                <span className="mode-option-desc">Connect to a KanQual instance hosted somewhere else.</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form
+            className="form"
+            onSubmit={(event) => {
+              event.preventDefault();
+            }}
+          >
+            <label className="form-label">
+              KanQual address
+              <input
+                className="form-input"
+                value={remoteAddress}
+                onChange={(event) => setRemoteAddress(event.target.value)}
+                placeholder="host.example.org"
+                autoFocus
+              />
+            </label>
+            <p className="auth-hint">
+              Remote PostgreSQL connection setup is not wired yet.
+            </p>
+            <div className="form-actions auth-actions--split">
+              <button type="button" className="btn" onClick={() => setShowRemoteForm(false)}>
+                Back
+              </button>
+              <button type="submit" className="btn btn--primary" disabled>
+                Connect
+              </button>
+            </div>
+          </form>
+        )}
+      </AuthSlideCard>
     </div>
   );
 }

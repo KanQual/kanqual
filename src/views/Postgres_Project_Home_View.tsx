@@ -1,4 +1,4 @@
-import {
+﻿import {
   type ComponentType,
   type Dispatch,
   type SetStateAction,
@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readFile as readTauriFile, writeFile } from "@tauri-apps/plugin-fs";
@@ -51,7 +52,10 @@ import {
   deletePostgresRelationshipType,
   deletePostgresSavedDrawing,
   getPostgresProjectCanvasState,
+  getPostgresProjectAiAssistRuntimeStatus,
+  getPostgresProjectAiAssistSettings,
   getPostgresSavedDrawing,
+  getPostgresStatus,
   importPostgresObjectImage,
   importPostgresObjectTypeImage,
   listPostgresAppUsers,
@@ -85,6 +89,7 @@ import {
   type PostgresObjectType,
   type PostgresProject,
   type PostgresProjectChangeEvent,
+  type PostgresInstallationSettings,
   type PostgresProjectUser,
   type PostgresRelationship,
   type PostgresRelationshipAttributeDefinition,
@@ -94,6 +99,10 @@ import {
   type PostgresSource,
   POSTGRES_PROJECT_CHANGED_EVENT,
 } from "../lib/postgres";
+import type {
+  ProjectEmbeddingBuildStatus,
+  ProjectEmbeddingStoreStatus,
+} from "../lib/projectEmbeddings";
 import {
   AttributeValuesModal,
   type SharedAttributeDraft,
@@ -103,12 +112,18 @@ import {
   type PostgresAttributeValueHistoryTarget,
 } from "../components/PostgresAttributeValueHistoryModal";
 import { AttributeDefinitionModal } from "../components/AttributeDefinitionModal";
+import { LoadingCard } from "../components/LoadingCard";
+import { usePostgresAutomaticProjectSnapshots } from "../hooks/usePostgresAutomaticProjectSnapshots";
 import {
   PostgresRelationshipModal,
   type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
 } from "../components/PostgresRelationshipModal";
-import sidebarMarkLogo from "../assets/logo-mark-no-background.png";
-import sidebarLogo from "../assets/logo-no-background.png";
+import { PostgresSidebar } from "./Postgres_Sidebar";
+import type {
+  PostgresSidebarAiStatus,
+  PostgresSidebarCollaborationStatus,
+  PostgresSidebarNetworkMode,
+} from "./Postgres_Sidebar";
 import type { PostgresMemoDraftTarget } from "./Postgres_Project_Memos_View";
 
 function normalizeCanvasSvgTextHtml(html: string): string {
@@ -180,9 +195,11 @@ export type PostgresProjectHomeViewProps = {
   authSession: PostgresAuthSession;
   onAuthSessionUpdated: (session: PostgresAuthSession) => void;
   onAuthSessionInvalidated: () => void;
+  installationSettings?: PostgresInstallationSettings | null;
   onBack: () => void;
   onProjectUpdated: (project: PostgresProject) => void;
   onProjectDeleted: (projectId: string) => void;
+  onProjectOpened?: (project: PostgresProject) => void | Promise<void>;
   onSignOut: () => Promise<void>;
 };
 
@@ -1672,7 +1689,7 @@ function wrapCanvasTextLines(text: string, width: number, fontSize: number): str
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   {[
-                    { label: "•", isActive: editor.isActive("bulletList"), onClick: () => editor.chain().focus().toggleBulletList().run() },
+                    { label: "â€¢", isActive: editor.isActive("bulletList"), onClick: () => editor.chain().focus().toggleBulletList().run() },
                     { label: "1.", isActive: editor.isActive("orderedList"), onClick: () => editor.chain().focus().toggleOrderedList().run() },
                   ].map((item) => (
                     <button
@@ -2516,12 +2533,12 @@ function PostgresObjectImageControls(props: {
       </div>
       {graphicMode && onGraphicModeChange ? (
         <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "center" }}>
-          <div className="auth-tabs" role="tablist" aria-label="Object type graphic source" style={{ width: 220, marginBottom: 0 }}>
+          <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label="Object type graphic source">
             <button
               type="button"
               role="tab"
               aria-selected={graphicMode === "select"}
-              className={`auth-tab ${graphicMode === "select" ? "auth-tab--active" : ""}`}
+              className={`segmented-control-option ${graphicMode === "select" ? "segmented-control-option--active" : ""}`}
               onClick={() => onGraphicModeChange("select")}
               disabled={disabled}
             >
@@ -2531,7 +2548,7 @@ function PostgresObjectImageControls(props: {
               type="button"
               role="tab"
               aria-selected={graphicMode === "upload"}
-              className={`auth-tab ${graphicMode === "upload" ? "auth-tab--active" : ""}`}
+              className={`segmented-control-option ${graphicMode === "upload" ? "segmented-control-option--active" : ""}`}
               onClick={() => onGraphicModeChange("upload")}
               disabled={disabled}
             >
@@ -2704,10 +2721,10 @@ function PostgresImageCropModal(props: {
         <p className="auth-hint" style={{ marginTop: 0 }}>
           Keep the full image or select a region to use for this object graphic.
         </p>
-        <div className="auth-tabs" role="tablist" aria-label="Image region mode">
+        <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label="Image region mode">
           <button
             type="button"
-            className={`auth-tab ${draft.mode === "full" ? "auth-tab--active" : ""}`}
+            className={`segmented-control-option ${draft.mode === "full" ? "segmented-control-option--active" : ""}`}
             onClick={() => updateDraft({ mode: "full" })}
             disabled={busy}
           >
@@ -2715,7 +2732,7 @@ function PostgresImageCropModal(props: {
           </button>
           <button
             type="button"
-            className={`auth-tab ${draft.mode === "crop" ? "auth-tab--active" : ""}`}
+            className={`segmented-control-option ${draft.mode === "crop" ? "segmented-control-option--active" : ""}`}
             onClick={() => updateDraft({
               mode: "crop",
               sizePercent: draft.sizePercent === 100 ? 80 : draft.sizePercent,
@@ -3297,13 +3314,25 @@ export function PostgresProjectHomeView({
   authSession,
   onAuthSessionUpdated,
   onAuthSessionInvalidated,
+  installationSettings,
   onBack,
   onProjectUpdated,
   onProjectDeleted,
+  onProjectOpened,
   onSignOut,
 }: PostgresProjectHomeViewProps) {
   const PROJECT_ROLE_OPTIONS = ["owner", "editor", "coder", "viewer"] as const;
   const [activeScreen, setActiveScreen] = useState<PostgresProjectScreen>("home");
+  const aiAssistAllowed =
+    installationSettings == null
+      ? true
+      : installationSettings.aiAssistPolicy.mode === "enabled"
+        ? true
+        : installationSettings.aiAssistPolicy.mode === "project"
+          ? installationSettings.aiAssistPolicy.projectOverrides[project.id] ?? true
+          : false;
+  const [sidebarNetworkMode, setSidebarNetworkMode] = useState<PostgresSidebarNetworkMode>("unknown");
+  const [sidebarAiStatus, setSidebarAiStatus] = useState<PostgresSidebarAiStatus>("unavailable");
   const [postgresSourceNavigationTarget, setPostgresSourceNavigationTarget] = useState<{
     sourceId: string;
     annotationId: string | null;
@@ -3351,6 +3380,23 @@ export function PostgresProjectHomeView({
   const [objectShapeOverride, setObjectShapeOverride] = useState("");
   const [objectColorOverride, setObjectColorOverride] = useState("");
   const [objectFillOverride, setObjectFillOverride] = useState("");
+
+  useEffect(() => {
+    if (
+      !aiAssistAllowed
+      && activeScreen !== "ai-assist"
+      && (
+        activeScreen === "ai-assist-chat"
+        || activeScreen === "ai-assisted-coding"
+        || activeScreen === "ai-analyze"
+        || activeScreen === "ai-assist-source-attributes"
+        || activeScreen === "ai-assist-object-attributes"
+        || activeScreen === "ai-assist-process-documents"
+      )
+    ) {
+      setActiveScreen("ai-assist");
+    }
+  }, [activeScreen, aiAssistAllowed]);
   const [objectAttributeValues, setObjectAttributeValues] = useState<Record<string, string>>({});
   const [draftObjectPendingImage, setDraftObjectPendingImage] = useState<PostgresImageUploadDraft | null>(null);
   const [selectedObjectTypeFilter, setSelectedObjectTypeFilter] = useState<string>("all");
@@ -4195,31 +4241,31 @@ export function PostgresProjectHomeView({
             </p>
           ) : null}
           <form onSubmit={config.onSubmit} className="form">
-            <div className="auth-tabs" role="tablist" aria-label={config.ariaLabel}>
+            <div className="segmented-control modal-segmented-control" role="tablist" aria-label={config.ariaLabel}>
               <button
                 type="button"
-                className={`auth-tab ${relationshipTypeModalTab === "details" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${relationshipTypeModalTab === "details" ? "segmented-control-option--active" : ""}`}
                 onClick={() => setRelationshipTypeModalTab("details")}
               >
                 Details
               </button>
               <button
                 type="button"
-                className={`auth-tab ${relationshipTypeModalTab === "object1" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${relationshipTypeModalTab === "object1" ? "segmented-control-option--active" : ""}`}
                 onClick={() => setRelationshipTypeModalTab("object1")}
               >
                 Object 1
               </button>
               <button
                 type="button"
-                className={`auth-tab ${relationshipTypeModalTab === "object2" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${relationshipTypeModalTab === "object2" ? "segmented-control-option--active" : ""}`}
                 onClick={() => setRelationshipTypeModalTab("object2")}
               >
                 Object 2
               </button>
               <button
                 type="button"
-                className={`auth-tab ${relationshipTypeModalTab === "attributes" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${relationshipTypeModalTab === "attributes" ? "segmented-control-option--active" : ""}`}
                 onClick={() => setRelationshipTypeModalTab("attributes")}
               >
                 Attributes
@@ -4444,24 +4490,24 @@ export function PostgresProjectHomeView({
         <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
           <h2>{config.title}</h2>
           <form onSubmit={config.onSubmit} className="form">
-            <div className="auth-tabs" role="tablist" aria-label={config.ariaLabel}>
+            <div className="segmented-control modal-segmented-control" role="tablist" aria-label={config.ariaLabel}>
               <button
                 type="button"
-                className={`auth-tab ${config.tab === "details" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${config.tab === "details" ? "segmented-control-option--active" : ""}`}
                 onClick={() => config.setTab("details")}
               >
                 Details
               </button>
               <button
                 type="button"
-                className={`auth-tab ${config.tab === "graphics" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${config.tab === "graphics" ? "segmented-control-option--active" : ""}`}
                 onClick={() => config.setTab("graphics")}
               >
                 Graphics
               </button>
               <button
                 type="button"
-                className={`auth-tab ${config.tab === "attributes" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${config.tab === "attributes" ? "segmented-control-option--active" : ""}`}
                 onClick={() => config.setTab("attributes")}
               >
                 Attributes
@@ -4490,12 +4536,12 @@ export function PostgresProjectHomeView({
             ) : config.tab === "graphics" ? (
               <>
                 <div style={{ display: "flex", justifyContent: "center" }}>
-                  <div className="auth-tabs" role="tablist" aria-label="Object graphic source" style={{ width: 330, marginBottom: 0 }}>
+                  <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label="Object graphic source">
                     <button
                       type="button"
                       role="tab"
                       aria-selected={config.graphicMode === "inherit"}
-                      className={`auth-tab ${config.graphicMode === "inherit" ? "auth-tab--active" : ""}`}
+                      className={`segmented-control-option ${config.graphicMode === "inherit" ? "segmented-control-option--active" : ""}`}
                       onClick={() =>
                         handleSetObjectGraphicMode("inherit", {
                           setMode: config.setGraphicMode,
@@ -4515,7 +4561,7 @@ export function PostgresProjectHomeView({
                       type="button"
                       role="tab"
                       aria-selected={config.graphicMode === "select"}
-                      className={`auth-tab ${config.graphicMode === "select" ? "auth-tab--active" : ""}`}
+                      className={`segmented-control-option ${config.graphicMode === "select" ? "segmented-control-option--active" : ""}`}
                       onClick={() =>
                         handleSetObjectGraphicMode("select", {
                           setMode: config.setGraphicMode,
@@ -4535,7 +4581,7 @@ export function PostgresProjectHomeView({
                       type="button"
                       role="tab"
                       aria-selected={config.graphicMode === "upload"}
-                      className={`auth-tab ${config.graphicMode === "upload" ? "auth-tab--active" : ""}`}
+                      className={`segmented-control-option ${config.graphicMode === "upload" ? "segmented-control-option--active" : ""}`}
                       onClick={() =>
                         handleSetObjectGraphicMode("upload", {
                           setMode: config.setGraphicMode,
@@ -4781,24 +4827,24 @@ export function PostgresProjectHomeView({
         <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
           <h2>{config.title}</h2>
           <form onSubmit={config.onSubmit} className="form">
-            <div className="auth-tabs" role="tablist" aria-label={config.ariaLabel}>
+            <div className="segmented-control modal-segmented-control" role="tablist" aria-label={config.ariaLabel}>
               <button
                 type="button"
-                className={`auth-tab ${config.tab === "details" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${config.tab === "details" ? "segmented-control-option--active" : ""}`}
                 onClick={() => config.setTab("details")}
               >
                 Details
               </button>
               <button
                 type="button"
-                className={`auth-tab ${config.tab === "graphics" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${config.tab === "graphics" ? "segmented-control-option--active" : ""}`}
                 onClick={() => config.setTab("graphics")}
               >
                 Graphics
               </button>
               <button
                 type="button"
-                className={`auth-tab ${config.tab === "attributes" ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${config.tab === "attributes" ? "segmented-control-option--active" : ""}`}
                 onClick={() => config.setTab("attributes")}
               >
                 Attributes
@@ -5096,11 +5142,81 @@ export function PostgresProjectHomeView({
   const canManageSources = isProjectAdmin || currentProjectUser?.role === "owner" || currentProjectUser?.role === "editor";
   const canManageAnnotations = isProjectAdmin || currentProjectUser?.role === "owner" || currentProjectUser?.role === "editor" || currentProjectUser?.role === "coder";
   const canManageMemos = canManageAnnotations;
+  usePostgresAutomaticProjectSnapshots(project, canManageProjectSettings);
   const availableAppUsers = useMemo(
-    () => appUsers.filter((candidate) => !users.some((user) => user.appUserId === candidate.id)),
+    () => appUsers.filter((candidate) => candidate.active && !users.some((user) => user.appUserId === candidate.id)),
     [appUsers, users],
   );
   const inviteRoles = getInviteRoles();
+  const sidebarCollaborationStatus: PostgresSidebarCollaborationStatus =
+    !project
+      ? "disabled"
+      : sidebarNetworkMode === "network" || sidebarNetworkMode === "internet"
+        ? "active-solo"
+        : "idle";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshSidebarNetworkStatus() {
+      try {
+        const status = await getPostgresStatus();
+        if (!cancelled) setSidebarNetworkMode(status.networkMode);
+      } catch {
+        if (!cancelled) setSidebarNetworkMode("unknown");
+      }
+    }
+
+    void refreshSidebarNetworkStatus();
+    const intervalId = window.setInterval(() => {
+      void refreshSidebarNetworkStatus();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshSidebarAiStatus() {
+      try {
+        const [settings, runtimeStatus, indexStatus, buildStatus] = await Promise.all([
+          getPostgresProjectAiAssistSettings(project.id),
+          getPostgresProjectAiAssistRuntimeStatus(project.id),
+          invoke<ProjectEmbeddingStoreStatus>("get_project_embedding_store_status", { projectId: project.id }).catch(() => null),
+          invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_store_build_status").catch(() => null),
+        ]);
+        if (cancelled) return;
+        const projectBuildRunning =
+          buildStatus?.projectId === project.id
+          && (buildStatus.phase === "running" || buildStatus.phase === "cancelling");
+        if (projectBuildRunning) {
+          setSidebarAiStatus("running");
+        } else if (!settings.enabled) {
+          setSidebarAiStatus("disabled");
+        } else if (runtimeStatus.hostProjectEmbeddingsReady === true || indexStatus?.exists) {
+          setSidebarAiStatus("ready");
+        } else {
+          setSidebarAiStatus("unavailable");
+        }
+      } catch {
+        if (!cancelled) setSidebarAiStatus("unavailable");
+      }
+    }
+
+    void refreshSidebarAiStatus();
+    const intervalId = window.setInterval(() => {
+      void refreshSidebarAiStatus();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [project.id]);
 
   function projectRoleLabel(role: string) {
     return role.slice(0, 1).toUpperCase() + role.slice(1);
@@ -5126,7 +5242,6 @@ export function PostgresProjectHomeView({
 
   function getEditableRolesForUser(user: PostgresProjectUser) {
     if (!canChangeRoles) return [user.role];
-    if (user.role === "owner" && !isProjectAdmin && ownerCount <= 1) return ["owner"];
     if (isProjectAdmin || currentProjectUser?.role === "owner") return [...PROJECT_ROLE_OPTIONS];
     return [user.role];
   }
@@ -5142,7 +5257,6 @@ export function PostgresProjectHomeView({
     if (user.role === "owner" && !isProjectAdmin && currentProjectUser?.role !== "owner") {
       return "Only project owners or administrators can remove a project owner.";
     }
-    if (user.role === "owner" && ownerCount <= 1) return "A project must always have at least one owner.";
     return null;
   }
 
@@ -7059,6 +7173,17 @@ export function PostgresProjectHomeView({
         activeScreen={activeScreen}
         activeProject={project}
         authSession={authSession}
+        projectRoleLabel={
+          isProjectAdmin
+            ? "Administrator"
+            : currentProjectUser
+              ? projectRoleLabel(currentProjectUser.role)
+              : "Member"
+        }
+        networkMode={sidebarNetworkMode}
+        aiStatus={aiAssistAllowed ? sidebarAiStatus : "disabled"}
+        aiAssistAllowed={aiAssistAllowed}
+        collaborationStatus={sidebarCollaborationStatus}
         onShowProjects={onBack}
         onShowProjectHome={() => setActiveScreen("home")}
         onShowProjectUsers={() => setActiveScreen("users")}
@@ -7091,8 +7216,6 @@ export function PostgresProjectHomeView({
         }}
         onShowCanvasView={() => setActiveScreen("view")}
         onShowAppSettings={() => setActiveScreen("app-settings")}
-        onShowProjectSettings={() => setActiveScreen("project-settings")}
-        onShowUserSettings={() => setActiveScreen("user-settings")}
         onBackToGate={onBack}
         onSignOut={onSignOut}
       />
@@ -7459,11 +7582,6 @@ export function PostgresProjectHomeView({
                               ))}
                             </select>
                           </label>
-                          {user.role === "owner" && ownerCount <= 1 ? (
-                            <p className="auth-hint" style={{ marginTop: 0 }}>
-                              A project must always have at least one owner.
-                            </p>
-                          ) : null}
                           <div className="form-actions">
                             <button type="button" className="btn" onClick={() => setEditingUserId(null)} disabled={usersSubmitting}>
                               Cancel
@@ -8126,7 +8244,7 @@ export function PostgresProjectHomeView({
                               >
                                 Type
                                 <span className="users-sort-icon">
-                                  {objectTypeSortCol === "objectType" ? (objectTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  {objectTypeSortCol === "objectType" ? (objectTypeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
                                 </span>
                               </th>
                               <th
@@ -8136,7 +8254,7 @@ export function PostgresProjectHomeView({
                               >
                                 Count
                                 <span className="users-sort-icon">
-                                  {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
                                 </span>
                               </th>
                             </tr>
@@ -8355,7 +8473,7 @@ export function PostgresProjectHomeView({
                                   >
                                     Object
                                     <span className="users-sort-icon">
-                                      {objectAttributeSortCol === "name" ? (objectAttributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                      {objectAttributeSortCol === "name" ? (objectAttributeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
                                     </span>
                                   </th>
                                   {objectAttributeDefinitionsForWorkspace.map((definition) => (
@@ -8366,7 +8484,7 @@ export function PostgresProjectHomeView({
                                     >
                                       {definition.name}
                                       <span className="users-sort-icon">
-                                        {objectAttributeSortCol === definition.id ? (objectAttributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                        {objectAttributeSortCol === definition.id ? (objectAttributeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
                                       </span>
                                       <span className="case-attribute-type-label">{definition.dataType}</span>
                                     </th>
@@ -8533,24 +8651,24 @@ export function PostgresProjectHomeView({
                         Create a project-specific object type now, then add objects to it whenever you are ready.
                       </p>
                       <form onSubmit={handleCreateObjectType} className="form">
-                        <div className="auth-tabs" role="tablist" aria-label="Add object type tabs">
+                        <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Add object type tabs">
                           <button
                             type="button"
-                            className={`auth-tab ${objectTypeModalTab === "details" ? "auth-tab--active" : ""}`}
+                            className={`segmented-control-option ${objectTypeModalTab === "details" ? "segmented-control-option--active" : ""}`}
                             onClick={() => setObjectTypeModalTab("details")}
                           >
                             Details
                           </button>
                           <button
                             type="button"
-                            className={`auth-tab ${objectTypeModalTab === "graphics" ? "auth-tab--active" : ""}`}
+                            className={`segmented-control-option ${objectTypeModalTab === "graphics" ? "segmented-control-option--active" : ""}`}
                             onClick={() => setObjectTypeModalTab("graphics")}
                           >
                             Graphics
                           </button>
                           <button
                             type="button"
-                            className={`auth-tab ${objectTypeModalTab === "attributes" ? "auth-tab--active" : ""}`}
+                            className={`segmented-control-option ${objectTypeModalTab === "attributes" ? "segmented-control-option--active" : ""}`}
                             onClick={() => setObjectTypeModalTab("attributes")}
                           >
                             Attributes
@@ -8711,24 +8829,24 @@ export function PostgresProjectHomeView({
                         Update the default node appearance for this object type. Existing objects will inherit the change unless they override it.
                       </p>
                       <form onSubmit={handleSaveObjectType} className="form">
-                        <div className="auth-tabs" role="tablist" aria-label="Edit object type tabs">
+                        <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Edit object type tabs">
                           <button
                             type="button"
-                            className={`auth-tab ${objectTypeModalTab === "details" ? "auth-tab--active" : ""}`}
+                            className={`segmented-control-option ${objectTypeModalTab === "details" ? "segmented-control-option--active" : ""}`}
                             onClick={() => setObjectTypeModalTab("details")}
                           >
                             Details
                           </button>
                           <button
                             type="button"
-                            className={`auth-tab ${objectTypeModalTab === "graphics" ? "auth-tab--active" : ""}`}
+                            className={`segmented-control-option ${objectTypeModalTab === "graphics" ? "segmented-control-option--active" : ""}`}
                             onClick={() => setObjectTypeModalTab("graphics")}
                           >
                             Graphics
                           </button>
                           <button
                             type="button"
-                            className={`auth-tab ${objectTypeModalTab === "attributes" ? "auth-tab--active" : ""}`}
+                            className={`segmented-control-option ${objectTypeModalTab === "attributes" ? "segmented-control-option--active" : ""}`}
                             onClick={() => setObjectTypeModalTab("attributes")}
                           >
                             Attributes
@@ -10221,7 +10339,20 @@ export function PostgresProjectHomeView({
             </div>
           ) : activeScreen === "app-settings" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
-              <PostgresAppSettingsViewLazy authSession={authSession} />
+              <PostgresAppSettingsViewLazy
+                authSession={authSession}
+                project={project}
+                canManageProject={canManageProjectSettings}
+                memberCount={users.length}
+                ownerCount={ownerCount}
+                objectCount={objects.length}
+                relationshipCount={relationships.length}
+                onProjectUpdated={onProjectUpdated}
+                onProjectDeleted={onProjectDeleted}
+                onProjectOpened={onProjectOpened}
+                onAuthSessionUpdated={onAuthSessionUpdated}
+                onAuthSessionInvalidated={onAuthSessionInvalidated}
+              />
             </Suspense>
           ) : activeScreen === "project-settings" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
@@ -10234,6 +10365,7 @@ export function PostgresProjectHomeView({
                 relationshipCount={relationships.length}
                 onProjectUpdated={onProjectUpdated}
                 onProjectDeleted={onProjectDeleted}
+                onProjectOpened={onProjectOpened}
               />
             </Suspense>
           ) : (
@@ -10601,315 +10733,10 @@ export function PostgresProjectHomeView({
   );
 }
 
-function PostgresSidebar({
-  activeScreen,
-  activeProject,
-  authSession,
-  onShowProjects,
-  onShowProjectHome,
-  onShowProjectUsers,
-  onShowProjectSources,
-  onShowProjectAnnotations,
-  onShowProjectCodebook,
-  onShowProjectCodeText,
-  onShowProjectMemos,
-  onShowProjectReports,
-  onShowProjectLog,
-  onShowProjectObjects,
-  onShowProjectRelationships,
-  onShowAiAssistHome,
-  onShowAiAssistChat,
-  onShowAiAssistedCoding,
-  onShowAiAnalyze,
-  onShowAiAssistSourceAttributes,
-  onShowAiAssistProcessDocuments,
-  onShowFreeDraw,
-  onShowExplore,
-  onShowConstruct,
-  onShowCanvasView,
-  onShowAppSettings,
-  onShowProjectSettings,
-  onShowUserSettings,
-  onBackToGate,
-  onSignOut,
-}: {
-  activeScreen: "projects" | PostgresProjectScreen;
-  activeProject: PostgresProject | null;
-  authSession: PostgresAuthSession;
-  onShowProjects?: () => void;
-  onShowProjectHome?: () => void;
-  onShowProjectUsers?: () => void;
-  onShowProjectSources?: () => void;
-  onShowProjectAnnotations?: () => void;
-  onShowProjectCodebook?: () => void;
-  onShowProjectCodeText?: () => void;
-  onShowProjectMemos?: () => void;
-  onShowProjectReports?: () => void;
-  onShowProjectLog?: () => void;
-  onShowProjectObjects?: () => void;
-  onShowProjectRelationships?: () => void;
-  onShowAiAssistHome?: () => void;
-  onShowAiAssistChat?: () => void;
-  onShowAiAssistedCoding?: () => void;
-  onShowAiAnalyze?: () => void;
-  onShowAiAssistSourceAttributes?: () => void;
-  onShowAiAssistProcessDocuments?: () => void;
-  onShowFreeDraw?: () => void;
-  onShowExplore?: () => void;
-  onShowConstruct?: () => void;
-  onShowCanvasView?: () => void;
-  onShowAppSettings?: () => void;
-  onShowProjectSettings?: () => void;
-  onShowUserSettings?: () => void;
-  onBackToGate: () => void;
-  onSignOut: () => Promise<void>;
-}) {
-  const [collapsedSidebarSections, setCollapsedSidebarSections] = useState<Set<string>>(() => new Set());
-  const toggleSidebarSection = (sectionId: string) => {
-    setCollapsedSidebarSections((current) => {
-      const next = new Set(current);
-      if (next.has(sectionId)) {
-        next.delete(sectionId);
-      } else {
-        next.add(sectionId);
-      }
-      return next;
-    });
-  };
-  const projectItems = [
-    { id: "home", label: "Home", disabled: !activeProject, onClick: onShowProjectHome },
-    { id: "users", label: "Users", disabled: !activeProject, onClick: onShowProjectUsers },
-    { id: "sources", label: "Sources", disabled: !activeProject, onClick: onShowProjectSources },
-    { id: "objects", label: "Objects", disabled: !activeProject, onClick: onShowProjectObjects },
-    { id: "relationships", label: "Relationships", disabled: !activeProject, onClick: onShowProjectRelationships },
-    { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
-    { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
-    { id: "project-log", label: "Log", disabled: !activeProject, onClick: onShowProjectLog },
-  ];
-  const canvasItems = [
-    { id: "free-draw", label: "Free Draw", disabled: !activeProject, onClick: onShowFreeDraw },
-    { id: "explore", label: "Explore", disabled: !activeProject, onClick: onShowExplore },
-    { id: "construct", label: "Construct", disabled: !activeProject, onClick: onShowConstruct },
-    { id: "view", label: "View", disabled: !activeProject, onClick: onShowCanvasView },
-  ];
-  const analysisItems = [
-    { id: "code-text", label: "Code Sources", disabled: !activeProject, onClick: onShowProjectCodeText },
-    { id: "memos", label: "Memos", disabled: !activeProject, onClick: onShowProjectMemos },
-    { id: "reports", label: "Reports", disabled: !activeProject, onClick: onShowProjectReports },
-  ];
-  const aiAssistItems = [
-    { id: "ai-assist", label: "Home", disabled: !activeProject, onClick: onShowAiAssistHome },
-    { id: "ai-assist-chat", label: "Chat", disabled: !activeProject, onClick: onShowAiAssistChat },
-    { id: "ai-assisted-coding", label: "Assisted Coding", disabled: !activeProject, onClick: onShowAiAssistedCoding },
-    { id: "ai-analyze", label: "Analyze Codes", disabled: !activeProject, onClick: onShowAiAnalyze },
-    { id: "ai-assist-source-attributes", label: "Attributes", disabled: !activeProject, onClick: onShowAiAssistSourceAttributes },
-    { id: "ai-assist-process-documents", label: "Transcripts", disabled: !activeProject, onClick: onShowAiAssistProcessDocuments },
-  ];
-  const settingsItems = [
-    { id: "app-settings", label: "App Settings", disabled: false, onClick: onShowAppSettings },
-    { id: "project-settings", label: "Project Settings", disabled: !activeProject, onClick: onShowProjectSettings },
-    { id: "user-settings", label: "User Settings", disabled: false, onClick: onShowUserSettings },
-    { id: "projects", label: "Projects", disabled: false, onClick: onShowProjects },
-    { id: "experiment", label: "Back to Gate", disabled: false, onClick: onBackToGate },
-    { id: "sign-out", label: "Sign Out", disabled: false, onClick: () => void onSignOut() },
-  ];
-
-  return (
-    <aside className="sidebar">
-      <div className="sidebar-brand">
-        <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
-        <div className="brand-collapsed-lockup" aria-hidden="true">
-          <img src={sidebarMarkLogo} alt="" className="brand-collapsed-logo" />
-          <span className="brand-collapsed-title">Kanqual</span>
-        </div>
-      </div>
-
-      {activeProject ? (
-        <div className="sidebar-project-badge">
-          <span className="project-badge-label">PostgreSQL Project</span>
-          <div className="project-badge-row">
-            <span className="project-badge-name">
-              {activeProject.name}
-            </span>
-          </div>
-        </div>
-      ) : (
-        <button type="button" className="sidebar-project-badge sidebar-project-badge--empty" onClick={onShowProjects}>
-          <span className="project-badge-label">PostgreSQL Project</span>
-          <span className="project-badge-empty-text">Open Project</span>
-        </button>
-      )}
-
-      <nav className="sidebar-nav">
-        <div className="sidebar-section">
-          <button
-            type="button"
-            className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("project")}
-            onClick={() => toggleSidebarSection("project")}
-          >
-            <span>Project</span>
-            <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("project") ? "\u25b8" : "\u25be"}
-            </span>
-          </button>
-          <div
-            className={`sidebar-section-items ${collapsedSidebarSections.has("project") ? "sidebar-section-items--collapsed" : ""}`}
-          >
-            {projectItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <button
-            type="button"
-            className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("analysis")}
-            onClick={() => toggleSidebarSection("analysis")}
-          >
-            <span>Analysis</span>
-            <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("analysis") ? "\u25b8" : "\u25be"}
-            </span>
-          </button>
-          <div
-            className={`sidebar-section-items ${collapsedSidebarSections.has("analysis") ? "sidebar-section-items--collapsed" : ""}`}
-          >
-            {analysisItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <button
-            type="button"
-            className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("ai-assist")}
-            onClick={() => toggleSidebarSection("ai-assist")}
-          >
-            <span>AI Assist</span>
-            <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("ai-assist") ? "\u25b8" : "\u25be"}
-            </span>
-          </button>
-          <div
-            className={`sidebar-section-items ${collapsedSidebarSections.has("ai-assist") ? "sidebar-section-items--collapsed" : ""}`}
-          >
-            {aiAssistItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <button
-            type="button"
-            className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("settings")}
-            onClick={() => toggleSidebarSection("settings")}
-          >
-            <span>Settings</span>
-            <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("settings") ? "\u25b8" : "\u25be"}
-            </span>
-          </button>
-          <div
-            className={`sidebar-section-items ${collapsedSidebarSections.has("settings") ? "sidebar-section-items--collapsed" : ""}`}
-          >
-            {settingsItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="sidebar-section">
-          <button
-            type="button"
-            className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("canvas")}
-            onClick={() => toggleSidebarSection("canvas")}
-          >
-            <span>Canvas</span>
-            <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("canvas") ? "\u25b8" : "\u25be"}
-            </span>
-          </button>
-          <div
-            className={`sidebar-section-items ${collapsedSidebarSections.has("canvas") ? "sidebar-section-items--collapsed" : ""}`}
-          >
-            {canvasItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </nav>
-
-      <div className="sidebar-user">
-        <div className="sidebar-user-info">
-          <div className="sidebar-user-name">
-            {authSession.user.name}
-          </div>
-          <div className="sidebar-user-email">{authSession.user.email}</div>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
 function ViewLoadingFallback() {
   return (
-    <div className="view-loading-state" role="status" aria-live="polite">
-      <div className="view-loading-card">
-        <strong>Loading view</strong>
-        <span>Please wait while Kanqual opens this workspace.</span>
-      </div>
+    <div className="view-loading-state">
+      <LoadingCard />
     </div>
   );
 }

@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
+import { SettingsModal } from "../components/SettingsModal";
+import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
-import { readAppSettings, saveAppSettings } from "../lib/appSettings";
+import { getAppRuntimeInfo, type AppRuntimeInfo } from "../lib/dataRoot";
+import { buildPermissionMatrixRows } from "../lib/permissionMatrix";
 import {
   getPostgresAuthStatus,
   getPostgresInstallationSettings,
   getPostgresStatus,
   getPostgresUserPreferences,
-  listPostgresProjects,
   savePostgresInstallationSettings,
   savePostgresUserPreferences,
   type PostgresAuthSession,
@@ -30,10 +32,87 @@ import {
   type FontSize,
   type Theme,
 } from "../theme";
+import { PostgresProjectSettingsView } from "./Postgres_Project_Settings_View";
+import { PostgresUserSettingsView } from "./Postgres_User_Settings_View";
+import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
 
 export type PostgresAppSettingsViewProps = {
   authSession: PostgresAuthSession;
+  project?: PostgresProject;
+  canManageProject?: boolean;
+  memberCount?: number;
+  ownerCount?: number;
+  objectCount?: number;
+  relationshipCount?: number;
+  onProjectUpdated?: (project: PostgresProject) => void;
+  onProjectDeleted?: (projectId: string) => void;
+  onProjectOpened?: (project: PostgresProject) => void | Promise<void>;
+  onAuthSessionUpdated?: (session: PostgresAuthSession) => void;
+  onAuthSessionInvalidated?: () => void;
 };
+
+type AppSettingsModalId =
+  | "appearance"
+  | "language"
+  | "import"
+  | "privacy"
+  | "storage"
+  | "diagnostics"
+  | "permissions";
+
+type LicenseRow = {
+  name: string;
+  version: string;
+  license: string;
+};
+
+function parseMarkdownLicenseTable(markdown: string, heading: string): LicenseRow[] {
+  const sectionPattern = new RegExp(`## ${heading}\\r?\\n([\\s\\S]*?)(\\r?\\n## |$)`);
+  const sectionMatch = markdown.match(sectionPattern);
+  if (!sectionMatch) return [];
+
+  const lines = sectionMatch[1]
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const tableLines = lines.filter((line) => line.startsWith("|"));
+  if (tableLines.length < 3) return [];
+
+  return tableLines.slice(2).map((line) => {
+    const cells = line
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim().replace(/^`|`$/g, ""));
+    return {
+      name: cells[0] ?? "",
+      version: cells[1] ?? "",
+      license: cells[2] ?? "",
+    };
+  });
+}
+
+const aboutJavascriptLicenses = parseMarkdownLicenseTable(
+  thirdPartyNoticesRaw,
+  "Resolved JavaScript / TypeScript Dependency Inventory",
+);
+
+const aboutRustLicenses = parseMarkdownLicenseTable(
+  thirdPartyNoticesRaw,
+  "Resolved Rust Crate Inventory",
+);
+
+const RELEASE_DATE = "June 12, 2026";
+
+function SettingsModalSection({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <section className="app-settings-modal-section">
+      <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+        <h3>{title}</h3>
+      </div>
+      {children ? <div className="app-settings-modal-section-body">{children}</div> : null}
+    </section>
+  );
+}
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -43,45 +122,6 @@ function describeUnknownError(error: unknown): string {
   } catch {
     return String(error);
   }
-}
-
-function clampIntegerValue(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(max, Math.floor(value)));
-}
-
-function syncLegacyAppSettingsFromPostgresInstallationSettings(
-  installationSettings: PostgresInstallationSettings,
-): void {
-  const current = readAppSettings();
-  saveAppSettings({
-    ...current,
-    startup: {
-      ...current.startup,
-      reopenLastProject: installationSettings.startupReopenLastProject,
-    },
-    documentImport: {
-      ...current.documentImport,
-      defaultMode: installationSettings.documentImportDefaultMode,
-      autoNameFromFile: installationSettings.documentImportAutoNameFromFile,
-      trimImportedText: installationSettings.documentImportTrimImportedText,
-      warnBeforeEmptyImport: installationSettings.documentImportWarnBeforeEmptyImport,
-    },
-    privacy: {
-      ...current.privacy,
-      maskFilePaths: installationSettings.privacyMaskFilePaths,
-      clearRecentProjectsOnSignOut: installationSettings.privacyClearRecentProjectsOnSignOut,
-      forgetLoginIdentitiesOnLogout: installationSettings.privacyForgetLoginIdentitiesOnLogout,
-    },
-    updates: {
-      ...current.updates,
-      autoCheck: installationSettings.updatesAutoCheck,
-    },
-    llm: {
-      ...current.llm,
-      ...installationSettings.llm,
-    },
-  });
 }
 
 function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferences): void {
@@ -111,123 +151,112 @@ function formatPostgresDateTime(iso: string): string {
 
 export function PostgresAppSettingsView({
   authSession,
+  project,
+  canManageProject = false,
+  memberCount = 0,
+  ownerCount = 0,
+  objectCount = 0,
+  relationshipCount = 0,
+  onProjectUpdated,
+  onProjectDeleted,
+  onProjectOpened,
+  onAuthSessionUpdated,
+  onAuthSessionInvalidated,
 }: PostgresAppSettingsViewProps) {
-  const { locale } = useI18n();
-  const [activeModal, setActiveModal] = useState<"startup" | "import" | "privacy" | "updates" | "llm" | "postgres" | null>(null);
+  const { locale, setLocale, t } = useI18n();
+  const [activeModal, setActiveModal] = useState<AppSettingsModalId | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
   const [installationSettings, setInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
   const [status, setStatus] = useState<PostgresStatus | null>(null);
   const [authStatus, setAuthStatus] = useState<PostgresAuthStatus | null>(null);
-  const [projects, setProjects] = useState<PostgresProject[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [appInfo, setAppInfo] = useState<AppRuntimeInfo | null>(null);
+  const [aboutCardExpanded, setAboutCardExpanded] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [theme, setTheme] = useState<Theme>("light");
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
+  const permissionMatrixRows = useMemo(() => buildPermissionMatrixRows(t), [t]);
 
-  const persistInstallationSettings = useCallback(async (
-    next: PostgresInstallationSettings,
-    successMessage: string,
-  ) => {
-    const saved = await savePostgresInstallationSettings(next);
-    setInstallationSettings(saved);
-    syncLegacyAppSettingsFromPostgresInstallationSettings(saved);
-    setNotice(successMessage);
-    setError("");
-  }, []);
-
-  const persistUserPreferences = useCallback(async (
-    next: PostgresUserPreferences,
-    successMessage?: string,
-  ) => {
-    const saved = await savePostgresUserPreferences(next);
-    setTheme(saved.theme);
-    setDensity(saved.density);
-    setFontSize(saved.fontSize);
-    setRecentProjectLimit(saved.recentProjectLimit);
-    applyPostgresRuntimeThemePreferences(saved);
-    if (successMessage) setNotice(successMessage);
-    setError("");
-  }, []);
-
-  const refreshPostgresDetails = useCallback(async () => {
-    setLoading(true);
+  const refreshDetails = useCallback(async () => {
     setError("");
     try {
-      const [
-        nextStatus,
-        nextAuthStatus,
-        nextProjects,
-        nextInstallationSettings,
-        nextUserPreferences,
-      ] = await Promise.all([
-        getPostgresStatus(),
-        getPostgresAuthStatus(),
-        listPostgresProjects(),
+      const [nextInstallationSettings, nextUserPreferences, nextStatus, nextAuthStatus, nextAppInfo] = await Promise.all([
         getPostgresInstallationSettings(),
         getPostgresUserPreferences(),
+        getPostgresStatus(),
+        getPostgresAuthStatus(),
+        getAppRuntimeInfo(),
       ]);
+      setInstallationSettings(nextInstallationSettings);
       setStatus(nextStatus);
       setAuthStatus(nextAuthStatus);
-      setProjects(nextProjects);
-      setInstallationSettings(nextInstallationSettings);
-      syncLegacyAppSettingsFromPostgresInstallationSettings(nextInstallationSettings);
+      setAppInfo(nextAppInfo);
       setTheme(nextUserPreferences.theme);
       setDensity(nextUserPreferences.density);
       setFontSize(nextUserPreferences.fontSize);
       setRecentProjectLimit(nextUserPreferences.recentProjectLimit);
+      if (nextUserPreferences.locale !== locale) setLocale(nextUserPreferences.locale);
       applyPostgresRuntimeThemePreferences(nextUserPreferences);
+      setActivePresetId(null);
     } catch (loadError) {
       setError(describeUnknownError(loadError));
-    } finally {
-      setLoading(false);
+    }
+  }, [locale, setLocale]);
+
+  useEffect(() => {
+    void refreshDetails();
+  }, [refreshDetails]);
+
+  const persistInstallationSettings = useCallback(async (next: PostgresInstallationSettings, successMessage: string) => {
+    try {
+      const saved = await savePostgresInstallationSettings(next);
+      setInstallationSettings(saved);
+      setNotice(successMessage);
+      setError("");
+    } catch (saveError) {
+      setError(describeUnknownError(saveError));
     }
   }, []);
 
-  useEffect(() => {
-    void refreshPostgresDetails();
-  }, [refreshPostgresDetails]);
+  const persistUserPreferences = useCallback(async (next: PostgresUserPreferences, successMessage?: string) => {
+    try {
+      const saved = await savePostgresUserPreferences(next);
+      setTheme(saved.theme);
+      setDensity(saved.density);
+      setFontSize(saved.fontSize);
+      setRecentProjectLimit(saved.recentProjectLimit);
+      applyPostgresRuntimeThemePreferences(saved);
+      if (successMessage) setNotice(successMessage);
+      setError("");
+    } catch (saveError) {
+      setError(describeUnknownError(saveError));
+    }
+  }, []);
 
-  function handleTheme(nextTheme: Theme) {
-    setTheme(nextTheme);
-    setActivePresetId(null);
-    applyTheme(nextTheme);
+  function persistThemePatch(next: Partial<Pick<PostgresUserPreferences, "theme" | "density" | "fontSize" | "locale">>) {
     void persistUserPreferences({
-      theme: nextTheme,
+      theme,
       density,
       fontSize,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
+      ...next,
     });
   }
 
-  function handleDensity(nextDensity: Density) {
-    setDensity(nextDensity);
-    applyDensity(nextDensity);
-    void persistUserPreferences({
-      theme,
-      density: nextDensity,
-      fontSize,
-      locale,
-      recentProjectLimit,
-      themeState: getStoredThemeState(),
-    });
-  }
-
-  function handleFontSize(nextFontSize: FontSize) {
-    setFontSize(nextFontSize);
-    applyFontSize(nextFontSize);
-    void persistUserPreferences({
+  async function handleLocaleChange(nextLocale: (typeof SUPPORTED_LOCALES)[number]) {
+    setLocale(nextLocale);
+    await persistUserPreferences({
       theme,
       density,
-      fontSize: nextFontSize,
-      locale,
+      fontSize,
+      locale: nextLocale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
-    });
+    }, "Language updated.");
   }
 
   async function handleThemeManagerApplied() {
@@ -244,6 +273,28 @@ export function PostgresAppSettingsView({
     }, "Theme updated.");
   }
 
+  const groupedCards = [
+    {
+      id: "preferences",
+      title: "Preferences",
+      cards: [
+        { id: "appearance", title: "Appearance", description: "Adjust the interface theme, density, and text size." },
+        { id: "language", title: t("appSettings.sectionTitles.language"), description: t("appSettings.overview.language") },
+        { id: "import", title: t("appSettings.sectionTitles.documentImport"), description: t("appSettings.overview.documentImport") },
+        { id: "privacy", title: t("appSettings.sectionTitles.privacy"), description: t("appSettings.overview.privacy") },
+      ] as Array<{ id: AppSettingsModalId; title: string; description: string }>,
+    },
+    {
+      id: "system",
+      title: "System",
+      cards: [
+        { id: "diagnostics", title: t("appSettings.sectionTitles.diagnostics"), description: t("appSettings.overview.diagnostics") },
+        { id: "permissions", title: t("appSettings.permissions.title"), description: t("appSettings.permissions.description") },
+        { id: "storage", title: t("appSettings.storage.localStorageTitle"), description: t("appSettings.overview.storage") },
+      ] as Array<{ id: AppSettingsModalId; title: string; description: string }>,
+    },
+  ];
+
   return (
     <div className="view app-settings-view">
       <header className="view-header">
@@ -257,608 +308,415 @@ export function PostgresAppSettingsView({
 
       <div className="app-settings-overview-shell">
         <div className="app-settings-overview-stack">
-          <div className="app-settings-overview-sections">
+          <section className="app-settings-about-card">
+            <div className="app-settings-about-header">
+              <div className="app-settings-about-copy">
+                <h2>{t("appSettings.about.title")}</h2>
+                <p>{t("appSettings.about.description")}</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn--sm app-settings-about-toggle"
+                onClick={() => setAboutCardExpanded((expanded) => !expanded)}
+                aria-expanded={aboutCardExpanded}
+              >
+                {aboutCardExpanded ? t("appSettings.about.collapse") : t("appSettings.about.expand")}
+              </button>
+            </div>
+            {aboutCardExpanded ? (
+              <div className="app-settings-about-body">
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.release")}</h4>
+                  <div className="about-kanqual-meta-grid">
+                    <div className="about-kanqual-meta-card">
+                      <span className="about-kanqual-meta-label">{t("appSettings.about.version")}</span>
+                      <strong>{appInfo?.appVersion ?? "0.9.1"}</strong>
+                    </div>
+                    <div className="about-kanqual-meta-card">
+                      <span className="about-kanqual-meta-label">{t("appSettings.about.releaseDate")}</span>
+                      <strong>{RELEASE_DATE}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.createdBy")}</h4>
+                  <p>{t("appSettings.about.createdByBody")}</p>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.citation")}</h4>
+                  <p>{t("appSettings.about.citationNote")}</p>
+                  <div className="about-kanqual-citation">
+                    {t("appSettings.about.citationExample", {
+                      version: appInfo?.appVersion ?? "0.9.1",
+                    })}
+                  </div>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.license")}</h4>
+                  <p>{t("appSettings.about.licenseBody")} {t("appSettings.about.licenseNote")}</p>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.dependencyLicenses")}</h4>
+                  <p className="about-kanqual-license-note">{t("appSettings.about.dependencyLicensesNote")}</p>
+
+                  <div className="about-kanqual-license-block">
+                    <h5>{t("appSettings.about.javascriptTypescript")}</h5>
+                    <div className="about-kanqual-license-table-wrap">
+                      <table className="about-kanqual-license-table">
+                        <thead>
+                          <tr>
+                            <th>{t("appSettings.about.package")}</th>
+                            <th>{t("appSettings.about.version")}</th>
+                            <th>{t("appSettings.about.license")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {aboutJavascriptLicenses.map((row) => (
+                            <tr key={`js-${row.name}-${row.version}`}>
+                              <td>{row.name}</td>
+                              <td>{row.version}</td>
+                              <td>{row.license}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="about-kanqual-license-block">
+                    <h5>{t("appSettings.about.rust")}</h5>
+                    <div className="about-kanqual-license-table-wrap">
+                      <table className="about-kanqual-license-table">
+                        <thead>
+                          <tr>
+                            <th>{t("appSettings.about.crate")}</th>
+                            <th>{t("appSettings.about.version")}</th>
+                            <th>{t("appSettings.about.license")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {aboutRustLicenses.map((row) => (
+                            <tr key={`rust-${row.name}-${row.version}`}>
+                              <td>{row.name}</td>
+                              <td>{row.version}</td>
+                              <td>{row.license}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+          </section>
+
+          {onAuthSessionUpdated && onAuthSessionInvalidated ? (
             <section className="app-settings-overview-section">
               <div className="app-settings-overview-section-header">
-                <p className="app-settings-overview-section-heading">Kanqual</p>
+                <p className="app-settings-overview-section-heading">Account</p>
               </div>
-              <div className="app-settings-overview-grid">
-                <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("startup")}>
-                  <h3>Startup</h3>
-                  <p>Control launch behavior for this device after you sign in.</p>
-                </button>
-                <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("import")}>
-                  <h3>Document Import</h3>
-                  <p>Set shared defaults for uploading, naming, and cleaning imported text.</p>
-                </button>
-                <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("privacy")}>
-                  <h3>Privacy</h3>
-                  <p>Choose what Kanqual remembers locally and what it clears on sign-out.</p>
-                </button>
-                <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("updates")}>
-                  <h3>Appearance & Updates</h3>
-                  <p>Adjust the interface and background update-check behavior.</p>
-                </button>
-                <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("llm")}>
-                  <h3>AI Assist Runtime</h3>
-                  <p>Persist local and cloud LLM defaults for the PostgreSQL in PostgreSQL.</p>
-                </button>
-                <button type="button" className="app-settings-overview-card app-settings-overview-card--default" onClick={() => setActiveModal("postgres")}>
-                  <h3>PostgreSQL</h3>
-                  <p>Review local PostgreSQL status, registered users, and project databases.</p>
-                </button>
-              </div>
+              <PostgresUserSettingsView
+                authSession={authSession}
+                onAuthSessionUpdated={onAuthSessionUpdated}
+                onAuthSessionInvalidated={onAuthSessionInvalidated}
+                embedded
+                includeAppearance={false}
+              />
             </section>
+          ) : null}
+
+          {project && onProjectUpdated && onProjectDeleted ? (
+            <section className="app-settings-overview-section">
+              <div className="app-settings-overview-section-header">
+                <p className="app-settings-overview-section-heading">Project</p>
+              </div>
+              <PostgresProjectSettingsView
+                project={project}
+                canManageProject={canManageProject}
+                memberCount={memberCount}
+                ownerCount={ownerCount}
+                objectCount={objectCount}
+                relationshipCount={relationshipCount}
+                onProjectUpdated={onProjectUpdated}
+                onProjectDeleted={onProjectDeleted}
+                onProjectOpened={onProjectOpened}
+                embedded
+              />
+            </section>
+          ) : null}
+
+          <div className="app-settings-overview-sections">
+            {groupedCards.map((section) => (
+              <section key={section.id} className="app-settings-overview-section">
+                <div className="app-settings-overview-section-header">
+                  <p className="app-settings-overview-section-heading">{section.title}</p>
+                </div>
+                <div className="app-settings-overview-grid">
+                  {section.cards.map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className="app-settings-overview-card app-settings-overview-card--default"
+                      onClick={() => setActiveModal(card.id)}
+                    >
+                      <h3>{card.title}</h3>
+                      <p>{card.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
         </div>
       </div>
 
-      {activeModal === "startup" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Startup</h2></div>
-            </div>
+      {activeModal === "appearance" ? (
+        <SettingsModal title="Appearance" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Launch Behavior</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="settings-warning">
-                      Signed-in PostgreSQL sessions end when Kanqual closes. This device can still remember recent accounts and reopen the last project after you sign in again.
+                <SettingsModalSection title="Interface">
+                  <div className="settings-row">
+                    <div className="settings-row-info"><div className="settings-row-label">Theme</div></div>
+                    <div className="theme-options">
+                      {(["light", "dark"] as Theme[]).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={`theme-option${theme === option ? " theme-option--active" : ""}`}
+                          onClick={() => {
+                            setTheme(option);
+                            setActivePresetId(null);
+                            applyTheme(option);
+                            persistThemePatch({ theme: option });
+                          }}
+                        >
+                          {option === "light" ? "Light" : "Dark"}
+                        </button>
+                      ))}
                     </div>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Reopen last project on launch</strong>
-                        <small>If the last project still exists, Kanqual will reopen it after sign-in.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.startupReopenLastProject ?? false}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, startupReopenLastProject: event.target.checked },
-                            "Startup behavior saved.",
-                          );
-                        }}
-                      />
-                    </label>
                   </div>
-                </section>
+                  <div className="settings-row">
+                    <div className="settings-row-info"><div className="settings-row-label">Interface density</div></div>
+                    <div className="segmented-control">
+                      {(["comfortable", "compact"] as Density[]).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={density === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                          onClick={() => {
+                            setDensity(option);
+                            applyDensity(option);
+                            persistThemePatch({ density: option });
+                          }}
+                        >
+                          {option === "comfortable" ? "Comfortable" : "Compact"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-info"><div className="settings-row-label">Text size</div></div>
+                    <div className="segmented-control">
+                      {(["small", "normal", "large"] as FontSize[]).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={fontSize === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                          onClick={() => {
+                            setFontSize(option);
+                            applyFontSize(option);
+                            persistThemePatch({ fontSize: option });
+                          }}
+                        >
+                          {option === "small" ? "Small" : option === "normal" ? "Normal" : "Large"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-info"><div className="settings-row-label">Custom theme</div></div>
+                    <button type="button" className="btn" onClick={() => setShowThemeManager(true)}>Edit theme</button>
+                  </div>
+                </SettingsModalSection>
               </div>
             </div>
-            <div className="app-settings-modal-footer">
-              <p className="app-settings-modal-footer-note">Changes are saved immediately.</p>
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "language" ? (
+        <SettingsModal title={t("appSettings.sectionTitles.language")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <SettingsModalSection title="Language">
+                <div className="settings-row settings-row--centered">
+                  <div className="settings-row-label">App language</div>
+                  <select
+                    className="form-input"
+                    style={{ width: "max-content", maxWidth: "100%" }}
+                    value={locale}
+                    onChange={(event) => void handleLocaleChange(event.target.value as (typeof SUPPORTED_LOCALES)[number])}
+                  >
+                    {SUPPORTED_LOCALES.map((option) => <option key={option} value={option}>{LOCALE_LABELS[option]}</option>)}
+                  </select>
+                </div>
+              </SettingsModalSection>
             </div>
-          </div>
-        </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "import" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Document Import</h2></div>
-            </div>
+        <SettingsModal title={t("appSettings.sectionTitles.documentImport")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Shared Defaults</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Default import mode</div>
-                        <div className="settings-row-desc">Choose whether new imports start in upload or paste mode.</div>
-                      </div>
-                      <div className="theme-options">
-                        {(["upload", "paste"] as const).map((option) => (
-                          <button
-                            key={option}
-                            type="button"
-                            className={`theme-option ${(installationSettings?.documentImportDefaultMode ?? "upload") === option ? "theme-option--active" : ""}`}
-                            onClick={() => {
-                              if (!installationSettings) return;
-                              void persistInstallationSettings(
-                                { ...installationSettings, documentImportDefaultMode: option },
-                                "Document import defaults saved.",
-                              );
-                            }}
-                          >
-                            {option === "upload" ? "Upload" : "Paste"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Auto-name from file</strong>
-                        <small>Use the source filename as the starting document name when possible.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.documentImportAutoNameFromFile ?? true}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, documentImportAutoNameFromFile: event.target.checked },
-                            "Document import defaults saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Trim imported text</strong>
-                        <small>Remove leading and trailing whitespace from imported text by default.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.documentImportTrimImportedText ?? true}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, documentImportTrimImportedText: event.target.checked },
-                            "Document import defaults saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Warn before empty import</strong>
-                        <small>Show a confirmation when an import would create an empty document.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.documentImportWarnBeforeEmptyImport ?? true}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, documentImportWarnBeforeEmptyImport: event.target.checked },
-                            "Document import defaults saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                  </div>
-                </section>
-              </div>
+              <SettingsModalSection title="Document Import">
+                <label className="settings-row">
+                  <span className="settings-row-info"><span className="settings-row-label">Name sources from files</span></span>
+                  <input
+                    type="checkbox"
+                    checked={installationSettings?.documentImportAutoNameFromFile ?? true}
+                    onChange={(event) => {
+                      if (!installationSettings) return;
+                      void persistInstallationSettings({ ...installationSettings, documentImportAutoNameFromFile: event.target.checked }, "Document import settings saved.");
+                    }}
+                  />
+                </label>
+                <label className="settings-row">
+                  <span className="settings-row-info"><span className="settings-row-label">Warn before empty imports</span></span>
+                  <input
+                    type="checkbox"
+                    checked={installationSettings?.documentImportWarnBeforeEmptyImport ?? true}
+                    onChange={(event) => {
+                      if (!installationSettings) return;
+                      void persistInstallationSettings({ ...installationSettings, documentImportWarnBeforeEmptyImport: event.target.checked }, "Document import settings saved.");
+                    }}
+                  />
+                </label>
+              </SettingsModalSection>
             </div>
-            <div className="app-settings-modal-footer">
-              <p className="app-settings-modal-footer-note">Changes are saved immediately.</p>
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "privacy" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Privacy</h2></div>
-            </div>
+        <SettingsModal title={t("appSettings.sectionTitles.privacy")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Local Data</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Mask file paths</strong>
-                        <small>Hide full local paths in interface text when possible.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.privacyMaskFilePaths ?? false}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, privacyMaskFilePaths: event.target.checked },
-                            "Privacy settings saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Clear recent projects on sign-out</strong>
-                        <small>Forget the locally stored recent project list when you sign out.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.privacyClearRecentProjectsOnSignOut ?? false}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, privacyClearRecentProjectsOnSignOut: event.target.checked },
-                            "Privacy settings saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Forget remembered login identities on sign-out</strong>
-                        <small>Remove stored account shortcuts when you sign out.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.privacyForgetLoginIdentitiesOnLogout ?? false}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, privacyForgetLoginIdentitiesOnLogout: event.target.checked },
-                            "Privacy settings saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                  </div>
-                </section>
-              </div>
+              <SettingsModalSection title="Privacy">
+                <label className="settings-row">
+                  <span className="settings-row-info"><span className="settings-row-label">Mask file paths</span></span>
+                  <input
+                    type="checkbox"
+                    checked={installationSettings?.privacyMaskFilePaths ?? false}
+                    onChange={(event) => installationSettings && void persistInstallationSettings({ ...installationSettings, privacyMaskFilePaths: event.target.checked }, "Privacy settings saved.")}
+                  />
+                </label>
+                <label className="settings-row">
+                  <span className="settings-row-info"><span className="settings-row-label">Clear recent projects on sign out</span></span>
+                  <input
+                    type="checkbox"
+                    checked={installationSettings?.privacyClearRecentProjectsOnSignOut ?? false}
+                    onChange={(event) => installationSettings && void persistInstallationSettings({ ...installationSettings, privacyClearRecentProjectsOnSignOut: event.target.checked }, "Privacy settings saved.")}
+                  />
+                </label>
+                <label className="settings-row">
+                  <span className="settings-row-info"><span className="settings-row-label">Forget login identities on logout</span></span>
+                  <input
+                    type="checkbox"
+                    checked={installationSettings?.privacyForgetLoginIdentitiesOnLogout ?? false}
+                    onChange={(event) => installationSettings && void persistInstallationSettings({ ...installationSettings, privacyForgetLoginIdentitiesOnLogout: event.target.checked }, "Privacy settings saved.")}
+                  />
+                </label>
+              </SettingsModalSection>
             </div>
-            <div className="app-settings-modal-footer">
-              <p className="app-settings-modal-footer-note">Changes are saved immediately.</p>
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
       ) : null}
 
-      {activeModal === "updates" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Appearance & Updates</h2></div>
-            </div>
+      {activeModal === "storage" ? (
+        <SettingsModal title={t("appSettings.storage.localStorageTitle")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Appearance</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Theme</div>
-                        <div className="settings-row-desc">Choose the default theme for this device.</div>
-                      </div>
-                      <div className="theme-options">
-                        {(["light", "dark"] as const).map((option) => (
-                          <button key={option} type="button" className={`theme-option ${theme === option ? "theme-option--active" : ""}`} onClick={() => handleTheme(option)}>
-                            {option === "light" ? "Light" : "Dark"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Density</div>
-                        <div className="settings-row-desc">Adjust spacing across the interface.</div>
-                      </div>
-                      <div className="theme-options">
-                        {(["compact", "comfortable"] as const).map((option) => (
-                          <button key={option} type="button" className={`theme-option ${density === option ? "theme-option--active" : ""}`} onClick={() => handleDensity(option)}>
-                            {option[0].toUpperCase() + option.slice(1)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Font size</div>
-                        <div className="settings-row-desc">Control the default reading size.</div>
-                      </div>
-                      <div className="theme-options">
-                        {(["small", "normal", "large"] as const).map((option) => (
-                          <button key={option} type="button" className={`theme-option ${fontSize === option ? "theme-option--active" : ""}`} onClick={() => handleFontSize(option)}>
-                            {option[0].toUpperCase() + option.slice(1)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Theme Manager</div>
-                        <div className="settings-row-desc">Open the theme preset editor.</div>
-                      </div>
-                      <button type="button" className="btn" onClick={() => setShowThemeManager(true)}>Open Theme Manager</button>
-                    </div>
-                  </div>
-                </section>
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Updates</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Automatically check for updates</strong>
-                        <small>Look for new Kanqual releases in the background.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.updatesAutoCheck ?? true}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, updatesAutoCheck: event.target.checked },
-                            "Update preferences saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="form-label">
-                      Recent projects shown
-                      <input
-                        className="form-input"
-                        type="number"
-                        min={1}
-                        max={50}
-                        value={recentProjectLimit}
-                        onChange={(event) => {
-                          const nextLimit = clampIntegerValue(Number(event.target.value), 1, 50);
-                          setRecentProjectLimit(nextLimit);
-                          void persistUserPreferences({
-                            theme,
-                            density,
-                            fontSize,
-                            locale,
-                            recentProjectLimit: nextLimit,
-                            themeState: getStoredThemeState(),
-                          }, "Recent-project preference saved.");
-                        }}
-                      />
-                    </label>
-                  </div>
-                </section>
-              </div>
+              <SettingsModalSection title="Database">
+                <div className="home-restricted-list">
+                  <div className="home-restricted-item"><span className="home-restricted-label">Host</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
+                  <div className="home-restricted-item"><span className="home-restricted-label">Network mode</span><span className="home-restricted-value">{status?.networkMode ?? "-"}</span></div>
+                  <div className="home-restricted-item"><span className="home-restricted-label">Control database</span><span className="home-restricted-value">{status?.appDatabase ?? "-"}</span></div>
+                </div>
+              </SettingsModalSection>
             </div>
-            <div className="app-settings-modal-footer">
-              <p className="app-settings-modal-footer-note">Changes are saved immediately.</p>
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
       ) : null}
 
-      {activeModal === "llm" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">AI Assist Runtime</h2></div>
-            </div>
+      {activeModal === "diagnostics" ? (
+        <SettingsModal title={t("appSettings.sectionTitles.diagnostics")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Cloud Runtime Defaults</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <label className="form-label">
-                      Provider
-                      <input className="form-input" value={installationSettings?.llm.cloudProvider ?? ""} onChange={(event) => {
-                        if (!installationSettings) return;
-                        const nextProvider = event.target.value as PostgresInstallationSettings["llm"]["cloudProvider"];
-                        void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, cloudProvider: nextProvider } }, "LLM settings saved.");
-                      }} />
-                    </label>
-                    <label className="form-label">
-                      Model
-                      <input className="form-input" value={installationSettings?.llm.cloudSelectedModel ?? ""} onChange={(event) => {
-                        if (!installationSettings) return;
-                        void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, cloudSelectedModel: event.target.value } }, "LLM settings saved.");
-                      }} />
-                    </label>
-                    <label className="form-label">
-                      API key / secret
-                      <input className="form-input" type="password" value={installationSettings?.llm.cloudApiSecret ?? ""} onChange={(event) => {
-                        if (!installationSettings) return;
-                        void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, cloudApiSecret: event.target.value } }, "LLM settings saved.");
-                      }} />
-                    </label>
-                  </div>
-                </section>
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Local Runtime Defaults</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="llm-settings-grid">
-                      <label className="form-label">
-                        Protocol
-                        <select className="form-input" value={installationSettings?.llm.ollamaProtocol ?? "http"} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaProtocol: event.target.value === "https" ? "https" : "http" } }, "LLM settings saved.");
-                        }}>
-                          <option value="http">http</option>
-                          <option value="https">https</option>
-                        </select>
-                      </label>
-                      <label className="form-label">
-                        Host
-                        <input className="form-input" value={installationSettings?.llm.ollamaHost ?? "127.0.0.1"} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaHost: event.target.value } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Port
-                        <input className="form-input" type="number" min={1} max={65535} value={installationSettings?.llm.ollamaPort ?? 11434} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaPort: clampIntegerValue(Number(event.target.value), 1, 65535) } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Selected local model
-                        <input className="form-input" value={installationSettings?.llm.ollamaSelectedModel ?? ""} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaSelectedModel: event.target.value } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Request timeout (seconds)
-                        <input className="form-input" type="number" min={5} max={600} value={installationSettings?.llm.ollamaRequestTimeoutSeconds ?? 120} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaRequestTimeoutSeconds: clampIntegerValue(Number(event.target.value), 5, 600) } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Document timeout (seconds)
-                        <input className="form-input" type="number" min={30} max={3600} value={installationSettings?.llm.ollamaDocumentProcessingTimeoutSeconds ?? 1800} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaDocumentProcessingTimeoutSeconds: clampIntegerValue(Number(event.target.value), 30, 3600) } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Temperature
-                        <input className="form-input" type="number" min={0} max={2} step={0.1} value={installationSettings?.llm.ollamaTemperature ?? 0.2} onChange={(event) => {
-                          if (!installationSettings) return;
-                          const temperature = Number(event.target.value);
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaTemperature: Number.isFinite(temperature) ? Math.max(0, Math.min(2, temperature)) : 0 } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Context window
-                        <input className="form-input" type="number" min={256} max={131072} value={installationSettings?.llm.ollamaNumCtx ?? 8192} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaNumCtx: clampIntegerValue(Number(event.target.value), 256, 131072) } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Keep alive (minutes)
-                        <input className="form-input" type="number" min={0} max={1440} value={installationSettings?.llm.ollamaKeepAliveMinutes ?? 10} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({ ...installationSettings, llm: { ...installationSettings.llm, ollamaKeepAliveMinutes: clampIntegerValue(Number(event.target.value), 0, 1440) } }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Relevant-segment shortlist
-                        <input className="form-input" type="number" min={1} max={50} value={installationSettings?.llm.ollamaRelevantSegmentsCandidateLimit ?? 12} onChange={(event) => {
-                          if (!installationSettings) return;
-                          const candidateLimit = clampIntegerValue(Number(event.target.value), 1, 50);
-                          void persistInstallationSettings({
-                            ...installationSettings,
-                            llm: {
-                              ...installationSettings.llm,
-                              ollamaRelevantSegmentsCandidateLimit: candidateLimit,
-                              ollamaRelevantSegmentsMaxResults: Math.min(installationSettings.llm.ollamaRelevantSegmentsMaxResults, candidateLimit),
-                            },
-                          }, "LLM settings saved.");
-                        }} />
-                      </label>
-                      <label className="form-label">
-                        Relevant segments returned
-                        <input className="form-input" type="number" min={1} max={installationSettings?.llm.ollamaRelevantSegmentsCandidateLimit ?? 12} value={installationSettings?.llm.ollamaRelevantSegmentsMaxResults ?? 6} onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings({
-                            ...installationSettings,
-                            llm: {
-                              ...installationSettings.llm,
-                              ollamaRelevantSegmentsMaxResults: clampIntegerValue(Number(event.target.value), 1, installationSettings.llm.ollamaRelevantSegmentsCandidateLimit),
-                            },
-                          }, "LLM settings saved.");
-                        }} />
-                      </label>
-                    </div>
-                  </div>
-                </section>
-              </div>
+              <SettingsModalSection title="Database Status">
+                <div className="home-restricted-list">
+                  <div className="home-restricted-item"><span className="home-restricted-label">Reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
+                  <div className="home-restricted-item"><span className="home-restricted-label">Setup complete</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
+                  <div className="home-restricted-item"><span className="home-restricted-label">Registered users</span><span className="home-restricted-value">{authStatus?.registeredUserCount ?? "-"}</span></div>
+                  <div className="home-restricted-item"><span className="home-restricted-label">Session started</span><span className="home-restricted-value">{formatPostgresDateTime(new Date(authSession.startedAtMs).toISOString())}</span></div>
+                </div>
+                <div className="form-actions" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+                  <button type="button" className="btn btn--primary" onClick={() => void refreshDetails()}>Re-check</button>
+                </div>
+              </SettingsModalSection>
             </div>
-            <div className="app-settings-modal-footer">
-              <p className="app-settings-modal-footer-note">Changes are saved immediately.</p>
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
       ) : null}
 
-      {activeModal === "postgres" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">PostgreSQL</h2></div>
-              <button type="button" className="btn" onClick={() => void refreshPostgresDetails()} disabled={loading}>
-                {loading ? "Refreshing..." : "Refresh"}
-              </button>
-            </div>
+      {activeModal === "permissions" ? (
+        <SettingsModal title={t("appSettings.permissions.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Current Session</h3></div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Signed in as</span><span className="home-restricted-value">{authSession.user.name}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Role</span><span className="home-restricted-value">{authSession.authKind === "postgres_admin" ? "Local administrator" : authSession.user.role}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Session started</span><span className="home-restricted-value">{formatPostgresDateTime(new Date(authSession.startedAtMs).toISOString())}</span></div>
-                    </div>
-                  </div>
-                </section>
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Local PostgreSQL</h3></div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Host</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Bootstrap applied</span><span className="home-restricted-value">{status?.bootstrapApplied ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Admin handoff complete</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">App role</span><span className="home-restricted-value">{status ? `${status.appRoleName} -> ${status.appDatabase}` : "-"}</span></div>
-                    </div>
-                  </div>
-                </section>
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Workspace Summary</h3></div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Registered users</span><span className="home-restricted-value">{authStatus?.registeredUserCount ?? "-"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Project databases</span><span className="home-restricted-value">{projects.length}</span></div>
-                    </div>
-                    {projects.length > 0 ? (
-                      <div className="users-table-wrap postgres-users-table-wrap" style={{ marginTop: 16, maxHeight: 280 }}>
-                        <table className="users-table">
-                          <thead><tr><th className="users-th">Project</th><th className="users-th">Database</th><th className="users-th">Updated</th></tr></thead>
-                          <tbody>
-                            {projects.map((project) => (
-                              <tr key={project.id} className="users-row">
-                                <td className="users-td users-td--name">{project.name}</td>
-                                <td className="users-td users-td--muted">{project.databaseName}</td>
-                                <td className="users-td users-td--muted">{formatPostgresDateTime(project.updatedAt)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <p className="auth-hint" style={{ marginTop: 12 }}>No PostgreSQL project databases have been created yet.</p>
-                    )}
-                  </div>
-                </section>
-              </div>
+              <SettingsModalSection title="User Roles">
+                <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 420 }}>
+                  <table className="users-table">
+                    <thead>
+                      <tr>
+                        <th className="users-th">Area</th>
+                        <th className="users-th">Action</th>
+                        <th className="users-th">Owner</th>
+                        <th className="users-th">Editor</th>
+                        <th className="users-th">Viewer</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {permissionMatrixRows.map((row) => (
+                        <tr className="users-row" key={`${row.category}-${row.permission}`}>
+                          <td className="users-td users-td--muted">{row.category}</td>
+                          <td className="users-td users-td--name">{row.permission}</td>
+                          <td className="users-td">{row.owner ? "Yes" : "No"}</td>
+                          <td className="users-td">{row.editor ? "Yes" : "No"}</td>
+                          <td className="users-td">{row.viewer ? "Yes" : "No"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SettingsModalSection>
             </div>
-            <div className="app-settings-modal-footer">
-              <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
       ) : null}
 
       {showThemeManager ? (
         <ThemeManagerModal
           onClose={() => setShowThemeManager(false)}
           onApplied={() => void handleThemeManagerApplied()}
-          onCanceled={() => {
-            setTheme(getStoredTheme());
-          }}
+          onCanceled={() => setTheme(getStoredTheme())}
         />
       ) : null}
     </div>

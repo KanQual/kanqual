@@ -241,12 +241,12 @@ export function PostgresRelationshipModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="form">
-          <div className="auth-tabs" role="tablist" aria-label={ariaLabel}>
+          <div className="segmented-control modal-segmented-control" role="tablist" aria-label={ariaLabel}>
             {(["details", "graphics", "attributes"] as const).map((nextTab) => (
               <button
                 key={nextTab}
                 type="button"
-                className={`auth-tab ${tab === nextTab ? "auth-tab--active" : ""}`}
+                className={`segmented-control-option ${tab === nextTab ? "segmented-control-option--active" : ""}`}
                 onClick={() => setTab(nextTab)}
               >
                 {nextTab.slice(0, 1).toUpperCase() + nextTab.slice(1)}

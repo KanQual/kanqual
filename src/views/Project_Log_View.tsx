@@ -19,7 +19,10 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "project.backup.create": "Project backup created",
   "project.backup.settings": "Project backup settings updated",
   "project.backup.delete": "Project backup deleted",
-  "project.network_mode.update": "Network mode updated",
+  "project.network_mode.update": "LAN mode updated",
+  "auth.login": "Signed in",
+  "auth.logout": "Signed out",
+  "auth.register": "Account registered",
   "project.ai_assist.update": "Project AI Assist updated",
   "project.canvas.update": "Project canvas updated",
   "project.ai_chat.message": "AI chat message sent",
@@ -211,6 +214,7 @@ export function formatProjectLogDateTime(iso: string): string {
 export function projectLogActionCategory(action: string): string {
   if (
     action.startsWith("project.")
+    || action.startsWith("auth.")
     || action.startsWith("member.")
     || action.startsWith("ai_assist.")
     || action.startsWith("project_uploaded_file.")
@@ -594,6 +598,9 @@ export function projectLogDescriptionLabel(
       if (entry.label === "Rebuilt host AI Assist embeddings") return t("projectLog.labels.aiAssistIndexRebuiltHost");
       return projectLogActionLabel(entry.action, t);
     case "project.network_mode.update":
+      if (details?.mode === "device") return "Returned database access to Device mode";
+      if (details?.mode === "network") return "Enabled Network database access";
+      if (details?.mode === "internet") return "Enabled Internet database access";
       if (details?.mode === "lan") return t("projectLog.labels.networkModeLanEnabled");
       if (details?.mode === "local") return t("projectLog.labels.networkModeLocalEnabled");
       return projectLogActionLabel(entry.action, t);
