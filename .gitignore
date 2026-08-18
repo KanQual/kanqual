@@ -25,6 +25,7 @@ dist-ssr
 src-tauri/target/debug
 pbtest*/
 docs/
+.tmp/
 
 # Platform-specific PostgreSQL runtimes are staged locally for packaging.
 src-tauri/postgres-runtimes/postgresql-17/**/*
