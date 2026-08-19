@@ -198,6 +198,8 @@ type PostgresEmbeddingModelDownloadChangedDetail = {
 };
 
 let latestEmbeddingModelDownloadDetail: PostgresEmbeddingModelDownloadChangedDetail | null = null;
+let dismissedEmbeddingModelDownloadStatusKey: string | null = null;
+let dismissedEmbeddingModelDownloadTerminalPhase: PostgresEmbeddingModelDownloadStatus["phase"] | null = null;
 
 export function notifyPostgresEmbeddingModelDownloadChanged(
   detail?: PostgresEmbeddingModelDownloadChangedDetail,
@@ -220,6 +222,23 @@ function getEmbeddingModelDownloadStatusKey(status: PostgresEmbeddingModelDownlo
 
 function isTerminalEmbeddingModelDownloadPhase(phase: PostgresEmbeddingModelDownloadStatus["phase"]): boolean {
   return phase === "completed" || phase === "cancelled" || phase === "error";
+}
+
+function clearDismissedEmbeddingModelDownloadStatus() {
+  dismissedEmbeddingModelDownloadStatusKey = null;
+  dismissedEmbeddingModelDownloadTerminalPhase = null;
+}
+
+function dismissEmbeddingModelDownloadStatus(status: PostgresEmbeddingModelDownloadStatus) {
+  dismissedEmbeddingModelDownloadStatusKey = getEmbeddingModelDownloadStatusKey(status);
+  dismissedEmbeddingModelDownloadTerminalPhase = isTerminalEmbeddingModelDownloadPhase(status.phase) ? status.phase : null;
+}
+
+function isEmbeddingModelDownloadStatusDismissed(status: PostgresEmbeddingModelDownloadStatus) {
+  return (
+    dismissedEmbeddingModelDownloadStatusKey === getEmbeddingModelDownloadStatusKey(status)
+    || dismissedEmbeddingModelDownloadTerminalPhase === status.phase
+  );
 }
 
 export type ReleaseCheckResult = {
@@ -705,7 +724,6 @@ export function PostgresEmbeddingModelDownloadBanner() {
   const [open, setOpen] = useState(false);
   const [retryRequest, setRetryRequest] = useState<PostgresEmbeddingModelRetryRequest | null>(null);
   const previousPhaseRef = useRef<PostgresEmbeddingModelDownloadStatus["phase"] | null>(null);
-  const dismissedStatusKeyRef = useRef<string | null>(null);
   const staleTerminalStatusKeyRef = useRef<string | null>(null);
   const cancelRequestedRef = useRef(false);
   const phase = status?.phase ?? "idle";
@@ -721,7 +739,9 @@ export function PostgresEmbeddingModelDownloadBanner() {
     const incomingStatusKey = getEmbeddingModelDownloadStatusKey(nextStatus);
 
     if (options.fromEvent) {
-      dismissedStatusKeyRef.current = null;
+      if (incomingIsActive) {
+        clearDismissedEmbeddingModelDownloadStatus();
+      }
       if (incomingIsActive && status && isTerminalEmbeddingModelDownloadPhase(status.phase)) {
         staleTerminalStatusKeyRef.current = getEmbeddingModelDownloadStatusKey(status);
       }
@@ -746,10 +766,9 @@ export function PostgresEmbeddingModelDownloadBanner() {
     const nextIsActive = normalizedStatus.phase === "downloading" || normalizedStatus.phase === "cancelling";
     const previousWasActive = previousPhase === "downloading" || previousPhase === "cancelling";
     const nextIsTerminal = isTerminalEmbeddingModelDownloadPhase(normalizedStatus.phase);
-    const nextStatusKey = getEmbeddingModelDownloadStatusKey(normalizedStatus);
 
     if (nextIsActive) {
-      dismissedStatusKeyRef.current = null;
+      clearDismissedEmbeddingModelDownloadStatus();
       if (!options.fromEvent) {
         staleTerminalStatusKeyRef.current = null;
       }
@@ -768,7 +787,10 @@ export function PostgresEmbeddingModelDownloadBanner() {
       || previousWasActive
       || nextIsTerminal
     ) {
-      setOpen(normalizedStatus.phase !== "idle" && dismissedStatusKeyRef.current !== nextStatusKey);
+      setOpen(
+        normalizedStatus.phase !== "idle"
+          && !isEmbeddingModelDownloadStatusDismissed(normalizedStatus),
+      );
     }
   }
 
@@ -852,7 +874,7 @@ export function PostgresEmbeddingModelDownloadBanner() {
 
   async function handleRetry() {
     if (!retryRequest || isActive) return;
-    dismissedStatusKeyRef.current = null;
+    clearDismissedEmbeddingModelDownloadStatus();
     cancelRequestedRef.current = false;
     const preparingStatus: PostgresEmbeddingModelDownloadStatus = {
       phase: "downloading",
@@ -940,7 +962,7 @@ export function PostgresEmbeddingModelDownloadBanner() {
               className="btn"
               onClick={() => {
                 if (status) {
-                  dismissedStatusKeyRef.current = getEmbeddingModelDownloadStatusKey(status);
+                  dismissEmbeddingModelDownloadStatus(status);
                 }
                 latestEmbeddingModelDownloadDetail = null;
                 setOpen(false);
@@ -955,7 +977,7 @@ export function PostgresEmbeddingModelDownloadBanner() {
             className="btn"
             onClick={() => {
               if (status) {
-                dismissedStatusKeyRef.current = getEmbeddingModelDownloadStatusKey(status);
+                dismissEmbeddingModelDownloadStatus(status);
               }
               latestEmbeddingModelDownloadDetail = null;
               setOpen(false);

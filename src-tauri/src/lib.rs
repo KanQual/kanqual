@@ -981,13 +981,13 @@ fn default_postgres_experiment_installation_settings() -> PostgresExperimentInst
 fn default_postgres_experiment_ai_assist_policy() -> PostgresExperimentAiAssistPolicy {
     PostgresExperimentAiAssistPolicy {
         mode: default_postgres_experiment_ai_assist_policy_mode(),
-        server_enabled: true,
+        server_enabled: false,
         project_overrides: HashMap::new(),
     }
 }
 
 fn default_postgres_experiment_ai_assist_policy_mode() -> String {
-    "enabled".to_string()
+    "disabled".to_string()
 }
 
 fn default_postgres_experiment_user_preferences() -> PostgresExperimentUserPreferences {
@@ -1546,49 +1546,6 @@ fn describe_postgres_error(error: &tokio_postgres::Error) -> String {
     }
 }
 
-async fn grant_postgres_experiment_ai_llm_catalog_access(
-    client: &tokio_postgres::Client,
-) -> Result<(), String> {
-    let rows = client
-        .query(
-            "
-            SELECT app_users.username
-            FROM app_users
-            WHERE app_users.username IS NOT NULL
-              AND TRIM(app_users.username) <> ''
-              AND EXISTS (
-                  SELECT 1
-                  FROM pg_roles
-                  WHERE pg_roles.rolname = app_users.username
-              )
-            ",
-            &[],
-        )
-        .await
-        .map_err(|e| {
-            format!(
-                "Could not load PostgreSQL app users for AI LLM catalog grants: {}",
-                describe_postgres_error(&e)
-            )
-        })?;
-    for row in rows {
-        let username: String = row.get(0);
-        client
-            .batch_execute(&format!(
-                "GRANT SELECT ON TABLE ai_llm_catalog TO \"{}\";",
-                sql_escape_identifier(&username)
-            ))
-            .await
-            .map_err(|e| {
-                format!(
-                    "Could not grant PostgreSQL AI LLM catalog access to {username}: {}",
-                    describe_postgres_error(&e)
-                )
-            })?;
-    }
-    Ok(())
-}
-
 async fn execute_postgres_statements(
     client: &tokio_postgres::Client,
     statements: &[&str],
@@ -1666,7 +1623,7 @@ async fn ensure_postgres_experiment_control_schema(
             "CREATE TABLE IF NOT EXISTS app_schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, database_name TEXT, storage_path TEXT, creation_source TEXT NOT NULL DEFAULT 'manual', created_by_username TEXT NOT NULL DEFAULT '', active BOOLEAN NOT NULL DEFAULT TRUE, disabled_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'standard', active BOOLEAN NOT NULL DEFAULT TRUE, disabled_at TIMESTAMPTZ, must_change_password BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ)",
-            "CREATE TABLE IF NOT EXISTS installation_settings (id TEXT PRIMARY KEY, startup_reopen_last_project BOOLEAN NOT NULL DEFAULT FALSE, document_import_default_mode TEXT NOT NULL DEFAULT 'upload', document_import_auto_name_from_file BOOLEAN NOT NULL DEFAULT TRUE, document_import_trim_imported_text BOOLEAN NOT NULL DEFAULT TRUE, document_import_warn_before_empty_import BOOLEAN NOT NULL DEFAULT TRUE, privacy_mask_file_paths BOOLEAN NOT NULL DEFAULT FALSE, privacy_clear_recent_projects_on_sign_out BOOLEAN NOT NULL DEFAULT FALSE, updates_auto_check BOOLEAN NOT NULL DEFAULT TRUE, updates_banner_enabled BOOLEAN NOT NULL DEFAULT TRUE, llm_settings_json TEXT NOT NULL DEFAULT '{}', ai_assist_policy_json TEXT NOT NULL DEFAULT '{\"mode\":\"enabled\",\"serverEnabled\":true,\"projectOverrides\":{}}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+            "CREATE TABLE IF NOT EXISTS installation_settings (id TEXT PRIMARY KEY, startup_reopen_last_project BOOLEAN NOT NULL DEFAULT FALSE, document_import_default_mode TEXT NOT NULL DEFAULT 'upload', document_import_auto_name_from_file BOOLEAN NOT NULL DEFAULT TRUE, document_import_trim_imported_text BOOLEAN NOT NULL DEFAULT TRUE, document_import_warn_before_empty_import BOOLEAN NOT NULL DEFAULT TRUE, privacy_mask_file_paths BOOLEAN NOT NULL DEFAULT FALSE, privacy_clear_recent_projects_on_sign_out BOOLEAN NOT NULL DEFAULT FALSE, updates_auto_check BOOLEAN NOT NULL DEFAULT TRUE, updates_banner_enabled BOOLEAN NOT NULL DEFAULT TRUE, llm_settings_json TEXT NOT NULL DEFAULT '{}', ai_assist_policy_json TEXT NOT NULL DEFAULT '{\"mode\":\"disabled\",\"serverEnabled\":false,\"projectOverrides\":{}}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS ai_llm_catalog (scope TEXT NOT NULL, provider_id TEXT NOT NULL, provider_label TEXT NOT NULL, model_id TEXT NOT NULL, model_label TEXT NOT NULL, model_publisher TEXT, endpoint TEXT, protocol TEXT, host TEXT, port INTEGER, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (scope, provider_id, model_id))",
             "CREATE TABLE IF NOT EXISTS user_preferences (subject_key TEXT PRIMARY KEY, theme TEXT NOT NULL DEFAULT 'light', density TEXT NOT NULL DEFAULT 'comfortable', font_size TEXT NOT NULL DEFAULT 'normal', locale TEXT NOT NULL DEFAULT 'en', recent_project_limit INTEGER NOT NULL DEFAULT 10, theme_state_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS device_state (id TEXT PRIMARY KEY, dismissed_update_version TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
@@ -1776,8 +1733,8 @@ async fn ensure_postgres_experiment_control_schema(
             "ALTER TABLE installation_settings ALTER COLUMN llm_settings_json SET DEFAULT '{}'",
             "UPDATE installation_settings SET llm_settings_json = '{}' WHERE llm_settings_json IS NULL OR TRIM(llm_settings_json) = ''",
             "ALTER TABLE installation_settings ALTER COLUMN llm_settings_json SET NOT NULL",
-            "ALTER TABLE installation_settings ALTER COLUMN ai_assist_policy_json SET DEFAULT '{\"mode\":\"enabled\",\"serverEnabled\":true,\"projectOverrides\":{}}'",
-            "UPDATE installation_settings SET ai_assist_policy_json = '{\"mode\":\"enabled\",\"serverEnabled\":true,\"projectOverrides\":{}}' WHERE ai_assist_policy_json IS NULL OR TRIM(ai_assist_policy_json) = ''",
+            "ALTER TABLE installation_settings ALTER COLUMN ai_assist_policy_json SET DEFAULT '{\"mode\":\"disabled\",\"serverEnabled\":false,\"projectOverrides\":{}}'",
+            "UPDATE installation_settings SET ai_assist_policy_json = '{\"mode\":\"disabled\",\"serverEnabled\":false,\"projectOverrides\":{}}' WHERE ai_assist_policy_json IS NULL OR TRIM(ai_assist_policy_json) = ''",
             "ALTER TABLE installation_settings ALTER COLUMN ai_assist_policy_json SET NOT NULL",
             "ALTER TABLE user_project_state ALTER COLUMN recent_projects_json SET DEFAULT '[]'",
             "UPDATE user_project_state SET recent_projects_json = '[]' WHERE recent_projects_json IS NULL OR TRIM(recent_projects_json) = ''",
@@ -1969,7 +1926,6 @@ async fn ensure_postgres_experiment_control_schema(
             deserialize_postgres_experiment_llm_settings(row.get::<_, String>(0).as_str());
         rebuild_postgres_experiment_ai_llm_catalog(&*client, &llm_settings).await?;
     }
-    grant_postgres_experiment_ai_llm_catalog_access(&client).await?;
     client
         .execute(
             "

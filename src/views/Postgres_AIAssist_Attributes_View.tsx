@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HelpIcon } from "../components/AppIcons";
+import { HelpIcon, PlusIcon } from "../components/AppIcons";
 import { parseProcessedTranscriptSegments } from "../components/ProcessedTranscriptView";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { buildLlmInvokeRequestFields } from "../lib/llmRuntime";
@@ -1250,10 +1250,12 @@ export function PostgresAIAssistAttributesView({
               <span className="annotate-card-title">Saved Suggestions</span>
               <button
                 type="button"
-                className="btn btn--small"
+                className="btn btn--small ai-saved-new-icon-button"
+                aria-label="New suggestion"
+                title="New suggestion"
                 onClick={clearSuggestionDraft}
               >
-                New
+                <PlusIcon className="ai-saved-new-icon" />
               </button>
             </div>
             <div className="ai-chat-list">

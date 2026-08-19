@@ -1839,7 +1839,8 @@ body {
 }
 
 .ai-assist-compact-setup-card .project-export-actions--modal {
-  margin-top: 12px;
+  margin-top: auto;
+  padding-top: 12px;
 }
 
 .ai-assist-home-card .project-model-modal-copy,
@@ -10018,6 +10019,49 @@ input[type="password"].form-input::-ms-clear {
   justify-content: space-between;
 }
 
+.ai-process-doc-source-card {
+  width: 100%;
+  align-self: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ai-process-doc-source-card-header {
+  min-height: 54px;
+  padding: 10px 14px 10px 18px;
+  border-bottom: var(--border-width) solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-process-doc-source-card-header h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.ai-process-doc-source-card .users-table-wrap {
+  border: 0;
+  border-radius: 0;
+}
+
+.ai-process-doc-process-icon-button {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.ai-process-doc-process-icon {
+  width: 20px;
+  height: 20px;
+}
+
 .ai-process-doc-home-copy {
   display: flex;
   flex-direction: column;
@@ -11046,6 +11090,21 @@ input[type="password"].form-input::-ms-clear {
   background: color-mix(in srgb, var(--color-primary) 50%, white);
   border-color: color-mix(in srgb, var(--color-primary) 50%, white);
   color: #fff;
+}
+
+.ai-saved-new-icon-button {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-saved-new-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .ai-chat-list-item {

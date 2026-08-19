@@ -873,7 +873,7 @@ export function PostgresAdminSettingsView({
   }, [adminProjectsLogFilters, adminProjectsLogSortColumn, adminProjectsLogSortDirection, projectAuditEntries, t]);
   const addUserPasswordMismatch =
     addUserPasswordConfirm.length > 0 && addUserPassword !== addUserPasswordConfirm;
-  const aiAssistPolicyMode = installationSettings?.aiAssistPolicy.mode ?? "enabled";
+  const aiAssistPolicyMode = installationSettings?.aiAssistPolicy.mode ?? "disabled";
   const embeddingDownloadPhase = embeddingModelDownloadStatus?.phase ?? "idle";
   const embeddingDownloadBusy = embeddingDownloadPhase === "downloading" || embeddingDownloadPhase === "cancelling";
   const hasEmbeddingModel = Boolean(embeddingModelStatus?.installed);

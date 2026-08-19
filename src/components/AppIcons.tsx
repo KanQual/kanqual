@@ -147,3 +147,19 @@ export function DownloadIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function ProcessTranscriptIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M5 3h9l5 5v5.1a6.4 6.4 0 0 0-2-.9V9h-4V5H7v14h5.2a6.4 6.4 0 0 0 .9 2H5zm10 2.4V7h1.6zM9 11h6v2H9zm0 4h4v2H9zm9 0 .5 1.2 1.3.1.2 1.4-1.1.7.4 1.2-1.2.8-1-.9-1 .9-1.2-.8.4-1.2-1.1-.7.2-1.4 1.3-.1.5-1.2zm-1 2.9a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2"
+      />
+    </svg>
+  );
+}

@@ -310,7 +310,6 @@ export function PostgresAiAssistHomeView({
   const [submitting, setSubmitting] = useState<"settings" | "build" | "cancel" | "delete" | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [setupTab, setSetupTab] = useState<"device" | "project">("device");
   const [activeDeviceModal, setActiveDeviceModal] = useState<null | "embedding-tuning" | "connection-settings" | "generation-defaults">(null);
   const [buildModalOpen, setBuildModalOpen] = useState(false);
   const [llmConnectionStatus, setLlmConnectionStatus] = useState<"checking" | "live" | "offline" | "disabled">("checking");
@@ -334,6 +333,7 @@ export function PostgresAiAssistHomeView({
   const embeddingDownloadPhase = embeddingModelDownloadStatus?.phase ?? "idle";
   const embeddingDownloadBusy = embeddingDownloadPhase === "downloading" || embeddingDownloadPhase === "cancelling";
   const hasEmbeddingModel = Boolean(embeddingModelStatus?.installed);
+  const activeEmbeddingModelName = embeddingModelStatus?.displayName?.trim() || "multilingual-e5-large";
   const remoteEmbeddingModelInstalled = runtimeStatus.hostEmbeddingModelInstalled;
   const remoteEmbeddingsReady = runtimeStatus.hostProjectEmbeddingsReady;
   const remoteSelectedModel = runtimeStatus.hostLlmModelSelected;
@@ -375,11 +375,6 @@ export function PostgresAiAssistHomeView({
     ?? CLOUD_PROVIDER_OPTIONS[0];
   const selectedLocalProvider = LOCAL_PROVIDER_OPTIONS.find((provider) => provider.value === appSettings.llm.localProvider)
     ?? LOCAL_PROVIDER_OPTIONS[0];
-  const rememberedGenerationModel = llmConnectionMode === "cloud"
-    ? appSettings.llm.cloudSelectedModelsByProvider[appSettings.llm.cloudProvider] ?? appSettings.llm.cloudSelectedModel
-    : llmConnectionMode === "local"
-      ? appSettings.llm.localSelectedModelsByProvider[appSettings.llm.localProvider] ?? appSettings.llm.ollamaSelectedModel
-      : "";
   const rememberedGenerationProviderLabel = llmConnectionMode === "cloud"
     ? selectedCloudProvider.label
     : llmConnectionMode === "local"
@@ -909,7 +904,7 @@ export function PostgresAiAssistHomeView({
     setError("");
     try {
       if (!hasEmbeddingModel) {
-        setError("Download the multilingual-e5 embedding model before building project embeddings.");
+        setError(`Download ${activeEmbeddingModelName} before building project embeddings.`);
         return false;
       }
       const sources = await buildPostgresProjectEmbeddingSourcesForProject(project.id, projectEmbeddingLlmSettings);
@@ -983,18 +978,7 @@ export function PostgresAiAssistHomeView({
       ) : (
       <div className="ai-assist-home-layout">
         <div className="ai-assist-home-info-column">
-          <section
-            className={`home-project-card ai-assist-home-card ai-assist-home-status-card${setupTab === "device" ? " ai-assist-home-status-card--active" : ""}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => setSetupTab("device")}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                setSetupTab("device");
-              }
-            }}
-          >
+          <section className="home-project-card ai-assist-home-card ai-assist-home-status-card">
             <div className="home-project-card-header">
               <h2>Device-Level Status</h2>
             </div>
@@ -1038,18 +1022,7 @@ export function PostgresAiAssistHomeView({
             </div>
           </section>
 
-          <section
-            className={`home-project-card ai-assist-home-card ai-assist-home-status-card${setupTab === "project" ? " ai-assist-home-status-card--active" : ""}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => setSetupTab("project")}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                setSetupTab("project");
-              }
-            }}
-          >
+          <section className="home-project-card ai-assist-home-card ai-assist-home-status-card">
             <div className="home-project-card-header">
               <h2>Project Readiness</h2>
             </div>
@@ -1103,29 +1076,30 @@ export function PostgresAiAssistHomeView({
 
         <div className="ai-assist-home-actions-column">
           <div className="ai-assist-home-tabbar">
-            <div className="segmented-control" role="tablist" aria-label="AI Assist setup views">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={setupTab === "device"}
-                className={setupTab === "device" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                onClick={() => setSetupTab("device")}
-              >
-                Device-Level Setup
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={setupTab === "project"}
-                className={setupTab === "project" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                onClick={() => setSetupTab("project")}
-              >
-                Project-Level Setup
-              </button>
+            <div className="segmented-control" role="tablist" aria-label="Project AI Assist status">
+              {([
+                { value: false, label: "Disabled" },
+                { value: true, label: "Enabled" },
+              ] as const).map((option) => (
+                <button
+                  key={String(option.value)}
+                  type="button"
+                  role="tab"
+                  aria-selected={settings.enabled === option.value}
+                  className={settings.enabled === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                  disabled={!canManageProject || submitting === "settings"}
+                  onClick={() => {
+                    if (settings.enabled === option.value) return;
+                    void persistSettings({ ...settings, enabled: option.value });
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
+            {!canManageProject ? <p className="auth-hint">Only project owners or the PostgreSQL administrator can change AI Assist availability.</p> : null}
           </div>
 
-          {setupTab === "device" ? (
             <section className="ai-assist-home-action-group">
               {!isLocalWorkspace ? (
                 <section className="home-project-card ai-assist-home-card">
@@ -1172,14 +1146,40 @@ export function PostgresAiAssistHomeView({
                 <section className="home-project-card ai-assist-home-card ai-assist-home-card--balanced ai-assist-compact-setup-card">
                   <div className="home-project-card-header">
                     <div>
-                      <h2>Embedding Model</h2>
+                      <h2>Embeddings</h2>
                     </div>
                   </div>
                   <div className="project-model-card">
                     <div>
-                      <div className="project-model-name">{embeddingModelStatus?.displayName ?? "multilingual-e5-large"}</div>
+                      <div className="project-model-name">{activeEmbeddingModelName}</div>
                       <p className="project-model-description">Status: {embeddingRuntimeStatusLabel}</p>
                     </div>
+                  </div>
+                  {!hasEmbeddingModel ? <div className="users-permission-note ai-assist-home-disabled-note">Download the embedding model first.</div> : null}
+                  {!isLocalWorkspace ? <div className="users-permission-note">Project embedding builds run on the PostgreSQL host for remote projects.</div> : null}
+                  {isLocalWorkspace && !canManageEmbeddings ? <div className="users-permission-note">Only project owners, editors, or the PostgreSQL administrator can manage embeddings.</div> : null}
+                  <div className="project-export-actions project-export-actions--modal">
+                    {indexStatus?.exists ? (
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void handleDeleteEmbeddings()}
+                        disabled={!isLocalWorkspace || buildBusy || submitting === "delete" || !canManageEmbeddings}
+                        style={{ marginLeft: "auto" }}
+                      >
+                        {submitting === "delete" ? "Deleting..." : "Delete"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => setBuildModalOpen(true)}
+                        disabled={!isLocalWorkspace || buildBusy || !canManageEmbeddings}
+                        style={{ marginLeft: "auto" }}
+                      >
+                        {buildBusy ? "Generating..." : "Generate"}
+                      </button>
+                    )}
                   </div>
                 </section>
 
@@ -1197,10 +1197,9 @@ export function PostgresAiAssistHomeView({
                       <p className="project-model-description">Batch size: {settings.embeddingBatchSize}</p>
                     </div>
                   </div>
-                  {!hasEmbeddingModel ? <div className="users-permission-note ai-assist-home-disabled-note">Download the embedding model first.</div> : null}
                   <div className="project-export-actions project-export-actions--modal">
                     <button type="button" className="btn" onClick={() => setActiveDeviceModal("embedding-tuning")} disabled={!hasEmbeddingModel}>
-                      Settings
+                      Edit
                     </button>
                   </div>
                 </section>
@@ -1304,9 +1303,9 @@ export function PostgresAiAssistHomeView({
                   {generationDefaultsAvailable ? (
                     <div className="project-model-card ai-assist-llm-model-memory-card">
                       <div>
-                        <div className="project-model-name">Last selected</div>
+                        <div className="project-model-name">Current Provider</div>
                         <p className="project-model-description">
-                          {rememberedGenerationProviderLabel}: {rememberedGenerationModel || "None"}
+                          {rememberedGenerationProviderLabel}
                         </p>
                       </div>
                     </div>
@@ -1361,57 +1360,13 @@ export function PostgresAiAssistHomeView({
                 </>
               )}
             </section>
-          ) : (
-            <section className="ai-assist-home-action-group">
-              <div className="ai-assist-home-card-row ai-assist-home-card-row--project">
-                <section className="home-project-card ai-assist-home-card">
-                  <div className="home-project-card-header">
-                    <div>
-                      <h2>Project AI Assist</h2>
-                    </div>
-                  </div>
-                  <label className="settings-toggle-row">
-                    <span><strong>Enable</strong></span>
-                    <input type="checkbox" checked={settings.enabled} disabled={!canManageProject} onChange={(event) => void persistSettings({ ...settings, enabled: event.target.checked })} />
-                  </label>
-                  {!canManageProject ? <p className="auth-hint">Only project owners or the PostgreSQL administrator can change these settings.</p> : null}
-                </section>
-
-                <section className="home-project-card ai-assist-home-card">
-                  <div className="home-project-card-header">
-                    <div>
-                      <h2>Embedding Management</h2>
-                    </div>
-                  </div>
-                  <div className="form-actions" style={{ marginTop: 16, justifyContent: "flex-start" }}>
-                    {!buildBusy ? (
-                      <button type="button" className="btn" onClick={() => setBuildModalOpen(true)} disabled={!isLocalWorkspace || !canManageEmbeddings}>
-                        {indexStatus?.exists ? "Rebuild" : "Run"}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={() => void handleDeleteEmbeddings()}
-                      disabled={!isLocalWorkspace || buildBusy || submitting === "delete" || !indexStatus?.exists || !canManageEmbeddings}
-                      style={{ marginLeft: "auto" }}
-                    >
-                      {submitting === "delete" ? "Deleting..." : "Delete"}
-                    </button>
-                  </div>
-                  {!isLocalWorkspace ? <div className="users-permission-note">Project embedding builds run on the PostgreSQL host for remote projects.</div> : null}
-                  {isLocalWorkspace && !canManageEmbeddings ? <div className="users-permission-note">Only project owners, editors, or the PostgreSQL administrator can manage embeddings.</div> : null}
-                </section>
-              </div>
-            </section>
-          )}
         </div>
       </div>
       )}
 
       <DeviceDetailsModal
         open={activeDeviceModal === "embedding-tuning"}
-        title="Embedding tuning"
+        title={`${activeEmbeddingModelName} settings`}
         onClose={() => setActiveDeviceModal(null)}
       >
         <div className="llm-settings-grid">

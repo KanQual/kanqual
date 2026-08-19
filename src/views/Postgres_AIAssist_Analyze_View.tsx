@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HelpIcon } from "../components/AppIcons";
+import { HelpIcon, PlusIcon } from "../components/AppIcons";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import {
   createPostgresAiAnalysis,
@@ -588,11 +588,13 @@ export function PostgresAIAssistAnalyzeView({
           />
 
           <div className="annotate-card" style={{ marginTop: 16 }}>
-            <div className="annotate-card-header ai-citation-detail-header">
+            <div className="annotate-card-header">
               <span className="annotate-card-title">Saved Analyses</span>
               <button
                 type="button"
-                className="btn btn--small"
+                className="btn btn--small ai-saved-new-icon-button"
+                aria-label="New analysis"
+                title="New analysis"
                 onClick={() => {
                   setLoadedAnalysis(null);
                   setSelectedCodeId(null);
@@ -600,7 +602,7 @@ export function PostgresAIAssistAnalyzeView({
                   resetResults();
                 }}
               >
-                New
+                <PlusIcon className="ai-saved-new-icon" />
               </button>
             </div>
             <div className="ai-chat-list">

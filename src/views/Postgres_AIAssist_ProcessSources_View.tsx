@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { HelpIcon } from "../components/AppIcons";
+import { HelpIcon, ProcessTranscriptIcon } from "../components/AppIcons";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
 import {
   collectSpeakerSummaries,
@@ -1392,7 +1392,7 @@ export function PostgresAiAssistProcessSourcesView({
     <div className="view users-view ai-process-doc-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Process Sources</h1>
+          <h1>Transcripts</h1>
           <button
             type="button"
             className="users-help-icon-btn"
@@ -1404,17 +1404,7 @@ export function PostgresAiAssistProcessSourcesView({
           </button>
         </div>
         <div className="view-header-actions">
-          {selectedProcessGroup === "raw" ? (
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={busy || selectedSourceIds.length === 0 || !canUseAiProcessDocuments}
-              onClick={() => setProcessModalOpen(true)}
-              title={!canUseAiProcessDocuments ? "You do not have permission to process sources for this project." : undefined}
-            >
-              {busy ? "Processing" : "Process Selected"}
-            </button>
-          ) : (
+          {selectedProcessGroup === "processed" ? (
             <button
               type="button"
               className="btn btn--primary"
@@ -1424,14 +1414,11 @@ export function PostgresAiAssistProcessSourcesView({
             >
               Open Review
             </button>
-          )}
+          ) : null}
         </div>
       </header>
       {error ? <p className="users-error">{error}</p> : null}
       {notice ? <p className="settings-success">{notice}</p> : null}
-      <p className="users-guide-copy" style={{ marginBottom: 16 }}>
-        Text sources are loaded directly from the PostgreSQL workspace. Select text sources to process, or transcripts to review saved AI outputs.
-      </p>
 
       <div
         className="postgres-sources-grid"
@@ -1469,9 +1456,8 @@ export function PostgresAiAssistProcessSourcesView({
             >
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <h2 style={{ margin: 0, fontSize: 18 }}>Source groups</h2>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>Source Types</h2>
                 </div>
-                <span className="home-restricted-value">{processGroupRows.length}</span>
               </div>
             </div>
 
@@ -1531,12 +1517,28 @@ export function PostgresAiAssistProcessSourcesView({
             paddingRight: 4,
           }}
         >
-          <div
-            className="users-table-wrap"
-            style={{
-              maxHeight: 34 + (Math.max(loading ? 1 : selectedProcessGroup === "raw" ? processableSources.length : reviewRecords.length, 1) + 2) * 36,
-            }}
-          >
+          <div className="home-project-card ai-process-doc-source-card">
+            <div className="ai-process-doc-source-card-header">
+              <h2>{selectedProcessGroup === "raw" ? "Text Sources" : "Transcripts"}</h2>
+              {selectedProcessGroup === "raw" ? (
+                <button
+                  type="button"
+                  className="btn btn--primary ai-process-doc-process-icon-button"
+                  disabled={busy || selectedSourceIds.length === 0 || !canUseAiProcessDocuments}
+                  onClick={() => setProcessModalOpen(true)}
+                  title={!canUseAiProcessDocuments ? "You do not have permission to process sources for this project." : busy ? "Processing selected sources" : "Process selected sources"}
+                  aria-label={busy ? "Processing selected sources" : "Process selected sources"}
+                >
+                  <ProcessTranscriptIcon className="ai-process-doc-process-icon" />
+                </button>
+              ) : null}
+            </div>
+            <div
+              className="users-table-wrap"
+              style={{
+                maxHeight: 34 + (Math.max(loading ? 1 : selectedProcessGroup === "raw" ? processableSources.length : reviewRecords.length, 1) + 2) * 36,
+              }}
+            >
             <table className="users-table">
               <thead>
                 {selectedProcessGroup === "raw" ? (
@@ -1634,6 +1636,7 @@ export function PostgresAiAssistProcessSourcesView({
                 )}
               </tbody>
             </table>
+            </div>
           </div>
           {selectedProcessGroup === "raw" && selectedSourceIds.length > 0 ? (
             <div className="ai-process-doc-home-copy" style={{ justifyContent: "flex-end" }}>
