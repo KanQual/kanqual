@@ -208,10 +208,10 @@ export async function loadCurrentProjectAiChatUser(projectId: string): Promise<C
   if (!session) return null;
 
   const users = await listPostgresProjectUsers(projectId);
-  const projectUser = users.find((user) => user.appUserId === session.user.id || user.email.toLowerCase() === session.user.email.toLowerCase());
+  const projectUser = users.find((user) => user.appUserId === session.user.id);
   return {
     id: projectUser?.id ?? "",
-    name: projectUser?.name || session.user.name || session.user.email || "You",
+    name: projectUser?.name || session.user.name || session.user.username || "You",
     appRole: session.user.role === "administrator" ? "administrator" : "standard",
     projectRole: projectUser?.role === "owner" || projectUser?.role === "editor" || projectUser?.role === "coder" || projectUser?.role === "viewer"
       ? projectUser.role

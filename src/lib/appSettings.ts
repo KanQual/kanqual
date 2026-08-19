@@ -22,7 +22,6 @@ export type DocumentImportSettings = {
 export type PrivacySecuritySettings = {
   maskFilePaths: boolean;
   clearRecentProjectsOnSignOut: boolean;
-  forgetLoginIdentitiesOnLogout: boolean;
 };
 
 export type UpdateSettings = {
@@ -98,7 +97,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   privacy: {
     maskFilePaths: false,
     clearRecentProjectsOnSignOut: false,
-    forgetLoginIdentitiesOnLogout: false,
   },
   updates: {
     autoCheck: true,

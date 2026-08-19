@@ -1,31 +1,26 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  formatBytes,
   readAppSettings,
   saveAppSettings,
   type AppSettings,
   type CloudLlmProvider,
   type LlmConnectionMode,
-  type LlmSettings,
   type LocalLlmProvider,
 } from "../lib/appSettings";
 import {
   buildPostgresProjectEmbeddingStore,
-  cancelPostgresEmbeddingModelDownload,
-  clearPostgresEmbeddingModel,
   deletePostgresProjectEmbeddingStore,
-  downloadPostgresEmbeddingModel,
-  getPostgresEmbeddingModelDownloadPreflight,
   getPostgresEmbeddingModelDownloadStatus,
   getPostgresEmbeddingModelStatus,
   getPostgresProjectAiAssistSettings,
   getPostgresProjectAiAssistRuntimeStatus,
   getPostgresInstallationSettings,
+  listPostgresEnabledAiLlmCatalog,
   savePostgresInstallationSettings,
   savePostgresProjectAiAssistSettings,
+  type PostgresAiLlmCatalogEntry,
   type PostgresAuthSession,
-  type PostgresEmbeddingModelDownloadPreflight,
   type PostgresEmbeddingModelDownloadStatus,
   type PostgresInstallationSettings,
   type PostgresEmbeddingModelStatus,
@@ -40,7 +35,6 @@ import {
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { formatCurrentDateTime } from "../i18n/formatters";
-import { notifyPostgresEmbeddingModelDownloadChanged } from "./App_Shell_Helpers";
 
 type OllamaModelSummary = {
   name: string;
@@ -151,6 +145,11 @@ const DEFAULT_AI_ASSIST_SETTINGS: PostgresProjectAiAssistSettings = {
   allowSummaries: true,
   allowCodeSuggestions: false,
   allowDraftReports: false,
+  embeddingChunkSize: 1800,
+  embeddingOverlapSize: 100,
+  embeddingBatchSize: 16,
+  embeddingPrefixPassages: true,
+  embeddingNormalizeWhitespace: true,
 };
 
 const DEFAULT_AI_ASSIST_RUNTIME_STATUS: PostgresProjectAiAssistRuntimeStatus = {
@@ -173,15 +172,6 @@ function formatDateTime(value: number | string | null | undefined): string {
 
 function formatPercent(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)}%` : "Working";
-}
-
-function formatDownloadDate(value: number | null | undefined, fallback: string): string {
-  if (!value) return fallback;
-  try {
-    return formatCurrentDateTime(value);
-  } catch {
-    return fallback;
-  }
 }
 
 function clampInteger(value: number, min: number, max: number): number {
@@ -299,15 +289,6 @@ function llmRuntimeReady(settings: AppSettings["llm"]): boolean {
   return false;
 }
 
-function embeddingTuningSignature(settings: LlmSettings): string {
-  return [
-    settings.chunkSize,
-    settings.overlapSize,
-    settings.prefixPassages ? "prefix" : "plain",
-    settings.normalizeWhitespace ? "normalize" : "raw",
-  ].join("|");
-}
-
 export function PostgresAiAssistHomeView({
   project,
   authSession,
@@ -317,20 +298,20 @@ export function PostgresAiAssistHomeView({
   const [settings, setSettings] = useState<PostgresProjectAiAssistSettings>(DEFAULT_AI_ASSIST_SETTINGS);
   const [runtimeStatus, setRuntimeStatus] = useState<PostgresProjectAiAssistRuntimeStatus>(DEFAULT_AI_ASSIST_RUNTIME_STATUS);
   const [installationSettings, setInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
+  const [aiLlmCatalog, setAiLlmCatalog] = useState<PostgresAiLlmCatalogEntry[]>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>(() => readAppSettings());
   const [embeddingModelStatus, setEmbeddingModelStatus] = useState<PostgresEmbeddingModelStatus | null>(null);
-  const [embeddingModelPreflight, setEmbeddingModelPreflight] = useState<PostgresEmbeddingModelDownloadPreflight | null>(null);
   const [embeddingModelDownloadStatus, setEmbeddingModelDownloadStatus] = useState<PostgresEmbeddingModelDownloadStatus | null>(null);
   const [indexStatus, setIndexStatus] = useState<ProjectEmbeddingStoreStatus | null>(null);
   const [buildStatus, setBuildStatus] = useState<ProjectEmbeddingBuildStatus | null>(null);
   const [embeddingItemCount, setEmbeddingItemCount] = useState(0);
   const [embeddingContentFingerprint, setEmbeddingContentFingerprint] = useState("");
   const [, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState<"settings" | "build" | "cancel" | "delete" | "model-download" | "model-cancel" | "model-clear" | null>(null);
+  const [submitting, setSubmitting] = useState<"settings" | "build" | "cancel" | "delete" | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [setupTab, setSetupTab] = useState<"device" | "project">("device");
-  const [activeDeviceModal, setActiveDeviceModal] = useState<null | "download-details" | "embedding-tuning" | "connection-settings" | "generation-defaults">(null);
+  const [activeDeviceModal, setActiveDeviceModal] = useState<null | "embedding-tuning" | "connection-settings" | "generation-defaults">(null);
   const [buildModalOpen, setBuildModalOpen] = useState(false);
   const [llmConnectionStatus, setLlmConnectionStatus] = useState<"checking" | "live" | "offline" | "disabled">("checking");
   const [ollamaBusy, setOllamaBusy] = useState(false);
@@ -347,7 +328,6 @@ export function PostgresAiAssistHomeView({
 
   const isLocalWorkspace = project.accessMode !== "remote";
   const isLocalAdministrator = authSession.authKind === "postgres_admin" || authSession.user.role === "administrator";
-  const canManageDeviceModel = isLocalWorkspace && isLocalAdministrator;
   const canManageLlmSettings = isLocalWorkspace && (isLocalAdministrator || canManageProject);
   const currentBuildPhase = buildStatus?.projectId === project.id ? buildStatus.phase : "idle";
   const buildBusy = currentBuildPhase === "running" || currentBuildPhase === "cancelling";
@@ -359,10 +339,35 @@ export function PostgresAiAssistHomeView({
   const remoteSelectedModel = runtimeStatus.hostLlmModelSelected;
   const remoteLlmEnabled = runtimeStatus.hostLlmEnabled;
   const remoteLlmConnectionLive = runtimeStatus.hostLlmConnectionLive;
+  const projectEmbeddingLlmSettings: AppSettings["llm"] = useMemo(() => ({
+    ...appSettings.llm,
+    chunkSize: settings.embeddingChunkSize,
+    overlapSize: settings.embeddingOverlapSize,
+    batchSize: settings.embeddingBatchSize,
+    prefixPassages: settings.embeddingPrefixPassages,
+    normalizeWhitespace: settings.embeddingNormalizeWhitespace,
+  }), [
+    appSettings.llm,
+    settings.embeddingBatchSize,
+    settings.embeddingChunkSize,
+    settings.embeddingNormalizeWhitespace,
+    settings.embeddingOverlapSize,
+    settings.embeddingPrefixPassages,
+  ]);
   const runtimeReady = isLocalWorkspace
     ? llmRuntimeReady(appSettings.llm)
     : Boolean(remoteLlmEnabled && remoteSelectedModel);
   const llmConnectionMode = appSettings.llm.connectionMode;
+  const enabledLocalCatalogEntries = aiLlmCatalog.filter((entry) => entry.scope === "local");
+  const enabledCloudCatalogEntries = aiLlmCatalog.filter((entry) => entry.scope === "cloud");
+  const enabledLocalProviderIds = new Set(enabledLocalCatalogEntries.map((entry) => entry.providerId));
+  const enabledCloudProviderIds = new Set(enabledCloudCatalogEntries.map((entry) => entry.providerId));
+  const enabledLocalProviderOptions = LOCAL_PROVIDER_OPTIONS.filter((provider) => enabledLocalProviderIds.has(provider.value));
+  const enabledCloudProviderOptions = CLOUD_PROVIDER_OPTIONS.filter((provider) => enabledCloudProviderIds.has(provider.value));
+  const enabledLocalModelsForProvider = enabledLocalCatalogEntries.filter((entry) => entry.providerId === appSettings.llm.localProvider);
+  const enabledCloudModelsForProvider = enabledCloudCatalogEntries.filter((entry) => entry.providerId === appSettings.llm.cloudProvider);
+  const enabledLocalModelIds = new Set(enabledLocalModelsForProvider.map((entry) => entry.modelId));
+  const enabledCloudModelIds = new Set(enabledCloudModelsForProvider.map((entry) => entry.modelId));
   const selectedModel = appSettings.llm.connectionMode === "cloud"
     ? appSettings.llm.cloudSelectedModel
     : appSettings.llm.ollamaSelectedModel;
@@ -393,21 +398,29 @@ export function PostgresAiAssistHomeView({
     : llmConnectionMode === "cloud"
       ? "Cloud"
       : "Local";
-  const allowedCloudModels = appSettings.llm.cloudEnabledModelsByProvider[appSettings.llm.cloudProvider];
-  const allowedLocalModels = appSettings.llm.localEnabledModelsByProvider[appSettings.llm.localProvider];
   const generationModelOptions = llmConnectionMode === "cloud"
-    ? cloudModels
-      .filter((model) => allowedCloudModels === undefined || allowedCloudModels.includes(model.id))
-      .map((model) => ({
-      id: model.id,
-      label: `${model.name}${model.publisher ? ` (${model.publisher})` : ""}`,
-    }))
-    : ollamaModels
-      .filter((model) => allowedLocalModels === undefined || allowedLocalModels.includes(model.name))
-      .map((model) => ({
-      id: model.name,
-      label: model.name,
-    }));
+    ? (cloudModels.length
+      ? cloudModels
+        .filter((model) => enabledCloudModelIds.has(model.id))
+        .map((model) => ({
+          id: model.id,
+          label: `${model.name}${model.publisher ? ` (${model.publisher})` : ""}`,
+        }))
+      : enabledCloudModelsForProvider.map((model) => ({
+        id: model.modelId,
+        label: `${model.modelLabel}${model.modelPublisher ? ` (${model.modelPublisher})` : ""}`,
+      })))
+    : (ollamaModels.length
+      ? ollamaModels
+        .filter((model) => enabledLocalModelIds.has(model.name))
+        .map((model) => ({
+          id: model.name,
+          label: model.name,
+        }))
+      : enabledLocalModelsForProvider.map((model) => ({
+        id: model.modelId,
+        label: model.modelLabel,
+      })));
   const embeddingRuntimeStatusLabel = embeddingDownloadPhase === "downloading"
     ? "Downloading"
     : embeddingDownloadPhase === "cancelling"
@@ -442,7 +455,10 @@ export function PostgresAiAssistHomeView({
     setLoading(true);
     setError("");
     try {
-      const installationSettings = await getPostgresInstallationSettings();
+      const [installationSettings, enabledCatalog] = await Promise.all([
+        getPostgresInstallationSettings(),
+        listPostgresEnabledAiLlmCatalog(),
+      ]);
       const nextAppSettings = {
         ...readAppSettings(),
         llm: {
@@ -450,22 +466,73 @@ export function PostgresAiAssistHomeView({
           ...installationSettings.llm,
         },
       };
+      const enabledLocalProviders = new Set(
+        enabledCatalog
+          .filter((entry) => entry.scope === "local")
+          .map((entry) => entry.providerId),
+      );
+      const enabledCloudProviders = new Set(
+        enabledCatalog
+          .filter((entry) => entry.scope === "cloud")
+          .map((entry) => entry.providerId),
+      );
+      const firstEnabledLocalProvider = enabledCatalog.find((entry) => entry.scope === "local")?.providerId as LocalLlmProvider | undefined;
+      const firstEnabledCloudProvider = enabledCatalog.find((entry) => entry.scope === "cloud")?.providerId as CloudLlmProvider | undefined;
+      if (nextAppSettings.llm.connectionMode === "local" && !enabledLocalProviders.has(nextAppSettings.llm.localProvider)) {
+        nextAppSettings.llm.connectionMode = firstEnabledLocalProvider ? "local" : "none";
+        nextAppSettings.llm.ollamaEnabled = Boolean(firstEnabledLocalProvider);
+        if (firstEnabledLocalProvider) {
+          nextAppSettings.llm.localProvider = firstEnabledLocalProvider;
+          nextAppSettings.llm.ollamaSelectedModel = nextAppSettings.llm.localSelectedModelsByProvider[firstEnabledLocalProvider] ?? "";
+        }
+      }
+      if (nextAppSettings.llm.connectionMode === "cloud" && !enabledCloudProviders.has(nextAppSettings.llm.cloudProvider)) {
+        nextAppSettings.llm.connectionMode = firstEnabledCloudProvider ? "cloud" : "none";
+        if (firstEnabledCloudProvider) {
+          nextAppSettings.llm.cloudProvider = firstEnabledCloudProvider;
+          nextAppSettings.llm.cloudSelectedModel = nextAppSettings.llm.cloudSelectedModelsByProvider[firstEnabledCloudProvider] ?? "";
+        }
+      }
+      const enabledLocalModels = new Set(
+        enabledCatalog
+          .filter((entry) => entry.scope === "local" && entry.providerId === nextAppSettings.llm.localProvider)
+          .map((entry) => entry.modelId),
+      );
+      if (nextAppSettings.llm.ollamaSelectedModel && !enabledLocalModels.has(nextAppSettings.llm.ollamaSelectedModel)) {
+        nextAppSettings.llm.ollamaSelectedModel = "";
+      }
+      const enabledCloudModels = new Set(
+        enabledCatalog
+          .filter((entry) => entry.scope === "cloud" && entry.providerId === nextAppSettings.llm.cloudProvider)
+          .map((entry) => entry.modelId),
+      );
+      if (nextAppSettings.llm.cloudSelectedModel && !enabledCloudModels.has(nextAppSettings.llm.cloudSelectedModel)) {
+        nextAppSettings.llm.cloudSelectedModel = "";
+      }
       setInstallationSettings(installationSettings);
+      setAiLlmCatalog(enabledCatalog);
       setAppSettings(nextAppSettings);
-      const [nextSettings, nextRuntimeStatus, sources] = await Promise.all([
+      const [nextSettings, nextRuntimeStatus] = await Promise.all([
         getPostgresProjectAiAssistSettings(project.id),
         getPostgresProjectAiAssistRuntimeStatus(project.id),
-        buildPostgresProjectEmbeddingSourcesForProject(project.id, nextAppSettings.llm),
       ]);
-      const [nextModelStatus, nextDownloadPreflight, nextDownloadStatus, nextIndexStatus, nextBuildStatus] = isLocalWorkspace
+      const nextProjectEmbeddingLlmSettings = {
+        ...nextAppSettings.llm,
+        chunkSize: nextSettings.embeddingChunkSize,
+        overlapSize: nextSettings.embeddingOverlapSize,
+        batchSize: nextSettings.embeddingBatchSize,
+        prefixPassages: nextSettings.embeddingPrefixPassages,
+        normalizeWhitespace: nextSettings.embeddingNormalizeWhitespace,
+      };
+      const sources = await buildPostgresProjectEmbeddingSourcesForProject(project.id, nextProjectEmbeddingLlmSettings);
+      const [nextModelStatus, nextDownloadStatus, nextIndexStatus, nextBuildStatus] = isLocalWorkspace
         ? await Promise.all([
           getPostgresEmbeddingModelStatus(),
-          getPostgresEmbeddingModelDownloadPreflight(),
           getPostgresEmbeddingModelDownloadStatus(),
           invoke<ProjectEmbeddingStoreStatus>("get_project_embedding_store_status", { projectId: project.id }),
           invoke<ProjectEmbeddingBuildStatus>("get_project_embedding_store_build_status"),
         ])
-        : [null, null, null, {
+        : [null, null, {
           exists: Boolean(nextRuntimeStatus.hostProjectEmbeddingsReady),
           generatedAtMs: null,
           itemCount: 0,
@@ -473,12 +540,11 @@ export function PostgresAiAssistHomeView({
       setSettings(nextSettings);
       setRuntimeStatus(nextRuntimeStatus);
       setEmbeddingModelStatus(nextModelStatus);
-      setEmbeddingModelPreflight(nextDownloadPreflight);
       setEmbeddingModelDownloadStatus(nextDownloadStatus);
       setIndexStatus(nextIndexStatus);
       setBuildStatus(nextBuildStatus);
       setEmbeddingItemCount(sources.flatMap((source) => source.items).length);
-      setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, nextAppSettings.llm));
+      setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, nextProjectEmbeddingLlmSettings));
     } catch (loadError) {
       setError(describeUnknownError(loadError));
     } finally {
@@ -518,13 +584,13 @@ export function PostgresAiAssistHomeView({
     let cancelled = false;
     void Promise.all([
       invoke<ProjectEmbeddingStoreStatus>("get_project_embedding_store_status", { projectId: project.id }),
-      buildPostgresProjectEmbeddingSourcesForProject(project.id, appSettings.llm),
+      buildPostgresProjectEmbeddingSourcesForProject(project.id, projectEmbeddingLlmSettings),
     ])
       .then(([nextIndexStatus, sources]) => {
         if (cancelled) return;
         setIndexStatus(nextIndexStatus);
         setEmbeddingItemCount(sources.flatMap((source) => source.items).length);
-        setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, appSettings.llm));
+        setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, projectEmbeddingLlmSettings));
       })
       .catch((statusError) => {
         if (!cancelled) setError(describeUnknownError(statusError));
@@ -532,7 +598,7 @@ export function PostgresAiAssistHomeView({
     return () => {
       cancelled = true;
     };
-  }, [appSettings.llm, buildStatus?.phase, buildStatus?.projectId, isLocalWorkspace, project.id]);
+  }, [buildStatus?.phase, buildStatus?.projectId, isLocalWorkspace, project.id, projectEmbeddingLlmSettings]);
 
   useEffect(() => {
     if (!ollamaTestFlash) return;
@@ -596,7 +662,6 @@ export function PostgresAiAssistHomeView({
     if (!installationSettings || !canManageLlmSettings) return;
     const previousAppSettings = appSettings;
     const previousInstallationSettings = installationSettings;
-    const previousEmbeddingTuningSignature = embeddingTuningSignature(previousAppSettings.llm);
     setError("");
     setAppSettings(next);
     syncLocalLlmSettings(next.llm);
@@ -607,11 +672,6 @@ export function PostgresAiAssistHomeView({
       }, project.id);
       setInstallationSettings(saved);
       setAppSettings(syncLocalLlmSettings(saved.llm));
-      if (isLocalWorkspace && embeddingTuningSignature(saved.llm) !== previousEmbeddingTuningSignature) {
-        const sources = await buildPostgresProjectEmbeddingSourcesForProject(project.id, saved.llm);
-        setEmbeddingItemCount(sources.flatMap((source) => source.items).length);
-        setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, saved.llm));
-      }
       if (successMessage) setNotice(successMessage);
     } catch (saveError) {
       setInstallationSettings(previousInstallationSettings);
@@ -668,20 +728,6 @@ export function PostgresAiAssistHomeView({
         ...profile.defaults,
         localProvider: provider,
         ollamaSelectedModel: appSettings.llm.localSelectedModelsByProvider[provider] ?? "",
-      },
-    });
-  }
-
-  function handleCloudSecretChange(secret: string) {
-    if (!canManageLlmSettings) return;
-    setCloudNotice("");
-    setCloudError("");
-    setCloudTestFlash(null);
-    void persistAppSettings({
-      ...appSettings,
-      llm: {
-        ...appSettings.llm,
-        cloudApiSecret: secret,
       },
     });
   }
@@ -807,82 +853,16 @@ export function PostgresAiAssistHomeView({
     }
   }
 
-  async function handleDownloadEmbeddingModel() {
-    if (!isLocalWorkspace || !canManageDeviceModel || embeddingDownloadBusy || hasEmbeddingModel) return;
-    setSubmitting("model-download");
-    setNotice("");
-    setError("");
-    const pendingStatus: PostgresEmbeddingModelDownloadStatus = {
-      phase: "downloading",
-      downloadedBytes: embeddingModelPreflight?.existingBytes ?? 0,
-      totalBytes: embeddingModelPreflight?.totalBytes ?? null,
-      downloadedFiles: embeddingModelPreflight?.existingFiles ?? 0,
-      totalFiles: embeddingModelPreflight?.totalFiles ?? 0,
-      currentFile: null,
-      progressPercent: null,
-      message: "Preparing download...",
-    };
-    setEmbeddingModelDownloadStatus(pendingStatus);
-    notifyPostgresEmbeddingModelDownloadChanged({ status: pendingStatus, retry: { kind: "default" } });
-    void downloadPostgresEmbeddingModel()
-      .then((nextStatus) => {
-        setEmbeddingModelStatus(nextStatus);
-        setNotice("Embedding model downloaded.");
-      })
-      .catch((downloadError) => {
-        notifyPostgresEmbeddingModelDownloadChanged({
-          status: {
-            ...pendingStatus,
-            phase: "error",
-            message: describeUnknownError(downloadError),
-          },
-          retry: { kind: "default" },
-        });
-      })
-      .finally(() => {
-        setSubmitting(null);
-        void getPostgresEmbeddingModelDownloadStatus().then(setEmbeddingModelDownloadStatus).catch(() => {});
-        void getPostgresEmbeddingModelDownloadPreflight().then(setEmbeddingModelPreflight).catch(() => {});
-      });
-  }
-
-  async function handleCancelEmbeddingModelDownload() {
-    if (!isLocalWorkspace || !canManageDeviceModel || !embeddingDownloadBusy) return;
-    setSubmitting("model-cancel");
-    setNotice("");
-    setError("");
-    try {
-      const status = await cancelPostgresEmbeddingModelDownload();
-      setEmbeddingModelDownloadStatus(status);
-      setNotice("Embedding model download cancellation requested.");
-    } catch (cancelError) {
-      setError(describeUnknownError(cancelError));
-    } finally {
-      setSubmitting(null);
-    }
-  }
-
-  async function handleClearEmbeddingModel() {
-    if (!isLocalWorkspace || !canManageDeviceModel || embeddingDownloadBusy) return;
-    setSubmitting("model-clear");
-    setNotice("");
-    setError("");
-    try {
-      const status = await clearPostgresEmbeddingModel();
-      setEmbeddingModelStatus(status);
-      setEmbeddingModelDownloadStatus(await getPostgresEmbeddingModelDownloadStatus());
-      setEmbeddingModelPreflight(await getPostgresEmbeddingModelDownloadPreflight());
-      setNotice("Local embedding model files cleared.");
-    } catch (clearError) {
-      setError(describeUnknownError(clearError));
-    } finally {
-      setSubmitting(null);
-    }
-  }
-
   async function persistSettings(next: PostgresProjectAiAssistSettings) {
     if (!canManageProject) return;
     const previousSettings = settings;
+    const previousEmbeddingTuningSignature = [
+      previousSettings.embeddingChunkSize,
+      previousSettings.embeddingOverlapSize,
+      previousSettings.embeddingBatchSize,
+      previousSettings.embeddingPrefixPassages ? "prefix" : "plain",
+      previousSettings.embeddingNormalizeWhitespace ? "normalize" : "raw",
+    ].join("|");
     setSubmitting("settings");
     setNotice("");
     setError("");
@@ -893,6 +873,26 @@ export function PostgresAiAssistHomeView({
         settings: next,
       });
       setSettings(saved);
+      const nextEmbeddingTuningSignature = [
+        saved.embeddingChunkSize,
+        saved.embeddingOverlapSize,
+        saved.embeddingBatchSize,
+        saved.embeddingPrefixPassages ? "prefix" : "plain",
+        saved.embeddingNormalizeWhitespace ? "normalize" : "raw",
+      ].join("|");
+      if (isLocalWorkspace && nextEmbeddingTuningSignature !== previousEmbeddingTuningSignature) {
+        const nextProjectEmbeddingLlmSettings = {
+          ...appSettings.llm,
+          chunkSize: saved.embeddingChunkSize,
+          overlapSize: saved.embeddingOverlapSize,
+          batchSize: saved.embeddingBatchSize,
+          prefixPassages: saved.embeddingPrefixPassages,
+          normalizeWhitespace: saved.embeddingNormalizeWhitespace,
+        };
+        const sources = await buildPostgresProjectEmbeddingSourcesForProject(project.id, nextProjectEmbeddingLlmSettings);
+        setEmbeddingItemCount(sources.flatMap((source) => source.items).length);
+        setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, nextProjectEmbeddingLlmSettings));
+      }
       setNotice("AI Assist settings saved.");
     } catch (saveError) {
       setSettings(previousSettings);
@@ -912,23 +912,23 @@ export function PostgresAiAssistHomeView({
         setError("Download the multilingual-e5 embedding model before building project embeddings.");
         return false;
       }
-      const sources = await buildPostgresProjectEmbeddingSourcesForProject(project.id, appSettings.llm);
+      const sources = await buildPostgresProjectEmbeddingSourcesForProject(project.id, projectEmbeddingLlmSettings);
       if (sources.length === 0 || sources.flatMap((source) => source.items).length === 0) {
         setError("Add project content before building AI Assist embeddings.");
         return false;
       }
       const status = await buildPostgresProjectEmbeddingStore({
         projectId: project.id,
-        batchSize: appSettings.llm.batchSize,
-        chunkSize: appSettings.llm.chunkSize,
-        overlapSize: appSettings.llm.overlapSize,
-        prefixPassages: appSettings.llm.prefixPassages,
-        normalizeWhitespace: appSettings.llm.normalizeWhitespace,
+        batchSize: projectEmbeddingLlmSettings.batchSize,
+        chunkSize: projectEmbeddingLlmSettings.chunkSize,
+        overlapSize: projectEmbeddingLlmSettings.overlapSize,
+        prefixPassages: projectEmbeddingLlmSettings.prefixPassages,
+        normalizeWhitespace: projectEmbeddingLlmSettings.normalizeWhitespace,
         sources,
       });
       setBuildStatus(status);
       setEmbeddingItemCount(sources.flatMap((source) => source.items).length);
-      setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, appSettings.llm));
+      setEmbeddingContentFingerprint(buildPostgresProjectEmbeddingSourcesFingerprint(sources, projectEmbeddingLlmSettings));
       return true;
     } catch (buildError) {
       setError(describeUnknownError(buildError));
@@ -1179,51 +1179,7 @@ export function PostgresAiAssistHomeView({
                     <div>
                       <div className="project-model-name">{embeddingModelStatus?.displayName ?? "multilingual-e5-large"}</div>
                       <p className="project-model-description">Status: {embeddingRuntimeStatusLabel}</p>
-                      <p className="project-model-description">
-                        Size: {embeddingModelStatus?.bytes ? formatBytes(embeddingModelStatus.bytes) : embeddingModelPreflight ? `${formatBytes(embeddingModelPreflight.existingBytes)} / ${formatBytes(embeddingModelPreflight.totalBytes)}` : "Not available yet"}
-                      </p>
-                      <p className="project-model-description">
-                        Files: {embeddingModelStatus?.files ?? embeddingModelPreflight?.existingFiles ?? 0}
-                      </p>
                     </div>
-                  </div>
-                  <div className="project-export-actions project-export-actions--modal">
-                    {!hasEmbeddingModel && !embeddingDownloadBusy ? (
-                      <button
-                        className="btn btn--primary"
-                        type="button"
-                        onClick={() => void handleDownloadEmbeddingModel()}
-                        disabled={!canManageDeviceModel || submitting === "model-download"}
-                      >
-                        {submitting === "model-download" ? "Starting..." : "Download"}
-                      </button>
-                    ) : null}
-                    {embeddingDownloadBusy ? (
-                      <button
-                        className="btn"
-                        type="button"
-                        onClick={() => void handleCancelEmbeddingModelDownload()}
-                        disabled={!canManageDeviceModel || submitting === "model-cancel"}
-                      >
-                        {embeddingDownloadPhase === "cancelling" || submitting === "model-cancel" ? "Cancelling..." : "Cancel"}
-                      </button>
-                    ) : null}
-                    {hasEmbeddingModel && !embeddingDownloadBusy ? (
-                      <>
-                        <button type="button" className="btn" onClick={() => setActiveDeviceModal("download-details")}>
-                          Details
-                        </button>
-                        <button
-                          className="btn btn--primary"
-                          type="button"
-                          onClick={() => void handleClearEmbeddingModel()}
-                          disabled={!canManageDeviceModel || submitting === "model-clear"}
-                          style={{ marginLeft: "auto" }}
-                        >
-                          {submitting === "model-clear" ? "Clearing..." : "Clear"}
-                        </button>
-                      </>
-                    ) : null}
                   </div>
                 </section>
 
@@ -1236,9 +1192,9 @@ export function PostgresAiAssistHomeView({
                   <div className="project-model-card">
                     <div>
                       <div className="project-model-name">Defaults</div>
-                      <p className="project-model-description">Chunk size: {appSettings.llm.chunkSize}</p>
-                      <p className="project-model-description">Overlap: {appSettings.llm.overlapSize}</p>
-                      <p className="project-model-description">Batch size: {appSettings.llm.batchSize}</p>
+                      <p className="project-model-description">Chunk size: {settings.embeddingChunkSize}</p>
+                      <p className="project-model-description">Overlap: {settings.embeddingOverlapSize}</p>
+                      <p className="project-model-description">Batch size: {settings.embeddingBatchSize}</p>
                     </div>
                   </div>
                   {!hasEmbeddingModel ? <div className="users-permission-note ai-assist-home-disabled-note">Download the embedding model first.</div> : null}
@@ -1259,19 +1215,27 @@ export function PostgresAiAssistHomeView({
                 </div>
                 <div className="settings-toggle-row settings-toggle-row--stacked settings-toggle-row--compact ai-assist-connection-mode-row">
                   <div className="segmented-control ai-assist-connection-mode-toggle" role="tablist" aria-label="Connection mode">
-                    {(["none", "local", "cloud"] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        role="tab"
-                        aria-selected={llmConnectionMode === mode}
-                        className={llmConnectionMode === mode ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                        disabled={!canManageLlmSettings}
-                        onClick={() => handleLlmConnectionModeChange(mode)}
-                      >
-                        {mode === "none" ? "None" : mode === "local" ? "Local" : "Cloud"}
-                      </button>
-                    ))}
+                    {(["none", "local", "cloud"] as const).map((mode) => {
+                      const modeUnavailable =
+                        mode === "local"
+                          ? enabledLocalProviderOptions.length === 0
+                          : mode === "cloud"
+                            ? enabledCloudProviderOptions.length === 0
+                            : false;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          role="tab"
+                          aria-selected={llmConnectionMode === mode}
+                          className={llmConnectionMode === mode ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                          disabled={!canManageLlmSettings || modeUnavailable}
+                          onClick={() => handleLlmConnectionModeChange(mode)}
+                        >
+                          {mode === "none" ? "None" : mode === "local" ? "Local" : "Cloud"}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 {llmConnectionMode === "none" ? (
@@ -1289,7 +1253,7 @@ export function PostgresAiAssistHomeView({
                       <label className="form-label">
                         API provider
                         <select className="form-input" value={appSettings.llm.localProvider} onChange={(event) => handleLocalProviderChange(event.target.value as LocalLlmProvider)}>
-                          {LOCAL_PROVIDER_OPTIONS.map((provider) => (
+                          {enabledLocalProviderOptions.map((provider) => (
                             <option key={provider.value} value={provider.value}>{provider.label}</option>
                           ))}
                         </select>
@@ -1312,18 +1276,14 @@ export function PostgresAiAssistHomeView({
                       <label className="form-label">
                         API provider
                         <select className="form-input" value={appSettings.llm.cloudProvider} onChange={(event) => handleCloudProviderChange(event.target.value as CloudLlmProvider)}>
-                          {CLOUD_PROVIDER_OPTIONS.map((provider) => (
+                          {enabledCloudProviderOptions.map((provider) => (
                             <option key={provider.value} value={provider.value}>{provider.label}</option>
                           ))}
                         </select>
                       </label>
                       <p className="ai-assist-inline-help">
-                        {selectedCloudProvider.helpText} <a href={selectedCloudProvider.keyUrl} target="_blank" rel="noreferrer">Open key setup</a>
+                        Cloud provider access is managed by the administrator.
                       </p>
-                      <label className="form-label">
-                        API secret
-                        <input className="form-input" type="password" autoComplete="off" value={appSettings.llm.cloudApiSecret} onChange={(event) => handleCloudSecretChange(event.target.value)} placeholder={`${selectedCloudProvider.label} API secret`} />
-                      </label>
                     </fieldset>
                     <div className="project-export-actions project-export-actions--modal llm-connection-actions llm-connection-actions--inline">
                       <button className="btn btn--primary" type="button" onClick={() => void handleCloudTestConnection()} disabled={!canManageLlmSettings || cloudBusy} style={{ marginLeft: "auto" }}>
@@ -1450,38 +1410,6 @@ export function PostgresAiAssistHomeView({
       )}
 
       <DeviceDetailsModal
-        open={activeDeviceModal === "download-details"}
-        title="Embedding download details"
-        onClose={() => setActiveDeviceModal(null)}
-      >
-        <ul className="ai-assist-settings-summary-list">
-          <li>
-            <strong>Repository</strong> <code>{embeddingModelStatus?.repoId ?? "intfloat/multilingual-e5-large"}</code>
-          </li>
-          <li>
-            <strong>Total download</strong> {formatBytes(embeddingModelPreflight?.totalBytes ?? 0)}
-          </li>
-          <li>
-            <strong>Already on device</strong>{" "}
-            {formatBytes(embeddingModelPreflight?.existingBytes ?? embeddingModelStatus?.bytes ?? 0)}
-            {embeddingModelPreflight?.manifestAvailable ? ` | ${embeddingModelPreflight.existingFiles} files` : ""}
-          </li>
-          <li>
-            <strong>Remaining</strong> {formatBytes(embeddingModelPreflight?.remainingBytes ?? 0)}
-            {embeddingModelPreflight?.manifestAvailable && embeddingModelPreflight.remainingFiles != null
-              ? ` across ${embeddingModelPreflight.remainingFiles} files`
-              : ""}
-          </li>
-          <li>
-            <strong>Downloaded at</strong> {formatDownloadDate(embeddingModelStatus?.downloadedAtMs, "Not downloaded yet")}
-          </li>
-          <li>
-            <strong>Location</strong> <code>{embeddingModelStatus?.modelDir ?? "Detecting local model directory..."}</code>
-          </li>
-        </ul>
-      </DeviceDetailsModal>
-
-      <DeviceDetailsModal
         open={activeDeviceModal === "embedding-tuning"}
         title="Embedding tuning"
         onClose={() => setActiveDeviceModal(null)}
@@ -1495,17 +1423,14 @@ export function PostgresAiAssistHomeView({
               type="number"
               min={100}
               max={20000}
-              value={appSettings.llm.chunkSize}
+              value={settings.embeddingChunkSize}
               onChange={(event) => {
                 const chunkSize = clampInteger(Number(event.target.value), 100, 20000);
-                const overlapSize = Math.min(appSettings.llm.overlapSize, Math.max(0, chunkSize - 1));
-                void persistAppSettings({
-                  ...appSettings,
-                  llm: {
-                    ...appSettings.llm,
-                    chunkSize,
-                    overlapSize,
-                  },
+                const overlapSize = Math.min(settings.embeddingOverlapSize, Math.max(0, chunkSize - 1));
+                void persistSettings({
+                  ...settings,
+                  embeddingChunkSize: chunkSize,
+                  embeddingOverlapSize: overlapSize,
                 });
               }}
             />
@@ -1517,14 +1442,11 @@ export function PostgresAiAssistHomeView({
               className="form-input"
               type="number"
               min={0}
-              max={Math.max(0, appSettings.llm.chunkSize - 1)}
-              value={appSettings.llm.overlapSize}
-              onChange={(event) => void persistAppSettings({
-                ...appSettings,
-                llm: {
-                  ...appSettings.llm,
-                  overlapSize: clampInteger(Number(event.target.value), 0, Math.max(0, appSettings.llm.chunkSize - 1)),
-                },
+              max={Math.max(0, settings.embeddingChunkSize - 1)}
+              value={settings.embeddingOverlapSize}
+              onChange={(event) => void persistSettings({
+                ...settings,
+                embeddingOverlapSize: clampInteger(Number(event.target.value), 0, Math.max(0, settings.embeddingChunkSize - 1)),
               })}
             />
           </label>
@@ -1536,13 +1458,10 @@ export function PostgresAiAssistHomeView({
               type="number"
               min={1}
               max={256}
-              value={appSettings.llm.batchSize}
-              onChange={(event) => void persistAppSettings({
-                ...appSettings,
-                llm: {
-                  ...appSettings.llm,
-                  batchSize: clampInteger(Number(event.target.value), 1, 256),
-                },
+              value={settings.embeddingBatchSize}
+              onChange={(event) => void persistSettings({
+                ...settings,
+                embeddingBatchSize: clampInteger(Number(event.target.value), 1, 256),
               })}
             />
           </label>

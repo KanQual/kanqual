@@ -29,6 +29,7 @@ type ReportTypeFilter =
   | "user-comparison"
   | "user-agreement"
   | "annotations";
+type ReportTypeSortCol = "type" | "count";
 type ActiveReportBuilder =
   | { type: "code"; kind: CodeReportKind }
   | { type: "user"; kind: CoderReportKind }
@@ -206,6 +207,8 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
   const [activeBuilder, setActiveBuilder] = useState<ActiveReportBuilder | null>(null);
   const [showNewReportModal, setShowNewReportModal] = useState(false);
   const [selectedReportTypeFilter, setSelectedReportTypeFilter] = useState<ReportTypeFilter>("all");
+  const [reportTypeSortCol, setReportTypeSortCol] = useState<ReportTypeSortCol>("type");
+  const [reportTypeSortDir, setReportTypeSortDir] = useState<"asc" | "desc">("asc");
   const [reports, setReports] = useState<PostgresReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -251,9 +254,29 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
     () => REPORT_TYPES.map((type) => ({
       ...type,
       count: reports.filter((report) => getReportFilterType(report) === type.id).length,
-    })),
-    [reports],
+    })).sort((left, right) => {
+      let comparison = 0;
+      if (reportTypeSortCol === "count") {
+        comparison = left.count - right.count;
+        if (comparison === 0) {
+          comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+        }
+      } else {
+        comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+      }
+      return reportTypeSortDir === "asc" ? comparison : -comparison;
+    }),
+    [reportTypeSortCol, reportTypeSortDir, reports],
   );
+
+  function handleReportTypeSort(column: ReportTypeSortCol) {
+    if (reportTypeSortCol === column) {
+      setReportTypeSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setReportTypeSortCol(column);
+    setReportTypeSortDir("asc");
+  }
 
   const filteredReports = useMemo(
     () => (
@@ -374,11 +397,29 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
             </div>
 
             <div className="users-table-wrap" style={{ border: 0, borderRadius: 0 }}>
-              <table className="users-table">
+              <table className="users-table" style={{ tableLayout: "fixed" }}>
                 <thead>
                   <tr>
-                    <th className="users-th">Type</th>
-                    <th className="users-th" style={{ width: "32%" }}>Count</th>
+                    <th
+                      className={`users-th${reportTypeSortCol === "type" ? " users-th--sorted" : ""}`}
+                      style={{ width: "76%" }}
+                      onClick={() => handleReportTypeSort("type")}
+                    >
+                      Type
+                      <span className="users-sort-icon">
+                        {reportTypeSortCol === "type" ? (reportTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>
+                    </th>
+                    <th
+                      className={`users-th${reportTypeSortCol === "count" ? " users-th--sorted" : ""}`}
+                      style={{ width: "24%" }}
+                      onClick={() => handleReportTypeSort("count")}
+                    >
+                      Count
+                      <span className="users-sort-icon">
+                        {reportTypeSortCol === "count" ? (reportTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

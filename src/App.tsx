@@ -12,8 +12,6 @@ import { readAppSettings, saveAppSettings } from "./lib/appSettings";
 import {
   bootstrapPostgres,
   changePostgresAppUserPassword,
-  clearPostgresRememberedAccounts,
-  clearPostgresUserProjectState,
   getPostgresDeviceState,
   getPostgresAuthStatus,
   getPostgresInstallationSettings,
@@ -67,15 +65,14 @@ function syncLegacyAppSettingsFromPostgresInstallationSettings(
     documentImport: {
       ...current.documentImport,
       defaultMode: installationSettings.documentImportDefaultMode,
-      autoNameFromFile: installationSettings.documentImportAutoNameFromFile,
+      autoNameFromFile: true,
       trimImportedText: installationSettings.documentImportTrimImportedText,
-      warnBeforeEmptyImport: installationSettings.documentImportWarnBeforeEmptyImport,
+      warnBeforeEmptyImport: true,
     },
     privacy: {
       ...current.privacy,
-      maskFilePaths: installationSettings.privacyMaskFilePaths,
-      clearRecentProjectsOnSignOut: installationSettings.privacyClearRecentProjectsOnSignOut,
-      forgetLoginIdentitiesOnLogout: installationSettings.privacyForgetLoginIdentitiesOnLogout,
+      maskFilePaths: false,
+      clearRecentProjectsOnSignOut: false,
     },
     updates: {
       ...current.updates,
@@ -176,7 +173,7 @@ function PostgresForcePasswordChangeView({
           <p className="auth-hint">
             This account was created with a temporary password. Choose a new password before continuing.
           </p>
-          <p className="auth-hint">Signed in as {session.user.email}</p>
+          <p className="auth-hint">Signed in as {session.user.username}</p>
           <label className="form-label">
             New password
             <div className="password-input-wrap">
@@ -559,12 +556,6 @@ function AuthGate() {
 
   const signOutPostgresSession = async () => {
     const nextAuthStatus = await logoutPostgresAppUser();
-    if (postgresInstallationSettings?.privacyForgetLoginIdentitiesOnLogout) {
-      await clearPostgresRememberedAccounts();
-    }
-    if (postgresInstallationSettings?.privacyClearRecentProjectsOnSignOut) {
-      await clearPostgresUserProjectState();
-    }
     setAdminOpenedProject(null);
     setPendingPasswordResetCurrentPassword("");
     setPostgresAuthStatus(nextAuthStatus);

@@ -1,8 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { SettingsModal } from "../components/SettingsModal";
+import { DownloadIcon } from "../components/AppIcons";
+import { FilterIcon } from "../components/FilterIcon";
 import {
   deletePostgresProject,
   listPostgresProjectLog,
@@ -18,6 +20,8 @@ import {
   formatPostgresBackupSize,
   importPostgresProjectBackupAsProject,
   loadPostgresProjectBackupManifest,
+  postgresBackupRetentionStatus,
+  type BackupRetentionStatus,
   type PostgresProjectBackupEntry,
   type PostgresProjectBackupManifest,
 } from "../lib/postgresProjectBackups";
@@ -47,6 +51,7 @@ import { useI18n } from "../i18n/provider";
 export type PostgresProjectSettingsViewProps = {
   project: PostgresProject;
   canManageProject: boolean;
+  canEditProjectMetadata?: boolean;
   memberCount: number;
   ownerCount: number;
   objectCount: number;
@@ -82,14 +87,107 @@ function formatPostgresDateTime(iso: string): string {
   }
 }
 
+function formatSnapshotCreatedParts(iso: string): { date: string; time: string } {
+  if (!iso) return { date: "-", time: "" };
+  try {
+    const date = new Date(iso);
+    return {
+      date: new Intl.DateTimeFormat([], {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }).format(date),
+      time: new Intl.DateTimeFormat([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(date),
+    };
+  } catch {
+    return { date: "-", time: "" };
+  }
+}
+
 function safeExportName(name: string): string {
   return name.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "kanqual_project";
 }
 
 function backupReasonLabel(entry: PostgresProjectBackupEntry): string {
-  if (entry.reason === "automatic") return "Automatic snapshot";
-  if (entry.reason === "session") return "Session snapshot";
-  return "Manual snapshot";
+  if (entry.reason === "manual") return "Manual";
+  return "Automatic";
+}
+
+function formatSnapshotHour(date: Date): string {
+  return new Intl.DateTimeFormat([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+  }).format(date);
+}
+
+function formatSnapshotDay(date: Date): string {
+  return new Intl.DateTimeFormat([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function snapshotRetentionUntilLabel(status: BackupRetentionStatus): string {
+  if (status.category === "manual") {
+    return "Indefinite";
+  }
+  if (status.category === "latest") {
+    return "Until superseded";
+  }
+  if (status.category === "pending-delete") {
+    return "Next cleanup";
+  }
+  if (status.deletionDate) {
+    return formatSnapshotDay(status.deletionDate);
+  }
+  return "-";
+}
+
+type SnapshotRetentionBadgeKind = "manual" | "hourly" | "daily" | "weekly" | "promotion" | "empty";
+type ProjectLogFilterColumn = "time" | "user" | "access" | "category" | "description";
+
+function snapshotRetentionBucketLabels(status: BackupRetentionStatus): Array<{ label: string; kind: SnapshotRetentionBadgeKind }> {
+  const labels: Array<{ label: string; kind: SnapshotRetentionBadgeKind }> = [];
+  if (status.category === "manual") {
+    labels.push({ label: "Manual", kind: "manual" });
+  } else if (status.category === "hourly" && status.bucketStart) {
+    labels.push({ label: `Hourly: ${formatSnapshotHour(status.bucketStart)}`, kind: "hourly" });
+  } else if (status.category === "daily" && status.bucketStart) {
+    labels.push({ label: `Daily: ${formatSnapshotDay(status.bucketStart)}`, kind: "daily" });
+  } else if (status.category === "weekly" && status.bucketStart) {
+    labels.push({ label: `Weekly: ${formatSnapshotDay(status.bucketStart)}`, kind: "weekly" });
+  } else if (!status.promotion) {
+    labels.push({ label: "-", kind: "empty" });
+  }
+  if (status.promotion) {
+    labels.push({ label: `Will become ${status.promotion}`, kind: "promotion" });
+  }
+  return labels;
+}
+
+function snapshotRetentionBadgeClass(kind: SnapshotRetentionBadgeKind): string {
+  return `backup-badge backup-badge--retention backup-badge--retention-${kind}`;
+}
+
+function PasswordVisibilityIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
+      <path
+        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
 }
 
 function projectCreationSourceLabel(source: string): string {
@@ -109,6 +207,7 @@ function csvEscape(value: string): string {
 export function PostgresProjectSettingsView({
   project,
   canManageProject,
+  canEditProjectMetadata = canManageProject,
   memberCount,
   ownerCount,
   onProjectUpdated,
@@ -127,6 +226,14 @@ export function PostgresProjectSettingsView({
   const [sources, setSources] = useState<PostgresSource[]>([]);
   const [projectLogEntries, setProjectLogEntries] = useState<PostgresProjectLogEntry[]>([]);
   const [expandedLogIds, setExpandedLogIds] = useState<Record<string, boolean>>({});
+  const [projectLogFilterOpen, setProjectLogFilterOpen] = useState(false);
+  const [projectLogFilters, setProjectLogFilters] = useState<Record<ProjectLogFilterColumn, string>>({
+    time: "",
+    user: "",
+    access: "",
+    category: "",
+    description: "",
+  });
   const [backupManifest, setBackupManifest] = useState<PostgresProjectBackupManifest | null>(null);
   const [backupBusy, setBackupBusy] = useState<"manual" | "delete" | "import" | null>(null);
   const [backupError, setBackupError] = useState("");
@@ -135,10 +242,14 @@ export function PostgresProjectSettingsView({
   const [importBackup, setImportBackup] = useState<PostgresProjectBackupEntry | null>(null);
   const [importBackupProjectName, setImportBackupProjectName] = useState("");
   const [importedBackupProject, setImportedBackupProject] = useState<PostgresProject | null>(null);
+  const [openBackupActionsFile, setOpenBackupActionsFile] = useState<string | null>(null);
+  const backupActionsMenuRef = useRef<HTMLTableCellElement | null>(null);
   const [exporting, setExporting] = useState<"json" | "xlsx" | "qdpx" | "encrypted" | null>(null);
   const [exportError, setExportError] = useState("");
   const [encryptedBackupPassword, setEncryptedBackupPassword] = useState("");
   const [encryptedBackupPasswordConfirm, setEncryptedBackupPasswordConfirm] = useState("");
+  const [encryptedBackupPasswordVisible, setEncryptedBackupPasswordVisible] = useState(false);
+  const [encryptedBackupPasswordConfirmVisible, setEncryptedBackupPasswordConfirmVisible] = useState(false);
   const [codebookBusy, setCodebookBusy] = useState<"export" | "import" | null>(null);
   const [codebookError, setCodebookError] = useState("");
   const [codebookImportResult, setCodebookImportResult] = useState<{ importedCount: number } | null>(null);
@@ -148,6 +259,18 @@ export function PostgresProjectSettingsView({
     setName(project.name);
     setDescription(project.description);
   }, [project.description, project.name]);
+
+  useEffect(() => {
+    if (!openBackupActionsFile) return;
+    function onPointerDown(event: PointerEvent) {
+      if (backupActionsMenuRef.current?.contains(event.target as Node)) return;
+      setOpenBackupActionsFile(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [openBackupActionsFile]);
 
   async function loadSources() {
     try {
@@ -178,10 +301,26 @@ export function PostgresProjectSettingsView({
     [sources],
   );
 
-  const sortedProjectLogEntries = useMemo(
-    () => [...projectLogEntries].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()),
-    [projectLogEntries],
-  );
+  const sortedProjectLogEntries = useMemo(() => {
+    const normalizedFilters = Object.fromEntries(
+      Object.entries(projectLogFilters).map(([key, value]) => [key, value.trim().toLowerCase()]),
+    ) as Record<ProjectLogFilterColumn, string>;
+    return [...projectLogEntries]
+      .filter((entry) => {
+        const values: Record<ProjectLogFilterColumn, string> = {
+          time: formatProjectLogDateTime(entry.occurredAt).toLowerCase(),
+          user: (entry.userName || "-").toLowerCase(),
+          access: projectLogAccessModeLabel(entry.accessMode, t).toLowerCase(),
+          category: projectLogActionLabel(entry.action, t).toLowerCase(),
+          description: projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t).toLowerCase(),
+        };
+        return (Object.keys(normalizedFilters) as ProjectLogFilterColumn[]).every((column) => {
+          const filter = normalizedFilters[column];
+          return !filter || values[column].includes(filter);
+        });
+      })
+      .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+  }, [projectLogEntries, projectLogFilters, t]);
 
   async function handleExport(format: "json" | "xlsx" | "qdpx") {
     setExportError("");
@@ -249,7 +388,7 @@ export function PostgresProjectSettingsView({
         filters: [{ name: "CSV file", extensions: ["csv"] }],
       });
       if (!path) return;
-      const entries = projectLogEntries.length ? projectLogEntries : await listPostgresProjectLog(project.id);
+      const entries = projectLogEntries.length ? sortedProjectLogEntries : await listPostgresProjectLog(project.id);
       const csv = [
         ["Time", "User", "Access", "Category", "Action", "Description"].map(csvEscape).join(","),
         ...entries.map((entry) => [
@@ -323,7 +462,7 @@ export function PostgresProjectSettingsView({
       return;
     }
     if (!canManageProject) {
-      setBackupError("Only project owners or administrators can import project snapshots.");
+      setBackupError("Only project owners or administrators can restore project snapshots.");
       setImportBackup(null);
       return;
     }
@@ -335,7 +474,7 @@ export function PostgresProjectSettingsView({
       setImportedBackupProject(imported);
       setImportBackup(null);
       setImportBackupProjectName("");
-      setBackupNotice(`Imported snapshot as "${imported.name}".`);
+      setBackupNotice(`Restored snapshot as "${imported.name}".`);
     } catch (importFailure) {
       setBackupError(describeUnknownError(importFailure));
     } finally {
@@ -385,8 +524,8 @@ export function PostgresProjectSettingsView({
     event.preventDefault();
     setError("");
     setNotice("");
-    if (!canManageProject) {
-      setError("Only project owners or the PostgreSQL administrator can change project settings.");
+    if (!canEditProjectMetadata) {
+      setError("Only project owners, editors, or the PostgreSQL administrator can change project details.");
       return;
     }
     if (!name.trim()) {
@@ -433,6 +572,134 @@ export function PostgresProjectSettingsView({
     }
   }
 
+  const projectSettingsSections = [
+    {
+      heading: "Project",
+      cards: [
+        {
+          id: "details",
+          title: "Details",
+          icon: "DE",
+          description: "Rename the project and edit its description.",
+          onOpen: () => {
+            setError("");
+            setName(project.name);
+            setDescription(project.description);
+            setActiveModal("details");
+          },
+        },
+        {
+          id: "storage",
+          title: "Storage",
+          icon: "HD",
+          description: "See the per-project database name, file location, and timestamps.",
+          onOpen: () => {
+            setError("");
+            setActiveModal("storage");
+          },
+        },
+      ],
+    },
+    {
+      heading: "Project Data",
+      cards: [
+        {
+          id: "uploaded-files",
+          title: "Uploaded Files",
+          icon: "UP",
+          description: "Review retained source file metadata for this project.",
+          onOpen: () => {
+            setError("");
+            setActiveModal("uploaded-files");
+            void loadSources();
+          },
+        },
+        {
+          id: "backups",
+          title: "Snapshots",
+          icon: "SN",
+          description: "Create and review project-level snapshots.",
+          onOpen: () => {
+            setBackupError("");
+            setBackupNotice("");
+            setActiveModal("backups");
+            void loadBackups();
+          },
+        },
+        {
+          id: "log",
+          title: "Log",
+          icon: "LG",
+          description: "Review and export this project's activity log.",
+          onOpen: () => {
+            setError("");
+            setActiveModal("log");
+            void loadProjectLog();
+          },
+        },
+      ],
+    },
+    {
+      heading: "Exchange",
+      cards: [
+        {
+          id: "export",
+          title: "Export",
+          icon: "EX",
+          description: "Export project data as JSON, Excel, REFI-QDA, or encrypted backup.",
+          onOpen: () => {
+            setExportError("");
+            setActiveModal("export");
+          },
+        },
+        {
+          id: "codebook",
+          title: "Codebook",
+          icon: "CB",
+          description: "Import or export a REFI-QDA codebook file.",
+          onOpen: () => {
+            setCodebookError("");
+            setActiveModal("codebook");
+          },
+        },
+        {
+          id: "danger",
+          title: "Delete Project",
+          icon: "DL",
+          description: "Permanently remove this project and its dedicated PostgreSQL database.",
+          requiresProjectManagement: true,
+          onOpen: () => {
+            setError("");
+            setDeleteConfirmationName("");
+            setActiveModal("danger");
+          },
+        },
+      ],
+    },
+  ];
+  const visibleProjectSettingsSections = projectSettingsSections
+    .map((section) => ({
+      ...section,
+      cards: section.cards.filter((card) => !card.requiresProjectManagement || canManageProject),
+    }))
+    .filter((section) => section.cards.length > 0);
+  const projectSettingsCards = visibleProjectSettingsSections.flatMap((section) => section.cards);
+
+  function renderProjectSettingsCard(card: (typeof projectSettingsCards)[number]) {
+    return (
+      <button
+        key={card.id}
+        type="button"
+        className={embedded ? "app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--default" : "app-settings-overview-card app-settings-overview-card--default"}
+        onClick={card.onOpen}
+      >
+        {embedded ? <span className="app-settings-overview-card-icon" aria-hidden="true">{card.icon}</span> : null}
+        <h3>{card.title}</h3>
+        {!embedded ? <p>{card.description}</p> : null}
+      </button>
+    );
+  }
+
   return (
     <div className={embedded ? "project-settings-view project-settings-view--embedded" : "view project-settings-view"}>
       {!embedded ? (
@@ -447,133 +714,25 @@ export function PostgresProjectSettingsView({
       {error ? <p className="auth-error">{error}</p> : null}
 
       <div className="app-settings-overview-shell project-settings-overview-shell">
-        <div className="app-settings-overview-stack">
-          <div className="app-settings-overview-sections">
-            <section className="app-settings-overview-section">
-              {!embedded ? (
-                <div className="app-settings-overview-section-header">
-                  <p className="app-settings-overview-section-heading">Project</p>
-                </div>
-              ) : null}
-              <div className="app-settings-overview-grid">
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setError("");
-                    setName(project.name);
-                    setDescription(project.description);
-                    setActiveModal("details");
-                  }}
-                >
-                  <h3>Details</h3>
-                  <p>Rename the project and edit its description.</p>
-                </button>
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setError("");
-                    setActiveModal("storage");
-                  }}
-                >
-                  <h3>Storage</h3>
-                  <p>See the per-project database name, file location, and timestamps.</p>
-                </button>
-              </div>
-            </section>
-
-            <section className="app-settings-overview-section">
-              {!embedded ? (
-                <div className="app-settings-overview-section-header">
-                  <p className="app-settings-overview-section-heading">Project Data</p>
-                </div>
-              ) : null}
-              <div className="app-settings-overview-grid">
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setError("");
-                    setActiveModal("uploaded-files");
-                    void loadSources();
-                  }}
-                >
-                  <h3>Uploaded Files</h3>
-                  <p>Review retained source file metadata for this project.</p>
-                </button>
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setBackupError("");
-                    setBackupNotice("");
-                    setActiveModal("backups");
-                    void loadBackups();
-                  }}
-                >
-                  <h3>Snapshots</h3>
-                  <p>Create and review project-level snapshots.</p>
-                </button>
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setError("");
-                    setActiveModal("log");
-                    void loadProjectLog();
-                  }}
-                >
-                  <h3>Log</h3>
-                  <p>Review and export this project's activity log.</p>
-                </button>
-              </div>
-            </section>
-
-            <section className="app-settings-overview-section">
-              {!embedded ? (
-                <div className="app-settings-overview-section-header">
-                  <p className="app-settings-overview-section-heading">Exchange</p>
-                </div>
-              ) : null}
-              <div className="app-settings-overview-grid">
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setExportError("");
-                    setActiveModal("export");
-                  }}
-                >
-                  <h3>Export</h3>
-                  <p>Export project data as JSON, Excel, REFI-QDA, or encrypted backup.</p>
-                </button>
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setCodebookError("");
-                    setActiveModal("codebook");
-                  }}
-                >
-                  <h3>Codebook</h3>
-                  <p>Import or export a REFI-QDA codebook file.</p>
-                </button>
-                <button
-                  type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
-                  onClick={() => {
-                    setError("");
-                    setDeleteConfirmationName("");
-                    setActiveModal("danger");
-                  }}
-                >
-                  <h3>Delete Project</h3>
-                  <p>Permanently remove this project and its dedicated PostgreSQL database.</p>
-                </button>
-              </div>
-            </section>
-          </div>
+        <div className={embedded ? "app-settings-overview-stack app-settings-overview-stack--compact" : "app-settings-overview-stack"}>
+          {embedded ? (
+            <div className="app-settings-overview-grid app-settings-overview-grid--compact">
+              {projectSettingsCards.map(renderProjectSettingsCard)}
+            </div>
+          ) : (
+            <div className="app-settings-overview-sections">
+              {visibleProjectSettingsSections.map((section) => (
+                <section key={section.heading} className="app-settings-overview-section">
+                  <div className="app-settings-overview-section-header">
+                    <p className="app-settings-overview-section-heading">{section.heading}</p>
+                  </div>
+                  <div className="app-settings-overview-grid">
+                    {section.cards.map(renderProjectSettingsCard)}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -591,6 +750,14 @@ export function PostgresProjectSettingsView({
                         <span className="home-restricted-label">Created from</span>
                         <span className="home-restricted-value">{projectCreationSourceLabel(project.creationSource)}</span>
                       </div>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">Created at</span>
+                        <span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span>
+                      </div>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">Created by</span>
+                        <span className="home-restricted-value">{project.createdByUsername || "Unknown"}</span>
+                      </div>
                     </div>
                     <form className="form" onSubmit={handleSaveDetails}>
                       <label className="form-label">
@@ -599,7 +766,7 @@ export function PostgresProjectSettingsView({
                           className="form-input"
                           value={name}
                           onChange={(event) => setName(event.target.value)}
-                          disabled={submitting === "details" || !canManageProject}
+                          disabled={submitting === "details" || !canEditProjectMetadata}
                           autoFocus
                         />
                       </label>
@@ -610,12 +777,12 @@ export function PostgresProjectSettingsView({
                           rows={5}
                           value={description}
                           onChange={(event) => setDescription(event.target.value)}
-                          disabled={submitting === "details" || !canManageProject}
+                          disabled={submitting === "details" || !canEditProjectMetadata}
                         />
                       </label>
-                      {!canManageProject ? (
+                      {!canEditProjectMetadata ? (
                         <p className="auth-hint" style={{ marginTop: 0 }}>
-                          Only project owners or the PostgreSQL administrator can change these settings.
+                          Only project owners, editors, or the PostgreSQL administrator can change these details.
                         </p>
                       ) : null}
                       <div className="form-actions">
@@ -625,7 +792,7 @@ export function PostgresProjectSettingsView({
                         <button
                           type="submit"
                           className="btn btn--primary"
-                          disabled={submitting === "details" || !canManageProject || !name.trim()}
+                          disabled={submitting === "details" || !canEditProjectMetadata || !name.trim()}
                         >
                           {submitting === "details" ? "Saving..." : "Save changes"}
                         </button>
@@ -721,13 +888,10 @@ export function PostgresProjectSettingsView({
                 {backupError ? <div className="form-error project-settings-error">{backupError}</div> : null}
                 {backupNotice ? <div className="settings-success project-settings-success">{backupNotice}</div> : null}
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Snapshot Controls</h3>
-                  </div>
                   <div className="app-settings-modal-section-body">
-                    <div className="backup-header-actions">
+                    <div className="backup-create-actions">
                       <button
-                        className="btn btn--primary"
+                        className="btn"
                         onClick={() => void handleManualBackup()}
                         disabled={backupBusy === "manual" || !canManageProject}
                         title={!canManageProject ? "Only project owners or administrators can create project snapshots." : undefined}
@@ -735,12 +899,9 @@ export function PostgresProjectSettingsView({
                         {backupBusy === "manual" ? "Creating..." : "Create Snapshot Now"}
                       </button>
                     </div>
-                    <p className="auth-hint" style={{ marginBottom: 0 }}>
-                      Snapshots are stored in the paired project snapshot database and include compressed source-file payloads.
-                    </p>
                     {!canManageProject ? (
                       <p className="auth-hint" style={{ marginBottom: 0 }}>
-                        Only project owners or administrators can create, delete, or import project snapshots.
+                        Only project owners or administrators can create, delete, or restore project snapshots.
                       </p>
                     ) : null}
                   </div>
@@ -751,57 +912,112 @@ export function PostgresProjectSettingsView({
                   </div>
                   <div className="app-settings-modal-section-body">
                     <div className="backup-list">
-                      {backupManifest?.backups.length ? backupManifest.backups.map((backup) => (
-                        <div key={backup.file} className="backup-list-item">
-                          <div>
-                            <div className="backup-list-title">
-                              {formatPostgresDateTime(backup.createdAt)}
-                              <span className="backup-badge">{backup.manual ? "Retained indefinitely" : "Retention managed"}</span>
-                            </div>
-                            <div className="backup-list-meta">
-                              {backupReasonLabel(backup)}{backup.sizeBytes ? ` | ${formatPostgresBackupSize(backup.sizeBytes)}` : ""}
-                              {` | ${backup.storageFileCount} file${backup.storageFileCount === 1 ? "" : "s"}`}
-                            </div>
-                            {backup.sourceLogLabel ? (
-                              <div className="backup-list-meta">
-                                Triggered by {backup.sourceLogLabel}
-                              </div>
-                            ) : null}
-                            <div className="backup-list-meta">
-                              Database {formatPostgresBackupSize(backup.databaseBytes) || "0 B"} | Files {formatPostgresBackupSize(backup.storageBytes) || "0 B"}
-                            </div>
-                          </div>
-                          <div className="backup-header-actions">
-                            <button
-                              className="btn"
-                              onClick={() => {
-                                setBackupError("");
-                                setBackupNotice("");
-                                setImportBackup(backup);
-                                setImportBackupProjectName(`${project.name} Snapshot Copy`);
-                              }}
-                              disabled={!!backupBusy || !canManageProject}
-                              title={!canManageProject ? "Only project owners or administrators can import project snapshots." : undefined}
-                            >
-                              Import
-                            </button>
-                            <button
-                              className="btn btn--danger"
-                              onClick={() => setDeleteBackup(backup)}
-                              disabled={!!backupBusy || !canManageProject || !backup.manual}
-                              title={
-                                !canManageProject
-                                  ? "Only project owners or administrators can delete project snapshots."
-                                  : !backup.manual
-                                    ? "Automatic and session snapshots are managed by retention settings."
-                                    : undefined
-                              }
-                            >
-                              Delete
-                            </button>
-                          </div>
+                      {backupManifest?.backups.length ? (
+                        <div className="project-log-table-wrap snapshot-table-wrap">
+                          <table className="project-log-table snapshot-table">
+                            <thead>
+                              <tr>
+                                <th>Created</th>
+                                <th>Retained Until</th>
+                                <th>Retention</th>
+                                <th>Reason</th>
+                                <th>Total</th>
+                                <th>Trigger</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {backupManifest.backups.map((backup) => {
+                                const retentionStatus = postgresBackupRetentionStatus(
+                                  backup,
+                                  backupManifest.backups,
+                                  backupManifest.retention,
+                                );
+                                const retentionLabels = snapshotRetentionBucketLabels(retentionStatus);
+                                const createdParts = formatSnapshotCreatedParts(backup.createdAt);
+                                return (
+                                  <tr key={backup.file}>
+                                    <td className="log-cell log-cell--time snapshot-created-cell">
+                                      <span>{createdParts.date}</span>
+                                      {createdParts.time ? <span>{createdParts.time}</span> : null}
+                                    </td>
+                                    <td className="log-cell log-cell--time">{snapshotRetentionUntilLabel(retentionStatus)}</td>
+                                    <td className="log-cell snapshot-retention-cell">
+                                      {retentionLabels.map((item) => (
+                                        <span
+                                          key={item.label}
+                                          className={snapshotRetentionBadgeClass(item.kind)}
+                                        >
+                                          {item.label}
+                                        </span>
+                                      ))}
+                                    </td>
+                                    <td className="log-cell log-cell--label">{backupReasonLabel(backup)}</td>
+                                    <td className="log-cell log-cell--time">{formatPostgresBackupSize(backup.sizeBytes) || "0 B"}</td>
+                                    <td className="log-cell log-cell--label">{backup.sourceLogLabel ? `Triggered by ${backup.sourceLogLabel}` : "-"}</td>
+                                    <td
+                                      className="log-cell snapshot-table-actions"
+                                      ref={openBackupActionsFile === backup.file ? backupActionsMenuRef : undefined}
+                                    >
+                                      <button
+                                        type="button"
+                                        className="snapshot-actions-trigger"
+                                        onClick={() => {
+                                          setOpenBackupActionsFile((current) => current === backup.file ? null : backup.file);
+                                        }}
+                                        aria-label="Snapshot actions"
+                                        aria-expanded={openBackupActionsFile === backup.file}
+                                        title="Snapshot actions"
+                                      >
+                                        ...
+                                      </button>
+                                      {openBackupActionsFile === backup.file ? (
+                                        <div className="snapshot-actions-menu" role="menu">
+                                          <button
+                                            type="button"
+                                            className="snapshot-actions-menu-item"
+                                            onClick={() => {
+                                              setOpenBackupActionsFile(null);
+                                              setBackupError("");
+                                              setBackupNotice("");
+                                              setImportBackup(backup);
+                                              setImportBackupProjectName(`${project.name} Snapshot Copy`);
+                                            }}
+                                            disabled={!!backupBusy || !canManageProject}
+                                            title={!canManageProject ? "Only project owners or administrators can restore project snapshots." : undefined}
+                                            role="menuitem"
+                                          >
+                                            Restore
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="snapshot-actions-menu-item snapshot-actions-menu-item--danger"
+                                            onClick={() => {
+                                              setOpenBackupActionsFile(null);
+                                              setDeleteBackup(backup);
+                                            }}
+                                            disabled={!!backupBusy || !canManageProject || !backup.manual}
+                                            title={
+                                              !canManageProject
+                                                ? "Only project owners or administrators can delete project snapshots."
+                                                : !backup.manual
+                                                  ? "Automatic snapshots are managed by retention settings."
+                                                  : undefined
+                                            }
+                                            role="menuitem"
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                      )) : (
+                      ) : (
                         <div className="empty-state backup-empty-state">
                           <p>No snapshots yet.</p>
                         </div>
@@ -824,16 +1040,26 @@ export function PostgresProjectSettingsView({
               {exportError ? <p className="auth-error">{exportError}</p> : null}
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Project Activity</h3>
-                  </div>
                   <div className="app-settings-modal-section-body">
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Export Log</div>
-                      </div>
-                      <button className="btn" type="button" onClick={() => void handleProjectLogExport()} disabled={projectLogExporting}>
-                        {projectLogExporting ? "Exporting..." : "Export CSV"}
+                    <div className="settings-inline-actions" style={{ justifyContent: "flex-end", marginBottom: 10 }}>
+                      <button
+                        type="button"
+                        className="codebook-icon-action"
+                        onClick={() => void handleProjectLogExport()}
+                        disabled={projectLogExporting}
+                        aria-label="Export project log as CSV"
+                        title={projectLogExporting ? "Exporting..." : "Export CSV"}
+                      >
+                        <DownloadIcon className="filter-icon-svg" />
+                      </button>
+                      <button
+                        type="button"
+                        className="codebook-icon-action"
+                        onClick={() => setProjectLogFilterOpen(true)}
+                        aria-label="Filter project log"
+                        title="Filter"
+                      >
+                        <FilterIcon className="filter-icon-svg" />
                       </button>
                     </div>
                     {sortedProjectLogEntries.length === 0 ? (
@@ -913,56 +1139,157 @@ export function PostgresProjectSettingsView({
         </SettingsModal>
       ) : null}
 
+      {activeModal === "log" && projectLogFilterOpen ? (
+        <SettingsModal title="Filter Project Log" onClose={() => setProjectLogFilterOpen(false)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-body">
+                    <div className="settings-form-grid">
+                      {([
+                        ["time", "Time"],
+                        ["user", "User"],
+                        ["access", "Access"],
+                        ["category", "Category"],
+                        ["description", "Description"],
+                      ] as Array<[ProjectLogFilterColumn, string]>).map(([column, label]) => (
+                        <label className="form-field" key={column}>
+                          <span>{label}</span>
+                          <input
+                            className="form-input"
+                            value={projectLogFilters[column]}
+                            onChange={(event) => setProjectLogFilters((current) => ({ ...current, [column]: event.target.value }))}
+                            placeholder={`Filter ${label.toLowerCase()}`}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setProjectLogFilters({
+                  time: "",
+                  user: "",
+                  access: "",
+                  category: "",
+                  description: "",
+                })}
+              >
+                Clear
+              </button>
+              <button type="button" className="btn btn--primary" onClick={() => setProjectLogFilterOpen(false)}>Done</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
       {activeModal === "export" ? (
-        <SettingsModal title="Export" onClose={() => setActiveModal(null)} closeDisabled={!!exporting}>
+        <SettingsModal title="Backup & Export" onClose={() => setActiveModal(null)} closeDisabled={!!exporting}>
             <div className="app-settings-modal-body">
               {exportError ? <p className="auth-error">{exportError}</p> : null}
               <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--warning">
-                    <h3>Encrypted Backup</h3>
+                <section className="project-backup-primary-panel">
+                  <div className="project-backup-primary-header">
+                    <div>
+                      <h3>Encrypted Backup</h3>
+                      <p>Create a password-protected KanQual backup for safekeeping or transfer.</p>
+                    </div>
                   </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="form">
-                      <label className="form-label">
-                        Backup Password
-                        <input className="form-input" type="password" value={encryptedBackupPassword} onChange={(event) => setEncryptedBackupPassword(event.target.value)} autoComplete="new-password" />
-                      </label>
-                      <label className="form-label">
-                        Confirm Password
-                        <input className="form-input" type="password" value={encryptedBackupPasswordConfirm} onChange={(event) => setEncryptedBackupPasswordConfirm(event.target.value)} autoComplete="new-password" />
-                      </label>
-                      <div className="project-export-actions project-export-actions--modal">
-                        <button className="btn btn--primary" onClick={() => void handleEncryptedBackupExport()} disabled={!!exporting || !encryptedBackupPassword || !encryptedBackupPasswordConfirm}>
-                          {exporting === "encrypted" ? "Exporting..." : "Export Encrypted Backup"}
+                  <div className="project-backup-password-grid">
+                    <label className="form-label">
+                      Backup Password
+                      <div className="password-input-wrap">
+                        <input
+                          className="form-input password-input-field"
+                          type={encryptedBackupPasswordVisible ? "text" : "password"}
+                          value={encryptedBackupPassword}
+                          onChange={(event) => setEncryptedBackupPassword(event.target.value)}
+                          autoComplete="new-password"
+                          disabled={!!exporting}
+                        />
+                        <button
+                          type="button"
+                          className="password-visibility-btn"
+                          aria-label={encryptedBackupPasswordVisible ? "Hide password" : "Show password"}
+                          aria-pressed={encryptedBackupPasswordVisible}
+                          onClick={() => setEncryptedBackupPasswordVisible((current) => !current)}
+                          disabled={!!exporting}
+                        >
+                          <PasswordVisibilityIcon />
                         </button>
                       </div>
-                    </div>
+                    </label>
+                    <label className="form-label">
+                      Confirm Password
+                      <div className="password-input-wrap">
+                        <input
+                          className="form-input password-input-field"
+                          type={encryptedBackupPasswordConfirmVisible ? "text" : "password"}
+                          value={encryptedBackupPasswordConfirm}
+                          onChange={(event) => setEncryptedBackupPasswordConfirm(event.target.value)}
+                          autoComplete="new-password"
+                          disabled={!!exporting}
+                        />
+                        <button
+                          type="button"
+                          className="password-visibility-btn"
+                          aria-label={encryptedBackupPasswordConfirmVisible ? "Hide password" : "Show password"}
+                          aria-pressed={encryptedBackupPasswordConfirmVisible}
+                          onClick={() => setEncryptedBackupPasswordConfirmVisible((current) => !current)}
+                          disabled={!!exporting}
+                        >
+                          <PasswordVisibilityIcon />
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+                  {encryptedBackupPasswordConfirm && encryptedBackupPassword !== encryptedBackupPasswordConfirm ? (
+                    <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
+                      The password entries do not match.
+                    </p>
+                  ) : null}
+                  <div className="project-backup-primary-actions">
+                    <button className="btn btn--primary" onClick={() => void handleEncryptedBackupExport()} disabled={!!exporting || !encryptedBackupPassword || !encryptedBackupPasswordConfirm || encryptedBackupPassword !== encryptedBackupPasswordConfirm}>
+                      {exporting === "encrypted" ? "Exporting..." : "Export Backup"}
+                    </button>
                   </div>
                 </section>
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--danger">
-                    <h3>Whole Project Exports</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="project-export-actions project-export-actions--modal">
+
+                <section className="project-export-secondary-section">
+                  <h3>Other Formats</h3>
+                  <p className="project-export-secondary-note">
+                    These exports are not encrypted and can be read by anyone with access to the files.
+                  </p>
+                  <div className="project-export-format-list">
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">JSON</div>
+                        <div className="project-export-format-copy">Raw project data.</div>
+                      </div>
                       <button className="btn" onClick={() => void handleExport("json")} disabled={!!exporting}>
-                        {exporting === "json" ? "Exporting..." : "Export JSON Backup"}
-                      </button>
-                      <button className="btn" onClick={() => void handleExport("qdpx")} disabled={!!exporting}>
-                        {exporting === "qdpx" ? "Exporting..." : "Export REFI-QDA Project"}
+                        {exporting === "json" ? "Exporting..." : "Export"}
                       </button>
                     </div>
-                  </div>
-                </section>
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Review Export</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="project-export-actions project-export-actions--modal">
-                      <button className="btn btn--primary" onClick={() => void handleExport("xlsx")} disabled={!!exporting}>
-                        {exporting === "xlsx" ? "Exporting..." : "Export Excel Workbook"}
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">REFI-QDA</div>
+                        <div className="project-export-format-copy">Exchange with QDA software.</div>
+                      </div>
+                      <button className="btn" onClick={() => void handleExport("qdpx")} disabled={!!exporting}>
+                        {exporting === "qdpx" ? "Exporting..." : "Export"}
+                      </button>
+                    </div>
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">Excel</div>
+                        <div className="project-export-format-copy">Review workbook.</div>
+                      </div>
+                      <button className="btn" onClick={() => void handleExport("xlsx")} disabled={!!exporting}>
+                        {exporting === "xlsx" ? "Exporting..." : "Export"}
                       </button>
                     </div>
                   </div>
@@ -981,17 +1308,30 @@ export function PostgresProjectSettingsView({
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 {codebookError ? <p className="auth-error">{codebookError}</p> : null}
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Codebook Exchange</h3>
+                <section className="project-backup-primary-panel">
+                  <div className="project-backup-primary-header">
+                    <div>
+                      <h3>REFI-QDA Codebook</h3>
+                      <p>Import or export code definitions as a REFI-QDA codebook file.</p>
+                    </div>
                   </div>
-                  <div className="app-settings-modal-section-body">
-                    <div className="project-export-actions project-export-actions--modal">
+                  <div className="project-export-format-list">
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">Import</div>
+                        <div className="project-export-format-copy">Add codes from a REFI-QDA codebook file.</div>
+                      </div>
                       <button className="btn" onClick={() => void handleCodebookImport()} disabled={!!codebookBusy}>
-                        {codebookBusy === "import" ? "Importing..." : "Import REFI-QDA Codebook"}
+                        {codebookBusy === "import" ? "Importing..." : "Import"}
                       </button>
+                    </div>
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">Export</div>
+                        <div className="project-export-format-copy">Save this project's codebook for use elsewhere.</div>
+                      </div>
                       <button className="btn btn--primary" onClick={() => void handleCodebookExport()} disabled={!!codebookBusy}>
-                        {codebookBusy === "export" ? "Exporting..." : "Export REFI-QDA Codebook"}
+                        {codebookBusy === "export" ? "Exporting..." : "Export"}
                       </button>
                     </div>
                   </div>
@@ -1014,9 +1354,9 @@ export function PostgresProjectSettingsView({
                     <h3>Danger Zone</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
-                    <p className="import-project-copy">
-                      This permanently deletes <strong>{project.name}</strong>, including its dedicated PostgreSQL
-                      database, objects, relationships, and project memberships.
+                    <p className="settings-warning settings-warning--danger">
+                      This permanently deletes <strong>{project.name}</strong>, including its dedicated database,
+                      objects, relationships, and project memberships.
                     </p>
                     <label className="form-label">
                       Type the project name to confirm
@@ -1030,7 +1370,7 @@ export function PostgresProjectSettingsView({
                     </label>
                     {!canManageProject ? (
                       <p className="auth-hint" style={{ marginTop: 0 }}>
-                        Only project owners or the PostgreSQL administrator can delete this project.
+                        Only project owners or the administrator can delete this project.
                       </p>
                     ) : null}
                   </div>
@@ -1069,7 +1409,7 @@ export function PostgresProjectSettingsView({
 
       {importBackup ? (
         <SettingsModal
-          title="Import Snapshot"
+          title="Restore Snapshot"
           onClose={() => {
             setImportBackup(null);
             setImportBackupProjectName("");
@@ -1078,7 +1418,7 @@ export function PostgresProjectSettingsView({
         >
             <div className="app-settings-modal-body">
               <p className="import-project-copy">
-                Import the snapshot from {formatPostgresDateTime(importBackup.createdAt)} as a new project.
+                Restore the snapshot from {formatPostgresDateTime(importBackup.createdAt)} as a new project.
               </p>
               <label className="form-field">
                 <span>New project name</span>
@@ -1102,14 +1442,14 @@ export function PostgresProjectSettingsView({
                 setImportBackupProjectName("");
               }} disabled={backupBusy === "import"}>Cancel</button>
               <button type="button" className="btn btn--primary" onClick={() => void handleImportBackup()} disabled={backupBusy === "import" || !canManageProject || !importBackupProjectName.trim()}>
-                {backupBusy === "import" ? "Importing..." : "Import"}
+                {backupBusy === "import" ? "Restoring..." : "Restore"}
               </button>
             </div>
         </SettingsModal>
       ) : null}
 
       {importedBackupProject ? (
-        <SettingsModal title="Snapshot Imported" onClose={() => setImportedBackupProject(null)}>
+        <SettingsModal title="Snapshot Restored" onClose={() => setImportedBackupProject(null)}>
             <div className="app-settings-modal-body">
               <p className="import-project-copy">
                 Created "{importedBackupProject.name}" as a new project.

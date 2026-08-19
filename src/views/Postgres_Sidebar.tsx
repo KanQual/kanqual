@@ -26,7 +26,6 @@ type PostgresSidebarProps = {
   onShowProjectCodeText?: () => void;
   onShowProjectMemos?: () => void;
   onShowProjectReports?: () => void;
-  onShowProjectLog?: () => void;
   onShowProjectObjects?: () => void;
   onShowProjectRelationships?: () => void;
   onShowAiAssistHome?: () => void;
@@ -62,7 +61,6 @@ export function PostgresSidebar({
   onShowProjectCodeText,
   onShowProjectMemos,
   onShowProjectReports,
-  onShowProjectLog,
   onShowProjectObjects,
   onShowProjectRelationships,
   onShowAiAssistHome,
@@ -98,7 +96,6 @@ export function PostgresSidebar({
     { id: "relationships", label: "Relationships", disabled: !activeProject, onClick: onShowProjectRelationships },
     { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
     { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
-    { id: "project-log", label: "Log", disabled: !activeProject, onClick: onShowProjectLog },
   ];
   const canvasItems = [
     { id: "free-draw", label: "Free Draw", disabled: !activeProject, onClick: onShowFreeDraw },

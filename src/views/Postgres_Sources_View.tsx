@@ -33,6 +33,7 @@ import {
   PostgresAttributeValueHistoryModal,
   type PostgresAttributeValueHistoryTarget,
 } from "../components/PostgresAttributeValueHistoryModal";
+import { PlusIcon } from "../components/AppIcons";
 import {
   PostgresRelationshipModal,
   type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
@@ -3251,14 +3252,6 @@ export function PostgresSourcesView({
   }, [selectedRow, visibleRows]);
 
   useEffect(() => {
-    if (showAttributesTable) return;
-    if (selectedSourceKindFilter === "all") return;
-    if (!visibleRows.some((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)) {
-      setSelectedSourceKindFilter("all");
-    }
-  }, [selectedSourceKindFilter, showAttributesTable, visibleRows]);
-
-  useEffect(() => {
     if (!selectedRow || selectedSourceKindFilter === "all") return;
     if ((selectedRow.sourceObjectTypeSystemKey || selectedRow.sourceObjectType) !== selectedSourceKindFilter) {
       setSelectedRow(null);
@@ -3424,6 +3417,15 @@ export function PostgresSourcesView({
       .filter((option): option is { kind: string; label: string; count: number } => option !== null),
     [sourceKindSummaries],
   );
+
+  useEffect(() => {
+    if (showAttributesTable) return;
+    if (selectedSourceKindFilter === "all") return;
+    if (!visibleRows.some((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)) {
+      setSelectedSourceKindFilter("all");
+    }
+  }, [selectedSourceKindFilter, showAttributesTable, visibleRows]);
+
   const selectedSourceKind = sourceKindFromFilterValue(selectedSourceKindFilter);
 
   const filteredRows = useMemo(
@@ -4518,40 +4520,21 @@ export function PostgresSourcesView({
             >
               Add Attribute
             </button>
-          ) : !showAttributesTable ? (
-            <button
-              className="btn btn--primary"
-              onClick={() => {
-                setNewSourceOpen(true);
-                setSubmitError(null);
-              }}
-              disabled={!canManageSources}
-              title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : undefined}
-            >
-              New Source
-            </button>
           ) : null}
         </div>
       </header>
 
       {error && <p className="users-error">{error}</p>}
       {attributeError && <p className="users-error">{attributeError}</p>}
-      {(showAttributesTable || !codingEnabled) && (
-        <p className="users-guide-copy" style={{ marginBottom: 16 }}>
-          {showAttributesTable
-            ? "Source attributes are stored directly in the PostgreSQL workspace. Define shared source metadata here and compare it across sources."
-            : "Sources are loaded directly from the PostgreSQL workspace. This project view is read-only for source coding; use Analysis > Code Text to annotate."}
-        </p>
-      )}
 
       <div
         className="postgres-sources-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
-          gap: 20,
-          alignItems: "center",
-          flex: 1,
+          gridTemplateColumns: "minmax(280px, 340px) auto minmax(0, 1fr)",
+          gap: 0,
+          alignItems: "stretch",
+          flex: "0 0 auto",
           minHeight: 0,
         }}
       >
@@ -4592,14 +4575,13 @@ export function PostgresSourcesView({
             >
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <h2 style={{ margin: 0, fontSize: 18 }}>Source object types</h2>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>Source Types</h2>
                   {textCodingMode === "ai-assisted" ? (
                     <p className="users-guide-copy" style={{ margin: 0, fontSize: 12 }}>
                       Text and Transcripts only
                     </p>
                   ) : null}
                 </div>
-                <span className="home-restricted-value">{sourceKindSummaries.length}</span>
               </div>
             </div>
 
@@ -4609,7 +4591,7 @@ export function PostgresSourcesView({
                   <tr>
                     <th
                       className={`users-th${sourceKindSortCol === "label" ? " users-th--sorted" : ""}`}
-                      style={{ width: "62%" }}
+                      style={{ width: "76%" }}
                       onClick={() => handleSourceKindSort("label")}
                     >
                       Type
@@ -4619,7 +4601,7 @@ export function PostgresSourcesView({
                     </th>
                     <th
                       className={`users-th${sourceKindSortCol === "count" ? " users-th--sorted" : ""}`}
-                      style={{ width: "38%" }}
+                      style={{ width: "24%" }}
                       onClick={() => handleSourceKindSort("count")}
                     >
                       Count
@@ -4650,7 +4632,7 @@ export function PostgresSourcesView({
                       }}
                     >
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span>All</span>
+                        <span>All sources</span>
                       </div>
                     </td>
                     <td className="users-td users-td--muted">{visibleRows.length}</td>
@@ -4676,7 +4658,7 @@ export function PostgresSourcesView({
                           }
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, paddingLeft: 18 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                           <SourceObjectTypeSwatch
                             shape={summary.shape}
                             fill={summary.fill}
@@ -4695,12 +4677,14 @@ export function PostgresSourcesView({
               </table>
               {sourceKindSummaries.length === 0 ? (
                 <div className="empty-state" style={{ minHeight: 140 }}>
-                  <p>No source types yet.</p>
+                  <p>No sources yet.</p>
                 </div>
               ) : null}
             </div>
           </section>
         </div>
+
+        <div className="project-workspace-col-divider" aria-hidden="true" />
 
         <section
           className="users-content"
@@ -4716,27 +4700,50 @@ export function PostgresSourcesView({
           }}
         >
           {!selectedRow ? (
-            <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
-              <div className="segmented-control" role="tablist" aria-label="Source workspace views">
-                <button
-                  type="button"
-                  className={showAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
-                  role="tab"
-                  aria-selected={!showAttributesTable}
-                  onClick={() => setShowAttributesTable(false)}
-                >
-                  Details
-                </button>
-                <button
-                  type="button"
-                  className={showAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                  role="tab"
-                  aria-selected={showAttributesTable}
-                  onClick={() => setShowAttributesTable(true)}
-                >
-                  Attributes
-                </button>
+            <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
+              <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
+                <div className="segmented-control" role="tablist" aria-label="Source workspace views">
+                  <button
+                    type="button"
+                    className={showAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+                    role="tab"
+                    aria-selected={!showAttributesTable}
+                    onClick={() => setShowAttributesTable(false)}
+                  >
+                    Details
+                  </button>
+                  <button
+                    type="button"
+                    className={showAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                    role="tab"
+                    aria-selected={showAttributesTable}
+                    onClick={() => setShowAttributesTable(true)}
+                  >
+                    Attributes
+                  </button>
+                </div>
               </div>
+              {!showAttributesTable ? (
+                <button
+                  type="button"
+                  className="btn btn--primary project-create-icon-button"
+                  aria-label="New source"
+                  title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "New source"}
+                  onClick={() => {
+                    setNewSourceOpen(true);
+                    setSubmitError(null);
+                  }}
+                  disabled={!canManageSources}
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                  }}
+                >
+                  <PlusIcon className="project-create-icon" />
+                </button>
+              ) : null}
             </div>
           ) : null}
           {showAttributesTable ? (

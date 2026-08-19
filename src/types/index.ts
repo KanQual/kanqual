@@ -155,7 +155,6 @@ export type View =
   | "documents"
   | "codebook"
   | "annotations"
-  | "project-log"
   | "project-settings"
   | "code-text"
   | "memos"

@@ -1,20 +1,16 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { formatCurrentDateTime } from "../i18n/formatters";
 import {
   createPostgresProject,
-  deletePostgresProject,
   getPostgresInstallationSettings,
   getPostgresUserProjectState,
   listPostgresProjects,
   POSTGRES_PROJECT_CHANGED_EVENT,
   rememberPostgresProjectClosed,
   rememberPostgresProjectOpened,
-  removePostgresProjectFromState,
   type PostgresProject,
   type PostgresProjectChangeEvent,
   type PostgresRecentProject,
-  updatePostgresProject,
 } from "../lib/postgres";
 import { LogoutIcon, PlusIcon } from "../components/AppIcons";
 
@@ -26,6 +22,13 @@ function describeUnknownError(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+function formatProjectLastLogin(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export type PostgresProjectsViewProps = {
@@ -46,6 +49,7 @@ export function PostgresProjectsView({
   renderProjectHome,
 }: PostgresProjectsViewProps) {
   const [projects, setProjects] = useState<PostgresProject[]>([]);
+  const [recentProjects, setRecentProjects] = useState<PostgresRecentProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -54,14 +58,7 @@ export function PostgresProjectsView({
   const [description, setDescription] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [openedProjectId, setOpenedProjectId] = useState<string | null>(null);
-  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
-  const [editingProjectName, setEditingProjectName] = useState("");
-  const [editingProjectDescription, setEditingProjectDescription] = useState("");
-  const [removingProjectId, setRemovingProjectId] = useState<string | null>(null);
-  const [deleteConfirmationName, setDeleteConfirmationName] = useState("");
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
-  const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const recordProjectOpened = useCallback(async (project: PostgresProject) => {
     const recentProject: PostgresRecentProject = {
@@ -72,6 +69,10 @@ export function PostgresProjectsView({
     };
     try {
       await rememberPostgresProjectOpened(recentProject);
+      setRecentProjects((current) => [
+        recentProject,
+        ...current.filter((item) => item.id !== recentProject.id),
+      ]);
     } catch (rememberError) {
       console.warn("Could not persist PostgreSQL recent project state:", describeUnknownError(rememberError));
     }
@@ -99,6 +100,7 @@ export function PostgresProjectsView({
         ]);
         if (!cancelled) {
           setProjects(nextProjects);
+          setRecentProjects(projectState.recentProjects);
           const reopenProjectId = installationSettings.startupReopenLastProject
             ? projectState.lastOpenedProjectId
             : null;
@@ -125,16 +127,27 @@ export function PostgresProjectsView({
   }, []);
 
   const openedProject = projects.find((project) => project.id === openedProjectId) ?? null;
-  const projectPendingDelete = projects.find((project) => project.id === removingProjectId) ?? null;
-  const canConfirmDelete = !!projectPendingDelete
-    && deleteConfirmationName.trim() === projectPendingDelete.name.trim();
-
+  const recentProjectById = new Map(recentProjects.map((project) => [project.id, project]));
+  const sortedProjects = [...projects].sort((left, right) => {
+    const leftOpenedAt = recentProjectById.get(left.id)?.openedAt ?? "";
+    const rightOpenedAt = recentProjectById.get(right.id)?.openedAt ?? "";
+    if (leftOpenedAt && rightOpenedAt && leftOpenedAt !== rightOpenedAt) {
+      return rightOpenedAt.localeCompare(leftOpenedAt);
+    }
+    if (leftOpenedAt && !rightOpenedAt) return -1;
+    if (!leftOpenedAt && rightOpenedAt) return 1;
+    return left.name.localeCompare(right.name);
+  });
   const refreshProjects = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const nextProjects = await listPostgresProjects();
+      const [nextProjects, projectState] = await Promise.all([
+        listPostgresProjects(),
+        getPostgresUserProjectState(),
+      ]);
       setProjects(nextProjects);
+      setRecentProjects(projectState.recentProjects);
       setSelectedProjectId((current) => {
         if (current && nextProjects.some((project) => project.id === current)) return current;
         return nextProjects[0]?.id ?? null;
@@ -178,52 +191,6 @@ export function PostgresProjectsView({
     }
   }
 
-  async function handleSaveProject() {
-    if (!editingProjectId || !editingProjectName.trim()) {
-      setError("Enter a project name for the PostgreSQL.");
-      return;
-    }
-
-    setSubmitting(true);
-    setError("");
-    setNotice("");
-    try {
-      const updated = await updatePostgresProject({
-        projectId: editingProjectId,
-        name: editingProjectName.trim(),
-        description: editingProjectDescription.trim(),
-      });
-      setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
-      setSelectedProjectId(updated.id);
-      setEditingProjectId(null);
-      setNotice(`Updated PostgreSQL project "${updated.name}".`);
-    } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : String(updateError));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleDeleteProject(projectId: string) {
-    setSubmitting(true);
-    setError("");
-    setNotice("");
-    try {
-      await deletePostgresProject(projectId);
-      await removePostgresProjectFromState(projectId);
-      setProjects((current) => current.filter((project) => project.id !== projectId));
-      setSelectedProjectId((current) => (current === projectId ? null : current));
-      setOpenedProjectId((current) => (current === projectId ? null : current));
-      setRemovingProjectId(null);
-      setDeleteConfirmationName("");
-      setNotice("Deleted PostgreSQL project.");
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -242,21 +209,6 @@ export function PostgresProjectsView({
       if (unlisten) unlisten();
     };
   }, [refreshProjects]);
-
-  useEffect(() => {
-    if (!menuProjectId) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!menuRef.current) return;
-      if (menuRef.current.contains(event.target as Node)) return;
-      setMenuProjectId(null);
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-    };
-  }, [menuProjectId]);
 
   if (openedProject) {
     return renderProjectHome(openedProject, {
@@ -311,7 +263,9 @@ export function PostgresProjectsView({
               {projects.length > 0 ? (
                 <button
                   type="button"
-                  className="btn btn--primary"
+                  className="btn btn--primary project-create-icon-button"
+                  aria-label="New Project"
+                  title="New Project"
                   onClick={() => {
                     setError("");
                     setNotice("");
@@ -320,7 +274,7 @@ export function PostgresProjectsView({
                     setCreateProjectOpen(true);
                   }}
                 >
-                  New Project
+                  <PlusIcon className="project-create-icon" />
                 </button>
               ) : null}
             </div>
@@ -355,103 +309,37 @@ export function PostgresProjectsView({
               </div>
             </div>
           ) : (
-            <ul className="project-list">
-              {projects.map((project) => (
-                <li
-                  key={project.id}
-                  className="project-card"
-                  onClick={() => {
-                    setSelectedProjectId(project.id);
-                    setOpenedProjectId(project.id);
-                    void recordProjectOpened(project);
-                  }}
-                  style={{
-                    cursor: "pointer",
-                    outline: selectedProjectId === project.id ? "2px solid var(--color-primary)" : undefined,
-                  }}
-                >
-                  <div
-                    className="project-card-header"
-                    ref={menuProjectId === project.id ? menuRef : null}
-                  >
-                    <div className="project-card-name">{project.name}</div>
-                    <div className="project-card-topbar">
-                      <button
-                        type="button"
-                        className="btn project-card-menu-button"
-                        aria-label={`Actions for ${project.name}`}
-                        aria-expanded={menuProjectId === project.id}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setMenuProjectId((current) => (current === project.id ? null : project.id));
+            <div className="project-selection-table-wrap">
+              <table className="users-table project-selection-table">
+                <thead>
+                  <tr>
+                    <th className="users-th">Project</th>
+                    <th className="users-th project-selection-last-login-th">Last Login</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedProjects.map((project) => {
+                    const recentProject = recentProjectById.get(project.id);
+                    return (
+                      <tr
+                        key={project.id}
+                        className={`users-row project-selection-row${selectedProjectId === project.id ? " project-selection-row--selected" : ""}`}
+                        onClick={() => {
+                          setSelectedProjectId(project.id);
+                          setOpenedProjectId(project.id);
+                          void recordProjectOpened(project);
                         }}
                       >
-                        Actions
-                      </button>
-                      {menuProjectId === project.id ? (
-                        <div
-                          className="project-card-menu"
-                          role="menu"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="project-card-menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              setMenuProjectId(null);
-                              setSelectedProjectId(project.id);
-                              setOpenedProjectId(project.id);
-                              void recordProjectOpened(project);
-                            }}
-                          >
-                            Open project
-                          </button>
-                          <button
-                            type="button"
-                            className="project-card-menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              setMenuProjectId(null);
-                              setEditingProjectId(project.id);
-                              setEditingProjectName(project.name);
-                              setEditingProjectDescription(project.description);
-                            }}
-                            disabled={submitting}
-                          >
-                            Edit project
-                          </button>
-                          <button
-                            type="button"
-                            className="project-card-menu-item project-card-menu-item--danger"
-                            role="menuitem"
-                            onClick={() => {
-                              setMenuProjectId(null);
-                              setDeleteConfirmationName("");
-                              setRemovingProjectId(project.id);
-                            }}
-                            disabled={submitting}
-                          >
-                            Delete project
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="project-card-desc">{project.description || "No description yet."}</div>
-                  <div className="project-card-meta">
-                    <div className="project-card-meta-row">
-                      <span className="project-card-meta-label">Created</span>
-                      <span>{formatCurrentDateTime(project.createdAt)}</span>
-                    </div>
-                    <div className="project-card-meta-row">
-                      <span className="project-card-meta-label">Updated</span>
-                      <span>{formatCurrentDateTime(project.updatedAt)}</span>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                        <td className="users-td project-selection-name-cell">{project.name}</td>
+                        <td className="users-td project-selection-last-login-cell">
+                          {recentProject?.openedAt ? formatProjectLastLogin(recentProject.openedAt) : "Never"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {createProjectOpen ? (
@@ -500,98 +388,6 @@ export function PostgresProjectsView({
             </div>
           ) : null}
 
-          {editingProjectId ? (
-            <div className="modal-overlay" onClick={() => !submitting && setEditingProjectId(null)}>
-              <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-                <h2>Edit project</h2>
-                <div className="form">
-                  <label className="form-label">
-                    Project name
-                    <input
-                      className="form-input"
-                      value={editingProjectName}
-                      onChange={(event) => setEditingProjectName(event.target.value)}
-                      autoFocus
-                    />
-                  </label>
-                  <label className="form-label">
-                    Description
-                    <textarea
-                      className="form-input form-textarea"
-                      rows={3}
-                      value={editingProjectDescription}
-                      onChange={(event) => setEditingProjectDescription(event.target.value)}
-                    />
-                  </label>
-                  <div className="form-actions">
-                    <button type="button" className="btn" onClick={() => setEditingProjectId(null)} disabled={submitting}>
-                      Cancel
-                    </button>
-                    <button type="button" className="btn btn--primary" onClick={() => void handleSaveProject()} disabled={submitting || !editingProjectName.trim()}>
-                      {submitting ? "Saving..." : "Save project"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {projectPendingDelete ? (
-            <div className="modal-overlay" onClick={() => {
-              if (submitting) return;
-              setRemovingProjectId(null);
-              setDeleteConfirmationName("");
-            }}>
-              <div className="modal" onClick={(event) => event.stopPropagation()}>
-                <h2>Delete project</h2>
-                <div className="form">
-                  <p className="import-project-copy">
-                    This permanently deletes the PostgreSQL project and its local database, files, objects, relationships, and memberships.
-                  </p>
-                  <p className="import-project-copy">
-                    Type <strong>{projectPendingDelete.name}</strong> to confirm.
-                  </p>
-                  <label className="form-label">
-                    Project name
-                    <input
-                      className="form-input"
-                      value={deleteConfirmationName}
-                      onChange={(event) => {
-                        setDeleteConfirmationName(event.target.value);
-                        if (error) setError("");
-                      }}
-                      placeholder={projectPendingDelete.name}
-                      autoFocus
-                    />
-                  </label>
-                  <p className="modal-warning-text">
-                    This removes the project record, drops the project database, and deletes the linked project storage directory.
-                  </p>
-                  <div className="form-actions">
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setRemovingProjectId(null);
-                        setDeleteConfirmationName("");
-                      }}
-                      disabled={submitting}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--danger"
-                      onClick={() => void handleDeleteProject(projectPendingDelete.id)}
-                      disabled={submitting || !canConfirmDelete}
-                    >
-                      {submitting ? "Deleting..." : "Delete project"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
     </div>

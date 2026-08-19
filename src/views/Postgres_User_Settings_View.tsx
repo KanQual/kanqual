@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
 import { SettingsModal } from "../components/SettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
@@ -6,16 +7,13 @@ import { useI18n } from "../i18n/provider";
 import {
   changePostgresAppUserPassword,
   getPostgresUserPreferences,
-  renamePostgresRememberedAccount,
   savePostgresUserPreferences,
-  updatePostgresAppUserProfile,
   type PostgresAuthSession,
   type PostgresUserPreferences,
 } from "../lib/postgres";
 import {
   applyDensity,
   applyFontSize,
-  applyTheme,
   getStoredTheme,
   getStoredThemeState,
   initTheme,
@@ -54,9 +52,33 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferenc
   initTheme();
 }
 
+function PasswordVisibilityIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
+      <path
+        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function accountInitials(name: string): string {
+  return (name || "?")
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 export function PostgresUserSettingsView({
   authSession,
-  onAuthSessionUpdated,
   onAuthSessionInvalidated,
   embedded = false,
   includeAppearance = true,
@@ -64,23 +86,19 @@ export function PostgresUserSettingsView({
   const { locale, setLocale } = useI18n();
   const [activeModal, setActiveModal] = useState<"profile" | "password" | "appearance" | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
-  const [name, setName] = useState(authSession.user.name);
-  const [email, setEmail] = useState(authSession.user.email);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [submitting, setSubmitting] = useState<"profile" | "password" | null>(null);
+  const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false);
+  const [newPasswordVisible, setNewPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
+  const [submitting, setSubmitting] = useState<"password" | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [theme, setTheme] = useState<Theme>("light");
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
-
-  useEffect(() => {
-    setName(authSession.user.name);
-    setEmail(authSession.user.email);
-  }, [authSession.user.email, authSession.user.name]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,40 +143,6 @@ export function PostgresUserSettingsView({
     setError("");
   }, []);
 
-  async function handleSaveProfile(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    if (authSession.authKind !== "app_user") {
-      setError("The built-in local administrator account is managed through PostgreSQL setup, not this profile form.");
-      return;
-    }
-    if (!name.trim() || !email.trim()) {
-      setError("Enter your name and email.");
-      return;
-    }
-
-    setSubmitting("profile");
-    try {
-      const previousEmail = authSession.user.email;
-      const updatedUser = await updatePostgresAppUserProfile({
-        name: name.trim(),
-        email: email.trim(),
-      });
-      await renamePostgresRememberedAccount(previousEmail, updatedUser.email, updatedUser.name);
-      onAuthSessionUpdated({
-        ...authSession,
-        user: updatedUser,
-      });
-      setNotice("Profile updated.");
-      setActiveModal(null);
-    } catch (updateError) {
-      setError(describeUnknownError(updateError));
-    } finally {
-      setSubmitting(null);
-    }
-  }
-
   async function handleChangePassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -186,9 +170,7 @@ export function PostgresUserSettingsView({
         currentPassword,
         newPassword,
       });
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+      resetPasswordForm();
       setNotice("Password changed. Sign in again to continue.");
       setActiveModal(null);
       onAuthSessionInvalidated();
@@ -199,19 +181,24 @@ export function PostgresUserSettingsView({
     }
   }
 
-  function handleTheme(nextTheme: Theme) {
-    setTheme(nextTheme);
-    setActivePresetId(null);
-    applyTheme(nextTheme);
-    void persistUserPreferences({
-      theme: nextTheme,
-      density,
-      fontSize,
-      locale,
-      recentProjectLimit,
-      themeState: getStoredThemeState(),
-    });
+  function resetPasswordForm() {
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setCurrentPasswordVisible(false);
+    setNewPasswordVisible(false);
+    setConfirmPasswordVisible(false);
   }
+
+  function openPasswordModal() {
+    resetPasswordForm();
+    setError("");
+    setNotice("");
+    setActiveModal("password");
+  }
+
+  const profileName = authSession.user.name || authSession.user.username;
+  const profileUsername = authSession.user.username;
 
   function handleDensity(nextDensity: Density) {
     setDensity(nextDensity);
@@ -258,7 +245,6 @@ export function PostgresUserSettingsView({
   async function handleThemeManagerApplied() {
     const nextTheme = getStoredTheme();
     setTheme(nextTheme);
-    setActivePresetId(null);
     await persistUserPreferences({
       theme: nextTheme,
       density,
@@ -283,50 +269,42 @@ export function PostgresUserSettingsView({
       {error ? <p className="auth-error">{error}</p> : null}
 
       <div className="app-settings-overview-shell user-settings-overview-shell">
-        <div className="app-settings-overview-stack">
+        <div className={embedded ? "app-settings-overview-stack app-settings-overview-stack--compact" : "app-settings-overview-stack"}>
           <div className="app-settings-overview-sections">
-            <section className="app-settings-overview-section">
+            <section className={embedded ? "app-settings-overview-section app-settings-overview-section--compact" : "app-settings-overview-section"}>
               {!embedded ? (
                 <div className="app-settings-overview-section-header">
                   <p className="app-settings-overview-section-heading">Account</p>
                 </div>
               ) : null}
-              <div className="app-settings-overview-grid">
+              <div className={embedded ? "app-settings-overview-grid app-settings-overview-grid--compact" : "app-settings-overview-grid"}>
                 <button
                   type="button"
-                  className="app-settings-overview-card app-settings-overview-card--default"
+                  className={embedded ? "app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--default" : "app-settings-overview-card app-settings-overview-card--default"}
                   onClick={() => setActiveModal("profile")}
                 >
+                  {embedded ? <span className="app-settings-overview-card-icon" aria-hidden="true">ID</span> : null}
                   <h3>Profile</h3>
-                  <p>Update your display name. Email is your PostgreSQL login username.</p>
+                  {!embedded ? <p>View your KanQual account.</p> : null}
                 </button>
-                {authSession.authKind !== "postgres_admin" ? (
-                  <button
-                    type="button"
-                    className="app-settings-overview-card app-settings-overview-card--default"
-                    onClick={() => setActiveModal("password")}
-                  >
-                    <h3>Password</h3>
-                    <p>Change your PostgreSQL account password.</p>
-                  </button>
-                ) : null}
               </div>
             </section>
             {includeAppearance ? (
-              <section className="app-settings-overview-section">
+              <section className={embedded ? "app-settings-overview-section app-settings-overview-section--compact" : "app-settings-overview-section"}>
                 {!embedded ? (
                   <div className="app-settings-overview-section-header">
                     <p className="app-settings-overview-section-heading">Preferences</p>
                   </div>
                 ) : null}
-                <div className="app-settings-overview-grid">
+                <div className={embedded ? "app-settings-overview-grid app-settings-overview-grid--compact" : "app-settings-overview-grid"}>
                   <button
                     type="button"
-                    className="app-settings-overview-card app-settings-overview-card--default"
+                    className={embedded ? "app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--default" : "app-settings-overview-card app-settings-overview-card--default"}
                     onClick={() => setActiveModal("appearance")}
                   >
+                    {embedded ? <span className="app-settings-overview-card-icon" aria-hidden="true">Aa</span> : null}
                     <h3>Appearance</h3>
-                    <p>Adjust theme, density, and text size for this device.</p>
+                    {!embedded ? <p>Adjust theme, density, and text size for this device.</p> : null}
                   </button>
                 </div>
               </section>
@@ -336,62 +314,161 @@ export function PostgresUserSettingsView({
       </div>
 
       {activeModal === "profile" ? (
-        <SettingsModal title="Profile" onClose={() => setActiveModal(null)} closeDisabled={submitting === "profile"}>
+        <SettingsModal title="Profile" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>PostgreSQL App User</h3></div>
                   <div className="app-settings-modal-section-body">
-                    <form className="form" onSubmit={handleSaveProfile}>
-                      <label className="form-label">Name
-                        <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
-                      </label>
-                      <label className="form-label">Email
-                        <input className="form-input" type="email" value={email} readOnly />
-                      </label>
-                      <div className="form-actions">
-                        <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "profile"}>Cancel</button>
-                        <button type="submit" className="btn btn--primary" disabled={submitting === "profile" || !name.trim() || !email.trim()}>
-                          {submitting === "profile" ? "Saving..." : "Save profile"}
-                        </button>
+                    <div className="form">
+                      <div className="auth-admin-notice auth-user-notice">
+                        <div className="account-avatar" aria-hidden="true">
+                          {accountInitials(profileName)}
+                        </div>
+                        <div className="account-info">
+                          <div className="account-name">{profileName}</div>
+                          <div className="account-email">{profileUsername}</div>
+                        </div>
                       </div>
-                    </form>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ alignSelf: "flex-start" }}
+                        onClick={openPasswordModal}
+                        disabled={authSession.authKind !== "app_user"}
+                      >
+                        Change password
+                      </button>
+                    </div>
                   </div>
                 </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <div className="form-actions" style={{ margin: 0 }}>
+                <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
               </div>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "password" ? (
-        <SettingsModal title="Password" onClose={() => setActiveModal(null)} closeDisabled={submitting === "password"}>
+        <SettingsModal title="Change Password" onClose={() => {
+          if (submitting === "password") return;
+          resetPasswordForm();
+          setActiveModal(null);
+        }} closeDisabled={submitting === "password"}>
+          <form className="form" onSubmit={handleChangePassword}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Change Password</h3></div>
                   <div className="app-settings-modal-section-body">
-                    <form className="form" onSubmit={handleChangePassword}>
-                      <label className="form-label">Current password
-                        <input className="form-input" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoFocus />
+                      <div className="auth-admin-notice auth-user-notice">
+                        <div className="account-avatar" aria-hidden="true">
+                          {accountInitials(profileName)}
+                        </div>
+                        <div className="account-info">
+                          <div className="account-name">{profileName}</div>
+                          <div className="account-email">{profileUsername}</div>
+                        </div>
+                      </div>
+                      <label className="form-label" style={{ marginTop: 8 }}>Current password
+                        <div className="password-input-wrap">
+                          <input
+                            className="form-input password-input-field"
+                            type={currentPasswordVisible ? "text" : "password"}
+                            value={currentPassword}
+                            onChange={(event) => setCurrentPassword(event.target.value)}
+                            autoFocus
+                            autoComplete="current-password"
+                            disabled={submitting === "password"}
+                          />
+                          <button
+                            type="button"
+                            className="password-visibility-btn"
+                            aria-label={currentPasswordVisible ? "Hide password" : "Show password"}
+                            aria-pressed={currentPasswordVisible}
+                            onClick={() => setCurrentPasswordVisible((current) => !current)}
+                            disabled={submitting === "password"}
+                          >
+                            <PasswordVisibilityIcon />
+                          </button>
+                        </div>
                       </label>
                       <label className="form-label">New password
-                        <input className="form-input" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+                        <div className="password-input-wrap">
+                          <input
+                            className="form-input password-input-field"
+                            type={newPasswordVisible ? "text" : "password"}
+                            value={newPassword}
+                            onChange={(event) => setNewPassword(event.target.value)}
+                            autoComplete="new-password"
+                            disabled={submitting === "password"}
+                          />
+                          <button
+                            type="button"
+                            className="password-visibility-btn"
+                            aria-label={newPasswordVisible ? "Hide password" : "Show password"}
+                            aria-pressed={newPasswordVisible}
+                            onClick={() => setNewPasswordVisible((current) => !current)}
+                            disabled={submitting === "password"}
+                          >
+                            <PasswordVisibilityIcon />
+                          </button>
+                        </div>
                         <p className="password-requirement-note">Minimum 8 characters.</p>
                       </label>
                       <label className="form-label">Confirm new password
-                        <input className="form-input" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+                        <div className="password-input-wrap">
+                          <input
+                            className="form-input password-input-field"
+                            type={confirmPasswordVisible ? "text" : "password"}
+                            value={confirmPassword}
+                            onChange={(event) => setConfirmPassword(event.target.value)}
+                            autoComplete="new-password"
+                            disabled={submitting === "password"}
+                          />
+                          <button
+                            type="button"
+                            className="password-visibility-btn"
+                            aria-label={confirmPasswordVisible ? "Hide password" : "Show password"}
+                            aria-pressed={confirmPasswordVisible}
+                            onClick={() => setConfirmPasswordVisible((current) => !current)}
+                            disabled={submitting === "password"}
+                          >
+                            <PasswordVisibilityIcon />
+                          </button>
+                        </div>
                       </label>
-                      <div className="form-actions">
-                        <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "password"}>Cancel</button>
-                        <button type="submit" className="btn btn--primary" disabled={submitting === "password"}>
-                          {submitting === "password" ? "Changing..." : "Change password"}
-                        </button>
-                      </div>
-                    </form>
+                      {confirmPassword && newPassword !== confirmPassword ? (
+                        <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
+                          The password entries do not match.
+                        </p>
+                      ) : null}
                   </div>
                 </section>
               </div>
             </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <div className="form-actions" style={{ margin: 0 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    resetPasswordForm();
+                    setActiveModal(null);
+                  }}
+                  disabled={submitting === "password"}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={submitting === "password"}>
+                  {submitting === "password" ? "Changing..." : "Change password"}
+                </button>
+              </div>
+            </div>
+          </form>
         </SettingsModal>
       ) : null}
 
@@ -402,19 +479,7 @@ export function PostgresUserSettingsView({
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Interface</h3></div>
                   <div className="app-settings-modal-section-body">
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Theme</div>
-                        <div className="settings-row-desc">Switch between light and dark mode.</div>
-                      </div>
-                      <div className="theme-options">
-                        {(["light", "dark"] as Theme[]).map((option) => (
-                          <button key={option} type="button" className={`theme-option${theme === option ? " theme-option--active" : ""}`} onClick={() => handleTheme(option)}>
-                            {option === "light" ? "Light" : "Dark"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    <ActiveThemePreviewRow theme={theme} onEdit={() => setShowThemeManager(true)} />
                     <div className="settings-row">
                       <div className="settings-row-info">
                         <div className="settings-row-label">Interface density</div>
@@ -461,13 +526,6 @@ export function PostgresUserSettingsView({
                           <option key={option} value={option}>{LOCALE_LABELS[option]}</option>
                         ))}
                       </select>
-                    </div>
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Custom theme</div>
-                        <div className="settings-row-desc">Edit saved presets, color overrides, corner radius, and border width for this device.</div>
-                      </div>
-                      <button type="button" className="btn" onClick={() => setShowThemeManager(true)}>Edit theme</button>
                     </div>
                   </div>
                 </section>

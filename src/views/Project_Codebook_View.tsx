@@ -430,11 +430,11 @@ const COLS: { key: SortCol; label: string; width: string }[] = [
 
 // Color swatch
 
-function ColorSwatch({ color, size = 14 }: { color: string; size?: number }) {
+function ColorSwatch({ color, size }: { color: string; size?: number }) {
   return (
     <span
-      className="code-color-swatch"
-      style={{ background: color || "#ccc", width: size, height: size }}
+      className="code-swatch"
+      style={{ background: color || "#ccc", ...(size ? { width: size, height: size } : {}) }}
       title={color}
     />
   );
@@ -732,7 +732,7 @@ export function CodebookView({
           description: code.description ?? "",
           parentId: code.parentCodeId ?? "",
           parentLabel: code.parentCodeId ? codeLabelById[code.parentCodeId] ?? "" : "",
-          createdByName: "-",
+          createdByName: code.createdByName || "-",
           createdAt: code.createdAt,
           sourcesCount: docsByCode[code.id]?.size ?? 0,
         })),

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { PlusIcon } from "./AppIcons";
+import { SettingsModal } from "./SettingsModal";
 import {
   type Theme,
   type ColorVar,
@@ -251,93 +253,95 @@ function ThemeEditor({
 
   return (
     <>
-      <div className="theme-editor-field">
-        <label className="form-label">
-          Name
-          <input
-            className="form-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Theme"
-            autoFocus
-          />
-        </label>
-      </div>
-
-      <div className="theme-editor-field">
-        <div className="form-label" style={{ marginBottom: 8 }}>
-          Base Mode
+      <div className="theme-editor-scroll">
+        <div className="theme-editor-field">
+          <label className="form-label">
+            Name
+            <input
+              className="form-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My Theme"
+              autoFocus
+            />
+          </label>
         </div>
-        <div className="theme-options" style={{ justifyContent: "flex-start" }}>
-          {(["light", "dark"] as Theme[]).map((theme) => (
-            <button
-              key={theme}
-              className={`theme-option${base === theme ? " theme-option--active" : ""}`}
-              onClick={() => handleBaseChange(theme)}
-              aria-pressed={base === theme}
-            >
-              <div className={`theme-preview theme-preview--${theme}`}>
-                <div className="theme-preview-sidebar" />
-                <div className="theme-preview-content">
-                  <div className="theme-preview-bar" style={{ width: "70%" }} />
-                  <div className="theme-preview-bar" style={{ width: "50%" }} />
-                  <div className="theme-preview-bar" style={{ width: "60%" }} />
+
+        <div className="theme-editor-field">
+          <div className="form-label" style={{ marginBottom: 8 }}>
+            Base Mode
+          </div>
+          <div className="theme-options" style={{ justifyContent: "flex-start" }}>
+            {(["light", "dark"] as Theme[]).map((theme) => (
+              <button
+                key={theme}
+                className={`theme-option${base === theme ? " theme-option--active" : ""}`}
+                onClick={() => handleBaseChange(theme)}
+                aria-pressed={base === theme}
+              >
+                <div className={`theme-preview theme-preview--${theme}`}>
+                  <div className="theme-preview-sidebar" />
+                  <div className="theme-preview-content">
+                    <div className="theme-preview-bar" style={{ width: "70%" }} />
+                    <div className="theme-preview-bar" style={{ width: "50%" }} />
+                    <div className="theme-preview-bar" style={{ width: "60%" }} />
+                  </div>
                 </div>
+                {theme === "light" ? "Light" : "Dark"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="theme-editor-field">
+          <div className="form-label" style={{ marginBottom: 8 }}>
+            UI Style
+          </div>
+          <SliderRow
+            label="Corner Radius"
+            desc="Roundness of corners on cards, buttons, and inputs"
+            value={borderRadius}
+            min={0}
+            max={20}
+            unit="px"
+            onChange={setBorderRadius}
+          />
+          <SliderRow
+            label="Border Width"
+            desc="Thickness of borders on cards, modals, and inputs"
+            value={borderWidth}
+            min={1}
+            max={4}
+            unit="px"
+            onChange={setBorderWidth}
+          />
+        </div>
+
+        <div className="theme-editor-field">
+          <div className="form-label" style={{ marginBottom: 8 }}>
+            Colors
+          </div>
+          <div className="color-groups">
+            {groups.map((group) => (
+              <div key={group} className="color-group">
+                <h3 className="color-group-title">{group}</h3>
+                {COLOR_VARS.filter((v) => v.group === group).map((varDef) => (
+                  <ColorRow
+                    key={varDef.key}
+                    varDef={varDef}
+                    value={colors[varDef.key] ?? defaults[varDef.key]}
+                    defaultValue={defaults[varDef.key]}
+                    onChange={handleColorChange}
+                    onReset={handleReset}
+                  />
+                ))}
               </div>
-              {theme === "light" ? "Light" : "Dark"}
-            </button>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="theme-editor-field">
-        <div className="form-label" style={{ marginBottom: 8 }}>
-          UI Style
-        </div>
-        <SliderRow
-          label="Corner Radius"
-          desc="Roundness of corners on cards, buttons, and inputs"
-          value={borderRadius}
-          min={0}
-          max={20}
-          unit="px"
-          onChange={setBorderRadius}
-        />
-        <SliderRow
-          label="Border Width"
-          desc="Thickness of borders on cards, modals, and inputs"
-          value={borderWidth}
-          min={1}
-          max={4}
-          unit="px"
-          onChange={setBorderWidth}
-        />
-      </div>
-
-      <div className="theme-editor-field">
-        <div className="form-label" style={{ marginBottom: 8 }}>
-          Colors
-        </div>
-        <div className="color-groups">
-          {groups.map((group) => (
-            <div key={group} className="color-group">
-              <h3 className="color-group-title">{group}</h3>
-              {COLOR_VARS.filter((v) => v.group === group).map((varDef) => (
-                <ColorRow
-                  key={varDef.key}
-                  varDef={varDef}
-                  value={colors[varDef.key] ?? defaults[varDef.key]}
-                  defaultValue={defaults[varDef.key]}
-                  onChange={handleColorChange}
-                  onReset={handleReset}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="form-actions">
+      <div className="app-settings-modal-footer">
         <button className="btn" onClick={handleResetDefaults}>
           Reset to Defaults
         </button>
@@ -352,6 +356,49 @@ function ThemeEditor({
   );
 }
 
+function ThemePreviewThumbnail({ theme }: { theme: Theme }) {
+  return (
+    <div className={`theme-preview theme-preview--${theme}`}>
+      <div className="theme-preview-sidebar" />
+      <div className="theme-preview-content">
+        <div className="theme-preview-bar" style={{ width: "70%" }} />
+        <div className="theme-preview-bar" style={{ width: "50%" }} />
+        <div className="theme-preview-bar" style={{ width: "60%" }} />
+      </div>
+    </div>
+  );
+}
+
+function ThemePresetPreviewThumbnail({ preset }: { preset: ThemePreset }) {
+  const defaults = getAppDefaults(preset.base);
+  const color = (key: string) => preset.colors[key] ?? defaults[key] ?? "";
+  const surface = color("--color-surface") || color("--color-bg") || "#f9fafb";
+  const bar = color("--color-border") || color("--color-text-muted") || "#d1d5db";
+
+  return (
+    <div
+      className="theme-preview theme-preview--custom"
+      style={{
+        borderColor: color("--color-border") || undefined,
+        borderRadius: `${Math.max(2, preset.borderRadius)}px`,
+      }}
+    >
+      <div
+        className="theme-preview-sidebar"
+        style={{ background: color("--color-sidebar") || color("--color-primary") || undefined }}
+      />
+      <div
+        className="theme-preview-content"
+        style={{ background: surface }}
+      >
+        <div className="theme-preview-bar" style={{ width: "70%", background: color("--color-primary") || bar }} />
+        <div className="theme-preview-bar" style={{ width: "50%", background: bar }} />
+        <div className="theme-preview-bar" style={{ width: "60%", background: color("--color-surface-alt") || bar }} />
+      </div>
+    </div>
+  );
+}
+
 export function ThemeManagerModal({
   onClose,
   onApplied,
@@ -363,7 +410,64 @@ export function ThemeManagerModal({
 }) {
   const [presets, setPresets] = useState<ThemePreset[]>(getPresets);
   const [editing, setEditing] = useState<ThemePreset | null>(null);
+  const [openThemeActions, setOpenThemeActions] = useState<string | null>(null);
+  const [themeActionsMenuPosition, setThemeActionsMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const snapshotRef = useRef<ReturnType<typeof currentSnapshot> | null>(null);
+  const themeActionsMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!openThemeActions) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Element | null;
+      if (target?.closest("[data-theme-actions-trigger='true']")) return;
+      if (themeActionsMenuRef.current?.contains(event.target as Node)) return;
+      setOpenThemeActions(null);
+      setThemeActionsMenuPosition(null);
+    }
+    function onViewportChange() {
+      setOpenThemeActions(null);
+      setThemeActionsMenuPosition(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+    };
+  }, [openThemeActions]);
+
+  function openActionsMenu(
+    event: MouseEvent<HTMLButtonElement>,
+    id: string,
+    actionCount: number,
+  ) {
+    if (openThemeActions === id) {
+      setOpenThemeActions(null);
+      setThemeActionsMenuPosition(null);
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const margin = 8;
+    const menuWidth = 160;
+    const menuHeight = actionCount * 37 + 10;
+    const belowTop = rect.bottom - 2;
+    const aboveTop = rect.top - menuHeight + 2;
+    const top = belowTop + menuHeight <= window.innerHeight - margin
+      ? belowTop
+      : Math.max(margin, aboveTop);
+    const preferredLeft = rect.right - menuWidth;
+    const fallbackLeft = rect.left;
+    const left = Math.min(
+      window.innerWidth - menuWidth - margin,
+      Math.max(margin, preferredLeft < margin ? fallbackLeft : preferredLeft),
+    );
+
+    setThemeActionsMenuPosition({ top, left });
+    setOpenThemeActions(id);
+  }
 
   function openNew() {
     snapshotRef.current = currentSnapshot();
@@ -375,6 +479,18 @@ export function ThemeManagerModal({
       colors: { ...snap.colors },
       borderRadius: snap.radius,
       borderWidth: snap.borderWidth,
+    });
+  }
+
+  function openNewFromBase(base: Theme) {
+    snapshotRef.current = currentSnapshot();
+    setEditing({
+      id: genId(),
+      name: `${base === "light" ? "Light" : "Dark"} Custom`,
+      base,
+      colors: { ...getAppDefaults(base) },
+      borderRadius: 6,
+      borderWidth: 1,
     });
   }
 
@@ -403,12 +519,16 @@ export function ThemeManagerModal({
   }
 
   function handleApply(preset: ThemePreset) {
+    setOpenThemeActions(null);
+    setThemeActionsMenuPosition(null);
     persistPreset(preset);
     void onApplied();
   }
 
-  function handleResetActiveDefaults() {
-    resetThemeToDefaults(getStoredTheme());
+  function handleApplyBuiltIn(theme: Theme) {
+    setOpenThemeActions(null);
+    setThemeActionsMenuPosition(null);
+    resetThemeToDefaults(theme);
     void onApplied();
   }
 
@@ -424,51 +544,99 @@ export function ThemeManagerModal({
   }
 
   return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !editing) onClose();
-      }}
+    <SettingsModal
+      title={editing ? (editing.name ? `Editing: ${editing.name}` : "New Theme") : "Theme Presets"}
+      onClose={editing ? handleCancel : onClose}
     >
-      <div className={`modal ${editing ? "modal--theme-editor" : "modal--wide"}`}>
-        {editing ? (
-          <>
-            <h2>{editing.name ? `Editing: ${editing.name}` : "New Theme"}</h2>
-            <div className="theme-editor-scroll">
-              <ThemeEditor initial={editing} onSave={handleSave} onCancel={handleCancel} />
-            </div>
-          </>
-        ) : (
-          <>
+      {editing ? (
+        <ThemeEditor initial={editing} onSave={handleSave} onCancel={handleCancel} />
+      ) : (
+        <>
+          <div className="app-settings-modal-body">
             <div className="theme-manager-header">
-              <h2 style={{ marginBottom: 0 }}>Theme Presets</h2>
+              <div />
               <div className="theme-manager-actions">
-                <button className="btn btn--sm" onClick={handleResetActiveDefaults}>
-                  Reset to Defaults
-                </button>
-                <button className="btn btn--primary btn--sm" onClick={openNew}>
-                  + New Theme
+                <button
+                  className="codebook-icon-action theme-manager-add-button"
+                  onClick={openNew}
+                  aria-label="New theme"
+                  title="New theme"
+                >
+                  <PlusIcon />
                 </button>
               </div>
             </div>
 
-            {presets.length === 0 ? (
-              <div className="theme-manager-empty">
-                <p>No saved themes yet.</p>
-                <p>Create a theme to save your custom colors and UI style.</p>
-              </div>
-            ) : (
-              <div className="theme-preset-list">
-                {presets.map((preset) => (
+            <div className="theme-preset-list">
+              {(["light", "dark"] as Theme[]).map((baseTheme) => (
+                <div key={`built-in-${baseTheme}`} className="theme-preset-row">
+                  <div className="theme-preset-swatches theme-preset-swatches--preview">
+                    <ThemePreviewThumbnail theme={baseTheme} />
+                  </div>
+                  <div className="theme-preset-info">
+                    <span className="theme-preset-name">{baseTheme === "light" ? "Light" : "Dark"}</span>
+                    <span className={`theme-preset-badge theme-preset-badge--${baseTheme}`}>
+                      built-in
+                    </span>
+                    <span className="theme-preset-meta">default theme</span>
+                  </div>
+                  <div
+                    className="theme-preset-actions"
+                  >
+                    <button
+                      type="button"
+                      className="snapshot-actions-trigger"
+                      data-theme-actions-trigger="true"
+                      onClick={(event) => openActionsMenu(event, `built-in-${baseTheme}`, 2)}
+                      aria-label={`${baseTheme === "light" ? "Light" : "Dark"} theme actions`}
+                      aria-expanded={openThemeActions === `built-in-${baseTheme}`}
+                      title="Theme actions"
+                    >
+                      ...
+                    </button>
+                    {openThemeActions === `built-in-${baseTheme}` ? (
+                      <div
+                        ref={themeActionsMenuRef}
+                        className="snapshot-actions-menu theme-preset-actions-menu"
+                        style={themeActionsMenuPosition ?? undefined}
+                        role="menu"
+                      >
+                        <button
+                          type="button"
+                          className="snapshot-actions-menu-item"
+                          onClick={() => handleApplyBuiltIn(baseTheme)}
+                          role="menuitem"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          type="button"
+                          className="snapshot-actions-menu-item"
+                          onClick={() => {
+                            setOpenThemeActions(null);
+                            setThemeActionsMenuPosition(null);
+                            openNewFromBase(baseTheme);
+                          }}
+                          role="menuitem"
+                        >
+                          Customize
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+
+              {presets.length === 0 ? (
+                <div className="theme-manager-empty">
+                  <p>No saved custom themes yet.</p>
+                  <p>Create a theme to save your custom colors and UI style.</p>
+                </div>
+              ) : (
+                presets.map((preset) => (
                   <div key={preset.id} className="theme-preset-row">
-                    <div className="theme-preset-swatches">
-                      {(["--color-sidebar", "--color-primary", "--color-bg"] as const).map((key) => (
-                        <span
-                          key={key}
-                          className="theme-preset-swatch"
-                          style={{ background: preset.colors[key] ?? "#ccc" }}
-                        />
-                      ))}
+                    <div className="theme-preset-swatches theme-preset-swatches--preview">
+                      <ThemePresetPreviewThumbnail preset={preset} />
                     </div>
                     <div className="theme-preset-info">
                       <span className="theme-preset-name">{preset.name || "Untitled"}</span>
@@ -479,30 +647,76 @@ export function ThemeManagerModal({
                         radius {preset.borderRadius}px border {preset.borderWidth}px
                       </span>
                     </div>
-                    <div className="theme-preset-actions">
-                      <button className="btn btn--sm btn--primary" onClick={() => handleApply(preset)}>
-                        Apply
+                    <div
+                      className="theme-preset-actions"
+                    >
+                      <button
+                        type="button"
+                        className="snapshot-actions-trigger"
+                        data-theme-actions-trigger="true"
+                        onClick={(event) => openActionsMenu(event, `preset-${preset.id}`, 3)}
+                        aria-label={`${preset.name || "Untitled"} theme actions`}
+                        aria-expanded={openThemeActions === `preset-${preset.id}`}
+                        title="Theme actions"
+                      >
+                        ...
                       </button>
-                      <button className="btn btn--sm" onClick={() => openEdit(preset)}>
-                        Edit
-                      </button>
-                      <button className="btn btn--sm btn--danger" onClick={() => handleDelete(preset.id)}>
-                        Delete
-                      </button>
+                      {openThemeActions === `preset-${preset.id}` ? (
+                        <div
+                          ref={themeActionsMenuRef}
+                          className="snapshot-actions-menu theme-preset-actions-menu"
+                          style={themeActionsMenuPosition ?? undefined}
+                          role="menu"
+                        >
+                          <button
+                            type="button"
+                            className="snapshot-actions-menu-item"
+                            onClick={() => handleApply(preset)}
+                            role="menuitem"
+                          >
+                            Apply
+                          </button>
+                          <button
+                            type="button"
+                            className="snapshot-actions-menu-item"
+                            onClick={() => {
+                              setOpenThemeActions(null);
+                              setThemeActionsMenuPosition(null);
+                              openEdit(preset);
+                            }}
+                            role="menuitem"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="snapshot-actions-menu-item snapshot-actions-menu-item--danger"
+                            onClick={() => {
+                              setOpenThemeActions(null);
+                              setThemeActionsMenuPosition(null);
+                              handleDelete(preset.id);
+                            }}
+                            role="menuitem"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={onClose}>
-                Close
-              </button>
+                ))
+              )}
             </div>
-          </>
-        )}
-      </div>
-    </div>
+          </div>
+
+          <div className="app-settings-modal-footer">
+            <span />
+            <button className="btn btn--primary" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        </>
+      )}
+    </SettingsModal>
   );
 }

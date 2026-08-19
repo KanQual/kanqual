@@ -203,7 +203,7 @@ export type PostgresSchemaMigrationResult = {
 export type PostgresAppUser = {
   id: string;
   name: string;
-  email: string;
+  username: string;
   role: string;
   active: boolean;
   disabledAt: string | null;
@@ -237,7 +237,6 @@ export type PostgresInstallationSettings = {
   documentImportWarnBeforeEmptyImport: boolean;
   privacyMaskFilePaths: boolean;
   privacyClearRecentProjectsOnSignOut: boolean;
-  privacyForgetLoginIdentitiesOnLogout: boolean;
   updatesAutoCheck: boolean;
   updatesBannerEnabled: boolean;
   aiAssistPolicy: {
@@ -274,6 +273,19 @@ export type PostgresInstallationSettings = {
     ollamaRelevantSegmentsCandidateLimit: number;
     ollamaRelevantSegmentsMaxResults: number;
   };
+};
+
+export type PostgresAiLlmCatalogEntry = {
+  scope: "local" | "cloud";
+  providerId: string;
+  providerLabel: string;
+  modelId: string;
+  modelLabel: string;
+  modelPublisher?: string | null;
+  endpoint?: string | null;
+  protocol?: string | null;
+  host?: string | null;
+  port?: number | null;
 };
 
 export type PostgresUserPreferences = {
@@ -328,6 +340,7 @@ export type PostgresProject = {
   databaseName: string;
   storagePath: string;
   creationSource: "manual" | "snapshot" | "kanqual_export" | "refi_qda" | string;
+  createdByUsername: string;
   accessMode: "local" | "remote";
   active: boolean;
   disabledAt: string | null;
@@ -344,6 +357,7 @@ export type PostgresProjectUser = {
   role: string;
   createdAt: string;
   updatedAt: string;
+  lastActiveAt: string | null;
 };
 
 export type PostgresProjectAiAssistSettings = {
@@ -353,6 +367,11 @@ export type PostgresProjectAiAssistSettings = {
   allowSummaries: boolean;
   allowCodeSuggestions: boolean;
   allowDraftReports: boolean;
+  embeddingChunkSize: number;
+  embeddingOverlapSize: number;
+  embeddingBatchSize: number;
+  embeddingPrefixPassages: boolean;
+  embeddingNormalizeWhitespace: boolean;
 };
 
 export type PostgresProjectAiAssistRuntimeStatus = {
@@ -591,6 +610,8 @@ export type PostgresCode = {
   shortcut: string;
   parentCodeId: string;
   sortOrder: number;
+  createdByProjectUserId: string;
+  createdByName: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -971,6 +992,10 @@ export async function getPostgresInstallationSettings(): Promise<PostgresInstall
   return invoke<PostgresInstallationSettings>("get_postgres_experiment_installation_settings_command");
 }
 
+export async function listPostgresEnabledAiLlmCatalog(): Promise<PostgresAiLlmCatalogEntry[]> {
+  return invoke<PostgresAiLlmCatalogEntry[]>("list_postgres_experiment_enabled_ai_llm_catalog_command");
+}
+
 export async function savePostgresInstallationSettings(
   settings: PostgresInstallationSettings,
   projectId?: string,
@@ -1085,7 +1110,7 @@ export async function clearPostgresUserProjectState(): Promise<void> {
 
 export async function createPostgresAppUser(data: {
   name: string;
-  email: string;
+  username: string;
   password: string;
   mustChangePassword?: boolean;
 }): Promise<PostgresAppUser> {
@@ -1095,7 +1120,7 @@ export async function createPostgresAppUser(data: {
 }
 
 export async function loginPostgresAppUser(data: {
-  email: string;
+  username: string;
   password: string;
   rememberSession: boolean;
 }): Promise<PostgresAuthSession> {
@@ -1119,7 +1144,7 @@ export async function logoutPostgresAppUser(): Promise<PostgresAuthStatus> {
 
 export async function updatePostgresAppUserProfile(data: {
   name: string;
-  email: string;
+  username: string;
 }): Promise<PostgresAppUser> {
   return invoke<PostgresAppUser>("update_postgres_experiment_app_user_profile_command", {
     request: data,

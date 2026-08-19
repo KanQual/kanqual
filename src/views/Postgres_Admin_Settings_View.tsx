@@ -3,15 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { readDir, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
+import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModalCloseButton as ModalCloseButton } from "../components/SettingsModal";
-import { DownloadIcon, HelpIcon, LogoutIcon } from "../components/AppIcons";
+import { CloseIcon, DownloadIcon, HelpIcon, LogoutIcon, PlusIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { LoadingCard } from "../components/LoadingCard";
-import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
 import {
   formatBytes,
+  DEFAULT_APP_SETTINGS,
   readAppSettings,
   saveAppSettings,
   type AppSettings,
@@ -77,11 +79,9 @@ import {
 import {
   applyDensity,
   applyFontSize,
-  applyTheme,
   getStoredTheme,
   getStoredThemeState,
   initTheme,
-  setActivePresetId,
   setRuntimeThemePreferences,
   type Density,
   type FontSize,
@@ -96,9 +96,7 @@ export type PostgresAdminSettingsViewProps = {
 
 type AppSettingsModalId =
   | "language"
-  | "import"
   | "appearance"
-  | "privacy"
   | "storage"
   | "network"
   | "aiAssist"
@@ -182,6 +180,7 @@ type SettingsModalSectionProps = {
   children?: ReactNode;
   action?: ReactNode;
   tone?: "default" | "warning" | "danger";
+  className?: string;
 };
 
 function SettingsModalSection({
@@ -189,9 +188,10 @@ function SettingsModalSection({
   children,
   action,
   tone = "default",
+  className = "",
 }: SettingsModalSectionProps) {
   return (
-    <section className="app-settings-modal-section">
+    <section className={`app-settings-modal-section${className ? ` ${className}` : ""}`}>
       <div className={`app-settings-modal-section-header app-settings-modal-section-header--${tone}${action ? " app-settings-modal-section-header--with-action" : ""}`}>
         <h3>{title}</h3>
         {action}
@@ -360,6 +360,17 @@ function PasswordVisibilityIcon() {
   );
 }
 
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} focusable="false">
+      <path
+        fill="currentColor"
+        d="M9.2 16.2 4.8 11.8l-1.4 1.4 5.8 5.8L21 7.2l-1.4-1.4z"
+      />
+    </svg>
+  );
+}
+
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
@@ -422,15 +433,14 @@ function syncLegacyAppSettingsFromPostgresInstallationSettings(
     documentImport: {
       ...current.documentImport,
       defaultMode: installationSettings.documentImportDefaultMode,
-      autoNameFromFile: installationSettings.documentImportAutoNameFromFile,
+      autoNameFromFile: true,
       trimImportedText: installationSettings.documentImportTrimImportedText,
-      warnBeforeEmptyImport: installationSettings.documentImportWarnBeforeEmptyImport,
+      warnBeforeEmptyImport: true,
     },
     privacy: {
       ...current.privacy,
-      maskFilePaths: installationSettings.privacyMaskFilePaths,
-      clearRecentProjectsOnSignOut: installationSettings.privacyClearRecentProjectsOnSignOut,
-      forgetLoginIdentitiesOnLogout: installationSettings.privacyForgetLoginIdentitiesOnLogout,
+      maskFilePaths: false,
+      clearRecentProjectsOnSignOut: false,
     },
     updates: {
       ...current.updates,
@@ -577,6 +587,7 @@ export function PostgresAdminSettingsView({
   } | null>(null);
   const [updatingMembershipId, setUpdatingMembershipId] = useState("");
   const [removingMembershipId, setRemovingMembershipId] = useState("");
+  const [addingMembershipProjectId, setAddingMembershipProjectId] = useState("");
   const [deactivatingUserId, setDeactivatingUserId] = useState("");
   const [reactivatingUserId, setReactivatingUserId] = useState("");
   const [manageUserMenu, setManageUserMenu] = useState<{
@@ -597,6 +608,8 @@ export function PostgresAdminSettingsView({
   const [requiredResetUserId, setRequiredResetUserId] = useState("");
   const [membershipUser, setMembershipUser] = useState<PostgresAppUser | null>(null);
   const [membershipRemovalWarning, setMembershipRemovalWarning] = useState<PostgresProjectUser | null>(null);
+  const [membershipNotice, setMembershipNotice] = useState("");
+  const [membershipError, setMembershipError] = useState("");
   const [aiAssistAdminTab, setAiAssistAdminTab] = useState<"usage" | "embeddings" | "llms">("usage");
   const [aiAssistPolicySaving, setAiAssistPolicySaving] = useState(false);
   const [embeddingModelStatus, setEmbeddingModelStatus] = useState<PostgresEmbeddingModelStatus | null>(null);
@@ -609,6 +622,12 @@ export function PostgresAdminSettingsView({
   const [adminCloudModels, setAdminCloudModels] = useState<CloudLlmModelSummary[]>([]);
   const [adminLocalModelsBusy, setAdminLocalModelsBusy] = useState(false);
   const [adminCloudModelsBusy, setAdminCloudModelsBusy] = useState(false);
+  const [localProviderModalOpen, setLocalProviderModalOpen] = useState(false);
+  const [localProviderDraft, setLocalProviderDraft] = useState<AppSettings["llm"] | null>(null);
+  const [localProviderMenu, setLocalProviderMenu] = useState<{ x: number; y: number } | null>(null);
+  const [cloudProviderModalOpen, setCloudProviderModalOpen] = useState(false);
+  const [cloudProviderDraft, setCloudProviderDraft] = useState<AppSettings["llm"] | null>(null);
+  const [cloudProviderMenu, setCloudProviderMenu] = useState<{ x: number; y: number } | null>(null);
   const [adminAuditTab, setAdminAuditTab] = useState<"auth" | "projects">("auth");
   const [adminUsersLogSortColumn, setAdminUsersLogSortColumn] = useState<AdminUsersLogSortColumn>("time");
   const [adminUsersLogSortDirection, setAdminUsersLogSortDirection] = useState<SortDirection>("desc");
@@ -644,84 +663,98 @@ export function PostgresAdminSettingsView({
     id: AppSettingsModalId;
     title: string;
     description: string;
+    icon: string;
     tone: "default" | "network" | "admin";
   }> = [
     {
       id: "language",
       title: t("appSettings.sectionTitles.language"),
       description: t("appSettings.overview.language"),
+      icon: "L",
       tone: "default" as const,
     },
     {
       id: "appearance",
       title: "Appearance",
       description: "Adjust the interface theme, density, and text size.",
+      icon: "A",
       tone: "default" as const,
     },
     {
       id: "storage",
       title: t("appSettings.storage.localStorageTitle"),
       description: t("appSettings.overview.storage"),
+      icon: "S",
       tone: "default" as const,
     },
     {
       id: "updates",
       title: "Updates",
       description: t("appSettings.overview.updates"),
+      icon: "U",
       tone: "admin" as const,
     },
     {
       id: "diagnostics",
       title: "Database",
       description: t("appSettings.overview.diagnostics"),
+      icon: "D",
       tone: "default" as const,
     },
     {
       id: "administratorLog",
       title: "Administrator Log",
       description: "Review authentication events and merged project activity.",
+      icon: "Log",
       tone: "admin" as const,
     },
     {
       id: "network",
       title: t("appSettings.sectionTitles.network"),
       description: t("appSettings.overview.network"),
+      icon: "N",
       tone: "admin" as const,
     },
     {
       id: "aiAssist",
       title: "AI Assist",
       description: "Control server-wide and project-level AI Assist availability.",
+      icon: "AI",
       tone: "admin" as const,
     },
     {
       id: "permissions",
       title: t("appSettings.permissions.title"),
       description: t("appSettings.permissions.description"),
+      icon: "R",
       tone: "default" as const,
     },
     {
       id: "addProject",
       title: "Add Project",
       description: "Create a project and assign initial project members.",
+      icon: "+P",
       tone: "admin" as const,
     },
     {
       id: "manageProjects",
       title: "Manage Projects",
       description: "Open, disable, or delete project workspaces.",
+      icon: "P",
       tone: "admin" as const,
     },
     {
       id: "addUser",
       title: "Add User",
       description: "Create a PostgreSQL user and assign project roles.",
+      icon: "+U",
       tone: "admin" as const,
     },
     {
       id: "manageUsers",
       title: "Manage Users",
       description: "Review accounts, project access, roles, and password resets.",
+      icon: "U",
       tone: "admin" as const,
     },
   ];
@@ -748,13 +781,13 @@ export function PostgresAdminSettingsView({
       cardIds: ["aiAssist", "network"],
     },
     {
-      id: "local-data",
-      sectionHeading: "Local Storage & Database",
+      id: "system",
+      sectionHeading: "System",
       cardIds: ["administratorLog", "diagnostics", "storage", "updates"],
     },
     {
-      id: "everyday",
-      sectionHeading: t("appSettings.overviewSections.everyday.eyebrow"),
+      id: "preferences",
+      sectionHeading: "Preferences",
       cardIds: ["appearance", "language"],
     },
   ];
@@ -856,19 +889,33 @@ export function PostgresAdminSettingsView({
     hasPartialEmbeddingModel && !partialEmbeddingModelIsDefault ? embeddingModelStatus : null;
   const aiAssistLlmSettings = installationSettings?.llm;
   const aiAssistSetupDisabled = aiAssistPolicyMode === "disabled";
-  const selectedLocalLlmProvider =
-    aiAssistLlmSettings?.connectionMode === "local"
+  const savedLocalLlmProvider =
+    aiAssistLlmSettings?.ollamaEnabled
       ? LOCAL_LLM_PROVIDER_OPTIONS.find((provider) => provider.value === aiAssistLlmSettings.localProvider) ?? null
       : null;
+  const selectedLocalLlmProvider =
+    localProviderDraft
+      ? LOCAL_LLM_PROVIDER_OPTIONS.find((provider) => provider.value === localProviderDraft.localProvider) ?? null
+      : null;
   const selectedCloudLlmProvider =
+    cloudProviderDraft
+      ? CLOUD_LLM_PROVIDER_OPTIONS.find((provider) => provider.value === cloudProviderDraft.cloudProvider) ?? null
+      : null;
+  const savedCloudLlmProvider =
     aiAssistLlmSettings?.connectionMode === "cloud"
       ? CLOUD_LLM_PROVIDER_OPTIONS.find((provider) => provider.value === aiAssistLlmSettings.cloudProvider) ?? null
       : null;
-  const adminLocalEnabledModels = aiAssistLlmSettings
-    ? aiAssistLlmSettings.localEnabledModelsByProvider[aiAssistLlmSettings.localProvider]
+  const savedLocalEnabledModels = aiAssistLlmSettings && savedLocalLlmProvider
+    ? aiAssistLlmSettings.localEnabledModelsByProvider[aiAssistLlmSettings.localProvider] ?? []
+    : [];
+  const adminLocalEnabledModels = localProviderDraft
+    ? localProviderDraft.localEnabledModelsByProvider[localProviderDraft.localProvider]
     : undefined;
-  const adminCloudEnabledModels = aiAssistLlmSettings
-    ? aiAssistLlmSettings.cloudEnabledModelsByProvider[aiAssistLlmSettings.cloudProvider]
+  const savedCloudEnabledModels = aiAssistLlmSettings && savedCloudLlmProvider
+    ? aiAssistLlmSettings.cloudEnabledModelsByProvider[aiAssistLlmSettings.cloudProvider] ?? []
+    : [];
+  const adminCloudEnabledModels = cloudProviderDraft
+    ? cloudProviderDraft.cloudEnabledModelsByProvider[cloudProviderDraft.cloudProvider]
     : undefined;
 
   function toggleAdminUsersLogSort(column: AdminUsersLogSortColumn) {
@@ -1045,23 +1092,43 @@ export function PostgresAdminSettingsView({
     void persistAiAssistLlmSettings(updater(installationSettings.llm), successMessage);
   }
 
-  function handleAdminLocalLlmProviderChange(provider: LocalLlmProvider | "") {
-    setAdminLocalModels([]);
-    if (!provider) {
-      updateAiAssistLlmSettings((current) => ({
-        ...current,
-        connectionMode: current.connectionMode === "local" ? "none" : current.connectionMode,
-        ollamaEnabled: false,
-        ollamaSelectedModel: "",
-        localSelectedModelsByProvider: {
-          ...current.localSelectedModelsByProvider,
-          [current.localProvider]: "",
-        },
-      }));
-      return;
-    }
+  function openLocalProviderModal() {
+    if (!aiAssistLlmSettings) return;
+    const provider = aiAssistLlmSettings.ollamaEnabled
+      ? aiAssistLlmSettings.localProvider
+      : "ollama";
     const profile = LOCAL_LLM_PROVIDER_OPTIONS.find((option) => option.value === provider) ?? LOCAL_LLM_PROVIDER_OPTIONS[0];
-    updateAiAssistLlmSettings((current) => ({
+    const draft: AppSettings["llm"] = {
+      ...aiAssistLlmSettings,
+      ...(aiAssistLlmSettings.ollamaEnabled ? {} : profile.defaults),
+      connectionMode: "local",
+      ollamaEnabled: true,
+      localProvider: provider,
+      ollamaSelectedModel: aiAssistLlmSettings.localSelectedModelsByProvider[provider] ?? "",
+    };
+    const savedModels = draft.localEnabledModelsByProvider[provider] ?? [];
+    setAdminLocalModels(savedModels.map((name) => ({ name, size: null, modifiedAt: null })));
+    setLocalProviderDraft(draft);
+    setAiAssistNotice("");
+    setAiAssistError("");
+    setLocalProviderModalOpen(true);
+  }
+
+  function closeLocalProviderModal() {
+    if (adminLocalModelsBusy || aiAssistPolicySaving) return;
+    setLocalProviderModalOpen(false);
+    setLocalProviderDraft(null);
+    setAdminLocalModels([]);
+  }
+
+  function updateLocalProviderDraft(updater: (current: AppSettings["llm"]) => AppSettings["llm"]) {
+    setLocalProviderDraft((current) => current ? updater(current) : current);
+  }
+
+  function handleAdminLocalLlmProviderChange(provider: LocalLlmProvider) {
+    setAdminLocalModels([]);
+    const profile = LOCAL_LLM_PROVIDER_OPTIONS.find((option) => option.value === provider) ?? LOCAL_LLM_PROVIDER_OPTIONS[0];
+    updateLocalProviderDraft((current) => ({
       ...current,
       ...profile.defaults,
       connectionMode: "local",
@@ -1071,12 +1138,74 @@ export function PostgresAdminSettingsView({
     }));
   }
 
+  async function saveLocalProviderDraft() {
+    if (!localProviderDraft) return;
+    await persistAiAssistLlmSettings({
+      ...localProviderDraft,
+      connectionMode: "local",
+      ollamaEnabled: true,
+    }, "Local provider saved.");
+    setLocalProviderModalOpen(false);
+    setLocalProviderDraft(null);
+    setAdminLocalModels([]);
+  }
+
+  async function removeLocalProvider() {
+    if (!aiAssistLlmSettings) return;
+    const defaults = DEFAULT_APP_SETTINGS.llm;
+    await persistAiAssistLlmSettings({
+      ...aiAssistLlmSettings,
+      connectionMode: aiAssistLlmSettings.connectionMode === "local" ? "none" : aiAssistLlmSettings.connectionMode,
+      ollamaEnabled: false,
+      localProvider: defaults.localProvider,
+      ollamaProtocol: defaults.ollamaProtocol,
+      ollamaHost: defaults.ollamaHost,
+      ollamaPort: defaults.ollamaPort,
+      ollamaSelectedModel: "",
+      localSelectedModelsByProvider: {},
+      localEnabledModelsByProvider: {},
+    }, "Local provider removed.");
+    setLocalProviderMenu(null);
+    setLocalProviderModalOpen(false);
+    setLocalProviderDraft(null);
+    setAdminLocalModels([]);
+  }
+
+  function openCloudProviderModal() {
+    if (!aiAssistLlmSettings) return;
+    const provider = aiAssistLlmSettings.connectionMode === "cloud"
+      ? aiAssistLlmSettings.cloudProvider
+      : CLOUD_LLM_PROVIDER_OPTIONS[0].value;
+    const draft: AppSettings["llm"] = {
+      ...aiAssistLlmSettings,
+      connectionMode: "cloud",
+      cloudProvider: provider,
+      cloudSelectedModel: aiAssistLlmSettings.cloudSelectedModelsByProvider[provider] ?? "",
+    };
+    const savedModels = draft.cloudEnabledModelsByProvider[provider] ?? [];
+    setAdminCloudModels(savedModels.map((id) => ({ id, name: id, publisher: null })));
+    setCloudProviderDraft(draft);
+    setAiAssistNotice("");
+    setAiAssistError("");
+    setCloudProviderModalOpen(true);
+  }
+
+  function closeCloudProviderModal() {
+    if (adminCloudModelsBusy || aiAssistPolicySaving) return;
+    setCloudProviderModalOpen(false);
+    setCloudProviderDraft(null);
+    setAdminCloudModels([]);
+  }
+
+  function updateCloudProviderDraft(updater: (current: AppSettings["llm"]) => AppSettings["llm"]) {
+    setCloudProviderDraft((current) => current ? updater(current) : current);
+  }
+
   function handleAdminCloudLlmProviderChange(provider: CloudLlmProvider | "") {
     setAdminCloudModels([]);
     if (!provider) {
-      updateAiAssistLlmSettings((current) => ({
+      updateCloudProviderDraft((current) => ({
         ...current,
-        connectionMode: current.connectionMode === "cloud" ? "none" : current.connectionMode,
         cloudApiSecret: "",
         cloudSelectedModel: "",
         cloudSelectedModelsByProvider: {
@@ -1086,18 +1215,46 @@ export function PostgresAdminSettingsView({
       }));
       return;
     }
-    updateAiAssistLlmSettings((current) => ({
+    updateCloudProviderDraft((current) => ({
       ...current,
       connectionMode: "cloud",
-      ollamaEnabled: false,
       cloudProvider: provider,
       cloudSelectedModel: current.cloudSelectedModelsByProvider[provider] ?? "",
     }));
   }
 
+  async function saveCloudProviderDraft() {
+    if (!cloudProviderDraft) return;
+    await persistAiAssistLlmSettings({
+      ...cloudProviderDraft,
+      connectionMode: "cloud",
+    }, "Cloud provider saved.");
+    setCloudProviderModalOpen(false);
+    setCloudProviderDraft(null);
+    setAdminCloudModels([]);
+  }
+
+  async function removeCloudProvider() {
+    if (!aiAssistLlmSettings) return;
+    const defaults = DEFAULT_APP_SETTINGS.llm;
+    await persistAiAssistLlmSettings({
+      ...aiAssistLlmSettings,
+      connectionMode: aiAssistLlmSettings.connectionMode === "cloud" ? "none" : aiAssistLlmSettings.connectionMode,
+      cloudProvider: defaults.cloudProvider,
+      cloudApiSecret: "",
+      cloudSelectedModel: "",
+      cloudSelectedModelsByProvider: {},
+      cloudEnabledModelsByProvider: {},
+    }, "Cloud provider removed.");
+    setCloudProviderMenu(null);
+    setCloudProviderModalOpen(false);
+    setCloudProviderDraft(null);
+    setAdminCloudModels([]);
+  }
+
   async function handleAdminTestLocalLlmProvider() {
-    if (!aiAssistLlmSettings || aiAssistLlmSettings.connectionMode !== "local") return;
-    if (!aiAssistLlmSettings.ollamaHost.trim() || aiAssistLlmSettings.ollamaPort <= 0) {
+    if (!localProviderDraft) return;
+    if (!localProviderDraft.ollamaHost.trim() || localProviderDraft.ollamaPort <= 0) {
       setAiAssistError("Enter a host and port before testing the local provider.");
       setAiAssistNotice("");
       return;
@@ -1108,14 +1265,23 @@ export function PostgresAdminSettingsView({
     try {
       const result = await invoke<OllamaDiscoveryResult>("discover_ollama_models", {
         request: {
-          localProvider: aiAssistLlmSettings.localProvider,
-          protocol: aiAssistLlmSettings.ollamaProtocol,
-          host: aiAssistLlmSettings.ollamaHost,
-          port: aiAssistLlmSettings.ollamaPort,
-          timeoutSeconds: aiAssistLlmSettings.ollamaRequestTimeoutSeconds,
+          localProvider: localProviderDraft.localProvider,
+          protocol: localProviderDraft.ollamaProtocol,
+          host: localProviderDraft.ollamaHost,
+          port: localProviderDraft.ollamaPort,
+          timeoutSeconds: localProviderDraft.ollamaRequestTimeoutSeconds,
         },
       });
       setAdminLocalModels(result.models);
+      setLocalProviderDraft((current) => current
+        ? {
+            ...current,
+            localEnabledModelsByProvider: {
+              ...current.localEnabledModelsByProvider,
+              [current.localProvider]: result.models.map((model) => model.name),
+            },
+          }
+        : current);
       setAiAssistNotice(result.message);
     } catch (testError) {
       setAdminLocalModels([]);
@@ -1126,8 +1292,8 @@ export function PostgresAdminSettingsView({
   }
 
   async function handleAdminTestCloudLlmProvider() {
-    if (!aiAssistLlmSettings || aiAssistLlmSettings.connectionMode !== "cloud") return;
-    if (!aiAssistLlmSettings.cloudApiSecret.trim()) {
+    if (!cloudProviderDraft) return;
+    if (!cloudProviderDraft.cloudApiSecret.trim()) {
       setAiAssistError("Enter an API secret before testing the cloud provider.");
       setAiAssistNotice("");
       return;
@@ -1138,12 +1304,21 @@ export function PostgresAdminSettingsView({
     try {
       const result = await invoke<CloudLlmDiscoveryResult>("discover_cloud_llm_models", {
         request: {
-          provider: aiAssistLlmSettings.cloudProvider,
-          apiSecret: aiAssistLlmSettings.cloudApiSecret,
-          timeoutSeconds: aiAssistLlmSettings.ollamaRequestTimeoutSeconds,
+          provider: cloudProviderDraft.cloudProvider,
+          apiSecret: cloudProviderDraft.cloudApiSecret,
+          timeoutSeconds: cloudProviderDraft.ollamaRequestTimeoutSeconds,
         },
       });
       setAdminCloudModels(result.models);
+      setCloudProviderDraft((current) => current
+        ? {
+            ...current,
+            cloudEnabledModelsByProvider: {
+              ...current.cloudEnabledModelsByProvider,
+              [current.cloudProvider]: result.models.map((model) => model.id),
+            },
+          }
+        : current);
       setAiAssistNotice(result.message);
     } catch (testError) {
       setAdminCloudModels([]);
@@ -1154,7 +1329,7 @@ export function PostgresAdminSettingsView({
   }
 
   function handleAdminLocalModelToggle(modelName: string, enabled: boolean) {
-    updateAiAssistLlmSettings((current) => {
+    updateLocalProviderDraft((current) => {
       const discoveredModelNames = adminLocalModels.map((model) => model.name);
       const currentEnabled = current.localEnabledModelsByProvider[current.localProvider] ?? discoveredModelNames;
       const nextEnabled = enabled
@@ -1174,11 +1349,11 @@ export function PostgresAdminSettingsView({
           [current.localProvider]: nextEnabled,
         },
       };
-    }, "Model availability saved.");
+    });
   }
 
   function handleAdminCloudModelToggle(modelId: string, enabled: boolean) {
-    updateAiAssistLlmSettings((current) => {
+    updateCloudProviderDraft((current) => {
       const discoveredModelIds = adminCloudModels.map((model) => model.id);
       const currentEnabled = current.cloudEnabledModelsByProvider[current.cloudProvider] ?? discoveredModelIds;
       const nextEnabled = enabled
@@ -1198,7 +1373,7 @@ export function PostgresAdminSettingsView({
           [current.cloudProvider]: nextEnabled,
         },
       };
-    }, "Model availability saved.");
+    });
   }
 
   const refreshEmbeddingModelDetails = useCallback(async () => {
@@ -1505,11 +1680,13 @@ export function PostgresAdminSettingsView({
   }, [refreshPostgresDetails]);
 
   useEffect(() => {
-    if (!manageProjectMenu && !manageUserMenu) return;
+    if (!manageProjectMenu && !manageUserMenu && !localProviderMenu && !cloudProviderMenu) return;
 
     function closeMenu() {
       setManageProjectMenu(null);
       setManageUserMenu(null);
+      setLocalProviderMenu(null);
+      setCloudProviderMenu(null);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -1522,7 +1699,7 @@ export function PostgresAdminSettingsView({
       window.removeEventListener("pointerdown", closeMenu);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [manageProjectMenu, manageUserMenu]);
+  }, [manageProjectMenu, manageUserMenu, localProviderMenu, cloudProviderMenu]);
 
   useEffect(() => {
     if (activeModal === "manageUsers") {
@@ -1638,20 +1815,6 @@ export function PostgresAdminSettingsView({
     }
   }
 
-  function handleTheme(nextTheme: Theme) {
-    setTheme(nextTheme);
-    setActivePresetId(null);
-    applyTheme(nextTheme);
-    void persistUserPreferences({
-      theme: nextTheme,
-      density,
-      fontSize,
-      locale,
-      recentProjectLimit,
-      themeState: getStoredThemeState(),
-    });
-  }
-
   function handleDensity(nextDensity: Density) {
     setDensity(nextDensity);
     applyDensity(nextDensity);
@@ -1681,7 +1844,6 @@ export function PostgresAdminSettingsView({
   async function handleThemeManagerApplied() {
     const nextTheme = getStoredTheme();
     setTheme(nextTheme);
-    setActivePresetId(null);
     await persistUserPreferences({
       theme: nextTheme,
       density,
@@ -1829,6 +1991,12 @@ export function PostgresAdminSettingsView({
     });
   }
 
+  function closeMembershipModal() {
+    setMembershipUser(null);
+    setMembershipNotice("");
+    setMembershipError("");
+  }
+
   async function handleCreatePostgresProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (authSession.authKind !== "postgres_admin") {
@@ -1947,13 +2115,13 @@ export function PostgresAdminSettingsView({
       setError("Sign in as the PostgreSQL administrator to create users.");
       return;
     }
-    const email = addUserUsername.trim().toLowerCase();
-    if (!email) {
+    const username = addUserUsername.trim().toLowerCase();
+    if (!username) {
       setError("Enter a username.");
       setAddUserTab("account");
       return;
     }
-    if (/\s/.test(email)) {
+    if (/\s/.test(username)) {
       setError("Usernames cannot contain spaces.");
       setAddUserTab("account");
       return;
@@ -1980,8 +2148,8 @@ export function PostgresAdminSettingsView({
     setNotice("");
     try {
       const created = await createPostgresAppUser({
-        name: email,
-        email,
+        name: username,
+        username,
         password: addUserPassword,
         mustChangePassword: true,
       });
@@ -1993,12 +2161,12 @@ export function PostgresAdminSettingsView({
         });
       }
       setAppUsers((current) => [...current.filter((user) => user.id !== created.id), created]
-        .sort((a, b) => a.name.localeCompare(b.name) || a.email.localeCompare(b.email)));
+        .sort((a, b) => a.name.localeCompare(b.name) || a.username.localeCompare(b.username)));
       setAuthStatus(await getPostgresAuthStatus());
       await refreshPostgresDetails();
       resetAddUserModal();
       setActiveModal(null);
-      setNotice(`Created PostgreSQL app user ${created.email}. They will be asked to change their password on first login.`);
+      setNotice(`Created PostgreSQL app user ${created.username}. They will be asked to change their password on first login.`);
     } catch (createError) {
       setError(describeUnknownError(createError));
     } finally {
@@ -2021,7 +2189,7 @@ export function PostgresAdminSettingsView({
       setAppUsers((current) => current.map((entry) => entry.id === deactivated.id ? deactivated : entry));
       setAuthStatus(await getPostgresAuthStatus());
       setUserAccessWarning(null);
-      setNotice(`Disabled ${deactivated.email}.`);
+      setNotice(`Disabled ${deactivated.username}.`);
     } catch (deactivateError) {
       setError(describeUnknownError(deactivateError));
     } finally {
@@ -2049,14 +2217,14 @@ export function PostgresAdminSettingsView({
 
   async function handleUpdateProjectMembershipRole(membership: PostgresProjectUser, role: string) {
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to change project roles.");
+      setMembershipError("Sign in as the PostgreSQL administrator to change project roles.");
       return;
     }
     if (!role || role === membership.role) return;
 
     setUpdatingMembershipId(membership.id);
-    setError("");
-    setNotice("");
+    setMembershipError("");
+    setMembershipNotice("");
     try {
       const updated = await updatePostgresProjectUser({
         projectId: membership.projectId,
@@ -2064,41 +2232,71 @@ export function PostgresAdminSettingsView({
         role,
       });
       setProjectMemberships((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
-      setNotice(`Updated ${updated.email}'s role for ${projectById.get(updated.projectId)?.name ?? "project"}.`);
+      setMembershipNotice(`Updated ${updated.email}'s role for ${projectById.get(updated.projectId)?.name ?? "project"}.`);
     } catch (updateError) {
-      setError(describeUnknownError(updateError));
+      setMembershipError(describeUnknownError(updateError));
     } finally {
       setUpdatingMembershipId("");
     }
   }
 
-  async function handleRemoveProjectMembership(membership: PostgresProjectUser) {
+  async function handleAddProjectMembership(user: PostgresAppUser, project: PostgresProject) {
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to remove project access.");
+      setMembershipError("Sign in as the PostgreSQL administrator to add project access.");
       return;
     }
-    setError("");
-    setNotice("");
+    if ((membershipsByAppUserId[user.id] ?? []).some((membership) => membership.projectId === project.id)) {
+      return;
+    }
+
+    setAddingMembershipProjectId(project.id);
+    setMembershipError("");
+    setMembershipNotice("");
+    try {
+      const created = await createPostgresProjectUser({
+        projectId: project.id,
+        appUserId: user.id,
+        role: "viewer",
+      });
+      setProjectMemberships((current) => [
+        ...current.filter((entry) => entry.id !== created.id),
+        created,
+      ]);
+      setMembershipNotice(`Added ${created.email} to ${project.name}.`);
+    } catch (addError) {
+      setMembershipError(describeUnknownError(addError));
+    } finally {
+      setAddingMembershipProjectId("");
+    }
+  }
+
+  async function handleRemoveProjectMembership(membership: PostgresProjectUser) {
+    if (authSession.authKind !== "postgres_admin") {
+      setMembershipError("Sign in as the PostgreSQL administrator to remove project access.");
+      return;
+    }
+    setMembershipError("");
+    setMembershipNotice("");
     setMembershipRemovalWarning(membership);
   }
 
   async function confirmRemoveProjectMembership(membership: PostgresProjectUser) {
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to remove project access.");
+      setMembershipError("Sign in as the PostgreSQL administrator to remove project access.");
       return;
     }
     const project = projectById.get(membership.projectId);
 
     setRemovingMembershipId(membership.id);
-    setError("");
-    setNotice("");
+    setMembershipError("");
+    setMembershipNotice("");
     try {
       await deletePostgresProjectUser(membership.projectId, membership.id);
       setProjectMemberships((current) => current.filter((entry) => entry.id !== membership.id));
       setMembershipRemovalWarning(null);
-      setNotice(`Removed ${membership.email}'s access to ${project?.name ?? "project"}.`);
+      setMembershipNotice(`Removed ${membership.email}'s access to ${project?.name ?? "project"}.`);
     } catch (removeError) {
-      setError(describeUnknownError(removeError));
+      setMembershipError(describeUnknownError(removeError));
     } finally {
       setRemovingMembershipId("");
     }
@@ -2143,8 +2341,8 @@ export function PostgresAdminSettingsView({
       setRequiredResetUserId("");
       setNotice(
         finalUser.active && requiredResetUserId === resetPasswordUser.id
-          ? `Enabled ${finalUser.email}. They will be asked to change their password on first login.`
-          : `Reset password for ${finalUser.email}.`,
+          ? `Enabled ${finalUser.username}. They will be asked to change their password on first login.`
+          : `Reset password for ${finalUser.username}.`,
       );
     } catch (resetError) {
       setError(describeUnknownError(resetError));
@@ -2169,17 +2367,6 @@ export function PostgresAdminSettingsView({
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
-        {onSignOut ? (
-          <button
-            type="button"
-            className="admin-signout-button"
-            aria-label="Sign out"
-            title="Sign out"
-            onClick={() => void onSignOut()}
-          >
-            <LogoutIcon className="admin-signout-icon" />
-          </button>
-        ) : null}
       </header>
 
       {notice ? <p className="settings-success">{notice}</p> : null}
@@ -2191,7 +2378,7 @@ export function PostgresAdminSettingsView({
             <ModalCloseButton onClick={() => setHelpOpen(false)} />
             <h2>App Settings Help</h2>
             <p className="users-guide-copy">
-              Manage language, import defaults, privacy, appearance, AI runtime defaults, and PostgreSQL administration.
+              Manage language, appearance, AI runtime defaults, updates, storage, and PostgreSQL administration.
             </p>
             <p className="users-guide-copy">
               PostgreSQL-backed settings are shared through the local installation database. Appearance and recent-project display preferences are stored per signed-in app user.
@@ -2206,23 +2393,23 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       <div className="app-settings-overview-shell">
-        <div className="app-settings-overview-stack">
+        <div className="app-settings-overview-stack app-settings-overview-stack--admin">
           <div className="app-settings-overview-sections">
             {appSettingsSections.map((section) => (
-              <section key={section.id} className="app-settings-overview-section">
+              <section key={section.id} className="app-settings-overview-section app-settings-overview-section--compact">
                 <div className="app-settings-overview-section-header">
                   <p className="app-settings-overview-section-heading">{section.sectionHeading}</p>
                 </div>
-                <div className="app-settings-overview-grid">
+                <div className="app-settings-overview-grid app-settings-overview-grid--compact">
                   {section.cards.map((card) => (
                     <button
                       key={card.id}
                       type="button"
-                      className={`app-settings-overview-card app-settings-overview-card--${card.tone}`}
+                      className={`app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--${card.tone}`}
                       onClick={() => setActiveModal(card.id)}
                     >
+                      <span className="app-settings-overview-card-icon" aria-hidden="true">{card.icon}</span>
                       <h3>{card.title}</h3>
-                      <p>{card.description}</p>
                     </button>
                   ))}
                 </div>
@@ -2232,202 +2419,40 @@ export function PostgresAdminSettingsView({
         </div>
       </div>
 
+      {onSignOut ? (
+        <button
+          type="button"
+          className="admin-signout-button"
+          aria-label="Sign out"
+          title="Sign out"
+          onClick={() => void onSignOut()}
+        >
+          <LogoutIcon className="admin-signout-icon" />
+        </button>
+      ) : null}
+
       {activeModal === "language" ? (
-        <div
-          className="modal-overlay"
-          onClick={() => {
+        <LanguageSettingsModal
+          title={t("appSettings.sectionTitles.language")}
+          label={t("appSettings.language.label")}
+          locale={locale}
+          onChange={(nextLocale) => {
+            setLocale(nextLocale);
+            void persistUserPreferences({
+              theme,
+              density,
+              fontSize,
+              locale: nextLocale,
+              recentProjectLimit,
+              themeState: getStoredThemeState(),
+            }, t("appSettings.language.saved"));
+          }}
+          onClose={() => {
             setActiveModal(null);
             setNetworkNotice("");
             setNetworkError("");
           }}
-        >
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => {
-                setActiveModal(null);
-                setNetworkNotice("");
-                setNetworkError("");
-              }}
-            />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">{t("appSettings.sectionTitles.language")}</h2></div>
-            </div>
-            <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <SettingsModalSection title={t("appSettings.sectionTitles.language")}>
-                  <div className="settings-row postgres-language-settings-row">
-                    <div className="settings-row-info">
-                      <div className="settings-row-label">{t("appSettings.language.label")}</div>
-                    </div>
-                    <select
-                      className="form-input postgres-language-settings-select"
-                      value={locale}
-                      onChange={(event) => {
-                        const nextLocale = event.target.value as typeof locale;
-                        setLocale(nextLocale);
-                        void persistUserPreferences({
-                          theme,
-                          density,
-                          fontSize,
-                          locale: nextLocale,
-                          recentProjectLimit,
-                          themeState: getStoredThemeState(),
-                        }, t("appSettings.language.saved"));
-                      }}
-                    >
-                      {SUPPORTED_LOCALES.map((option) => (
-                        <option key={option} value={option}>{LOCALE_LABELS[option]}</option>
-                      ))}
-                    </select>
-                  </div>
-                </SettingsModalSection>
-              </div>
-            </div>
-            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={() => {
-                  setActiveModal(null);
-                  setNetworkNotice("");
-                  setNetworkError("");
-                }}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {activeModal === "import" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Document Import</h2></div>
-            </div>
-            <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Shared Defaults</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Auto-name from file</strong>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.documentImportAutoNameFromFile ?? true}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, documentImportAutoNameFromFile: event.target.checked },
-                            "Document import defaults saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Warn before empty import</strong>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.documentImportWarnBeforeEmptyImport ?? true}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, documentImportWarnBeforeEmptyImport: event.target.checked },
-                            "Document import defaults saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                  </div>
-                </section>
-              </div>
-            </div>
-            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {activeModal === "privacy" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Privacy</h2></div>
-            </div>
-            <div className="app-settings-modal-body">
-              <div className="app-settings-modal-sections">
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Local Data</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Mask file paths</strong>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.privacyMaskFilePaths ?? false}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, privacyMaskFilePaths: event.target.checked },
-                            "Privacy settings saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Clear recent projects on sign-out</strong>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.privacyClearRecentProjectsOnSignOut ?? false}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, privacyClearRecentProjectsOnSignOut: event.target.checked },
-                            "Privacy settings saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="settings-toggle-row">
-                      <span>
-                        <strong>Forget remembered login identities on sign-out</strong>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={installationSettings?.privacyForgetLoginIdentitiesOnLogout ?? false}
-                        onChange={(event) => {
-                          if (!installationSettings) return;
-                          void persistInstallationSettings(
-                            { ...installationSettings, privacyForgetLoginIdentitiesOnLogout: event.target.checked },
-                            "Privacy settings saved.",
-                          );
-                        }}
-                      />
-                    </label>
-                  </div>
-                </section>
-              </div>
-            </div>
-            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
-            </div>
-          </div>
-        </div>
+        />
       ) : null}
 
       {activeModal === "appearance" ? (
@@ -2438,23 +2463,13 @@ export function PostgresAdminSettingsView({
               <div><h2 className="settings-section-title">Appearance</h2></div>
             </div>
             <div className="app-settings-modal-body">
+              {membershipNotice ? <p className="settings-success">{membershipNotice}</p> : null}
+              {membershipError ? <p className="auth-error">{membershipError}</p> : null}
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Interface</h3></div>
                   <div className="app-settings-modal-section-body">
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Theme</div>
-                        <div className="settings-row-desc">Switch between light and dark mode.</div>
-                      </div>
-                      <div className="theme-options">
-                        {(["light", "dark"] as Theme[]).map((option) => (
-                          <button key={option} type="button" className={`theme-option${theme === option ? " theme-option--active" : ""}`} onClick={() => handleTheme(option)}>
-                            {option === "light" ? "Light" : "Dark"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    <ActiveThemePreviewRow theme={theme} onEdit={() => setShowThemeManager(true)} />
                     <div className="settings-row">
                       <div className="settings-row-info">
                         <div className="settings-row-label">Interface density</div>
@@ -2490,13 +2505,6 @@ export function PostgresAdminSettingsView({
                           </button>
                         ))}
                       </div>
-                    </div>
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">Custom theme</div>
-                        <div className="settings-row-desc">Edit saved presets, color overrides, corner radius, and border width for this device.</div>
-                      </div>
-                      <button type="button" className="btn" onClick={() => setShowThemeManager(true)}>Edit theme</button>
                     </div>
                   </div>
                 </section>
@@ -3026,289 +3034,143 @@ export function PostgresAdminSettingsView({
                 </div>
               ) : (
                 <div className="app-settings-modal-sections">
-                  <SettingsModalSection title="Local Providers">
-                    <fieldset className="llm-settings-grid" disabled={!installationSettings || aiAssistPolicySaving} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-                      <label className="form-label">
-                        API provider
-                        <select
-                          className="form-input"
-                          value={aiAssistLlmSettings?.connectionMode === "local" ? aiAssistLlmSettings.localProvider : ""}
-                          onChange={(event) => handleAdminLocalLlmProviderChange(event.target.value as LocalLlmProvider | "")}
-                        >
-                          <option value="">None</option>
-                          {LOCAL_LLM_PROVIDER_OPTIONS.map((provider) => (
-                            <option key={provider.value} value={provider.value}>{provider.label}</option>
-                          ))}
-                        </select>
-                        {selectedLocalLlmProvider ? <span className="settings-field-hint">{selectedLocalLlmProvider.helpText}</span> : null}
-                      </label>
-                      <label className="form-label">
-                        Protocol
-                        <select
-                          className="form-input"
-                          disabled={aiAssistLlmSettings?.connectionMode !== "local"}
-                          value={aiAssistLlmSettings?.ollamaProtocol ?? "http"}
-                          onChange={(event) => updateAiAssistLlmSettings((current) => ({
-                            ...current,
-                            ollamaProtocol: event.target.value === "https" ? "https" : "http",
-                          }))}
-                        >
-                          <option value="http">http</option>
-                          <option value="https">https</option>
-                        </select>
-                      </label>
-                      <label className="form-label">
-                        Host URL
-                        <input
-                          className="form-input"
-                          type="text"
-                          disabled={aiAssistLlmSettings?.connectionMode !== "local"}
-                          value={aiAssistLlmSettings?.ollamaHost ?? ""}
-                          onChange={(event) => updateAiAssistLlmSettings((current) => ({ ...current, ollamaHost: event.target.value }))}
-                          placeholder={selectedLocalLlmProvider && selectedLocalLlmProvider.value !== "custom" ? selectedLocalLlmProvider.defaults.ollamaHost : ""}
-                        />
-                      </label>
-                      <label className="form-label">
-                        Port
-                        <input
-                          className="form-input"
-                          type="number"
-                          disabled={aiAssistLlmSettings?.connectionMode !== "local"}
-                          min={aiAssistLlmSettings?.localProvider === "custom" ? 0 : 1}
-                          max={65535}
-                          value={aiAssistLlmSettings?.localProvider === "custom" && aiAssistLlmSettings.ollamaPort === 0 ? "" : aiAssistLlmSettings?.ollamaPort ?? ""}
-                          onChange={(event) => updateAiAssistLlmSettings((current) => ({
-                            ...current,
-                            ollamaPort: current.localProvider === "custom" && event.target.value.trim() === ""
-                              ? 0
-                              : clampSettingsInteger(event.target.value, current.ollamaPort, 1, 65535),
-                          }))}
-                        />
-                      </label>
-                      <label className="form-label">
-                        Request timeout
-                        <input
-                          className="form-input"
-                          type="number"
-                          disabled={aiAssistLlmSettings?.connectionMode !== "local"}
-                          min={5}
-                          max={600}
-                          value={aiAssistLlmSettings?.ollamaRequestTimeoutSeconds ?? 120}
-                          onChange={(event) => updateAiAssistLlmSettings((current) => ({
-                            ...current,
-                            ollamaRequestTimeoutSeconds: clampSettingsInteger(event.target.value, current.ollamaRequestTimeoutSeconds, 5, 600),
-                          }))}
-                        />
-                      </label>
-                      <label className="form-label">
-                        Selected model
-                        <input
-                          className="form-input"
-                          type="text"
-                          disabled={aiAssistLlmSettings?.connectionMode !== "local"}
-                          value={aiAssistLlmSettings?.ollamaSelectedModel ?? ""}
-                          onChange={(event) => {
-                            const selectedModel = event.target.value;
-                            updateAiAssistLlmSettings((current) => ({
-                              ...current,
-                              ollamaSelectedModel: selectedModel,
-                              localSelectedModelsByProvider: {
-                                ...current.localSelectedModelsByProvider,
-                                [current.localProvider]: selectedModel,
-                              },
-                            }));
-                          }}
-                          placeholder="Model name"
-                        />
-                      </label>
-                    </fieldset>
-                    <div className="project-export-actions project-export-actions--modal" style={{ justifyContent: "flex-end" }}>
+                  <SettingsModalSection title="Local Providers" className="app-settings-modal-section--compact-controls">
+                    <div className="project-export-actions project-export-actions--modal admin-local-provider-add-row" style={{ justifyContent: "flex-end" }}>
                       <button
-                        className="btn btn--primary"
                         type="button"
-                        onClick={() => void handleAdminTestLocalLlmProvider()}
-                        disabled={!installationSettings || aiAssistPolicySaving || adminLocalModelsBusy || aiAssistLlmSettings?.connectionMode !== "local"}
+                        className="btn btn--primary admin-local-provider-add-button"
+                        aria-label="Add local provider"
+                        title="Add local provider"
+                        onClick={openLocalProviderModal}
+                        disabled={!installationSettings || aiAssistPolicySaving}
                       >
-                        {adminLocalModelsBusy ? "Testing..." : "Test"}
+                        <PlusIcon className="admin-local-provider-add-icon" />
                       </button>
                     </div>
                     <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 260 }}>
                       <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
                         <thead>
                           <tr>
-                            <th className="users-th" style={{ width: "42%" }}>Model</th>
-                            <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>Enabled</th>
+                            <th className="users-th" style={{ width: "28%" }}>Provider</th>
+                            <th className="users-th" style={{ width: "34%" }}>Endpoint</th>
+                            <th className="users-th" style={{ width: "22%" }}>Models</th>
+                            <th className="users-th" style={{ width: 64, textAlign: "right" }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {adminLocalModels.length === 0 ? (
+                          {!savedLocalLlmProvider || !aiAssistLlmSettings ? (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={2}>
-                                Test the local provider to list available models.
+                              <td className="users-td users-td--muted" colSpan={4}>
+                                No local providers configured.
                               </td>
                             </tr>
-                          ) : adminLocalModels.map((model) => {
-                            const enabled = adminLocalEnabledModels === undefined || adminLocalEnabledModels.includes(model.name);
-                            return (
-                              <tr key={model.name} className="users-row">
-                                <td className="users-td users-td--name" style={{ minWidth: 0 }}>
-                                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={model.name}>
-                                    {model.name}
-                                  </div>
-                                </td>
-                                <td className="users-td" style={{ whiteSpace: "nowrap" }}>
-                                  <div className="segmented-control" role="tablist" aria-label={`Availability for ${model.name}`} style={{ width: "fit-content", flexWrap: "nowrap" }}>
-                                    <button
-                                      type="button"
-                                      className={!enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                                      disabled={aiAssistPolicySaving}
-                                      onClick={() => handleAdminLocalModelToggle(model.name, false)}
-                                    >
-                                      Disabled
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                                      disabled={aiAssistPolicySaving}
-                                      onClick={() => handleAdminLocalModelToggle(model.name, true)}
-                                    >
-                                      Enabled
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          ) : (
+                            <tr className="users-row">
+                              <td className="users-td users-td--name">{savedLocalLlmProvider.label}</td>
+                              <td className="users-td users-td--muted">
+                                {aiAssistLlmSettings.ollamaProtocol}://{aiAssistLlmSettings.ollamaHost}:{aiAssistLlmSettings.ollamaPort}
+                              </td>
+                              <td className="users-td">
+                                {savedLocalEnabledModels.length ? `${savedLocalEnabledModels.length} enabled` : "All listed models"}
+                              </td>
+                              <td className="users-td snapshot-table-actions">
+                                <button
+                                  type="button"
+                                  className="snapshot-actions-trigger"
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    const rect = event.currentTarget.getBoundingClientRect();
+                                    setManageProjectMenu(null);
+                                    setManageUserMenu(null);
+                                    setCloudProviderMenu(null);
+                                    setLocalProviderMenu((current) => current ? null : {
+                                      x: Math.max(8, rect.right - 160),
+                                      y: rect.bottom + 4,
+                                    });
+                                  }}
+                                  disabled={!installationSettings || aiAssistPolicySaving}
+                                  aria-label={`Actions for ${savedLocalLlmProvider.label}`}
+                                  aria-expanded={Boolean(localProviderMenu)}
+                                  title="Provider actions"
+                                >
+                                  ...
+                                </button>
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
                   </SettingsModalSection>
 
-                  <SettingsModalSection title="Cloud Providers">
-                    <fieldset className="llm-settings-grid" disabled={!installationSettings || aiAssistPolicySaving} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-                      <label className="form-label">
-                        API provider
-                        <select
-                          className="form-input"
-                          value={aiAssistLlmSettings?.connectionMode === "cloud" ? aiAssistLlmSettings.cloudProvider : ""}
-                          onChange={(event) => handleAdminCloudLlmProviderChange(event.target.value as CloudLlmProvider | "")}
-                        >
-                          <option value="">None</option>
-                          {CLOUD_LLM_PROVIDER_OPTIONS.map((provider) => (
-                            <option key={provider.value} value={provider.value}>{provider.label}</option>
-                          ))}
-                        </select>
-                        {selectedCloudLlmProvider ? (
-                          <span className="settings-field-hint">
-                          {selectedCloudLlmProvider.helpText}{" "}
-                          <button
-                            className="settings-inline-link settings-inline-link--button"
-                            type="button"
-                            onClick={() => void openUrl(selectedCloudLlmProvider.keyUrl)}
-                          >
-                            Open key setup
-                          </button>
-                          </span>
-                        ) : null}
-                      </label>
-                      <label className="form-label">
-                        API secret
-                        <input
-                          className="form-input"
-                          type="password"
-                          autoComplete="off"
-                          disabled={aiAssistLlmSettings?.connectionMode !== "cloud"}
-                          value={aiAssistLlmSettings?.cloudApiSecret ?? ""}
-                          onChange={(event) => updateAiAssistLlmSettings((current) => ({ ...current, cloudApiSecret: event.target.value }))}
-                          placeholder={selectedCloudLlmProvider ? `${selectedCloudLlmProvider.label} API secret` : ""}
-                        />
-                      </label>
-                      <label className="form-label">
-                        Selected model
-                        <input
-                          className="form-input"
-                          type="text"
-                          disabled={aiAssistLlmSettings?.connectionMode !== "cloud"}
-                          value={aiAssistLlmSettings?.cloudSelectedModel ?? ""}
-                          onChange={(event) => {
-                            const selectedModel = event.target.value;
-                            updateAiAssistLlmSettings((current) => ({
-                              ...current,
-                              cloudSelectedModel: selectedModel,
-                              cloudSelectedModelsByProvider: {
-                                ...current.cloudSelectedModelsByProvider,
-                                [current.cloudProvider]: selectedModel,
-                              },
-                            }));
-                          }}
-                          placeholder="Model name"
-                        />
-                      </label>
-                    </fieldset>
-                    <div className="project-export-actions project-export-actions--modal" style={{ justifyContent: "flex-end" }}>
+                  <SettingsModalSection title="Cloud Providers" className="app-settings-modal-section--compact-controls">
+                    <div className="project-export-actions project-export-actions--modal admin-local-provider-add-row" style={{ justifyContent: "flex-end" }}>
                       <button
-                        className="btn btn--primary"
                         type="button"
-                        onClick={() => void handleAdminTestCloudLlmProvider()}
-                        disabled={!installationSettings || aiAssistPolicySaving || adminCloudModelsBusy || aiAssistLlmSettings?.connectionMode !== "cloud"}
+                        className="btn btn--primary admin-local-provider-add-button"
+                        aria-label="Add cloud provider"
+                        title="Add cloud provider"
+                        onClick={openCloudProviderModal}
+                        disabled={!installationSettings || aiAssistPolicySaving}
                       >
-                        {adminCloudModelsBusy ? "Testing..." : "Test"}
+                        <PlusIcon className="admin-local-provider-add-icon" />
                       </button>
                     </div>
                     <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 260 }}>
                       <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
                         <thead>
                           <tr>
-                            <th className="users-th" style={{ width: "38%" }}>Model</th>
-                            <th className="users-th" style={{ width: 140, whiteSpace: "nowrap" }}>Publisher</th>
-                            <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>Enabled</th>
+                            <th className="users-th" style={{ width: "32%" }}>Provider</th>
+                            <th className="users-th" style={{ width: "32%" }}>Secret</th>
+                            <th className="users-th" style={{ width: "20%" }}>Models</th>
+                            <th className="users-th" style={{ width: 64, textAlign: "right" }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {adminCloudModels.length === 0 ? (
+                          {!savedCloudLlmProvider || !aiAssistLlmSettings ? (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={3}>
-                                Test the cloud provider to list available models.
+                              <td className="users-td users-td--muted" colSpan={4}>
+                                No cloud providers configured.
                               </td>
                             </tr>
-                          ) : adminCloudModels.map((model) => {
-                            const enabled = adminCloudEnabledModels === undefined || adminCloudEnabledModels.includes(model.id);
-                            return (
-                              <tr key={model.id} className="users-row">
-                                <td className="users-td users-td--name" style={{ minWidth: 0 }}>
-                                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={model.name}>
-                                    {model.name}
-                                  </div>
-                                  <div className="users-td--muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={model.id}>
-                                    {model.id}
-                                  </div>
-                                </td>
-                                <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>
-                                  {model.publisher ?? "-"}
-                                </td>
-                                <td className="users-td" style={{ whiteSpace: "nowrap" }}>
-                                  <div className="segmented-control" role="tablist" aria-label={`Availability for ${model.name}`} style={{ width: "fit-content", flexWrap: "nowrap" }}>
-                                    <button
-                                      type="button"
-                                      className={!enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                                      disabled={aiAssistPolicySaving}
-                                      onClick={() => handleAdminCloudModelToggle(model.id, false)}
-                                    >
-                                      Disabled
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                                      disabled={aiAssistPolicySaving}
-                                      onClick={() => handleAdminCloudModelToggle(model.id, true)}
-                                    >
-                                      Enabled
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          ) : (
+                            <tr className="users-row">
+                              <td className="users-td users-td--name">{savedCloudLlmProvider.label}</td>
+                              <td className="users-td users-td--muted">
+                                {aiAssistLlmSettings.cloudApiSecret.trim() ? "Configured" : "Missing"}
+                              </td>
+                              <td className="users-td">
+                                {savedCloudEnabledModels.length ? `${savedCloudEnabledModels.length} enabled` : "All listed models"}
+                              </td>
+                              <td className="users-td snapshot-table-actions">
+                                <button
+                                  type="button"
+                                  className="snapshot-actions-trigger"
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    const rect = event.currentTarget.getBoundingClientRect();
+                                    setManageProjectMenu(null);
+                                    setManageUserMenu(null);
+                                    setLocalProviderMenu(null);
+                                    setCloudProviderMenu((current) => current ? null : {
+                                      x: Math.max(8, rect.right - 160),
+                                      y: rect.bottom + 4,
+                                    });
+                                  }}
+                                  disabled={!installationSettings || aiAssistPolicySaving}
+                                  aria-label={`Actions for ${savedCloudLlmProvider.label}`}
+                                  aria-expanded={Boolean(cloudProviderMenu)}
+                                  title="Provider actions"
+                                >
+                                  ...
+                                </button>
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -3425,6 +3287,372 @@ export function PostgresAdminSettingsView({
               <button type="button" className="btn btn--primary" onClick={closeAiAssistModal}>Done</button>
             </div>
           </div>
+          {localProviderModalOpen && localProviderDraft ? (
+            <div
+              className="modal-overlay"
+              onClick={(event) => {
+                event.stopPropagation();
+                closeLocalProviderModal();
+              }}
+            >
+              <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
+                <ModalCloseButton onClick={closeLocalProviderModal} />
+                <div className="settings-section-header">
+                  <div><h2 className="settings-section-title">Local Provider</h2></div>
+                </div>
+                <div className="app-settings-modal-body">
+                  {aiAssistNotice ? <p className="settings-success">{aiAssistNotice}</p> : null}
+                  {aiAssistError ? <p className="auth-error">{aiAssistError}</p> : null}
+                  <div className="app-settings-modal-sections">
+                    <SettingsModalSection title="Connection">
+                      <fieldset className="llm-settings-grid" disabled={!installationSettings || aiAssistPolicySaving || adminLocalModelsBusy} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                        <label className="form-label">
+                          API provider
+                          <select
+                            className="form-input"
+                            value={localProviderDraft.localProvider}
+                            onChange={(event) => handleAdminLocalLlmProviderChange(event.target.value as LocalLlmProvider)}
+                          >
+                            {LOCAL_LLM_PROVIDER_OPTIONS.map((provider) => (
+                              <option key={provider.value} value={provider.value}>{provider.label}</option>
+                            ))}
+                          </select>
+                          {selectedLocalLlmProvider ? <span className="settings-field-hint">{selectedLocalLlmProvider.helpText}</span> : null}
+                        </label>
+                        <label className="form-label">
+                          Protocol
+                          <select
+                            className="form-input"
+                            value={localProviderDraft.ollamaProtocol}
+                            onChange={(event) => updateLocalProviderDraft((current) => ({
+                              ...current,
+                              ollamaProtocol: event.target.value === "https" ? "https" : "http",
+                            }))}
+                          >
+                            <option value="http">http</option>
+                            <option value="https">https</option>
+                          </select>
+                        </label>
+                        <label className="form-label">
+                          Host URL
+                          <input
+                            className="form-input"
+                            type="text"
+                            value={localProviderDraft.ollamaHost}
+                            onChange={(event) => updateLocalProviderDraft((current) => ({ ...current, ollamaHost: event.target.value }))}
+                            placeholder={selectedLocalLlmProvider && selectedLocalLlmProvider.value !== "custom" ? selectedLocalLlmProvider.defaults.ollamaHost : ""}
+                          />
+                        </label>
+                        <label className="form-label">
+                          Port
+                          <input
+                            className="form-input"
+                            type="number"
+                            min={localProviderDraft.localProvider === "custom" ? 0 : 1}
+                            max={65535}
+                            value={localProviderDraft.localProvider === "custom" && localProviderDraft.ollamaPort === 0 ? "" : localProviderDraft.ollamaPort}
+                            onChange={(event) => updateLocalProviderDraft((current) => ({
+                              ...current,
+                              ollamaPort: current.localProvider === "custom" && event.target.value.trim() === ""
+                                ? 0
+                                : clampSettingsInteger(event.target.value, current.ollamaPort, 1, 65535),
+                            }))}
+                          />
+                        </label>
+                        <label className="form-label">
+                          Request timeout
+                          <input
+                            className="form-input"
+                            type="number"
+                            min={5}
+                            max={600}
+                            value={localProviderDraft.ollamaRequestTimeoutSeconds}
+                            onChange={(event) => updateLocalProviderDraft((current) => ({
+                              ...current,
+                              ollamaRequestTimeoutSeconds: clampSettingsInteger(event.target.value, current.ollamaRequestTimeoutSeconds, 5, 600),
+                            }))}
+                          />
+                        </label>
+                      </fieldset>
+                      <div className="project-export-actions project-export-actions--modal" style={{ justifyContent: "flex-end" }}>
+                        <button
+                          className="btn btn--primary"
+                          type="button"
+                          onClick={() => void handleAdminTestLocalLlmProvider()}
+                          disabled={!installationSettings || aiAssistPolicySaving || adminLocalModelsBusy || !localProviderDraft.ollamaHost.trim() || localProviderDraft.ollamaPort <= 0}
+                        >
+                          {adminLocalModelsBusy ? "Testing..." : "Test"}
+                        </button>
+                      </div>
+                    </SettingsModalSection>
+                    <SettingsModalSection title="Models">
+                      <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 260 }}>
+                        <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
+                          <thead>
+                            <tr>
+                              <th className="users-th" style={{ width: "42%" }}>Model</th>
+                              <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>Enabled</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {adminLocalModels.length === 0 ? (
+                              <tr>
+                                <td className="users-td users-td--muted" colSpan={2}>
+                                  Test the local provider to list available models.
+                                </td>
+                              </tr>
+                            ) : adminLocalModels.map((model) => {
+                              const enabled = adminLocalEnabledModels === undefined || adminLocalEnabledModels.includes(model.name);
+                              return (
+                                <tr key={model.name} className="users-row">
+                                  <td className="users-td users-td--name" style={{ minWidth: 0 }}>
+                                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={model.name}>
+                                      {model.name}
+                                    </div>
+                                  </td>
+                                  <td className="users-td" style={{ whiteSpace: "nowrap" }}>
+                                    <div className="segmented-control" role="tablist" aria-label={`Availability for ${model.name}`} style={{ width: "fit-content", flexWrap: "nowrap" }}>
+                                      <button
+                                        type="button"
+                                        className={!enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                                        disabled={aiAssistPolicySaving}
+                                        onClick={() => handleAdminLocalModelToggle(model.name, false)}
+                                      >
+                                        Disabled
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                                        disabled={aiAssistPolicySaving}
+                                        onClick={() => handleAdminLocalModelToggle(model.name, true)}
+                                      >
+                                        Enabled
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </SettingsModalSection>
+                  </div>
+                </div>
+                <div className="app-settings-modal-footer">
+                  <button type="button" className="btn" onClick={closeLocalProviderModal} disabled={adminLocalModelsBusy || aiAssistPolicySaving}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => void saveLocalProviderDraft()}
+                    disabled={adminLocalModelsBusy || aiAssistPolicySaving || !localProviderDraft.ollamaHost.trim() || localProviderDraft.ollamaPort <= 0}
+                  >
+                    {aiAssistPolicySaving ? "Saving..." : "Save Provider"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {cloudProviderModalOpen && cloudProviderDraft ? (
+            <div
+              className="modal-overlay"
+              onClick={(event) => {
+                event.stopPropagation();
+                closeCloudProviderModal();
+              }}
+            >
+              <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
+                <ModalCloseButton onClick={closeCloudProviderModal} />
+                <div className="settings-section-header">
+                  <div><h2 className="settings-section-title">Cloud Provider</h2></div>
+                </div>
+                <div className="app-settings-modal-body">
+                  <div className="app-settings-modal-sections">
+                    <SettingsModalSection title="Connection">
+                      <fieldset className="llm-settings-grid" disabled={!installationSettings || aiAssistPolicySaving} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                        <label className="form-label">
+                          API provider
+                          <select
+                            className="form-input"
+                            value={cloudProviderDraft.cloudProvider}
+                            onChange={(event) => handleAdminCloudLlmProviderChange(event.target.value as CloudLlmProvider | "")}
+                          >
+                            <option value="">None</option>
+                            {CLOUD_LLM_PROVIDER_OPTIONS.map((provider) => (
+                              <option key={provider.value} value={provider.value}>{provider.label}</option>
+                            ))}
+                          </select>
+                          {selectedCloudLlmProvider ? (
+                            <span className="settings-field-hint">
+                              {selectedCloudLlmProvider.helpText}{" "}
+                              <button
+                                className="settings-inline-link settings-inline-link--button"
+                                type="button"
+                                onClick={() => void openUrl(selectedCloudLlmProvider.keyUrl)}
+                              >
+                                Open key setup
+                              </button>
+                            </span>
+                          ) : null}
+                        </label>
+                        <label className="form-label">
+                          API secret
+                          <input
+                            className="form-input"
+                            type="password"
+                            autoComplete="off"
+                            value={cloudProviderDraft.cloudApiSecret}
+                            onChange={(event) => updateCloudProviderDraft((current) => ({ ...current, cloudApiSecret: event.target.value }))}
+                            placeholder={selectedCloudLlmProvider ? `${selectedCloudLlmProvider.label} API secret` : ""}
+                          />
+                        </label>
+                      </fieldset>
+                      <div className="project-export-actions project-export-actions--modal" style={{ justifyContent: "flex-end" }}>
+                        <button
+                          className="btn btn--primary"
+                          type="button"
+                          onClick={() => void handleAdminTestCloudLlmProvider()}
+                          disabled={!installationSettings || aiAssistPolicySaving || adminCloudModelsBusy || !cloudProviderDraft.cloudApiSecret.trim()}
+                        >
+                          {adminCloudModelsBusy ? "Testing..." : "Test"}
+                        </button>
+                      </div>
+                    </SettingsModalSection>
+                    <SettingsModalSection title="Models">
+                      <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 260 }}>
+                        <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
+                          <thead>
+                            <tr>
+                              <th className="users-th" style={{ width: "38%" }}>Model</th>
+                              <th className="users-th" style={{ width: 140, whiteSpace: "nowrap" }}>Publisher</th>
+                              <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>Enabled</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {adminCloudModels.length === 0 ? (
+                              <tr>
+                                <td className="users-td users-td--muted" colSpan={3}>
+                                  Test the cloud provider to list available models.
+                                </td>
+                              </tr>
+                            ) : adminCloudModels.map((model) => {
+                              const enabled = adminCloudEnabledModels === undefined || adminCloudEnabledModels.includes(model.id);
+                              return (
+                                <tr key={model.id} className="users-row">
+                                  <td className="users-td users-td--name" style={{ minWidth: 0 }}>
+                                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={model.name}>
+                                      {model.name}
+                                    </div>
+                                    <div className="users-td--muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={model.id}>
+                                      {model.id}
+                                    </div>
+                                  </td>
+                                  <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>
+                                    {model.publisher ?? "-"}
+                                  </td>
+                                  <td className="users-td" style={{ whiteSpace: "nowrap" }}>
+                                    <div className="segmented-control" role="tablist" aria-label={`Availability for ${model.name}`} style={{ width: "fit-content", flexWrap: "nowrap" }}>
+                                      <button
+                                        type="button"
+                                        className={!enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                                        disabled={aiAssistPolicySaving}
+                                        onClick={() => handleAdminCloudModelToggle(model.id, false)}
+                                      >
+                                        Disabled
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                                        disabled={aiAssistPolicySaving}
+                                        onClick={() => handleAdminCloudModelToggle(model.id, true)}
+                                      >
+                                        Enabled
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </SettingsModalSection>
+                  </div>
+                </div>
+                <div className="app-settings-modal-footer">
+                  <button type="button" className="btn" onClick={closeCloudProviderModal} disabled={adminCloudModelsBusy || aiAssistPolicySaving}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => void saveCloudProviderDraft()}
+                    disabled={adminCloudModelsBusy || aiAssistPolicySaving || !cloudProviderDraft.cloudApiSecret.trim()}
+                  >
+                    {aiAssistPolicySaving ? "Saving..." : "Save Provider"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {localProviderMenu ? (
+            <div
+              className="context-menu"
+              style={{ left: localProviderMenu.x, top: localProviderMenu.y, minWidth: 160, zIndex: 1500 }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setLocalProviderMenu(null);
+                  openLocalProviderModal();
+                }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="context-menu-item context-menu-item--danger"
+                onClick={() => void removeLocalProvider()}
+                disabled={aiAssistPolicySaving}
+              >
+                Remove
+              </button>
+            </div>
+          ) : null}
+          {cloudProviderMenu ? (
+            <div
+              className="context-menu"
+              style={{ left: cloudProviderMenu.x, top: cloudProviderMenu.y, minWidth: 160, zIndex: 1500 }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCloudProviderMenu(null);
+                  openCloudProviderModal();
+                }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="context-menu-item context-menu-item--danger"
+                onClick={() => void removeCloudProvider()}
+                disabled={aiAssistPolicySaving}
+              >
+                Remove
+              </button>
+            </div>
+          ) : null}
           {activeEmbeddingModelModal === "download" ? (
             <div
               className="modal-overlay"
@@ -4300,7 +4528,7 @@ export function PostgresAdminSettingsView({
                                   .map((user) => (
                                     <tr key={user.id} className="users-row">
                                       <td className="users-td users-td--name">{user.name}</td>
-                                      <td className="users-td users-td--muted">{user.email}</td>
+                                      <td className="users-td users-td--muted">{user.username}</td>
                                       <td className="users-td">
                                         <select
                                           className="form-input"
@@ -4396,6 +4624,7 @@ export function PostgresAdminSettingsView({
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Status</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Created</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Last Updated</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4437,11 +4666,34 @@ export function PostgresAdminSettingsView({
                                 </td>
                                 <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>{formatPostgresDateTime(project.createdAt)}</td>
                                 <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>{formatPostgresDateTime(project.updatedAt)}</td>
+                                <td className="users-td snapshot-table-actions">
+                                  <button
+                                    type="button"
+                                    className="snapshot-actions-trigger"
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      const rect = event.currentTarget.getBoundingClientRect();
+                                      setManageUserMenu(null);
+                                      setManageProjectMenu((current) => current?.projectId === project.id ? null : {
+                                        projectId: project.id,
+                                        x: Math.max(8, rect.right - 160),
+                                        y: rect.bottom + 4,
+                                      });
+                                    }}
+                                    aria-label={`Actions for ${project.name}`}
+                                    aria-expanded={manageProjectMenu?.projectId === project.id}
+                                    title="Project actions"
+                                  >
+                                    ...
+                                  </button>
+                                </td>
                               </tr>
                             );
                           }) : (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={4}>No PostgreSQL projects have been created yet.</td>
+                              <td className="users-td users-td--muted" colSpan={5}>No PostgreSQL projects have been created yet.</td>
                             </tr>
                           )}
                         </tbody>
@@ -4750,6 +5002,7 @@ export function PostgresAdminSettingsView({
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Status</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Created</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Last Active</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4782,7 +5035,7 @@ export function PostgresAdminSettingsView({
                               >
                                 <td className="users-td users-td--name">
                                   <div>{user.name}</div>
-                                  <div className="users-td--muted">{user.email}</div>
+                                  <div className="users-td--muted">{user.username}</div>
                                 </td>
                                 <td className="users-td" style={{ whiteSpace: "nowrap" }}>
                                   <div>{user.active ? "Active" : "Disabled"}</div>
@@ -4792,11 +5045,34 @@ export function PostgresAdminSettingsView({
                                 </td>
                                 <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>{formatPostgresDateTime(user.createdAt)}</td>
                                 <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>{user.lastLoginAt ? formatPostgresDateTime(user.lastLoginAt) : "-"}</td>
+                                <td className="users-td snapshot-table-actions">
+                                  <button
+                                    type="button"
+                                    className="snapshot-actions-trigger"
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      const rect = event.currentTarget.getBoundingClientRect();
+                                      setManageProjectMenu(null);
+                                      setManageUserMenu((current) => current?.userId === user.id ? null : {
+                                        userId: user.id,
+                                        x: Math.max(8, rect.right - 190),
+                                        y: rect.bottom + 4,
+                                      });
+                                    }}
+                                    aria-label={`Actions for ${user.username}`}
+                                    aria-expanded={manageUserMenu?.userId === user.id}
+                                    title="User actions"
+                                  >
+                                    ...
+                                  </button>
+                                </td>
                               </tr>
                             );
                           }) : (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={4}>No PostgreSQL app users have been created yet.</td>
+                              <td className="users-td users-td--muted" colSpan={5}>No PostgreSQL app users have been created yet.</td>
                             </tr>
                           )}
                         </tbody>
@@ -4854,6 +5130,8 @@ export function PostgresAdminSettingsView({
             disabled={loadingProjectMemberships}
             onClick={() => {
               setManageUserMenu(null);
+              setMembershipNotice("");
+              setMembershipError("");
               setMembershipUser(manageUserMenuUser);
             }}
           >
@@ -4892,12 +5170,12 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {activeModal === "manageUsers" && membershipUser ? (
-        <div className="modal-overlay" onClick={() => setMembershipUser(null)}>
+        <div className="modal-overlay" onClick={closeMembershipModal}>
           <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setMembershipUser(null)} />
+            <ModalCloseButton onClick={closeMembershipModal} />
             <div className="settings-section-header">
               <div>
-                <h2 className="settings-section-title">{membershipUser.email}</h2>
+                <h2 className="settings-section-title">{membershipUser.username}</h2>
               </div>
             </div>
             <div className="app-settings-modal-body">
@@ -4912,59 +5190,118 @@ export function PostgresAdminSettingsView({
                           const projectB = projectById.get(b.projectId)?.name ?? "";
                           return projectA.localeCompare(projectB) || a.role.localeCompare(b.role);
                         });
-                      return memberships.length ? (
-                        <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 420 }}>
-                          <table className="users-table">
-                            <thead>
-                              <tr>
-                                <th className="users-th">Project</th>
-                                <th className="users-th">Role</th>
-                                <th className="users-th">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {memberships.map((membership) => {
-                                const membershipProject = projectById.get(membership.projectId);
-                                const membershipBusy =
-                                  updatingMembershipId === membership.id ||
-                                  removingMembershipId === membership.id;
-                                return (
-                                  <tr key={membership.id} className="users-row">
-                                    <td className="users-td users-td--name">
-                                      <div>{membershipProject?.name ?? membership.projectId}</div>
-                                      <div className="users-td--muted">{membershipProject?.databaseName ?? ""}</div>
-                                    </td>
-                                    <td className="users-td">
-                                      <select
-                                        className="form-input"
-                                        value={membership.role}
-                                        onChange={(event) => void handleUpdateProjectMembershipRole(membership, event.target.value)}
-                                        disabled={authSession.authKind !== "postgres_admin" || membershipBusy}
-                                      >
-                                        <option value="owner">Owner</option>
-                                        <option value="editor">Editor</option>
-                                        <option value="coder">Coder</option>
-                                        <option value="viewer">Viewer</option>
-                                      </select>
-                                    </td>
-                                    <td className="users-td">
-                                      <button
-                                        type="button"
-                                        className="btn btn--sm btn--ghost-danger"
-                                        onClick={() => void handleRemoveProjectMembership(membership)}
-                                        disabled={authSession.authKind !== "postgres_admin" || membershipBusy}
-                                      >
-                                        {removingMembershipId === membership.id ? "Removing..." : "Remove"}
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                      const membershipProjectIds = new Set(memberships.map((membership) => membership.projectId));
+                      const availableProjects = projects
+                        .filter((project) => !membershipProjectIds.has(project.id))
+                        .slice()
+                        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+                      return (
+                        <div className="admin-membership-lists">
+                          <div className="admin-membership-list">
+                            <h3 className="admin-membership-list-title">Project Memberships</h3>
+                            {memberships.length ? (
+                              <div className="users-table-wrap postgres-users-table-wrap admin-membership-table-wrap">
+                                <table className="users-table">
+                                  <thead>
+                                    <tr>
+                                      <th className="users-th">Project</th>
+                                      <th className="users-th">Role</th>
+                                      <th className="users-th admin-membership-icon-th" aria-label="Remove" />
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {memberships.map((membership) => {
+                                      const membershipProject = projectById.get(membership.projectId);
+                                      const membershipBusy =
+                                        updatingMembershipId === membership.id ||
+                                        removingMembershipId === membership.id;
+                                      return (
+                                        <tr key={membership.id} className="users-row">
+                                          <td className="users-td users-td--name">
+                                            <div>{membershipProject?.name ?? membership.projectId}</div>
+                                            <div className="users-td--muted">{membershipProject?.databaseName ?? ""}</div>
+                                          </td>
+                                          <td className="users-td">
+                                            <select
+                                              className="form-input"
+                                              value={membership.role}
+                                              onChange={(event) => void handleUpdateProjectMembershipRole(membership, event.target.value)}
+                                              disabled={authSession.authKind !== "postgres_admin" || membershipBusy}
+                                            >
+                                              <option value="owner">Owner</option>
+                                              <option value="editor">Editor</option>
+                                              <option value="coder">Coder</option>
+                                              <option value="viewer">Viewer</option>
+                                            </select>
+                                          </td>
+                                          <td className="users-td admin-membership-icon-cell">
+                                            <button
+                                              type="button"
+                                              className="admin-membership-icon-button admin-membership-icon-button--remove"
+                                              aria-label={`Remove ${membershipUser.username} from ${membershipProject?.name ?? "project"}`}
+                                              title={removingMembershipId === membership.id ? "Removing" : "Remove"}
+                                              onClick={() => void handleRemoveProjectMembership(membership)}
+                                              disabled={authSession.authKind !== "postgres_admin" || membershipBusy}
+                                            >
+                                              <CloseIcon className="admin-membership-icon" />
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <p className="auth-hint">No project memberships.</p>
+                            )}
+                          </div>
+
+                          <div className="admin-membership-list">
+                            <h3 className="admin-membership-list-title">Available Projects</h3>
+                            {availableProjects.length ? (
+                              <div className="users-table-wrap postgres-users-table-wrap admin-membership-table-wrap">
+                                <table className="users-table">
+                                  <thead>
+                                    <tr>
+                                      <th className="users-th">Project</th>
+                                      <th className="users-th">Status</th>
+                                      <th className="users-th admin-membership-icon-th" aria-label="Add" />
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {availableProjects.map((project) => {
+                                      const adding = addingMembershipProjectId === project.id;
+                                      return (
+                                        <tr key={project.id} className="users-row">
+                                          <td className="users-td users-td--name">
+                                            <div>{project.name}</div>
+                                            <div className="users-td--muted">{project.databaseName}</div>
+                                          </td>
+                                          <td className="users-td">{project.active ? "Active" : "Disabled"}</td>
+                                          <td className="users-td admin-membership-icon-cell">
+                                            <button
+                                              type="button"
+                                              className="admin-membership-icon-button admin-membership-icon-button--add"
+                                              aria-label={`Add ${membershipUser.username} to ${project.name}`}
+                                              title={adding ? "Adding" : "Add as viewer"}
+                                              onClick={() => void handleAddProjectMembership(membershipUser, project)}
+                                              disabled={authSession.authKind !== "postgres_admin" || adding || Boolean(addingMembershipProjectId)}
+                                            >
+                                              <CheckIcon className="admin-membership-icon" />
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <p className="auth-hint">No available projects.</p>
+                            )}
+                          </div>
                         </div>
-                      ) : (
-                        <p className="auth-hint">No project memberships.</p>
                       );
                     })()}
                   </div>
@@ -4973,7 +5310,7 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setMembershipUser(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={closeMembershipModal}>Done</button>
             </div>
           </div>
         </div>
@@ -5037,7 +5374,7 @@ export function PostgresAdminSettingsView({
                           {appUsers.length ? appUsers.map((user) => (
                             <tr key={user.id} className="users-row">
                               <td className="users-td users-td--name">{user.name}</td>
-                              <td className="users-td users-td--muted">{user.email}</td>
+                              <td className="users-td users-td--muted">{user.username}</td>
                               <td className="users-td">{user.role}</td>
                               <td className="users-td">{user.active ? "Active" : "Disabled"}</td>
                               <td className="users-td users-td--muted">{formatPostgresDateTime(user.updatedAt)}</td>
@@ -5137,7 +5474,7 @@ export function PostgresAdminSettingsView({
                 projectById.get(membershipRemovalWarning.projectId)?.name ?? "this project"
               }.`}
             </p>
-            <div className="form-actions" style={{ justifyContent: "flex-end" }}>
+            <div className="form-actions membership-removal-actions" style={{ justifyContent: "flex-end" }}>
               <button
                 type="button"
                 className="btn"
@@ -5243,8 +5580,8 @@ export function PostgresAdminSettingsView({
             <h2>{userAccessWarning.action === "disable" ? "Disable User" : "Enable User"}</h2>
             <p className="settings-row-desc">
               {userAccessWarning.action === "disable"
-                ? `${userAccessWarning.user.email} will lose access to KanQual, the PostgreSQL server, and every project.`
-                : `${userAccessWarning.user.email} will regain access to the PostgreSQL server. You will need to set a temporary password before the account can be used.`}
+                ? `${userAccessWarning.user.username} will lose access to KanQual, the PostgreSQL server, and every project.`
+                : `${userAccessWarning.user.username} will regain access to the PostgreSQL server. You will need to set a temporary password before the account can be used.`}
             </p>
             <div className="form-actions" style={{ justifyContent: "flex-end" }}>
               <button
@@ -5350,8 +5687,8 @@ export function PostgresAdminSettingsView({
             <h2>Reset Password</h2>
             <p className="settings-row-desc">
               {requiredResetUserId === resetPasswordUser.id
-                ? `Set a temporary password for ${resetPasswordUser.email} to finish enabling this account.`
-                : `Set a new temporary password for ${resetPasswordUser.email}.`}
+                ? `Set a temporary password for ${resetPasswordUser.username} to finish enabling this account.`
+                : `Set a new temporary password for ${resetPasswordUser.username}.`}
             </p>
             <form className="form" onSubmit={handleResetPostgresUserPassword}>
               <label className="form-label" style={{ marginTop: 8 }}>

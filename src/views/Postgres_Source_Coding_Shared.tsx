@@ -11,7 +11,7 @@ import type {
   SourceRow,
 } from "./Postgres_Sources_View";
 
-type CodeTreeNode = {
+export type CodeTreeNode = {
   code: PostgresCode;
   depth: number;
   hasChildren: boolean;

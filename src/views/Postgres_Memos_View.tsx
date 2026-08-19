@@ -942,7 +942,7 @@ export function PostgresMemosView({
                 </tr>
               ) : memos.length === 0 ? (
                 <tr>
-                  <td className="users-td" colSpan={4}>No PostgreSQL memos yet.</td>
+                  <td className="users-td-msg" colSpan={4}>No memos yet.</td>
                 </tr>
               ) : (
                 memos.map((memo) => {

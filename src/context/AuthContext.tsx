@@ -17,7 +17,7 @@ import {
   stopLocalPocketBase,
 } from "../lib/pb";
 import { clearRecentProjects, readAppSettings } from "../lib/appSettings";
-import { clearLocalAccounts, clearRemoteSessions, LOCAL_PB_URL } from "../lib/authHistory";
+import { LOCAL_PB_URL } from "../lib/authHistory";
 import { getSmokeTestConfig, updateSmokeTestState } from "../lib/smokeTest";
 
 type AuthStatus = "loading" | "ready" | "authenticated";
@@ -441,10 +441,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const settings = readAppSettings();
     if (settings.privacy.clearRecentProjectsOnSignOut) {
       clearRecentProjects();
-    }
-    if (settings.privacy.forgetLoginIdentitiesOnLogout) {
-      clearLocalAccounts();
-      clearRemoteSessions();
     }
     pb?.authStore.clear();
     setUser(null);

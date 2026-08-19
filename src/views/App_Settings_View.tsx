@@ -1482,19 +1482,6 @@ export function AppSettingsView() {
               />
             </label>
 
-            <label className="settings-toggle-row">
-              <span>
-                <strong>{t("appSettings.privacy.forgetLoginIdentitiesOnLogoutLabel")}</strong>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.privacy.forgetLoginIdentitiesOnLogout}
-                onChange={(e) => persist({
-                  ...settings,
-                  privacy: { ...settings.privacy, forgetLoginIdentitiesOnLogout: e.target.checked },
-                }, "Privacy settings saved.")}
-              />
-            </label>
           </SettingsModalSection>
         );
       case "diagnostics":
@@ -2855,20 +2842,6 @@ export function AppSettingsView() {
           />
         </label>
 
-        <label className="settings-toggle-row">
-          <span>
-            <strong>{t("appSettings.privacy.forgetLoginIdentitiesOnLogoutLabel")}</strong>
-            <small>{t("appSettings.privacy.forgetLoginIdentitiesOnLogoutDescription")}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.privacy.forgetLoginIdentitiesOnLogout}
-            onChange={(e) => persist({
-              ...settings,
-              privacy: { ...settings.privacy, forgetLoginIdentitiesOnLogout: e.target.checked },
-            }, "Privacy settings saved.")}
-          />
-        </label>
       </section>
 
       <section className="settings-section settings-section--wide">

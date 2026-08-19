@@ -248,6 +248,117 @@ function bucketKey(date: Date, bucket: "hour" | "day" | "week"): string {
   return `${copy.getUTCFullYear()}-${copy.getUTCMonth()}-${copy.getUTCDate()}`;
 }
 
+function bucketStart(date: Date, bucket: "hour" | "day" | "week"): Date {
+  const copy = new Date(date);
+  if (bucket === "hour") {
+    copy.setUTCMinutes(0, 0, 0);
+    return copy;
+  }
+  if (bucket === "day") {
+    copy.setUTCHours(0, 0, 0, 0);
+    return copy;
+  }
+  const day = copy.getUTCDay() || 7;
+  copy.setUTCDate(copy.getUTCDate() - day + 1);
+  copy.setUTCHours(0, 0, 0, 0);
+  return copy;
+}
+
+export function postgresBackupDeletionDate(
+  entry: PostgresProjectBackupEntry,
+  backups: PostgresProjectBackupEntry[],
+  retention: BackupRetentionSettings,
+): Date | null {
+  if (entry.manual) return null;
+  const sortedAutomatic = backups
+    .filter((backup) => !backup.manual)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (sortedAutomatic[0]?.file === entry.file) return null;
+
+  const created = new Date(entry.createdAt);
+  if (Number.isNaN(created.getTime())) return null;
+
+  const hourlyMs = retention.hourlyHours * 60 * 60 * 1000;
+  const dailyMs = retention.dailyDays * 24 * 60 * 60 * 1000;
+  const weeklyMs = retention.weeklyWeeks * 7 * 24 * 60 * 60 * 1000;
+  return new Date(created.getTime() + Math.max(hourlyMs, dailyMs, weeklyMs));
+}
+
+export function postgresBackupRetentionStatus(
+  entry: PostgresProjectBackupEntry,
+  backups: PostgresProjectBackupEntry[],
+  retention: BackupRetentionSettings,
+  now = new Date(),
+): BackupRetentionStatus {
+  if (entry.manual) {
+    return { category: "manual", bucketStart: null, promotion: null, deletionDate: null };
+  }
+
+  const sortedAutomatic = backups
+    .filter((backup) => !backup.manual)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const created = new Date(entry.createdAt);
+  if (Number.isNaN(created.getTime())) {
+    return { category: "pending-delete", bucketStart: null, promotion: null, deletionDate: null };
+  }
+
+  const hourKey = bucketKey(created, "hour");
+  const dayKey = bucketKey(created, "day");
+  const weekKey = bucketKey(created, "week");
+  const isFirstInHour = sortedAutomatic.find((backup) => {
+    const backupDate = new Date(backup.createdAt);
+    return !Number.isNaN(backupDate.getTime()) && bucketKey(backupDate, "hour") === hourKey;
+  })?.file === entry.file;
+  const isFirstInDay = sortedAutomatic.find((backup) => {
+    const backupDate = new Date(backup.createdAt);
+    return !Number.isNaN(backupDate.getTime()) && bucketKey(backupDate, "day") === dayKey;
+  })?.file === entry.file;
+  const isFirstInWeek = sortedAutomatic.find((backup) => {
+    const backupDate = new Date(backup.createdAt);
+    return !Number.isNaN(backupDate.getTime()) && bucketKey(backupDate, "week") === weekKey;
+  })?.file === entry.file;
+
+  if (sortedAutomatic[0]?.file === entry.file) {
+    return {
+      category: "latest",
+      bucketStart: null,
+      promotion: isFirstInHour ? "hourly" : null,
+      deletionDate: null,
+    };
+  }
+
+  const ageMs = now.getTime() - created.getTime();
+  const ageHours = ageMs / (60 * 60 * 1000);
+  const ageDays = ageMs / (24 * 60 * 60 * 1000);
+
+  if (ageHours <= retention.hourlyHours && isFirstInHour) {
+    return {
+      category: "hourly",
+      bucketStart: bucketStart(created, "hour"),
+      promotion: isFirstInDay ? "daily" : null,
+      deletionDate: new Date(created.getTime() + retention.hourlyHours * 60 * 60 * 1000),
+    };
+  }
+  if (ageDays <= retention.dailyDays && isFirstInDay) {
+    return {
+      category: "daily",
+      bucketStart: bucketStart(created, "day"),
+      promotion: isFirstInWeek ? "weekly" : null,
+      deletionDate: new Date(created.getTime() + retention.dailyDays * 24 * 60 * 60 * 1000),
+    };
+  }
+  if (ageDays <= retention.weeklyWeeks * 7 && isFirstInWeek) {
+    return {
+      category: "weekly",
+      bucketStart: bucketStart(created, "week"),
+      promotion: null,
+      deletionDate: new Date(created.getTime() + retention.weeklyWeeks * 7 * 24 * 60 * 60 * 1000),
+    };
+  }
+
+  return { category: "pending-delete", bucketStart: null, promotion: null, deletionDate: postgresBackupDeletionDate(entry, backups, retention) };
+}
+
 function shouldKeepAutomaticBackup(
   entry: PostgresProjectBackupEntry,
   now: Date,

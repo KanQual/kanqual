@@ -18,6 +18,10 @@ import {
   type PostgresStatus,
 } from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import {
+  getPostgresAccounts,
+  savePostgresAccount as savePostgresAccountHistory,
+} from "../lib/authHistory";
 import { ComputerIcon, NetworkIcon } from "../components/AppIcons";
 import { LoadingCard } from "../components/LoadingCard";
 
@@ -106,6 +110,28 @@ function accountInitials(name: string): string {
 
 function defaultNameFromUsername(username: string): string {
   return username.trim() || username;
+}
+
+function mergeRememberedAccounts(
+  primaryAccounts: PostgresRememberedAccount[],
+  fallbackAccounts: PostgresRememberedAccount[],
+): PostgresRememberedAccount[] {
+  const byEmail = new Map<string, PostgresRememberedAccount>();
+  [...fallbackAccounts, ...primaryAccounts].forEach((account) => {
+    const email = account.email.trim().toLowerCase();
+    if (!email) return;
+    const existing = byEmail.get(email);
+    if (!existing || new Date(account.lastLogin).getTime() > new Date(existing.lastLogin).getTime()) {
+      byEmail.set(email, {
+        email,
+        name: account.name || email,
+        lastLogin: account.lastLogin,
+      });
+    }
+  });
+  return Array.from(byEmail.values())
+    .sort((left, right) => new Date(right.lastLogin).getTime() - new Date(left.lastLogin).getTime())
+    .slice(0, 20);
 }
 
 function PasswordVisibilityIcon() {
@@ -465,16 +491,16 @@ export function PostgresLaunchView({
     try {
       await createPostgresAppUser({
         name: defaultNameFromUsername(email),
-        email,
+        username: email,
         password: firstAccountPassword,
       });
       const session = await loginPostgresAppUser({
-        email,
+        username: email,
         password: firstAccountPassword,
         rememberSession: false,
       });
       try {
-        await rememberPostgresAccount(email, session.user.name || email);
+        await rememberPostgresAccount(email, session.user.name || session.user.username || email);
       } catch (rememberError) {
         console.warn("Could not remember PostgreSQL account:", describeUnknownError(rememberError));
       }
@@ -936,9 +962,10 @@ export function PostgresAuthView({
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [signInStep, setSignInStep] = useState<"username" | "password">("username");
   const [email, setEmail] = useState("");
-  const [recentAccounts, setRecentAccounts] = useState<PostgresRememberedAccount[]>([]);
+  const [recentAccounts, setRecentAccounts] = useState<PostgresRememberedAccount[]>(() =>
+    mergeRememberedAccounts([], getPostgresAccounts()),
+  );
   const [selectedRecentEmail, setSelectedRecentEmail] = useState("");
-  const [showManualEmailEntry, setShowManualEmailEntry] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmFirstAccountPassword, setConfirmFirstAccountPassword] = useState("");
@@ -960,11 +987,12 @@ export function PostgresAuthView({
       try {
         const nextAccounts = await listPostgresRememberedAccounts();
         if (!cancelled) {
-          setRecentAccounts(nextAccounts);
+          setRecentAccounts(mergeRememberedAccounts(nextAccounts, getPostgresAccounts()));
         }
       } catch (loadError) {
         if (!cancelled) {
           console.warn("Could not load remembered PostgreSQL accounts:", describeUnknownError(loadError));
+          setRecentAccounts(mergeRememberedAccounts([], getPostgresAccounts()));
         }
       }
     }
@@ -1000,16 +1028,19 @@ export function PostgresAuthView({
     try {
       await createPostgresAppUser({
         name: defaultNameFromUsername(email),
-        email,
+        username: email,
         password,
       });
       const session = await loginPostgresAppUser({
-        email,
+        username: email,
         password,
         rememberSession: false,
       });
+      savePostgresAccountHistory(email, session.user.name || session.user.username || email);
+      setRecentAccounts(mergeRememberedAccounts([], getPostgresAccounts()));
       try {
-        await rememberPostgresAccount(email, session.user.name || email);
+        await rememberPostgresAccount(email, session.user.name || session.user.username || email);
+        setRecentAccounts(mergeRememberedAccounts(await listPostgresRememberedAccounts(), getPostgresAccounts()));
       } catch (rememberError) {
         console.warn("Could not remember PostgreSQL account:", describeUnknownError(rememberError));
       }
@@ -1082,13 +1113,15 @@ export function PostgresAuthView({
     setSubmitting(true);
     try {
       const session = await loginPostgresAppUser({
-        email: trimmedEmail,
+        username: trimmedEmail,
         password,
         rememberSession: false,
       });
+      savePostgresAccountHistory(trimmedEmail, session.user.name || session.user.username || trimmedEmail);
+      setRecentAccounts(mergeRememberedAccounts([], getPostgresAccounts()));
       try {
-        await rememberPostgresAccount(trimmedEmail, session.user.name || trimmedEmail);
-        setRecentAccounts(await listPostgresRememberedAccounts());
+        await rememberPostgresAccount(trimmedEmail, session.user.name || session.user.username || trimmedEmail);
+        setRecentAccounts(mergeRememberedAccounts(await listPostgresRememberedAccounts(), getPostgresAccounts()));
       } catch (rememberError) {
         console.warn("Could not update PostgreSQL remembered accounts:", describeUnknownError(rememberError));
       }
@@ -1270,18 +1303,17 @@ export function PostgresAuthView({
           <div className="auth-brand">KanQual</div>
         </div>
         <form onSubmit={handleSubmit} className="form">
-          {signInStep === "username" && recentAccounts.length > 0 && !selectedRecentAccount && !showManualEmailEntry ? (
-            <div className="form-label">
-              Recent accounts
-              <ul className="account-list" style={{ marginTop: 10, marginBottom: 12 }}>
+          {signInStep === "username" && recentAccounts.length > 0 ? (
+            <div className="auth-recent-accounts">
+              <div className="auth-recent-accounts-title">Recent accounts</div>
+              <ul className="account-list auth-recent-account-list">
                 {recentAccounts.map((account) => (
                   <li
                     key={account.email}
-                    className="account-item"
+                    className="account-item auth-recent-account-item"
                     onClick={() => {
                       setEmail(account.email);
                       setSelectedRecentEmail(account.email);
-                      setShowManualEmailEntry(false);
                       setSignInStep("password");
                       setPassword("");
                       setError("");
@@ -1296,21 +1328,6 @@ export function PostgresAuthView({
                   </li>
                 ))}
               </ul>
-              <div className="account-list-actions" style={{ justifyContent: "flex-start", marginBottom: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={() => {
-                    setEmail("");
-                    setSelectedRecentEmail("");
-                    setShowManualEmailEntry(true);
-                    setSignInStep("username");
-                    setError("");
-                  }}
-                >
-                  Use different username
-                </button>
-              </div>
             </div>
           ) : null}
 
@@ -1324,7 +1341,7 @@ export function PostgresAuthView({
             </div>
           ) : null}
 
-          {signInStep === "username" && (!selectedRecentAccount && (showManualEmailEntry || recentAccounts.length === 0)) ? (
+          {signInStep === "username" ? (
             <label className="form-label">
               Username
               <input
@@ -1334,7 +1351,6 @@ export function PostgresAuthView({
                 onChange={(event) => {
                   setEmail(event.target.value);
                   setSelectedRecentEmail("");
-                  setShowManualEmailEntry(true);
                   setSignInStep("username");
                 }}
                 autoFocus
@@ -1380,7 +1396,6 @@ export function PostgresAuthView({
                   setPassword("");
                   setPasswordVisible(false);
                   setSelectedRecentEmail("");
-                  setShowManualEmailEntry(true);
                   setError("");
                 }}
                 disabled={submitting}

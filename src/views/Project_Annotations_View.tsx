@@ -1,35 +1,11 @@
-import { type CSSProperties, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import circleFilledShapeSvg from "../assets/object-shapes/circle-filled.svg?raw";
-import circleOutlineShapeSvg from "../assets/object-shapes/circle-outline.svg?raw";
-import rectangleFilledShapeSvg from "../assets/object-shapes/rectangle-filled.svg?raw";
-import rectangleOutlineShapeSvg from "../assets/object-shapes/rectangle-outline.svg?raw";
-import triangleFilledShapeSvg from "../assets/object-shapes/triangle-filled.svg?raw";
-import triangleOutlineShapeSvg from "../assets/object-shapes/triangle-outline.svg?raw";
-import diamondFilledShapeSvg from "../assets/object-shapes/diamond-filled.svg?raw";
-import diamondOutlineShapeSvg from "../assets/object-shapes/diamond-outline.svg?raw";
-import hexagonFilledShapeSvg from "../assets/object-shapes/hexagon-filled.svg?raw";
-import hexagonOutlineShapeSvg from "../assets/object-shapes/hexagon-outline.svg?raw";
-import octagonFilledShapeSvg from "../assets/object-shapes/octagon-filled.svg?raw";
-import octagonOutlineShapeSvg from "../assets/object-shapes/octagon-outline.svg?raw";
-import parallelogramFilledShapeSvg from "../assets/object-shapes/parallelogram-filled.svg?raw";
-import parallelogramOutlineShapeSvg from "../assets/object-shapes/parallelogram-outline.svg?raw";
-import trapezoidFilledShapeSvg from "../assets/object-shapes/trapezoid-filled.svg?raw";
-import trapezoidOutlineShapeSvg from "../assets/object-shapes/trapezoid-outline.svg?raw";
-import tagFilledShapeSvg from "../assets/object-shapes/tag-filled.svg?raw";
-import tagOutlineShapeSvg from "../assets/object-shapes/tag-outline.svg?raw";
-import starFilledShapeSvg from "../assets/object-shapes/star-filled.svg?raw";
-import starOutlineShapeSvg from "../assets/object-shapes/star-outline.svg?raw";
-import sourceTextOutlineShapeSvg from "../assets/object-shapes/source-text-outline.svg?raw";
-import sourceProcessedTranscriptOutlineShapeSvg from "../assets/object-shapes/source-processed-transcript-outline.svg?raw";
-import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline.svg?raw";
-import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
-import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
-import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
 import { HelpIcon } from "../components/AppIcons";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
+import type { PostgresCode } from "../lib/postgres";
+import { visibleCodeNodes, type CodeTreeNode } from "./Postgres_Source_Coding_Shared";
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
@@ -79,6 +55,7 @@ interface AnnRow {
 
 type SortCol = "documentName" | "sourceKind" | "codeLabel" | "lockLabel" | "createdAt" | "createdByName";
 type SortDir = "asc" | "desc";
+type CodeFilterSortCol = "code" | "count";
 type SourceObjectTypeShape =
   | "rounded"
   | "rectangle"
@@ -105,30 +82,6 @@ const COLS: { key: SortCol; label: string; width: string }[] = [
 const ANNOTATION_ID_WIDTH = "10%";
 const SOURCE_OBJECT_TYPE_DEFAULT_COLOR = "#355070";
 
-function buildSvgDataUrl(svgMarkup: string): string {
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}`;
-}
-
-const SOURCE_OBJECT_SHAPE_ASSET_URLS: Record<SourceObjectTypeShape, { filled: string; outline: string }> = {
-  rounded: { filled: buildSvgDataUrl(circleFilledShapeSvg), outline: buildSvgDataUrl(circleOutlineShapeSvg) },
-  rectangle: { filled: buildSvgDataUrl(rectangleFilledShapeSvg), outline: buildSvgDataUrl(rectangleOutlineShapeSvg) },
-  triangle: { filled: buildSvgDataUrl(triangleFilledShapeSvg), outline: buildSvgDataUrl(triangleOutlineShapeSvg) },
-  diamond: { filled: buildSvgDataUrl(diamondFilledShapeSvg), outline: buildSvgDataUrl(diamondOutlineShapeSvg) },
-  hexagon: { filled: buildSvgDataUrl(hexagonFilledShapeSvg), outline: buildSvgDataUrl(hexagonOutlineShapeSvg) },
-  octagon: { filled: buildSvgDataUrl(octagonFilledShapeSvg), outline: buildSvgDataUrl(octagonOutlineShapeSvg) },
-  parallelogram: { filled: buildSvgDataUrl(parallelogramFilledShapeSvg), outline: buildSvgDataUrl(parallelogramOutlineShapeSvg) },
-  trapezoid: { filled: buildSvgDataUrl(trapezoidFilledShapeSvg), outline: buildSvgDataUrl(trapezoidOutlineShapeSvg) },
-  tag: { filled: buildSvgDataUrl(tagFilledShapeSvg), outline: buildSvgDataUrl(tagOutlineShapeSvg) },
-  star: { filled: buildSvgDataUrl(starFilledShapeSvg), outline: buildSvgDataUrl(starOutlineShapeSvg) },
-};
-const SOURCE_OBJECT_VISUAL_ASSET_URLS: Record<SourceObjectVisualKey, string> = {
-  source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
-  source_processed_transcript: buildSvgDataUrl(sourceProcessedTranscriptOutlineShapeSvg),
-  source_pdf: buildSvgDataUrl(sourcePdfOutlineShapeSvg),
-  source_image: buildSvgDataUrl(sourceImageOutlineShapeSvg),
-  source_audio: buildSvgDataUrl(sourceAudioOutlineShapeSvg),
-  source_video: buildSvgDataUrl(sourceVideoOutlineShapeSvg),
-};
 const POSTGRES_SOURCE_KIND_VISUALS: Record<string, { label: string; color: string; systemKey: SourceObjectVisualKey }> = {
   text: { label: "Text", color: "#355070", systemKey: "source_text" },
   transcript: { label: "Transcript", color: "#2a9d8f", systemKey: "source_processed_transcript" },
@@ -184,66 +137,6 @@ function getSourceKindVisual(sourceKind: string | null | undefined): { label: st
   const normalized = (sourceKind ?? "").trim().toLowerCase().replace(/_/g, " ");
   const key = normalized === "processed transcript" ? "transcript" : normalized;
   return POSTGRES_SOURCE_KIND_VISUALS[key] ?? null;
-}
-
-function getSourceObjectMaskStyle(url: string): CSSProperties {
-  return {
-    WebkitMaskImage: `url("${url}")`,
-    maskImage: `url("${url}")`,
-    WebkitMaskSize: "contain",
-    maskSize: "contain",
-    WebkitMaskRepeat: "no-repeat",
-    maskRepeat: "no-repeat",
-    WebkitMaskPosition: "center",
-    maskPosition: "center",
-  };
-}
-
-function SourceObjectTypeSwatch(props: {
-  shape: SourceObjectTypeShape;
-  fill: SourceObjectFill;
-  color: string;
-  sourceVisualKey: SourceObjectVisualKey | null;
-}) {
-  const { shape, fill, color, sourceVisualKey } = props;
-  const sourceOutlineAsset = sourceVisualKey ? SOURCE_OBJECT_VISUAL_ASSET_URLS[sourceVisualKey] : null;
-  const shapeAssets = sourceVisualKey ? null : SOURCE_OBJECT_SHAPE_ASSET_URLS[shape];
-  const background = fill === "outline" ? "transparent" : `${color}2e`;
-
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        position: "relative",
-        display: "inline-flex",
-        width: 24,
-        height: 18,
-        overflow: "hidden",
-        flexShrink: 0,
-        verticalAlign: "middle",
-        lineHeight: 0,
-      }}
-    >
-      <span
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "block",
-          background: sourceOutlineAsset ? "transparent" : background,
-          ...(sourceOutlineAsset ? {} : getSourceObjectMaskStyle(shapeAssets!.filled)),
-        }}
-      />
-      <span
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "block",
-          background: color,
-          ...getSourceObjectMaskStyle(sourceOutlineAsset ?? shapeAssets!.outline),
-        }}
-      />
-    </span>
-  );
 }
 
 export interface AnnotationsViewProps {
@@ -827,14 +720,6 @@ function formatSourceType(value: string | undefined): string {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
-function sourceTypeRowLabel(label: string): string {
-  const cleaned = label
-    .replace(/\bsources?\b/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-  return cleaned || label;
-}
-
 export function AnnotationsView(props: AnnotationsViewProps) {
   const {
     postgresProjectId,
@@ -855,12 +740,16 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   ];
 
   const [rows, setRows] = useState<AnnRow[]>([]);
+  const [codes, setCodes] = useState<PostgresCode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [sortCol, setSortCol] = useState<SortCol>("documentName");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [selectedSourceKindFilter, setSelectedSourceKindFilter] = useState<string>("all");
+  const [selectedCodeFilter, setSelectedCodeFilter] = useState<string>("all");
+  const [collapsedCodeIds, setCollapsedCodeIds] = useState<Set<string>>(new Set());
+  const [codeFilterSortCol, setCodeFilterSortCol] = useState<CodeFilterSortCol>("code");
+  const [codeFilterSortDir, setCodeFilterSortDir] = useState<SortDir>("asc");
   const [selectedRow, setSelectedRow] = useState<AnnRow | null>(null);
 
   useEffect(() => {
@@ -887,6 +776,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
       const sourceLockById = Object.fromEntries(
         snapshot.sourceLocks.map((lock) => [lock.sourceId, lock]),
       );
+      setCodes(snapshot.codes);
       setRows(snapshot.annotations.map((annotation) => {
         const source = sourceById[annotation.sourceId];
         const primaryCode = primaryCodeById[annotation.primaryCodeId];
@@ -948,6 +838,14 @@ export function AnnotationsView(props: AnnotationsViewProps) {
     }
   }
 
+  function handleCodeFilterSort(col: CodeFilterSortCol) {
+    if (col === codeFilterSortCol) setCodeFilterSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+    else {
+      setCodeFilterSortCol(col);
+      setCodeFilterSortDir("asc");
+    }
+  }
+
   function openAnnotation(row: AnnRow) {
     setSelectedRow(row);
   }
@@ -959,56 +857,73 @@ export function AnnotationsView(props: AnnotationsViewProps) {
     });
   }
 
-  const sourceKindSummaries = useMemo(() => {
-    const summaryByKind = new Map<string, {
-      label: string;
-      count: number;
-      shape: SourceObjectTypeShape;
-      color: string;
-      fill: SourceObjectFill;
-      systemKey: string | null;
-    }>();
+  const annotationCountByCodeId = useMemo(() => {
+    const countByCode = new Map<string, number>();
     for (const row of rows) {
-      const kind = (row.sourceKind ?? "").trim() || "source";
-      const current = summaryByKind.get(kind);
-      if (current) {
-        current.count += 1;
-      } else {
-        summaryByKind.set(kind, {
-          label: row.sourceObjectType || formatSourceType(kind),
-          count: 1,
-          shape: row.sourceObjectTypeShape ?? "rounded",
-          color: row.sourceObjectTypeColor ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
-          fill: row.sourceObjectTypeFill ?? "filled",
-          systemKey: row.sourceObjectTypeSystemKey ?? null,
-        });
-      }
+      const codeId = row.codeId || "__unknown__";
+      countByCode.set(codeId, (countByCode.get(codeId) ?? 0) + 1);
     }
-    return [...summaryByKind.entries()]
-      .map(([kind, summary]) => ({
-        kind,
-        label: summary.label,
-        count: summary.count,
-        shape: summary.shape,
-        color: summary.color,
-        fill: summary.fill,
-        systemKey: summary.systemKey,
-      }))
-      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+    return countByCode;
   }, [rows]);
 
-  useEffect(() => {
-    if (selectedSourceKindFilter === "all") return;
-    if (!sourceKindSummaries.some((summary) => summary.kind === selectedSourceKindFilter)) {
-      setSelectedSourceKindFilter("all");
+  const codeTree = useMemo(() => {
+    const children = new Map<string | null, PostgresCode[]>();
+    codes.forEach((code) => {
+      const parentId = code.parentCodeId || null;
+      const list = children.get(parentId) ?? [];
+      list.push(code);
+      children.set(parentId, list);
+    });
+    children.forEach((list) => {
+      list.sort((left, right) => {
+        let comparison = 0;
+        if (codeFilterSortCol === "count") {
+          comparison = (annotationCountByCodeId.get(left.id) ?? 0) - (annotationCountByCodeId.get(right.id) ?? 0);
+          if (comparison === 0) {
+            comparison = left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+          }
+        } else {
+          comparison = left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+        }
+        return codeFilterSortDir === "asc" ? comparison : -comparison;
+      });
+    });
+
+    const ordered: CodeTreeNode[] = [];
+    function walk(parentId: string | null, depth: number) {
+      const list = children.get(parentId) ?? [];
+      list.forEach((code) => {
+        const hasChildren = (children.get(code.id)?.length ?? 0) > 0;
+        ordered.push({ code, depth, hasChildren });
+        walk(code.id, depth + 1);
+      });
     }
-  }, [selectedSourceKindFilter, sourceKindSummaries]);
+    walk(null, 0);
+    return ordered;
+  }, [annotationCountByCodeId, codeFilterSortCol, codeFilterSortDir, codes]);
+  const visibleCodes = useMemo(() => visibleCodeNodes(codeTree, collapsedCodeIds), [codeTree, collapsedCodeIds]);
+
+  useEffect(() => {
+    if (selectedCodeFilter === "all") return;
+    if (!codes.some((code) => code.id === selectedCodeFilter)) {
+      setSelectedCodeFilter("all");
+    }
+  }, [selectedCodeFilter, codes]);
+
+  function toggleCollapsedCode(codeId: string) {
+    setCollapsedCodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(codeId)) next.delete(codeId);
+      else next.add(codeId);
+      return next;
+    });
+  }
 
   const filteredRows = useMemo(
-    () => selectedSourceKindFilter === "all"
+    () => selectedCodeFilter === "all"
       ? rows
-      : rows.filter((row) => ((row.sourceKind ?? "").trim() || "source") === selectedSourceKindFilter),
-    [rows, selectedSourceKindFilter],
+      : rows.filter((row) => (row.codeId || "__unknown__") === selectedCodeFilter),
+    [rows, selectedCodeFilter],
   );
 
   const sorted = [...filteredRows].sort((a, b) => {
@@ -1151,10 +1066,10 @@ export function AnnotationsView(props: AnnotationsViewProps) {
         className="postgres-sources-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
-          gap: 20,
-          alignItems: "center",
-          flex: 1,
+          gridTemplateColumns: "minmax(280px, 340px) auto minmax(0, 1fr)",
+          gap: 0,
+          alignItems: "stretch",
+          flex: "0 0 auto",
           minHeight: 0,
         }}
       >
@@ -1171,6 +1086,16 @@ export function AnnotationsView(props: AnnotationsViewProps) {
             paddingRight: 4,
           }}
         >
+          <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
+            <div className="segmented-control" role="presentation">
+              <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
+                Details
+              </button>
+              <button type="button" className="segmented-control-option" tabIndex={-1}>
+                Attributes
+              </button>
+            </div>
+          </div>
           <section className="home-project-card" style={{ padding: 0, overflow: "hidden" }}>
             <div
               style={{
@@ -1182,80 +1107,116 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 18 }}>Source object types</h2>
-                <span className="home-restricted-value">{sourceKindSummaries.length}</span>
+                <h2 style={{ margin: 0, fontSize: 18 }}>Codes</h2>
               </div>
             </div>
             <div>
               <table className="users-table" style={{ tableLayout: "fixed" }}>
+                <thead>
+                  <tr>
+                    <th
+                      className={`users-th${codeFilterSortCol === "code" ? " users-th--sorted" : ""}`}
+                      style={{ width: "76%" }}
+                      onClick={() => handleCodeFilterSort("code")}
+                    >
+                      Code
+                      <span className="users-sort-icon">
+                        {codeFilterSortCol === "code" ? (codeFilterSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>
+                    </th>
+                    <th
+                      className={`users-th${codeFilterSortCol === "count" ? " users-th--sorted" : ""}`}
+                      style={{ width: "24%" }}
+                      onClick={() => handleCodeFilterSort("count")}
+                    >
+                      Count
+                      <span className="users-sort-icon">
+                        {codeFilterSortCol === "count" ? (codeFilterSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
                   <tr
                     className="users-row"
                     style={{
-                      background: selectedSourceKindFilter === "all" ? "rgba(53, 80, 112, 0.10)" : undefined,
+                      background: selectedCodeFilter === "all" ? "rgba(53, 80, 112, 0.10)" : undefined,
                     }}
                   >
                     <td
                       className="users-td users-td--name"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedSourceKindFilter("all")}
+                      onClick={() => setSelectedCodeFilter("all")}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setSelectedSourceKindFilter("all");
+                          setSelectedCodeFilter("all");
                         }
                       }}
                     >
-                      All
+                      <span>All annotations</span>
                     </td>
                     <td className="users-td users-td--muted">{rows.length}</td>
                   </tr>
-                  {sourceKindSummaries.map((summary) => (
+                  {visibleCodes.map(({ code, depth, hasChildren }) => (
                     <tr
-                      key={summary.kind}
+                      key={code.id}
                       className="users-row"
                       style={{
-                        background: selectedSourceKindFilter === summary.kind ? "rgba(53, 80, 112, 0.10)" : undefined,
+                        background: selectedCodeFilter === code.id ? "rgba(53, 80, 112, 0.10)" : undefined,
                       }}
                     >
                       <td
                         className="users-td users-td--name"
                         role="button"
                         tabIndex={0}
-                        onClick={() => setSelectedSourceKindFilter(summary.kind)}
+                        onClick={() => setSelectedCodeFilter(code.id)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            setSelectedSourceKindFilter(summary.kind);
+                            setSelectedCodeFilter(code.id);
                           }
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, paddingLeft: 18 }}>
-                          <SourceObjectTypeSwatch
-                            shape={summary.shape}
-                            fill={summary.fill}
-                            color={summary.color}
-                            sourceVisualKey={getSourceObjectVisualKey(summary.systemKey)}
-                          />
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, paddingLeft: depth * 18 }}>
+                          {hasChildren ? (
+                            <button
+                              type="button"
+                              className="code-collapse-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleCollapsedCode(code.id);
+                              }}
+                              title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
+                              aria-label={collapsedCodeIds.has(code.id) ? "Expand code" : "Collapse code"}
+                            >
+                              {collapsedCodeIds.has(code.id) ? "▶" : "▼"}
+                            </button>
+                          ) : (
+                            <span className="code-collapse-spacer" aria-hidden="true" />
+                          )}
+                          <span className="code-swatch" style={{ background: code.color || "#888888" }} />
                           <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {sourceTypeRowLabel(summary.label)}
+                            {code.label || "-"}
                           </span>
                         </div>
                       </td>
-                      <td className="users-td users-td--muted">{summary.count}</td>
+                      <td className="users-td users-td--muted">{annotationCountByCodeId.get(code.id) ?? 0}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {sourceKindSummaries.length === 0 ? (
+              {codes.length === 0 ? (
                 <div className="empty-state" style={{ minHeight: 140 }}>
-                  <p>No source types yet.</p>
+                  <p>No codes yet.</p>
                 </div>
               ) : null}
             </div>
           </section>
         </div>
+
+        <div className="project-workspace-col-divider" aria-hidden="true" />
 
         <section
           className="users-content"

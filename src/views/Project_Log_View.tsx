@@ -1,6 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
 import { useStore } from "../context/StoreContext";
-import { HelpIcon } from "../components/AppIcons";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import type { ProjectLogEntry } from "../types";
@@ -16,9 +15,12 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "project.import":      "Project imported",
   "project.encrypted_backup.import": "Encrypted project backup imported",
   "project.restore_backup": "Project restored from backup",
-  "project.backup.create": "Project backup created",
-  "project.backup.settings": "Project backup settings updated",
-  "project.backup.delete": "Project backup deleted",
+  "project.snapshot.create": "Project snapshot created",
+  "project.snapshot.settings": "Project snapshot settings updated",
+  "project.snapshot.delete": "Project snapshot deleted",
+  "project.backup.create": "Project snapshot created",
+  "project.backup.settings": "Project snapshot settings updated",
+  "project.backup.delete": "Project snapshot deleted",
   "project.network_mode.update": "LAN mode updated",
   "auth.login": "Signed in",
   "auth.logout": "Signed out",
@@ -117,9 +119,15 @@ export function projectLogActionLabel(action: string, t: ReturnType<typeof useI1
     case "project.import": return t("projectLog.actions.projectImport");
     case "project.encrypted_backup.import": return t("projectLog.actions.projectEncryptedBackupImport");
     case "project.restore_backup": return t("projectLog.actions.projectRestoreBackup");
-    case "project.backup.create": return t("projectLog.actions.projectBackupCreate");
-    case "project.backup.settings": return t("projectLog.actions.projectBackupSettings");
-    case "project.backup.delete": return t("projectLog.actions.projectBackupDelete");
+    case "project.snapshot.create":
+    case "project.backup.create":
+      return t("projectLog.actions.projectSnapshotCreate");
+    case "project.snapshot.settings":
+    case "project.backup.settings":
+      return t("projectLog.actions.projectSnapshotSettings");
+    case "project.snapshot.delete":
+    case "project.backup.delete":
+      return t("projectLog.actions.projectSnapshotDelete");
     case "project.network_mode.update": return t("projectLog.actions.projectNetworkModeUpdate");
     case "project.ai_assist.update": return t("projectLog.actions.projectAiAssistUpdate");
     case "project.ai_chat.message": return t("projectLog.actions.projectAiChatMessage");
@@ -263,7 +271,8 @@ function formatDetailKey(key: string, t: ReturnType<typeof useI18n>["t"]): strin
   const fieldLabelMap: Record<string, Parameters<typeof t>[0]> = {
     previousRole: "projectLog.fieldLabels.previousRole",
     nextRole: "projectLog.fieldLabels.nextRole",
-    backupKind: "projectLog.fieldLabels.backupKind",
+    snapshotKind: "projectLog.fieldLabels.snapshotKind",
+    backupKind: "projectLog.fieldLabels.snapshotKind",
     targetKind: "projectLog.fieldLabels.targetKind",
     attributeName: "projectLog.fieldLabels.attributeName",
     codeId: "projectLog.fieldLabels.codeId",
@@ -277,7 +286,8 @@ function formatDetailKey(key: string, t: ReturnType<typeof useI18n>["t"]): strin
     documentCount: "projectLog.fieldLabels.documentCount",
     codeCount: "projectLog.fieldLabels.codeCount",
     coderCount: "projectLog.fieldLabels.coderCount",
-    backupCount: "projectLog.fieldLabels.backupCount",
+    snapshotCount: "projectLog.fieldLabels.snapshotCount",
+    backupCount: "projectLog.fieldLabels.snapshotCount",
     importedUsersCount: "projectLog.fieldLabels.importedUsersCount",
     requiresUserResolution: "projectLog.fieldLabels.requiresUserResolution",
     sizeBytes: "projectLog.fieldLabels.sizeBytes",
@@ -390,9 +400,14 @@ export function summarizeProjectLogDetails(action: string, details: ProjectLogDe
     }));
   }
 
-  if (typeof details.backupKind === "string") {
-    push(t("projectLog.details.backupKind", {
-      kind: details.backupKind,
+  const snapshotKind = typeof details.snapshotKind === "string"
+    ? details.snapshotKind
+    : typeof details.backupKind === "string"
+      ? details.backupKind
+      : null;
+  if (snapshotKind) {
+    push(t("projectLog.details.snapshotKind", {
+      kind: snapshotKind,
     }));
   }
 
@@ -466,8 +481,13 @@ export function summarizeProjectLogDetails(action: string, details: ProjectLogDe
     push(t("projectLog.details.coderCount", { count: details.coderCount }));
   }
 
-  if (typeof details.backupCount === "number" && action === "project.backup.settings") {
-    push(t("projectLog.details.backupCount", { count: details.backupCount }));
+  const snapshotCount = typeof details.snapshotCount === "number"
+    ? details.snapshotCount
+    : typeof details.backupCount === "number"
+      ? details.backupCount
+      : null;
+  if (snapshotCount != null && (action === "project.snapshot.settings" || action === "project.backup.settings")) {
+    push(t("projectLog.details.snapshotCount", { count: snapshotCount }));
   }
 
   if (typeof details.importedUsersCount === "number") {
@@ -604,11 +624,14 @@ export function projectLogDescriptionLabel(
       if (details?.mode === "lan") return t("projectLog.labels.networkModeLanEnabled");
       if (details?.mode === "local") return t("projectLog.labels.networkModeLocalEnabled");
       return projectLogActionLabel(entry.action, t);
-    case "project.backup.create":
-      if (details?.backupKind === "manual") return t("projectLog.labels.backupCreatedManual");
-      if (details?.backupKind === "session") return t("projectLog.labels.backupCreatedSession");
-      if (details?.backupKind === "automatic") return t("projectLog.labels.backupCreatedAutomatic");
+    case "project.snapshot.create":
+    case "project.backup.create": {
+      const snapshotKind = details?.snapshotKind ?? details?.backupKind;
+      if (snapshotKind === "manual") return t("projectLog.labels.snapshotCreatedManual");
+      if (snapshotKind === "session") return t("projectLog.labels.snapshotCreatedSession");
+      if (snapshotKind === "automatic") return t("projectLog.labels.snapshotCreatedAutomatic");
       return projectLogActionLabel(entry.action, t);
+    }
     case "presence.inactive":
       return typeof details?.userLabel === "string"
         ? t("projectLog.labels.presenceInactive", { name: details.userLabel })
@@ -915,51 +938,6 @@ export function ProjectLogTable() {
           })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-export function ProjectLogView() {
-  const { t } = useI18n();
-  const [helpOpen, setHelpOpen] = useState(false);
-
-  return (
-    <div className="view project-log-view">
-      <header className="view-header">
-        <div>
-          <div className="view-title-with-help">
-            <h1>{t("projectLog.title")}</h1>
-            <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("projectLog.openHelp")}>
-              <HelpIcon className="users-help-icon" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <ProjectLogTable />
-
-      {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("projectLog.help.title")}</h2>
-            <div className="app-settings-modal-body">
-              <p className="settings-section-desc">
-                {t("projectLog.help.intro")}
-              </p>
-              <ul className="settings-help-list">
-                <li>{t("projectLog.help.line1")}</li>
-                <li>{t("projectLog.help.line2")}</li>
-                <li>{t("projectLog.help.line3")}</li>
-              </ul>
-              <div className="form-actions">
-                <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                  {t("common.close")}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

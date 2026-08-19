@@ -1,28 +1,22 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
+import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
-import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
+import { SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
 import { getAppRuntimeInfo, type AppRuntimeInfo } from "../lib/dataRoot";
 import { buildPermissionMatrixRows } from "../lib/permissionMatrix";
 import {
-  getPostgresAuthStatus,
-  getPostgresInstallationSettings,
-  getPostgresStatus,
   getPostgresUserPreferences,
-  savePostgresInstallationSettings,
   savePostgresUserPreferences,
   type PostgresAuthSession,
-  type PostgresAuthStatus,
-  type PostgresInstallationSettings,
   type PostgresProject,
-  type PostgresStatus,
   type PostgresUserPreferences,
 } from "../lib/postgres";
 import {
   applyDensity,
   applyFontSize,
-  applyTheme,
   getStoredTheme,
   getStoredThemeState,
   initTheme,
@@ -40,6 +34,7 @@ export type PostgresAppSettingsViewProps = {
   authSession: PostgresAuthSession;
   project?: PostgresProject;
   canManageProject?: boolean;
+  canEditProjectMetadata?: boolean;
   memberCount?: number;
   ownerCount?: number;
   objectCount?: number;
@@ -52,12 +47,9 @@ export type PostgresAppSettingsViewProps = {
 };
 
 type AppSettingsModalId =
+  | "about"
   | "appearance"
   | "language"
-  | "import"
-  | "privacy"
-  | "storage"
-  | "diagnostics"
   | "permissions";
 
 type LicenseRow = {
@@ -134,25 +126,11 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferenc
   initTheme();
 }
 
-function formatPostgresDateTime(iso: string): string {
-  if (!iso) return "-";
-  try {
-    return new Intl.DateTimeFormat([], {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(iso));
-  } catch {
-    return "-";
-  }
-}
-
 export function PostgresAppSettingsView({
   authSession,
   project,
   canManageProject = false,
+  canEditProjectMetadata = canManageProject,
   memberCount = 0,
   ownerCount = 0,
   objectCount = 0,
@@ -166,11 +144,7 @@ export function PostgresAppSettingsView({
   const { locale, setLocale, t } = useI18n();
   const [activeModal, setActiveModal] = useState<AppSettingsModalId | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
-  const [installationSettings, setInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
-  const [status, setStatus] = useState<PostgresStatus | null>(null);
-  const [authStatus, setAuthStatus] = useState<PostgresAuthStatus | null>(null);
   const [appInfo, setAppInfo] = useState<AppRuntimeInfo | null>(null);
-  const [aboutCardExpanded, setAboutCardExpanded] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [theme, setTheme] = useState<Theme>("light");
@@ -182,16 +156,10 @@ export function PostgresAppSettingsView({
   const refreshDetails = useCallback(async () => {
     setError("");
     try {
-      const [nextInstallationSettings, nextUserPreferences, nextStatus, nextAuthStatus, nextAppInfo] = await Promise.all([
-        getPostgresInstallationSettings(),
+      const [nextUserPreferences, nextAppInfo] = await Promise.all([
         getPostgresUserPreferences(),
-        getPostgresStatus(),
-        getPostgresAuthStatus(),
         getAppRuntimeInfo(),
       ]);
-      setInstallationSettings(nextInstallationSettings);
-      setStatus(nextStatus);
-      setAuthStatus(nextAuthStatus);
       setAppInfo(nextAppInfo);
       setTheme(nextUserPreferences.theme);
       setDensity(nextUserPreferences.density);
@@ -208,17 +176,6 @@ export function PostgresAppSettingsView({
   useEffect(() => {
     void refreshDetails();
   }, [refreshDetails]);
-
-  const persistInstallationSettings = useCallback(async (next: PostgresInstallationSettings, successMessage: string) => {
-    try {
-      const saved = await savePostgresInstallationSettings(next);
-      setInstallationSettings(saved);
-      setNotice(successMessage);
-      setError("");
-    } catch (saveError) {
-      setError(describeUnknownError(saveError));
-    }
-  }, []);
 
   const persistUserPreferences = useCallback(async (next: PostgresUserPreferences, successMessage?: string) => {
     try {
@@ -262,7 +219,6 @@ export function PostgresAppSettingsView({
   async function handleThemeManagerApplied() {
     const nextTheme = getStoredTheme();
     setTheme(nextTheme);
-    setActivePresetId(null);
     await persistUserPreferences({
       theme: nextTheme,
       density,
@@ -278,28 +234,25 @@ export function PostgresAppSettingsView({
       id: "preferences",
       title: "Preferences",
       cards: [
-        { id: "appearance", title: "Appearance", description: "Adjust the interface theme, density, and text size." },
-        { id: "language", title: t("appSettings.sectionTitles.language"), description: t("appSettings.overview.language") },
-        { id: "import", title: t("appSettings.sectionTitles.documentImport"), description: t("appSettings.overview.documentImport") },
-        { id: "privacy", title: t("appSettings.sectionTitles.privacy"), description: t("appSettings.overview.privacy") },
-      ] as Array<{ id: AppSettingsModalId; title: string; description: string }>,
+        { id: "appearance", title: "Appearance", icon: "Aa" },
+        { id: "language", title: t("appSettings.sectionTitles.language"), icon: "LA" },
+      ] as Array<{ id: AppSettingsModalId; title: string; icon: string }>,
     },
     {
       id: "system",
       title: "System",
       cards: [
-        { id: "diagnostics", title: t("appSettings.sectionTitles.diagnostics"), description: t("appSettings.overview.diagnostics") },
-        { id: "permissions", title: t("appSettings.permissions.title"), description: t("appSettings.permissions.description") },
-        { id: "storage", title: t("appSettings.storage.localStorageTitle"), description: t("appSettings.overview.storage") },
-      ] as Array<{ id: AppSettingsModalId; title: string; description: string }>,
+        { id: "about", title: t("appSettings.about.title"), icon: "KQ" },
+        { id: "permissions", title: t("appSettings.permissions.title"), icon: "RO" },
+      ] as Array<{ id: AppSettingsModalId; title: string; icon: string }>,
     },
   ];
 
   return (
-    <div className="view app-settings-view">
+    <div className="view app-settings-view app-settings-view--compact">
       <header className="view-header">
         <div className="view-title-with-help">
-          <h1>App Settings</h1>
+          <h1>Settings</h1>
         </div>
       </header>
 
@@ -307,23 +260,71 @@ export function PostgresAppSettingsView({
       {error ? <p className="auth-error">{error}</p> : null}
 
       <div className="app-settings-overview-shell">
-        <div className="app-settings-overview-stack">
-          <section className="app-settings-about-card">
-            <div className="app-settings-about-header">
-              <div className="app-settings-about-copy">
-                <h2>{t("appSettings.about.title")}</h2>
-                <p>{t("appSettings.about.description")}</p>
+        <div className="app-settings-overview-stack app-settings-overview-stack--compact">
+          {onAuthSessionUpdated && onAuthSessionInvalidated ? (
+            <section className="app-settings-overview-section app-settings-overview-section--compact">
+              <div className="app-settings-overview-section-header">
+                <p className="app-settings-overview-section-heading">Account</p>
               </div>
-              <button
-                type="button"
-                className="btn btn--sm app-settings-about-toggle"
-                onClick={() => setAboutCardExpanded((expanded) => !expanded)}
-                aria-expanded={aboutCardExpanded}
-              >
-                {aboutCardExpanded ? t("appSettings.about.collapse") : t("appSettings.about.expand")}
-              </button>
-            </div>
-            {aboutCardExpanded ? (
+              <PostgresUserSettingsView
+                authSession={authSession}
+                onAuthSessionUpdated={onAuthSessionUpdated}
+                onAuthSessionInvalidated={onAuthSessionInvalidated}
+                embedded
+                includeAppearance={false}
+              />
+            </section>
+          ) : null}
+
+          {project && onProjectUpdated && onProjectDeleted ? (
+            <section className="app-settings-overview-section app-settings-overview-section--compact">
+              <div className="app-settings-overview-section-header">
+                <p className="app-settings-overview-section-heading">Project</p>
+              </div>
+              <PostgresProjectSettingsView
+                project={project}
+                canManageProject={canManageProject}
+                canEditProjectMetadata={canEditProjectMetadata}
+                memberCount={memberCount}
+                ownerCount={ownerCount}
+                objectCount={objectCount}
+                relationshipCount={relationshipCount}
+                onProjectUpdated={onProjectUpdated}
+                onProjectDeleted={onProjectDeleted}
+                onProjectOpened={onProjectOpened}
+                embedded
+              />
+            </section>
+          ) : null}
+
+          <div className="app-settings-overview-sections">
+            {groupedCards.map((section) => (
+              <section key={section.id} className="app-settings-overview-section app-settings-overview-section--compact">
+                <div className="app-settings-overview-section-header">
+                  <p className="app-settings-overview-section-heading">{section.title}</p>
+                </div>
+                <div className="app-settings-overview-grid app-settings-overview-grid--compact">
+                  {section.cards.map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className="app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--default"
+                      onClick={() => setActiveModal(card.id)}
+                    >
+                      <span className="app-settings-overview-card-icon" aria-hidden="true">{card.icon}</span>
+                      <h3>{card.title}</h3>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {activeModal === "about" ? (
+        <SettingsModal title={t("appSettings.about.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
               <div className="app-settings-about-body">
                 <section className="about-kanqual-section">
                   <h4>{t("appSettings.about.release")}</h4>
@@ -420,94 +421,17 @@ export function PostgresAppSettingsView({
                   </div>
                 </section>
               </div>
-            ) : null}
-          </section>
-
-          {onAuthSessionUpdated && onAuthSessionInvalidated ? (
-            <section className="app-settings-overview-section">
-              <div className="app-settings-overview-section-header">
-                <p className="app-settings-overview-section-heading">Account</p>
-              </div>
-              <PostgresUserSettingsView
-                authSession={authSession}
-                onAuthSessionUpdated={onAuthSessionUpdated}
-                onAuthSessionInvalidated={onAuthSessionInvalidated}
-                embedded
-                includeAppearance={false}
-              />
-            </section>
-          ) : null}
-
-          {project && onProjectUpdated && onProjectDeleted ? (
-            <section className="app-settings-overview-section">
-              <div className="app-settings-overview-section-header">
-                <p className="app-settings-overview-section-heading">Project</p>
-              </div>
-              <PostgresProjectSettingsView
-                project={project}
-                canManageProject={canManageProject}
-                memberCount={memberCount}
-                ownerCount={ownerCount}
-                objectCount={objectCount}
-                relationshipCount={relationshipCount}
-                onProjectUpdated={onProjectUpdated}
-                onProjectDeleted={onProjectDeleted}
-                onProjectOpened={onProjectOpened}
-                embedded
-              />
-            </section>
-          ) : null}
-
-          <div className="app-settings-overview-sections">
-            {groupedCards.map((section) => (
-              <section key={section.id} className="app-settings-overview-section">
-                <div className="app-settings-overview-section-header">
-                  <p className="app-settings-overview-section-heading">{section.title}</p>
-                </div>
-                <div className="app-settings-overview-grid">
-                  {section.cards.map((card) => (
-                    <button
-                      key={card.id}
-                      type="button"
-                      className="app-settings-overview-card app-settings-overview-card--default"
-                      onClick={() => setActiveModal(card.id)}
-                    >
-                      <h3>{card.title}</h3>
-                      <p>{card.description}</p>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        </div>
-      </div>
+            </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+        </SettingsModal>
+      ) : null}
 
       {activeModal === "appearance" ? (
         <SettingsModal title="Appearance" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection title="Interface">
-                  <div className="settings-row">
-                    <div className="settings-row-info"><div className="settings-row-label">Theme</div></div>
-                    <div className="theme-options">
-                      {(["light", "dark"] as Theme[]).map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          className={`theme-option${theme === option ? " theme-option--active" : ""}`}
-                          onClick={() => {
-                            setTheme(option);
-                            setActivePresetId(null);
-                            applyTheme(option);
-                            persistThemePatch({ theme: option });
-                          }}
-                        >
-                          {option === "light" ? "Light" : "Dark"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <ActiveThemePreviewRow theme={theme} onEdit={() => setShowThemeManager(true)} />
                   <div className="settings-row">
                     <div className="settings-row-info"><div className="settings-row-label">Interface density</div></div>
                     <div className="segmented-control">
@@ -546,10 +470,6 @@ export function PostgresAppSettingsView({
                       ))}
                     </div>
                   </div>
-                  <div className="settings-row">
-                    <div className="settings-row-info"><div className="settings-row-label">Custom theme</div></div>
-                    <button type="button" className="btn" onClick={() => setShowThemeManager(true)}>Edit theme</button>
-                  </div>
                 </SettingsModalSection>
               </div>
             </div>
@@ -558,124 +478,13 @@ export function PostgresAppSettingsView({
       ) : null}
 
       {activeModal === "language" ? (
-        <SettingsModal title={t("appSettings.sectionTitles.language")} onClose={() => setActiveModal(null)}>
-            <div className="app-settings-modal-body">
-              <SettingsModalSection title="Language">
-                <div className="settings-row settings-row--centered">
-                  <div className="settings-row-label">App language</div>
-                  <select
-                    className="form-input"
-                    style={{ width: "max-content", maxWidth: "100%" }}
-                    value={locale}
-                    onChange={(event) => void handleLocaleChange(event.target.value as (typeof SUPPORTED_LOCALES)[number])}
-                  >
-                    {SUPPORTED_LOCALES.map((option) => <option key={option} value={option}>{LOCALE_LABELS[option]}</option>)}
-                  </select>
-                </div>
-              </SettingsModalSection>
-            </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
-        </SettingsModal>
-      ) : null}
-
-      {activeModal === "import" ? (
-        <SettingsModal title={t("appSettings.sectionTitles.documentImport")} onClose={() => setActiveModal(null)}>
-            <div className="app-settings-modal-body">
-              <SettingsModalSection title="Document Import">
-                <label className="settings-row">
-                  <span className="settings-row-info"><span className="settings-row-label">Name sources from files</span></span>
-                  <input
-                    type="checkbox"
-                    checked={installationSettings?.documentImportAutoNameFromFile ?? true}
-                    onChange={(event) => {
-                      if (!installationSettings) return;
-                      void persistInstallationSettings({ ...installationSettings, documentImportAutoNameFromFile: event.target.checked }, "Document import settings saved.");
-                    }}
-                  />
-                </label>
-                <label className="settings-row">
-                  <span className="settings-row-info"><span className="settings-row-label">Warn before empty imports</span></span>
-                  <input
-                    type="checkbox"
-                    checked={installationSettings?.documentImportWarnBeforeEmptyImport ?? true}
-                    onChange={(event) => {
-                      if (!installationSettings) return;
-                      void persistInstallationSettings({ ...installationSettings, documentImportWarnBeforeEmptyImport: event.target.checked }, "Document import settings saved.");
-                    }}
-                  />
-                </label>
-              </SettingsModalSection>
-            </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
-        </SettingsModal>
-      ) : null}
-
-      {activeModal === "privacy" ? (
-        <SettingsModal title={t("appSettings.sectionTitles.privacy")} onClose={() => setActiveModal(null)}>
-            <div className="app-settings-modal-body">
-              <SettingsModalSection title="Privacy">
-                <label className="settings-row">
-                  <span className="settings-row-info"><span className="settings-row-label">Mask file paths</span></span>
-                  <input
-                    type="checkbox"
-                    checked={installationSettings?.privacyMaskFilePaths ?? false}
-                    onChange={(event) => installationSettings && void persistInstallationSettings({ ...installationSettings, privacyMaskFilePaths: event.target.checked }, "Privacy settings saved.")}
-                  />
-                </label>
-                <label className="settings-row">
-                  <span className="settings-row-info"><span className="settings-row-label">Clear recent projects on sign out</span></span>
-                  <input
-                    type="checkbox"
-                    checked={installationSettings?.privacyClearRecentProjectsOnSignOut ?? false}
-                    onChange={(event) => installationSettings && void persistInstallationSettings({ ...installationSettings, privacyClearRecentProjectsOnSignOut: event.target.checked }, "Privacy settings saved.")}
-                  />
-                </label>
-                <label className="settings-row">
-                  <span className="settings-row-info"><span className="settings-row-label">Forget login identities on logout</span></span>
-                  <input
-                    type="checkbox"
-                    checked={installationSettings?.privacyForgetLoginIdentitiesOnLogout ?? false}
-                    onChange={(event) => installationSettings && void persistInstallationSettings({ ...installationSettings, privacyForgetLoginIdentitiesOnLogout: event.target.checked }, "Privacy settings saved.")}
-                  />
-                </label>
-              </SettingsModalSection>
-            </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
-        </SettingsModal>
-      ) : null}
-
-      {activeModal === "storage" ? (
-        <SettingsModal title={t("appSettings.storage.localStorageTitle")} onClose={() => setActiveModal(null)}>
-            <div className="app-settings-modal-body">
-              <SettingsModalSection title="Database">
-                <div className="home-restricted-list">
-                  <div className="home-restricted-item"><span className="home-restricted-label">Host</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
-                  <div className="home-restricted-item"><span className="home-restricted-label">Network mode</span><span className="home-restricted-value">{status?.networkMode ?? "-"}</span></div>
-                  <div className="home-restricted-item"><span className="home-restricted-label">Control database</span><span className="home-restricted-value">{status?.appDatabase ?? "-"}</span></div>
-                </div>
-              </SettingsModalSection>
-            </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
-        </SettingsModal>
-      ) : null}
-
-      {activeModal === "diagnostics" ? (
-        <SettingsModal title={t("appSettings.sectionTitles.diagnostics")} onClose={() => setActiveModal(null)}>
-            <div className="app-settings-modal-body">
-              <SettingsModalSection title="Database Status">
-                <div className="home-restricted-list">
-                  <div className="home-restricted-item"><span className="home-restricted-label">Reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
-                  <div className="home-restricted-item"><span className="home-restricted-label">Setup complete</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
-                  <div className="home-restricted-item"><span className="home-restricted-label">Registered users</span><span className="home-restricted-value">{authStatus?.registeredUserCount ?? "-"}</span></div>
-                  <div className="home-restricted-item"><span className="home-restricted-label">Session started</span><span className="home-restricted-value">{formatPostgresDateTime(new Date(authSession.startedAtMs).toISOString())}</span></div>
-                </div>
-                <div className="form-actions" style={{ marginTop: 16, justifyContent: "flex-end" }}>
-                  <button type="button" className="btn btn--primary" onClick={() => void refreshDetails()}>Re-check</button>
-                </div>
-              </SettingsModalSection>
-            </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
-        </SettingsModal>
+        <LanguageSettingsModal
+          title={t("appSettings.sectionTitles.language")}
+          label={t("appSettings.language.label")}
+          locale={locale}
+          onChange={(nextLocale) => void handleLocaleChange(nextLocale)}
+          onClose={() => setActiveModal(null)}
+        />
       ) : null}
 
       {activeModal === "permissions" ? (

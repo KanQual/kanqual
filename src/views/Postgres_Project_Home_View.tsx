@@ -40,14 +40,13 @@ import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
+import { PlusIcon } from "../components/AppIcons";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import {
-  createPostgresProjectUser,
   createPostgresObjectAttributeDefinition,
   createPostgresRelationshipAttributeDefinition,
   deletePostgresObject,
   deletePostgresObjectType,
-  deletePostgresProjectUser,
   deletePostgresRelationship,
   deletePostgresRelationshipType,
   deletePostgresSavedDrawing,
@@ -58,7 +57,6 @@ import {
   getPostgresStatus,
   importPostgresObjectImage,
   importPostgresObjectTypeImage,
-  listPostgresAppUsers,
   listPostgresObjects,
   listPostgresObjectAttributeDefinitions,
   listPostgresObjectTypes,
@@ -76,9 +74,7 @@ import {
   savePostgresSavedDrawing,
   removePostgresObjectImage,
   removePostgresObjectTypeImage,
-  updatePostgresProjectUser,
   updatePostgresRelationshipAttributeDefinition,
-  type PostgresAppUser,
   type PostgresAuthSession,
   type PostgresCanvasDisplayShape,
   type PostgresCanvasNodeState,
@@ -161,9 +157,6 @@ const PostgresProjectMemosViewLazy = lazy(
 const PostgresReportsViewLazy = lazy(
   () => import("./Postgres_Reports_View").then((m) => ({ default: m.PostgresReportsView })),
 );
-const PostgresProjectLogViewLazy = lazy(
-  () => import("./Postgres_Project_Log_View").then((m) => ({ default: m.PostgresProjectLogView })),
-);
 const PostgresAiAssistHomeViewLazy = lazy(
   () => import("./Postgres_AIAssist_Home_View").then((m) => ({ default: m.PostgresAiAssistHomeView })),
 );
@@ -235,7 +228,6 @@ type PostgresProjectScreen =
   | "code-text"
   | "memos"
   | "reports"
-  | "project-log"
   | "objects"
   | "relationships"
   | "free-draw"
@@ -280,6 +272,8 @@ function PostgresAiAssistPortPlaceholderView({
   );
 }
 type PostgresObjectTypeSortCol = "objectType" | "count";
+type PostgresUserRoleSortCol = "role" | "count";
+type PostgresRelationshipTypeSortCol = "relationshipType" | "count";
 type PostgresRelationshipAttributeDraft = SharedAttributeDraft;
 type TypeAttributeDraft = SharedAttributeDraft & { localId: string };
 type TypeScopedAttributeDraft = SharedAttributeDraft & { typeIds: string[] };
@@ -3341,18 +3335,9 @@ export function PostgresProjectHomeView({
   const [postgresAnnotationNavigationTargetId, setPostgresAnnotationNavigationTargetId] = useState<string | null>(null);
   const [postgresMemoDraftTarget, setPostgresMemoDraftTarget] = useState<PostgresMemoDraftTarget | null>(null);
   const [users, setUsers] = useState<PostgresProjectUser[]>([]);
-  const [appUsers, setAppUsers] = useState<PostgresAppUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
-  const [usersSubmitting, setUsersSubmitting] = useState(false);
   const [usersError, setUsersError] = useState("");
-  const [userNotice, setUserNotice] = useState("");
   const [selectedUserRoleFilter, setSelectedUserRoleFilter] = useState<(typeof PROJECT_ROLE_OPTIONS)[number] | "all">("all");
-  const [selectedAppUserId, setSelectedAppUserId] = useState("");
-  const [userRole, setUserRole] = useState<(typeof PROJECT_ROLE_OPTIONS)[number]>("coder");
-  const [addUserOpen, setAddUserOpen] = useState(false);
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editRole, setEditRole] = useState<(typeof PROJECT_ROLE_OPTIONS)[number]>("coder");
-  const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [objectTypes, setObjectTypes] = useState<PostgresObjectType[]>([]);
   const [objects, setObjects] = useState<PostgresObject[]>([]);
   const [sources, setSources] = useState<PostgresSource[]>([]);
@@ -3416,6 +3401,10 @@ export function PostgresProjectHomeView({
   const [showRelationshipAttributesTable, setShowRelationshipAttributesTable] = useState(false);
   const [objectTypeSortCol, setObjectTypeSortCol] = useState<PostgresObjectTypeSortCol>("objectType");
   const [objectTypeSortDir, setObjectTypeSortDir] = useState<"asc" | "desc">("asc");
+  const [userRoleSortCol, setUserRoleSortCol] = useState<PostgresUserRoleSortCol>("role");
+  const [userRoleSortDir, setUserRoleSortDir] = useState<"asc" | "desc">("asc");
+  const [relationshipTypeSortCol, setRelationshipTypeSortCol] = useState<PostgresRelationshipTypeSortCol>("relationshipType");
+  const [relationshipTypeSortDir, setRelationshipTypeSortDir] = useState<"asc" | "desc">("asc");
   const [objectAttributeSortCol, setObjectAttributeSortCol] = useState<"name" | string>("name");
   const [objectAttributeSortDir, setObjectAttributeSortDir] = useState<"asc" | "desc">("asc");
   const [relationshipAttributeSortCol, setRelationshipAttributeSortCol] = useState<"name" | string>("name");
@@ -3484,7 +3473,6 @@ export function PostgresProjectHomeView({
   const [exportingSavedDrawingId, setExportingSavedDrawingId] = useState<string | null>(null);
   const [savedDrawingExportBusyFormat, setSavedDrawingExportBusyFormat] = useState<"png" | "pdf" | null>(null);
   const [removingSavedDrawingId, setRemovingSavedDrawingId] = useState<string | null>(null);
-  const [relationshipTypeSearchTerm, setRelationshipTypeSearchTerm] = useState("");
   const [openRelationshipTypeActionsMenu, setOpenRelationshipTypeActionsMenu] = useState<{
     id: string;
     left: number;
@@ -3834,7 +3822,18 @@ export function PostgresProjectHomeView({
         color: normalizePostgresRelationshipColor(relationshipType.color),
       };
     })
-    .sort((left, right) => left.relationshipType.localeCompare(right.relationshipType));
+    .sort((left, right) => {
+      let comparison = 0;
+      if (relationshipTypeSortCol === "count") {
+        comparison = left.count - right.count;
+        if (comparison === 0) {
+          comparison = left.relationshipType.localeCompare(right.relationshipType, undefined, { sensitivity: "base" });
+        }
+      } else {
+        comparison = left.relationshipType.localeCompare(right.relationshipType, undefined, { sensitivity: "base" });
+      }
+      return relationshipTypeSortDir === "asc" ? comparison : -comparison;
+    });
   const relationshipWorkspaceAttributeTypeOptions = useMemo(
     () => relationshipTypeSummaries.map((summary) => ({
       id: summary.relationshipTypeId,
@@ -3906,11 +3905,6 @@ export function PostgresProjectHomeView({
     relationshipAttributeSortCol,
     relationshipAttributeSortDir,
   ]);
-  const filteredRelationshipTypeSummaries = relationshipTypeSummaries.filter((summary) => {
-    const query = relationshipTypeSearchTerm.trim().toLowerCase();
-    if (!query) return true;
-    return summary.relationshipType.toLowerCase().includes(query) || summary.constraint.toLowerCase().includes(query);
-  });
   const filteredSavedDrawings = savedDrawings.filter((drawing) => drawing.canvasKind === selectedCanvasViewKind);
   useEffect(() => {
     if (selectedObjectTypeFilter === "all") return;
@@ -3997,6 +3991,24 @@ export function PostgresProjectHomeView({
     }
     setObjectTypeSortCol(column);
     setObjectTypeSortDir("asc");
+  }
+
+  function handleUserRoleSort(column: PostgresUserRoleSortCol) {
+    if (userRoleSortCol === column) {
+      setUserRoleSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setUserRoleSortCol(column);
+    setUserRoleSortDir("asc");
+  }
+
+  function handleRelationshipTypeSort(column: PostgresRelationshipTypeSortCol) {
+    if (relationshipTypeSortCol === column) {
+      setRelationshipTypeSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setRelationshipTypeSortCol(column);
+    setRelationshipTypeSortDir("asc");
   }
   const objectAttributeDefinitionsForCreateType = objectAttributeDefinitions.filter(
     (definition) => definition.objectTypeId === objectTypeId,
@@ -5123,9 +5135,10 @@ export function PostgresProjectHomeView({
     setRelationshipTypeAttributeDrafts((current) => current.filter((entry) => entry.localId !== localId));
   }
 
-  const currentProjectUser = users.find((user) => user.email.toLowerCase() === authSession.user.email.toLowerCase()) ?? null;
+  const currentProjectUser = users.find((user) => user.appUserId === authSession.user.id) ?? null;
   const isProjectAdmin = authSession.authKind === "postgres_admin";
   const canManageProjectSettings = isProjectAdmin || currentProjectUser?.role === "owner";
+  const canEditProjectMetadata = canManageProjectSettings || currentProjectUser?.role === "editor";
   const lastProjectActivityAt =
     [
       project.updatedAt,
@@ -5136,18 +5149,10 @@ export function PostgresProjectHomeView({
       .filter(Boolean)
       .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? project.createdAt;
   const ownerCount = users.filter((user) => user.role === "owner").length;
-  const canInviteUsers = isProjectAdmin || currentProjectUser?.role === "owner" || currentProjectUser?.role === "editor";
-  const canChangeRoles = isProjectAdmin || currentProjectUser?.role === "owner";
-  const canRemoveUsers = isProjectAdmin || currentProjectUser?.role === "owner";
   const canManageSources = isProjectAdmin || currentProjectUser?.role === "owner" || currentProjectUser?.role === "editor";
   const canManageAnnotations = isProjectAdmin || currentProjectUser?.role === "owner" || currentProjectUser?.role === "editor" || currentProjectUser?.role === "coder";
   const canManageMemos = canManageAnnotations;
   usePostgresAutomaticProjectSnapshots(project, canManageProjectSettings);
-  const availableAppUsers = useMemo(
-    () => appUsers.filter((candidate) => candidate.active && !users.some((user) => user.appUserId === candidate.id)),
-    [appUsers, users],
-  );
-  const inviteRoles = getInviteRoles();
   const sidebarCollaborationStatus: PostgresSidebarCollaborationStatus =
     !project
       ? "disabled"
@@ -5229,8 +5234,20 @@ export function PostgresProjectHomeView({
         label: projectRoleLabel(role),
         count: users.filter((user) => user.role === role).length,
       }))
-      .filter((summary) => summary.count > 0),
-    [users],
+      .filter((summary) => summary.count > 0)
+      .sort((left, right) => {
+        let comparison = 0;
+        if (userRoleSortCol === "count") {
+          comparison = left.count - right.count;
+          if (comparison === 0) {
+            comparison = left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+          }
+        } else {
+          comparison = left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+        }
+        return userRoleSortDir === "asc" ? comparison : -comparison;
+      }),
+    [userRoleSortCol, userRoleSortDir, users],
   );
 
   const filteredProjectUsers = useMemo(
@@ -5240,26 +5257,6 @@ export function PostgresProjectHomeView({
     [selectedUserRoleFilter, users],
   );
 
-  function getEditableRolesForUser(user: PostgresProjectUser) {
-    if (!canChangeRoles) return [user.role];
-    if (isProjectAdmin || currentProjectUser?.role === "owner") return [...PROJECT_ROLE_OPTIONS];
-    return [user.role];
-  }
-
-  function getInviteRoles() {
-    if (isProjectAdmin || currentProjectUser?.role === "owner") return [...PROJECT_ROLE_OPTIONS];
-    return PROJECT_ROLE_OPTIONS.filter((role) => role !== "owner");
-  }
-
-  function getRemoveBlockReason(user: PostgresProjectUser) {
-    if (!canRemoveUsers) return "You do not have permission to remove users from this project.";
-    if (user.appUserId === authSession.user.id) return "You cannot remove your own account from this project.";
-    if (user.role === "owner" && !isProjectAdmin && currentProjectUser?.role !== "owner") {
-      return "Only project owners or administrators can remove a project owner.";
-    }
-    return null;
-  }
-
   useEffect(() => {
     let cancelled = false;
 
@@ -5267,18 +5264,13 @@ export function PostgresProjectHomeView({
       setUsersLoading(true);
       setUsersError("");
       try {
-        const [nextUsers, nextAppUsers] = await Promise.all([
-          listPostgresProjectUsers(project.id),
-          listPostgresAppUsers(),
-        ]);
+        const nextUsers = await listPostgresProjectUsers(project.id);
         if (!cancelled) {
           setUsers(nextUsers);
-          setAppUsers(nextAppUsers);
         }
       } catch (loadError) {
         if (!cancelled) {
           setUsers([]);
-          setAppUsers([]);
           setUsersError(loadError instanceof Error ? loadError.message : String(loadError));
         }
       } finally {
@@ -5297,12 +5289,6 @@ export function PostgresProjectHomeView({
     setCanvasSaveError("");
     clearSavedCanvasSession();
   }, [project.id]);
-
-  useEffect(() => {
-    if (!inviteRoles.includes(userRole)) {
-      setUserRole(inviteRoles.includes("coder") ? "coder" : inviteRoles[0] ?? "viewer");
-    }
-  }, [inviteRoles, userRole]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5408,15 +5394,10 @@ export function PostgresProjectHomeView({
     setUsersLoading(true);
     setUsersError("");
     try {
-      const [nextUsers, nextAppUsers] = await Promise.all([
-        listPostgresProjectUsers(project.id),
-        listPostgresAppUsers(),
-      ]);
+      const nextUsers = await listPostgresProjectUsers(project.id);
       setUsers(nextUsers);
-      setAppUsers(nextAppUsers);
     } catch (loadError) {
       setUsers([]);
-      setAppUsers([]);
       setUsersError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       setUsersLoading(false);
@@ -5737,77 +5718,6 @@ export function PostgresProjectHomeView({
       setGraphError(deleteError instanceof Error ? deleteError.message : String(deleteError));
     } finally {
       setGraphSubmitting(false);
-    }
-  }
-
-  async function handleCreateUser(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setUsersError("");
-    setUserNotice("");
-    if (!selectedAppUserId) {
-      setUsersError("Choose a registered user to add to this project.");
-      return;
-    }
-
-    setUsersSubmitting(true);
-    try {
-      const created = await createPostgresProjectUser({
-        projectId: project.id,
-        appUserId: selectedAppUserId,
-        role: userRole,
-      });
-      setUsers((current) => [...current, created]);
-      setSelectedAppUserId("");
-      setUserRole("coder");
-      setAddUserOpen(false);
-      setUserNotice(`Added ${created.name} to this PostgreSQL project.`);
-      setActiveScreen("users");
-    } catch (createError) {
-      setUsersError(createError instanceof Error ? createError.message : String(createError));
-    } finally {
-      setUsersSubmitting(false);
-    }
-  }
-
-  async function handleSaveUserRole(user: PostgresProjectUser) {
-    setUsersError("");
-    setUserNotice("");
-    setUsersSubmitting(true);
-    try {
-      const updated = await updatePostgresProjectUser({
-        projectId: project.id,
-        projectUserId: user.id,
-        role: editRole,
-      });
-      setUsers((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
-      setEditingUserId(null);
-      setUserNotice(`Updated ${updated.name}'s role to ${projectRoleLabel(updated.role)}.`);
-    } catch (updateError) {
-      setUsersError(updateError instanceof Error ? updateError.message : String(updateError));
-    } finally {
-      setUsersSubmitting(false);
-    }
-  }
-
-  async function handleRemoveUser(user: PostgresProjectUser) {
-    const blockReason = getRemoveBlockReason(user);
-    if (blockReason) {
-      setUsersError(blockReason);
-      return;
-    }
-
-    setUsersError("");
-    setUserNotice("");
-    setUsersSubmitting(true);
-    try {
-      await deletePostgresProjectUser(project.id, user.id);
-      setUsers((current) => current.filter((entry) => entry.id !== user.id));
-      setRemovingUserId(null);
-      setUserNotice(`Removed ${user.name} from this PostgreSQL project.`);
-    } catch (removeError) {
-      setUsersError(removeError instanceof Error ? removeError.message : String(removeError));
-    } finally {
-      setUsersSubmitting(false);
     }
   }
 
@@ -7193,7 +7103,6 @@ export function PostgresProjectHomeView({
         onShowProjectCodeText={() => setActiveScreen("code-text")}
         onShowProjectMemos={() => setActiveScreen("memos")}
         onShowProjectReports={() => setActiveScreen("reports")}
-        onShowProjectLog={() => setActiveScreen("project-log")}
         onShowProjectObjects={() => setActiveScreen("objects")}
         onShowProjectRelationships={() => setActiveScreen("relationships")}
         onShowAiAssistHome={() => setActiveScreen("ai-assist")}
@@ -7312,31 +7221,19 @@ export function PostgresProjectHomeView({
                   <div className="users-title-wrap">
                     <h1>Project Users</h1>
                   </div>
-                  <div className="view-header-actions">
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      disabled={!canInviteUsers || availableAppUsers.length === 0}
-                      onClick={() => setAddUserOpen(true)}
-                      title={!canInviteUsers ? "Only project owners, administrators, and editors can add users." : undefined}
-                    >
-                      Add user
-                    </button>
-                  </div>
                 </header>
 
                 <div className="users-content postgres-users-content" style={{ alignItems: "stretch" }}>
-                  {userNotice ? <p className="settings-success">{userNotice}</p> : null}
                   {usersError ? <p className="users-error">{usersError}</p> : null}
 
                   <div
                     className="postgres-sources-grid project-users-grid"
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
-                      gap: 20,
-                      alignItems: "center",
-                      flex: 1,
+                      gridTemplateColumns: "minmax(280px, 340px) auto minmax(0, 1fr)",
+                      gap: 0,
+                      alignItems: "stretch",
+                      flex: "0 0 auto",
                       minHeight: 0,
                     }}
                   >
@@ -7365,11 +7262,34 @@ export function PostgresProjectHomeView({
                         >
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                             <h2 style={{ margin: 0, fontSize: 18 }}>User roles</h2>
-                            <span className="home-restricted-value">{users.length}</span>
                           </div>
                         </div>
                         <div>
                           <table className="users-table" style={{ tableLayout: "fixed" }}>
+                            <thead>
+                              <tr>
+                                <th
+                                  className={`users-th${userRoleSortCol === "role" ? " users-th--sorted" : ""}`}
+                                  style={{ width: "76%" }}
+                                  onClick={() => handleUserRoleSort("role")}
+                                >
+                                  Role
+                                  <span className="users-sort-icon">
+                                    {userRoleSortCol === "role" ? (userRoleSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  </span>
+                                </th>
+                                <th
+                                  className={`users-th${userRoleSortCol === "count" ? " users-th--sorted" : ""}`}
+                                  style={{ width: "24%" }}
+                                  onClick={() => handleUserRoleSort("count")}
+                                >
+                                  Count
+                                  <span className="users-sort-icon">
+                                    {userRoleSortCol === "count" ? (userRoleSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  </span>
+                                </th>
+                              </tr>
+                            </thead>
                             <tbody>
                               <tr
                                 className="users-row"
@@ -7389,7 +7309,7 @@ export function PostgresProjectHomeView({
                                     }
                                   }}
                                 >
-                                  All
+                                  All users
                                 </td>
                                 <td className="users-td users-td--muted">{users.length}</td>
                               </tr>
@@ -7424,6 +7344,8 @@ export function PostgresProjectHomeView({
                       </section>
                     </div>
 
+                    <div className="project-users-col-divider" aria-hidden="true" />
+
                     <section
                       className="users-content"
                       style={{
@@ -7454,42 +7376,32 @@ export function PostgresProjectHomeView({
                           <table className="users-table">
                             <thead>
                               <tr>
-                                <th className="users-th" style={{ width: "26%" }}>User</th>
-                                <th className="users-th" style={{ width: "28%" }}>Email</th>
-                                <th className="users-th" style={{ width: "12%" }}>Role</th>
-                                <th className="users-th" style={{ width: "17%" }}>Created</th>
-                                <th className="users-th" style={{ width: "17%" }}>Updated</th>
+                                <th className="users-th" style={{ width: "28%" }}>User</th>
+                                <th className="users-th" style={{ width: "18%" }}>Role</th>
+                                <th className="users-th" style={{ width: "27%" }}>Created</th>
+                                <th className="users-th" style={{ width: "27%" }}>Last active</th>
                               </tr>
                             </thead>
                             <tbody>
                               {filteredProjectUsers.map((user) => (
                                 <tr
                                   key={user.id}
-                                  className={`users-row project-users-row${canChangeRoles ? "" : " users-row--disabled"}`}
-                                  onClick={() => {
-                                    if (canChangeRoles) {
-                                      setEditingUserId(user.id);
-                                      setEditRole(user.role as (typeof PROJECT_ROLE_OPTIONS)[number]);
-                                      setRemovingUserId(null);
-                                    }
-                                  }}
+                                  className="users-row project-users-row"
                                 >
                                   <td className="users-td users-td--name">
                                     <div className="postgres-users-name-cell">
                                       <span>{user.name}</span>
-                                      <span className="postgres-users-meta">
-                                        {user.role === "owner" ? "Project owner" : "Project member"}
-                                      </span>
                                     </div>
                                   </td>
-                                  <td className="users-td users-td--muted">{user.email}</td>
                                   <td className="users-td">
                                     <span className={`role-badge role-badge--${user.role}`}>
                                       {projectRoleLabel(user.role)}
                                     </span>
                                   </td>
                                   <td className="users-td users-td--muted">{formatCurrentDateTime(user.createdAt)}</td>
-                                  <td className="users-td users-td--muted">{formatCurrentDateTime(user.updatedAt)}</td>
+                                  <td className="users-td users-td--muted">
+                                    {user.lastActiveAt ? formatCurrentDateTime(user.lastActiveAt) : "Never"}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -7501,150 +7413,6 @@ export function PostgresProjectHomeView({
                 </div>
               </div>
 
-              {addUserOpen ? (
-                <div className="modal-overlay" onClick={() => !usersSubmitting && setAddUserOpen(false)}>
-                  <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-                    <h2>Add user</h2>
-                    <p className="users-guide-copy" style={{ marginBottom: 16 }}>
-                      Add an existing Kanqual account to this PostgreSQL project and choose what that user can do here.
-                    </p>
-                    <form onSubmit={handleCreateUser} className="form">
-                      <label className="form-label">
-                        Registered user
-                        <select
-                          className="form-input"
-                          value={selectedAppUserId}
-                          onChange={(event) => setSelectedAppUserId(event.target.value)}
-                          autoFocus
-                        >
-                          <option value="">Select a registered user</option>
-                          {availableAppUsers.map((user) => (
-                            <option key={user.id} value={user.id}>
-                              {user.name} ({user.email})
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="form-label">
-                        Role
-                        <select
-                          className="form-input"
-                          value={userRole}
-                          onChange={(event) => setUserRole(event.target.value as (typeof PROJECT_ROLE_OPTIONS)[number])}
-                        >
-                          {inviteRoles.map((role) => (
-                            <option key={role} value={role}>
-                              {projectRoleLabel(role)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="form-actions">
-                        <button type="button" className="btn" onClick={() => setAddUserOpen(false)} disabled={usersSubmitting}>
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          className="btn btn--primary"
-                          disabled={usersSubmitting || !selectedAppUserId}
-                        >
-                          {usersSubmitting ? "Adding..." : "Add user"}
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              ) : null}
-
-              {editingUserId ? (
-                (() => {
-                  const user = users.find((entry) => entry.id === editingUserId);
-                  if (!user) return null;
-                  return (
-                    <div className="modal-overlay" onClick={() => !usersSubmitting && setEditingUserId(null)}>
-                      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-                        <h2>Edit user</h2>
-                        <p className="auth-hint" style={{ marginTop: 0 }}>
-                          {user.name} ({user.email})
-                        </p>
-                        <div className="form">
-                          <label className="form-label">
-                            Project role
-                            <select
-                              className="form-input"
-                              value={editRole}
-                              onChange={(event) => setEditRole(event.target.value as (typeof PROJECT_ROLE_OPTIONS)[number])}
-                            >
-                              {getEditableRolesForUser(user).map((role) => (
-                                <option key={role} value={role}>
-                                  {projectRoleLabel(role)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <div className="form-actions">
-                            <button type="button" className="btn" onClick={() => setEditingUserId(null)} disabled={usersSubmitting}>
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn--danger"
-                              disabled={!!getRemoveBlockReason(user)}
-                              onClick={() => {
-                                setRemovingUserId(user.id);
-                                setEditingUserId(null);
-                              }}
-                            >
-                              Remove
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn--primary"
-                              onClick={() => void handleSaveUserRole(user)}
-                              disabled={usersSubmitting || editRole === user.role}
-                            >
-                              {usersSubmitting ? "Saving..." : "Save role"}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
-              ) : null}
-
-              {removingUserId ? (
-                (() => {
-                  const user = users.find((entry) => entry.id === removingUserId);
-                  if (!user) return null;
-                  return (
-                    <div className="modal-overlay" onClick={() => !usersSubmitting && setRemovingUserId(null)}>
-                      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-                        <h2>Remove user</h2>
-                        <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                          Remove {user.name} from this project?
-                        </p>
-                        <p className="modal-warning-text">
-                          Removing this user revokes access to this project but does not delete their Kanqual account.
-                        </p>
-                        <div className="form-actions" style={{ marginTop: 24 }}>
-                          <button type="button" className="btn" onClick={() => setRemovingUserId(null)} disabled={usersSubmitting}>
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--danger"
-                            onClick={() => void handleRemoveUser(user)}
-                            disabled={usersSubmitting}
-                          >
-                            {usersSubmitting ? "Removing..." : "Remove from project"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
-              ) : null}
             </>
           ) : activeScreen === "sources" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
@@ -7742,12 +7510,6 @@ export function PostgresProjectHomeView({
           ) : activeScreen === "reports" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
               <PostgresReportsViewLazy projectId={project.id} projectStoragePath={project.storagePath} />
-            </Suspense>
-          ) : activeScreen === "project-log" ? (
-            <Suspense fallback={<ViewLoadingFallback />}>
-              <PostgresProjectLogViewLazy
-                projectId={project.id}
-              />
             </Suspense>
           ) : activeScreen === "ai-assist" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
@@ -8130,7 +7892,7 @@ export function PostgresProjectHomeView({
               <div className="view users-view">
                 <header className="view-header">
                   <div className="users-title-wrap">
-                    <h1>Research Objects</h1>
+                    <h1>Objects</h1>
                   </div>
                   <div className="view-header-actions">
                     {showObjectAttributesTable && selectedObjectTypeFilter !== "all" ? (
@@ -8142,37 +7904,6 @@ export function PostgresProjectHomeView({
                       >
                         Add Attribute
                       </button>
-                    ) : !showObjectAttributesTable ? (
-                      <>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => {
-                            setEditingObjectTypeModalId(null);
-                            setDraftObjectTypeName("");
-                            setDraftObjectTypeDescription("");
-                            setDraftObjectTypeShape("rounded");
-                            setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
-                            setDraftObjectTypeFill("filled");
-                            setDraftObjectTypeImageStoragePath("");
-                            setDraftObjectTypePendingImage(null);
-                            setDraftObjectTypeGraphicMode("select");
-                            initializeObjectTypeAttributeEditor(null);
-                            setObjectTypeModalTab("details");
-                            setGraphError("");
-                            setCreateObjectTypeOpen(true);
-                          }}
-                        >
-                          Add object type
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--primary"
-                          onClick={() => openCreateObjectModal()}
-                        >
-                          New object
-                        </button>
-                      </>
                     ) : null}
                   </div>
                 </header>
@@ -8181,10 +7912,10 @@ export function PostgresProjectHomeView({
                   className="postgres-sources-grid"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
-                    gap: 20,
-                    alignItems: "center",
-                    flex: 1,
+                    gridTemplateColumns: "minmax(280px, 340px) auto minmax(0, 1fr)",
+                    gap: 0,
+                    alignItems: "stretch",
+                    flex: "0 0 auto",
                     minHeight: 0,
                   }}
                 >
@@ -8229,7 +7960,31 @@ export function PostgresProjectHomeView({
                       >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                           <h2 style={{ margin: 0, fontSize: 18 }}>Object types</h2>
-                          <span className="home-restricted-value">{objectTypeSummaries.length}</span>
+                          {!showObjectAttributesTable ? (
+                            <button
+                              type="button"
+                              className="btn project-create-icon-button"
+                              aria-label="Add object type"
+                              title="Add object type"
+                              onClick={() => {
+                                setEditingObjectTypeModalId(null);
+                                setDraftObjectTypeName("");
+                                setDraftObjectTypeDescription("");
+                                setDraftObjectTypeShape("rounded");
+                                setDraftObjectTypeColor(POSTGRES_OBJECT_TYPE_DEFAULT_COLOR);
+                                setDraftObjectTypeFill("filled");
+                                setDraftObjectTypeImageStoragePath("");
+                                setDraftObjectTypePendingImage(null);
+                                setDraftObjectTypeGraphicMode("select");
+                                initializeObjectTypeAttributeEditor(null);
+                                setObjectTypeModalTab("details");
+                                setGraphError("");
+                                setCreateObjectTypeOpen(true);
+                              }}
+                            >
+                              <PlusIcon className="project-create-icon" />
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -8244,7 +7999,7 @@ export function PostgresProjectHomeView({
                               >
                                 Type
                                 <span className="users-sort-icon">
-                                  {objectTypeSortCol === "objectType" ? (objectTypeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
+                                  {objectTypeSortCol === "objectType" ? (objectTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                                 </span>
                               </th>
                               <th
@@ -8254,7 +8009,7 @@ export function PostgresProjectHomeView({
                               >
                                 Count
                                 <span className="users-sort-icon">
-                                  {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
+                                  {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                                 </span>
                               </th>
                             </tr>
@@ -8278,10 +8033,7 @@ export function PostgresProjectHomeView({
                                   }
                                 }}
                               >
-                                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                  <span>All objects</span>
-                                  <span className="postgres-users-meta">Across every object type</span>
-                                </div>
+                                <span>All objects</span>
                               </td>
                               <td className="users-td users-td--muted">{customObjects.length}</td>
                             </tr>
@@ -8414,6 +8166,8 @@ export function PostgresProjectHomeView({
                     </section>
                   </div>
 
+                  <div className="project-workspace-col-divider" aria-hidden="true" />
+
                   <section
                     className="users-content"
                     style={{
@@ -8430,27 +8184,46 @@ export function PostgresProjectHomeView({
                   >
                     {graphNotice ? <p className="settings-success">{graphNotice}</p> : null}
                     {graphError ? <p className="auth-error">{graphError}</p> : null}
-                    <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
-                      <div className="segmented-control" role="tablist" aria-label="Object workspace views">
-                        <button
-                          type="button"
-                          className={showObjectAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
-                          role="tab"
-                          aria-selected={!showObjectAttributesTable}
-                          onClick={() => setShowObjectAttributesTable(false)}
-                        >
-                          Details
-                        </button>
-                        <button
-                          type="button"
-                          className={showObjectAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                          role="tab"
-                          aria-selected={showObjectAttributesTable}
-                          onClick={() => setShowObjectAttributesTable(true)}
-                        >
-                          Attributes
-                        </button>
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
+                      <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
+                        <div className="segmented-control" role="tablist" aria-label="Object workspace views">
+                          <button
+                            type="button"
+                            className={showObjectAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+                            role="tab"
+                            aria-selected={!showObjectAttributesTable}
+                            onClick={() => setShowObjectAttributesTable(false)}
+                          >
+                            Details
+                          </button>
+                          <button
+                            type="button"
+                            className={showObjectAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                            role="tab"
+                            aria-selected={showObjectAttributesTable}
+                            onClick={() => setShowObjectAttributesTable(true)}
+                          >
+                            Attributes
+                          </button>
+                        </div>
                       </div>
+                      {!showObjectAttributesTable ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary project-create-icon-button"
+                          aria-label="New object"
+                          title="New object"
+                          onClick={() => openCreateObjectModal()}
+                          style={{
+                            position: "absolute",
+                            right: 0,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                          }}
+                        >
+                          <PlusIcon className="project-create-icon" />
+                        </button>
+                      ) : null}
                     </div>
                     {graphLoading ? (
                       <div className="empty-state postgres-users-empty-state">
@@ -8473,7 +8246,7 @@ export function PostgresProjectHomeView({
                                   >
                                     Object
                                     <span className="users-sort-icon">
-                                      {objectAttributeSortCol === "name" ? (objectAttributeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
+                                      {objectAttributeSortCol === "name" ? (objectAttributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                                     </span>
                                   </th>
                                   {objectAttributeDefinitionsForWorkspace.map((definition) => (
@@ -8484,7 +8257,7 @@ export function PostgresProjectHomeView({
                                     >
                                       {definition.name}
                                       <span className="users-sort-icon">
-                                        {objectAttributeSortCol === definition.id ? (objectAttributeSortDir === "asc" ? " â†‘" : " â†“") : " â†•"}
+                                        {objectAttributeSortCol === definition.id ? (objectAttributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                                       </span>
                                       <span className="case-attribute-type-label">{definition.dataType}</span>
                                     </th>
@@ -8548,14 +8321,6 @@ export function PostgresProjectHomeView({
                           </div>
                         )}
                       </>
-                    ) : filteredObjects.length === 0 ? (
-                      <div className="empty-state postgres-users-empty-state">
-                        <p>
-                          {selectedObjectTypeFilter === "all"
-                            ? "No objects yet."
-                            : `No ${objectTypeById.get(selectedObjectTypeFilter)?.name ?? "selected"} objects yet.`}
-                        </p>
-                      </div>
                     ) : (
                       <div className="users-table-wrap postgres-users-table-wrap">
                         <table className="users-table">
@@ -8567,40 +8332,50 @@ export function PostgresProjectHomeView({
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredObjects.map((object) => {
-                              return (
-                                <tr
-                                  key={object.id}
-                                  className="users-row"
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={() => setSelectedObjectDetailsId(object.id)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      setSelectedObjectDetailsId(object.id);
-                                    }
-                                  }}
-                                  style={{
-                                    background: selectedObjectDetailsId === object.id ? "rgba(53, 80, 112, 0.10)" : undefined,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  <td className="users-td users-td--name">{object.title}</td>
-                                  <td className="users-td users-td--muted">{object.objectType}</td>
-                                  <td className="users-td users-td--muted">
-                                    {formatCurrentDateTime(object.updatedAt, {
-                                      year: "numeric",
-                                      month: "short",
-                                      day: "numeric",
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                      second: "2-digit",
-                                    })}
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                            {filteredObjects.length === 0 ? (
+                              <tr>
+                                <td colSpan={3} className="users-td-msg">
+                                  {selectedObjectTypeFilter === "all"
+                                    ? "No objects yet."
+                                    : `No ${objectTypeById.get(selectedObjectTypeFilter)?.name ?? "selected"} objects yet.`}
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredObjects.map((object) => {
+                                return (
+                                  <tr
+                                    key={object.id}
+                                    className="users-row"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setSelectedObjectDetailsId(object.id)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        setSelectedObjectDetailsId(object.id);
+                                      }
+                                    }}
+                                    style={{
+                                      background: selectedObjectDetailsId === object.id ? "rgba(53, 80, 112, 0.10)" : undefined,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <td className="users-td users-td--name">{object.title}</td>
+                                    <td className="users-td users-td--muted">{object.objectType}</td>
+                                    <td className="users-td users-td--muted">
+                                      {formatCurrentDateTime(object.updatedAt, {
+                                        year: "numeric",
+                                        month: "short",
+                                        day: "numeric",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                        second: "2-digit",
+                                      })}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -9252,19 +9027,6 @@ export function PostgresProjectHomeView({
                       >
                         Add Attribute
                       </button>
-                    ) : !showRelationshipAttributesTable ? (
-                      <>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={openCreateRelationshipTypeModal}
-                        >
-                          Add relationship type
-                        </button>
-                        <button type="button" className="btn btn--primary" onClick={() => openCreateRelationshipModal()}>
-                          New relationship
-                        </button>
-                      </>
                     ) : null}
                   </div>
                 </header>
@@ -9273,10 +9035,10 @@ export function PostgresProjectHomeView({
                   className="postgres-sources-grid"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)",
-                    gap: 20,
-                    alignItems: "center",
-                    flex: 1,
+                    gridTemplateColumns: "minmax(280px, 340px) auto minmax(0, 1fr)",
+                    gap: 0,
+                    alignItems: "stretch",
+                    flex: "0 0 auto",
                     minHeight: 0,
                   }}
                 >
@@ -9285,6 +9047,7 @@ export function PostgresProjectHomeView({
                     style={{
                       alignSelf: "center",
                       justifyContent: "center",
+                      gap: 16,
                       minHeight: 0,
                       maxHeight: "100%",
                       overflowY: "auto",
@@ -9292,6 +9055,16 @@ export function PostgresProjectHomeView({
                       paddingRight: 4,
                     }}
                   >
+                    <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
+                      <div className="segmented-control" role="presentation">
+                        <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
+                          Details
+                        </button>
+                        <button type="button" className="segmented-control-option" tabIndex={-1}>
+                          Attributes
+                        </button>
+                      </div>
+                    </div>
                     <section className="home-project-card" style={{ padding: 0, overflow: "hidden" }}>
                       <div
                         style={{
@@ -9304,22 +9077,44 @@ export function PostgresProjectHomeView({
                       >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                           <h2 style={{ margin: 0, fontSize: 18 }}>Relationship types</h2>
-                          <span className="home-restricted-value">{relationshipTypeSummaries.length}</span>
+                          {!showRelationshipAttributesTable ? (
+                            <button
+                              type="button"
+                              className="btn project-create-icon-button"
+                              aria-label="Add relationship type"
+                              title="Add relationship type"
+                              onClick={openCreateRelationshipTypeModal}
+                            >
+                              <PlusIcon className="project-create-icon" />
+                            </button>
+                          ) : null}
                         </div>
-                        <input
-                          className="form-input"
-                          value={relationshipTypeSearchTerm}
-                          onChange={(event) => setRelationshipTypeSearchTerm(event.target.value)}
-                          placeholder="Search relationship types"
-                        />
                       </div>
 
-                      <div style={{ maxHeight: 560, overflowY: "auto" }}>
+                      <div>
                         <table className="users-table" style={{ tableLayout: "fixed" }}>
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "76%" }}>Type</th>
-                              <th className="users-th" style={{ width: "24%" }}>Count</th>
+                              <th
+                                className={`users-th${relationshipTypeSortCol === "relationshipType" ? " users-th--sorted" : ""}`}
+                                style={{ width: "76%" }}
+                                onClick={() => handleRelationshipTypeSort("relationshipType")}
+                              >
+                                Type
+                                <span className="users-sort-icon">
+                                  {relationshipTypeSortCol === "relationshipType" ? (relationshipTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                </span>
+                              </th>
+                              <th
+                                className={`users-th${relationshipTypeSortCol === "count" ? " users-th--sorted" : ""}`}
+                                style={{ width: "24%" }}
+                                onClick={() => handleRelationshipTypeSort("count")}
+                              >
+                                Count
+                                <span className="users-sort-icon">
+                                  {relationshipTypeSortCol === "count" ? (relationshipTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                </span>
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -9345,14 +9140,11 @@ export function PostgresProjectHomeView({
                                   }
                                 }}
                               >
-                                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                  <span>All relationships</span>
-                                  <span className="postgres-users-meta">Across every relationship type</span>
-                                </div>
+                                <span>All relationships</span>
                               </td>
                               <td className="users-td users-td--muted">{relationships.length}</td>
                             </tr>
-                            {filteredRelationshipTypeSummaries.map((summary) => (
+                            {relationshipTypeSummaries.map((summary) => (
                               <tr
                                 key={summary.relationshipTypeId}
                                 className="users-row"
@@ -9367,7 +9159,6 @@ export function PostgresProjectHomeView({
                                 }}
                                 style={{
                                   background: selectedRelationshipTypeFilter === summary.relationshipTypeId ? "rgba(53, 80, 112, 0.10)" : undefined,
-                                  cursor: "context-menu",
                                 }}
                               >
                                 <td
@@ -9386,7 +9177,7 @@ export function PostgresProjectHomeView({
                                     }
                                   }}
                                 >
-                                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, paddingLeft: 18 }}>
                                     <RelationshipTypeLinePreview
                                       lineShape={summary.lineShape}
                                       lineWeight={summary.lineWeight}
@@ -9494,14 +9285,16 @@ export function PostgresProjectHomeView({
                             </button>
                           </div>
                         ) : null}
-                        {filteredRelationshipTypeSummaries.length === 0 ? (
+                        {relationshipTypeSummaries.length === 0 ? (
                           <div className="empty-state" style={{ minHeight: 140 }}>
-                            <p>No relationship types match that search.</p>
+                            <p>No relationship types yet.</p>
                           </div>
                         ) : null}
                       </div>
                     </section>
                   </div>
+
+                  <div className="project-workspace-col-divider" aria-hidden="true" />
 
                   <section
                     className="users-content"
@@ -9520,27 +9313,46 @@ export function PostgresProjectHomeView({
                     {graphNotice ? <p className="settings-success">{graphNotice}</p> : null}
                     {graphError ? <p className="auth-error">{graphError}</p> : null}
 
-                    <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
-                      <div className="segmented-control" role="tablist" aria-label="Relationship workspace views">
-                        <button
-                          type="button"
-                          className={showRelationshipAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
-                          role="tab"
-                          aria-selected={!showRelationshipAttributesTable}
-                          onClick={() => setShowRelationshipAttributesTable(false)}
-                        >
-                          Details
-                        </button>
-                        <button
-                          type="button"
-                          className={showRelationshipAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                          role="tab"
-                          aria-selected={showRelationshipAttributesTable}
-                          onClick={() => setShowRelationshipAttributesTable(true)}
-                        >
-                          Attributes
-                        </button>
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
+                      <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
+                        <div className="segmented-control" role="tablist" aria-label="Relationship workspace views">
+                          <button
+                            type="button"
+                            className={showRelationshipAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+                            role="tab"
+                            aria-selected={!showRelationshipAttributesTable}
+                            onClick={() => setShowRelationshipAttributesTable(false)}
+                          >
+                            Details
+                          </button>
+                          <button
+                            type="button"
+                            className={showRelationshipAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                            role="tab"
+                            aria-selected={showRelationshipAttributesTable}
+                            onClick={() => setShowRelationshipAttributesTable(true)}
+                          >
+                            Attributes
+                          </button>
+                        </div>
                       </div>
+                      {!showRelationshipAttributesTable ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary project-create-icon-button"
+                          aria-label="New relationship"
+                          title="New relationship"
+                          onClick={() => openCreateRelationshipModal()}
+                          style={{
+                            position: "absolute",
+                            right: 0,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                          }}
+                        >
+                          <PlusIcon className="project-create-icon" />
+                        </button>
+                      ) : null}
                     </div>
 
                     {graphLoading ? (
@@ -9645,14 +9457,6 @@ export function PostgresProjectHomeView({
                           </div>
                         )}
                       </>
-                    ) : filteredRelationships.length === 0 ? (
-                      <div className="empty-state postgres-users-empty-state">
-                        <p>
-                          {selectedRelationshipTypeFilter === "all"
-                            ? "No relationships yet."
-                            : `No ${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "selected"} relationships yet.`}
-                        </p>
-                      </div>
                     ) : (
                       <div className="users-table-wrap postgres-users-table-wrap">
                         <table className="users-table">
@@ -9665,7 +9469,15 @@ export function PostgresProjectHomeView({
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredRelationships.map((relationship) => {
+                            {filteredRelationships.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="users-td-msg">
+                                  {selectedRelationshipTypeFilter === "all"
+                                    ? "No relationships yet."
+                                    : `No ${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "selected"} relationships yet.`}
+                                </td>
+                              </tr>
+                            ) : filteredRelationships.map((relationship) => {
                               const fromObject = objectById.get(relationship.fromObjectId);
                               const toObject = objectById.get(relationship.toObjectId);
                               return (
@@ -10343,6 +10155,7 @@ export function PostgresProjectHomeView({
                 authSession={authSession}
                 project={project}
                 canManageProject={canManageProjectSettings}
+                canEditProjectMetadata={canEditProjectMetadata}
                 memberCount={users.length}
                 ownerCount={ownerCount}
                 objectCount={objects.length}
@@ -10359,6 +10172,7 @@ export function PostgresProjectHomeView({
               <PostgresProjectSettingsViewLazy
                 project={project}
                 canManageProject={canManageProjectSettings}
+                canEditProjectMetadata={canEditProjectMetadata}
                 memberCount={users.length}
                 ownerCount={ownerCount}
                 objectCount={objects.length}
