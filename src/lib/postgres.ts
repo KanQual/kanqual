@@ -89,6 +89,27 @@ export type PostgresUpgradeBackupResult = {
   bytes: number;
 };
 
+export type PostgresUpgradeBackupDiagnosticsEntry = {
+  path: string;
+  fileName: string;
+  createdAtMs: number;
+  modifiedAtMs: number;
+  kanqualVersion: string;
+  postgresVersion: string;
+  projectCount: number;
+  storageFileCount: number;
+  bytes: number;
+  source: string;
+  exists: boolean;
+};
+
+export type PostgresUpgradeBackupDiagnostics = {
+  folderPath: string;
+  folderExists: boolean;
+  lastSuccessfulBackup: PostgresUpgradeBackupDiagnosticsEntry | null;
+  backups: PostgresUpgradeBackupDiagnosticsEntry[];
+};
+
 export type RestorePostgresUpgradeBackupResult = {
   restoredAtMs: number;
   kanqualVersion: string;
@@ -1003,8 +1024,15 @@ export async function createPostgresUpgradeBackup(
   outputPath?: string,
 ): Promise<PostgresUpgradeBackupResult> {
   return invoke<PostgresUpgradeBackupResult>("create_postgres_experiment_upgrade_backup_command", {
-    request: { adminPassword, outputPath },
+    request: {
+      adminPassword,
+      outputPath,
+    },
   });
+}
+
+export async function listPostgresUpgradeBackupDiagnostics(): Promise<PostgresUpgradeBackupDiagnostics> {
+  return invoke<PostgresUpgradeBackupDiagnostics>("list_postgres_experiment_upgrade_backup_diagnostics_command");
 }
 
 export async function restorePostgresUpgradeBackup(data: {

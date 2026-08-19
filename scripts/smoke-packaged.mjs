@@ -5,7 +5,6 @@ function parseArgs(argv) {
   const args = {
     platform: "",
     bundleRoot: path.resolve("src-tauri", "target", "release", "bundle"),
-    expectedSidecar: "",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -14,8 +13,6 @@ function parseArgs(argv) {
       args.platform = String(argv[++i] ?? "").trim().toLowerCase();
     } else if (arg === "--bundle-root") {
       args.bundleRoot = path.resolve(String(argv[++i] ?? ""));
-    } else if (arg === "--expected-sidecar") {
-      args.expectedSidecar = String(argv[++i] ?? "").trim();
     } else if (arg === "--help" || arg === "-h") {
       args.help = true;
     } else {
@@ -28,7 +25,7 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log(`Usage:
-  node scripts/smoke-packaged.mjs --platform <windows|macos|linux> [--bundle-root <path>] [--expected-sidecar <filename>]
+  node scripts/smoke-packaged.mjs --platform <windows|macos|linux> [--bundle-root <path>]
 `);
 }
 
@@ -81,6 +78,15 @@ function baseName(filePath) {
   return path.basename(filePath);
 }
 
+async function validatePostgresRuntime(runtimeRoot, platform) {
+  const extension = platform === "windows" ? ".exe" : "";
+  const required = ["postgres", "initdb", "pg_ctl", "psql", "pg_dump"];
+  for (const executable of required) {
+    const executablePath = path.join(runtimeRoot, "bin", `${executable}${extension}`);
+    assert(await pathExists(executablePath), `Packaged smoke test failed: bundled PostgreSQL runtime is missing ${executablePath}.`);
+  }
+}
+
 async function findPaths(bundleRoot, predicate) {
   const entries = await walk(bundleRoot);
   return entries
@@ -106,8 +112,8 @@ async function validateWindowsBundle(bundleRoot) {
 
   const requiredPortableEntries = [
     "kanqual.exe",
-    "pocketbase.exe",
     "portable-mode.json",
+    "runtime",
     "data",
     "licenses",
     "LICENSE",
@@ -123,15 +129,17 @@ async function validateWindowsBundle(bundleRoot) {
   const portableMarker = path.join(portableDir, "portable-mode.json");
   const portableMarkerText = await fs.readFile(portableMarker, "utf8");
   assert(portableMarkerText.trim() === "{}", "Windows smoke test failed: portable-mode.json does not contain the expected marker payload.");
+  await validatePostgresRuntime(path.join(portableDir, "runtime", "postgresql-17"), "windows");
 
   return [
     `Installer: ${baseName(installer)}`,
     `Portable ZIP: ${baseName(portableZip)}`,
     `Portable dir: ${baseName(portableDir)}`,
+    "Runtime: PostgreSQL 17",
   ];
 }
 
-async function validateMacosBundle(bundleRoot, expectedSidecar) {
+async function validateMacosBundle(bundleRoot) {
   const appDirs = await findPaths(bundleRoot, (fullPath, entry) => entry.isDirectory() && baseName(fullPath).endsWith(".app"));
   const dmgs = await findPaths(bundleRoot, (fullPath, entry) => entry.isFile() && matchesExtension(fullPath, ".dmg"));
 
@@ -142,27 +150,15 @@ async function validateMacosBundle(bundleRoot, expectedSidecar) {
   const infoPlist = path.join(appDir, "Contents", "Info.plist");
   const macOsDir = path.join(appDir, "Contents", "MacOS");
   const macOsEntries = await fs.readdir(macOsDir, { withFileTypes: true });
-  const bundledSidecarName = expectedSidecar
-    ? (expectedSidecar.toLowerCase().endsWith(".exe") ? "pocketbase.exe" : "pocketbase")
-    : null;
 
   assert(await pathExists(infoPlist), "macOS smoke test failed: Info.plist is missing from the app bundle.");
   assert(macOsEntries.some((entry) => entry.isFile() && entry.name.toLowerCase().includes("kanqual")), "macOS smoke test failed: app executable is missing from Contents/MacOS.");
-  if (bundledSidecarName) {
-    assert(
-      macOsEntries.some((entry) => entry.isFile() && entry.name === bundledSidecarName),
-      `macOS smoke test failed: expected bundled PocketBase sidecar ${bundledSidecarName} is missing from Contents/MacOS.`,
-    );
-  } else {
-    assert(macOsEntries.some((entry) => entry.isFile() && entry.name.startsWith("pocketbase")), "macOS smoke test failed: PocketBase sidecar is missing from Contents/MacOS.");
-  }
+  await validatePostgresRuntime(path.join(appDir, "Contents", "Resources", "runtime", "postgresql-17"), "macos");
 
   return [
     `App bundle: ${baseName(appDir)}`,
     `DMG: ${baseName(dmgs[0])}`,
-    bundledSidecarName
-      ? `Sidecar: ${bundledSidecarName} (from source ${expectedSidecar})`
-      : "Sidecar: detected",
+    "Runtime: PostgreSQL 17",
   ];
 }
 
@@ -198,7 +194,7 @@ async function main() {
   if (args.platform === "windows") {
     details = await validateWindowsBundle(args.bundleRoot);
   } else if (args.platform === "macos") {
-    details = await validateMacosBundle(args.bundleRoot, args.expectedSidecar);
+    details = await validateMacosBundle(args.bundleRoot);
   } else if (args.platform === "linux") {
     details = await validateLinuxBundle(args.bundleRoot);
   } else {

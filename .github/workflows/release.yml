@@ -19,38 +19,39 @@ jobs:
             platform_label: windows
             smoke_platform: windows
             smoke_packaged_args: ""
+            postgres_runtime_target: "windows-x86_64"
             bundle_targets: "nsis"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
-            sidecar_check: "pocketbase-x86_64-pc-windows-msvc.exe"
             runtime_smoke_command: "npm run smoke:runtime -- --platform windows --hold-ms 2000 --timeout-ms 120000"
           - os: macos-latest
             platform_label: macos
             smoke_platform: macos
-            smoke_packaged_args: "--expected-sidecar pocketbase-aarch64-apple-darwin"
+            smoke_packaged_args: ""
+            postgres_runtime_target: "macos-aarch64"
             bundle_targets: "app,dmg"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
-            sidecar_check: "pocketbase-aarch64-apple-darwin"
             runtime_smoke_command: "npm run smoke:runtime -- --platform macos --hold-ms 3000 --timeout-ms 150000"
           - os: macos-15-intel
             platform_label: macos-intel
             smoke_platform: macos
-            smoke_packaged_args: "--expected-sidecar pocketbase-x86_64-apple-darwin"
+            smoke_packaged_args: ""
+            postgres_runtime_target: "macos-x86_64"
             bundle_targets: "app,dmg"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
-            sidecar_check: "pocketbase-x86_64-apple-darwin"
             runtime_smoke_command: "npm run smoke:runtime -- --platform macos --hold-ms 3000 --timeout-ms 150000"
           - os: ubuntu-22.04
             platform_label: linux
             smoke_platform: linux
             smoke_packaged_args: ""
+            postgres_runtime_target: "linux-x86_64"
             bundle_targets: "appimage,deb"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
-            sidecar_check: "pocketbase-x86_64-unknown-linux-gnu"
             runtime_smoke_command: "xvfb-run -a npm run smoke:runtime -- --platform linux --hold-ms 3000 --timeout-ms 150000"
 
     runs-on: ${{ matrix.os }}
     env:
       CI: true
+      KANQUAL_POSTGRES_RUNTIME_TARGET: ${{ matrix.postgres_runtime_target }}
 
     steps:
       - name: Check out repository
@@ -93,23 +94,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Validate bundled PocketBase sidecars for this platform
-        shell: pwsh
-        run: |
-          $sidecarDir = Join-Path $PWD "src-tauri/binaries/local"
-          $expected = "${{ matrix.sidecar_check }}".Split(",") | Where-Object { $_ -and $_.Trim() }
-          $present = $false
-          foreach ($file in $expected) {
-            $candidate = Join-Path $sidecarDir $file
-            if (Test-Path $candidate) {
-              Write-Host "Found sidecar candidate: $candidate"
-              $present = $true
-            }
-          }
-          if (-not $present) {
-            Write-Error "Missing platform sidecar. Expected one of: $($expected -join ', ')"
-            exit 1
-          }
+      - name: Fetch bundled PostgreSQL runtime for this platform
+        run: npm run fetch:bundled-postgres -- --target ${{ matrix.postgres_runtime_target }}
+
+      - name: Validate bundled PostgreSQL runtime staging
+        run: npm run prepare:bundled-postgres:strict
 
       - name: Verify frontend and native tests
         shell: pwsh
@@ -147,11 +136,6 @@ jobs:
             exit 1
           }
 
-          if (-not (Test-Path (Join-Path $targetRoot "pocketbase.exe"))) {
-            Write-Error "Portable packaging failed: src-tauri/target/release/pocketbase.exe was not found."
-            exit 1
-          }
-
           if (Test-Path $portableDir) {
             Remove-Item -LiteralPath $portableDir -Recurse -Force
           }
@@ -161,9 +145,10 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
           New-Item -ItemType Directory -Force -Path (Join-Path $portableDir "data") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $portableDir "runtime") | Out-Null
 
           Copy-Item -LiteralPath (Join-Path $targetRoot "kanqual.exe") -Destination (Join-Path $portableDir "kanqual.exe") -Force
-          Copy-Item -LiteralPath (Join-Path $targetRoot "pocketbase.exe") -Destination (Join-Path $portableDir "pocketbase.exe") -Force
+          Copy-Item -LiteralPath (Join-Path $PWD "src-tauri/resources/runtime/postgresql-17") -Destination (Join-Path $portableDir "runtime/postgresql-17") -Recurse -Force
           Set-Content -LiteralPath (Join-Path $portableDir "portable-mode.json") -Value "{}" -NoNewline
           Copy-Item -LiteralPath (Join-Path $PWD "LICENSE") -Destination $portableDir -Force
           Copy-Item -LiteralPath (Join-Path $PWD "LICENSES.md") -Destination $portableDir -Force

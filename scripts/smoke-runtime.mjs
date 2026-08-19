@@ -116,11 +116,11 @@ async function resolveWindowsLaunchTarget(bundleRoot, releaseRoot) {
 
   for (const dirPath of portableDirs) {
     const exePath = path.join(dirPath, "kanqual.exe");
-    const sidecarPath = path.join(dirPath, "pocketbase.exe");
+    const postgresPath = path.join(dirPath, "runtime", "postgresql-17", "bin", "postgres.exe");
     const exeStat = await fs.stat(exePath).catch(() => null);
     if (
       exeStat
-      && await pathExists(sidecarPath)
+      && await pathExists(postgresPath)
       && (!releaseExeStat || exeStat.mtimeMs >= releaseExeStat.mtimeMs)
     ) {
       return { launchPath: exePath, mode: "portable" };
@@ -306,7 +306,7 @@ async function main() {
     await delay(1500);
   }
 
-  assert(await pathExists(path.join(smoke.dataDir, "pb_data")), `Smoke runtime test failed: expected PocketBase data in ${smoke.dataDir}.`);
+  assert(await pathExists(path.join(smoke.dataDir, "postgres", "data", "PG_VERSION")), `Smoke runtime test failed: expected bundled PostgreSQL data directory in ${smoke.dataDir}.`);
 
   console.log(`Runtime smoke test passed for ${args.platform}.`);
   console.log(`- Mode: ${target.mode}`);

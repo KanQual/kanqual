@@ -47,7 +47,6 @@
       "icons/icon.icns",
       "icons/icon2.ico"
     ],
-    "externalBin": ["binaries/local/pocketbase"],
     "resources": ["resources/runtime/postgresql-17/**/*"]
   }
 }

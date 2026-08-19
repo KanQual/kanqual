@@ -48,6 +48,8 @@ const POSTGRES_ADMIN_ROLE_PREFIX: &str = "kanqual_admin_";
 const POSTGRES_DEFAULT_DATABASE: &str = "kanqual";
 const POSTGRES_PROJECT_DATABASE_PREFIX: &str = "kq_proj_";
 const POSTGRES_PROJECT_SNAPSHOT_DATABASE_PREFIX: &str = "kq_snap_";
+const POSTGRES_EXPERIMENT_CONTROL_SCHEMA_VERSION: i32 = 10;
+const POSTGRES_EXPERIMENT_PROJECT_SCHEMA_VERSION: i32 = 9;
 const APP_METADATA_COLLECTION: &str = "app_metadata";
 const BACKEND_IDENTIFIER_KEY: &str = "backend_identifier";
 const USERS_TABLE_IDENTIFIER_KEY: &str = "users_table_identifier";
@@ -70,6 +72,7 @@ const ENCRYPTED_BACKUP_ARGON2_ITERATIONS: u32 = 3;
 const ENCRYPTED_BACKUP_ARGON2_PARALLELISM: u32 = 1;
 const ENCRYPTED_BACKUP_SALT_BYTES: usize = 16;
 const ENCRYPTED_BACKUP_NONCE_BYTES: usize = 12;
+const UPGRADE_BACKUP_DIAGNOSTICS_FILE: &str = "upgrade-backup-diagnostics.json";
 const AUTH_RULE: &str = "@request.auth.id != ''";
 const LARGE_REPORT_SNAPSHOT_MAX: u64 = 2_000_000;
 
@@ -7193,6 +7196,37 @@ struct PostgresUpgradeBackupResult {
     bytes: u64,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresUpgradeBackupDiagnosticsEntry {
+    path: String,
+    file_name: String,
+    created_at_ms: u64,
+    modified_at_ms: u64,
+    kanqual_version: String,
+    postgres_version: String,
+    project_count: usize,
+    storage_file_count: usize,
+    bytes: u64,
+    source: String,
+    exists: bool,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresUpgradeBackupDiagnosticsManifest {
+    entries: Vec<PostgresUpgradeBackupDiagnosticsEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresUpgradeBackupDiagnostics {
+    folder_path: String,
+    folder_exists: bool,
+    last_successful_backup: Option<PostgresUpgradeBackupDiagnosticsEntry>,
+    backups: Vec<PostgresUpgradeBackupDiagnosticsEntry>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RestorePostgresUpgradeBackupResult {
@@ -7213,6 +7247,11 @@ struct PostgresUpgradeBackupProjectManifest {
     database_name: String,
     storage_path: String,
     active: bool,
+    schema_versions: Vec<i32>,
+    database_dump_sha256: String,
+    storage_file_count: usize,
+    storage_bytes: u64,
+    storage_sha256: String,
     created_at: String,
     updated_at: String,
 }
@@ -7222,6 +7261,7 @@ struct PostgresUpgradeBackupProjectManifest {
 struct PostgresUpgradeBackupDatabaseDump {
     database_name: String,
     role: String,
+    sha256: String,
     sql: String,
 }
 
@@ -7230,6 +7270,8 @@ struct PostgresUpgradeBackupDatabaseDump {
 struct PostgresUpgradeBackupStorageFile {
     project_id: String,
     relative_path: String,
+    size_bytes: u64,
+    checksum_sha256: String,
     bytes_b64: String,
 }
 
@@ -24771,6 +24813,231 @@ fn ensure_project_backup_json_shape(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn value_string_required<'a>(value: &'a Value, key: &str, label: &str) -> Result<&'a str, String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| format!("The upgrade backup is missing {label}."))
+}
+
+fn value_array_required<'a>(value: &'a Value, key: &str, label: &str) -> Result<&'a Vec<Value>, String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("The upgrade backup is missing {label}."))
+}
+
+fn validate_upgrade_backup_schema_versions(
+    versions: &[Value],
+    label: &str,
+    max_supported_version: i32,
+) -> Result<(), String> {
+    if versions.is_empty() {
+        return Err(format!(
+            "The upgrade backup has invalid {label} schema version metadata."
+        ));
+    }
+    let mut highest_version = 0_i32;
+    for version in versions {
+        let version = version.as_i64().ok_or_else(|| {
+            format!("The upgrade backup has invalid {label} schema version metadata.")
+        })?;
+        if version < 1 || version > i32::MAX as i64 {
+            return Err(format!(
+                "The upgrade backup has invalid {label} schema version metadata."
+            ));
+        }
+        highest_version = highest_version.max(version as i32);
+    }
+    if highest_version > max_supported_version {
+        return Err(format!(
+            "This upgrade backup was created with a newer KanQual {label} schema and cannot be restored by this version."
+        ));
+    }
+    Ok(())
+}
+
+fn validate_upgrade_backup_database_dump(value: &Value, label: &str) -> Result<(), String> {
+    let sql = value_string_required(value, "sql", &format!("{label} SQL"))?;
+    let expected_sha256 = value_string_required(value, "sha256", &format!("{label} checksum"))?;
+    let actual_sha256 = sha256_hex(sql.as_bytes());
+    if actual_sha256 != expected_sha256 {
+        return Err(format!(
+            "The upgrade backup {label} checksum does not match its SQL payload."
+        ));
+    }
+    Ok(())
+}
+
+fn validate_upgrade_backup_storage_file(value: &Value) -> Result<(), String> {
+    let relative_path = value_string_required(value, "relativePath", "a storage file path")?;
+    let _ = safe_backup_relative_path(relative_path)?;
+    let bytes_b64 = value_string_required(value, "bytesB64", "a storage file payload")?;
+    let expected_sha256 =
+        value_string_required(value, "checksumSha256", "a storage file checksum")?;
+    let expected_size = value
+        .get("sizeBytes")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "The upgrade backup is missing a storage file size.".to_string())?;
+    let bytes = BASE64_STANDARD
+        .decode(bytes_b64)
+        .map_err(|_| "A storage file payload in the upgrade backup is not valid base64.".to_string())?;
+    if bytes.len() as u64 != expected_size {
+        return Err("A storage file payload in the upgrade backup does not match its recorded size.".to_string());
+    }
+    if sha256_hex(&bytes) != expected_sha256 {
+        return Err("A storage file payload in the upgrade backup does not match its checksum.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_upgrade_backup_project_manifest(
+    project: &Value,
+    project_dumps: &std::collections::HashMap<String, String>,
+    storage_files: &[Value],
+) -> Result<(), String> {
+    let database_name = value_string_required(project, "databaseName", "a project database name")?;
+    let expected_dump_sha256 =
+        value_string_required(project, "databaseDumpSha256", "a project database dump checksum")?;
+    let actual_dump_sha256 = project_dumps
+        .get(database_name)
+        .ok_or_else(|| format!("The upgrade backup is missing a dump for project database {database_name}."))?;
+    if actual_dump_sha256 != expected_dump_sha256 {
+        return Err(format!(
+            "The upgrade backup project manifest checksum does not match project database {database_name}."
+        ));
+    }
+    let schema_versions = value_array_required(project, "schemaVersions", "project schema versions")?;
+    validate_upgrade_backup_schema_versions(
+        schema_versions,
+        &format!("project {database_name}"),
+        POSTGRES_EXPERIMENT_PROJECT_SCHEMA_VERSION,
+    )?;
+
+    let project_id = value_string_required(project, "id", "a project id")?;
+    let expected_file_count = project
+        .get("storageFileCount")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "The upgrade backup is missing a project storage file count.".to_string())?;
+    let expected_storage_bytes = project
+        .get("storageBytes")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "The upgrade backup is missing a project storage byte count.".to_string())?;
+    let expected_storage_sha256 =
+        value_string_required(project, "storageSha256", "a project storage checksum")?;
+    let project_files = storage_files
+        .iter()
+        .filter(|file| backup_value_string(file, "projectId") == project_id)
+        .collect::<Vec<_>>();
+    if project_files.len() as u64 != expected_file_count {
+        return Err(format!(
+            "The upgrade backup project {database_name} storage file count does not match its manifest."
+        ));
+    }
+    let storage_bytes = project_files.iter().try_fold(0_u64, |total, file| {
+        file.get("sizeBytes")
+            .and_then(Value::as_u64)
+            .map(|size| total + size)
+            .ok_or_else(|| "The upgrade backup is missing a storage file size.".to_string())
+    })?;
+    if storage_bytes != expected_storage_bytes {
+        return Err(format!(
+            "The upgrade backup project {database_name} storage byte count does not match its manifest."
+        ));
+    }
+    let storage_sha256 = storage_collection_sha256(project_files.iter().copied());
+    if storage_sha256 != expected_storage_sha256 {
+        return Err(format!(
+            "The upgrade backup project {database_name} storage checksum does not match its manifest."
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_upgrade_backup_json_shape(text: &str) -> Result<(), String> {
+    let parsed: Value = serde_json::from_str(text)
+        .map_err(|_| "The decrypted upgrade backup is not valid JSON.".to_string())?;
+    let object = parsed
+        .as_object()
+        .ok_or_else(|| "The decrypted file is not a KanQual upgrade backup.".to_string())?;
+    if object.get("kind").and_then(Value::as_str) != Some("kanqual-full-backend-upgrade-backup") {
+        return Err("The selected file is not a KanQual full backend upgrade backup.".to_string());
+    }
+    if object.get("version").and_then(Value::as_u64) != Some(1) {
+        return Err("This KanQual upgrade backup format is not supported.".to_string());
+    }
+    let manifest = object
+        .get("manifest")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "The upgrade backup is missing manifest metadata.".to_string())?;
+    for key in [
+        "kanqualVersion",
+        "postgresVersion",
+        "backupFormatVersion",
+        "controlDatabase",
+        "controlDumpSha256",
+        "backupReason",
+        "platform",
+        "architecture",
+    ] {
+        if !manifest
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err(format!("The upgrade backup manifest is missing {key}."));
+        }
+    }
+    let control_schema_versions = manifest
+        .get("controlSchemaVersions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "The upgrade backup manifest is missing control schema versions.".to_string())?;
+    validate_upgrade_backup_schema_versions(
+        control_schema_versions,
+        "control",
+        POSTGRES_EXPERIMENT_CONTROL_SCHEMA_VERSION,
+    )?;
+    let control_dump = object
+        .get("controlDump")
+        .ok_or_else(|| "The upgrade backup is missing the control database dump.".to_string())?;
+    validate_upgrade_backup_database_dump(control_dump, "control database dump")?;
+    if value_string_required(control_dump, "sha256", "control dump checksum")?
+        != manifest
+            .get("controlDumpSha256")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    {
+        return Err("The upgrade backup control dump checksum does not match its manifest.".to_string());
+    }
+
+    let project_dumps = value_array_required(&parsed, "projectDumps", "project database dumps")?;
+    let mut dump_checksums = std::collections::HashMap::new();
+    for dump in project_dumps {
+        let database_name = value_string_required(dump, "databaseName", "a project database name")?;
+        validate_upgrade_backup_database_dump(dump, &format!("project database dump {database_name}"))?;
+        dump_checksums.insert(
+            database_name.to_string(),
+            value_string_required(dump, "sha256", "a project database checksum")?.to_string(),
+        );
+    }
+
+    let storage_files = object
+        .get("projectStorageFiles")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for file in &storage_files {
+        validate_upgrade_backup_storage_file(file)?;
+    }
+
+    let projects = value_array_required(&parsed, "projects", "project metadata")?;
+    for project in projects {
+        validate_upgrade_backup_project_manifest(project, &dump_checksums, &storage_files)?;
+    }
+    Ok(())
+}
+
 fn decrypt_encrypted_backup_payload_inner(
     encrypted_backup: &str,
     password: &str,
@@ -24960,6 +25227,147 @@ fn backup_value_string(value: &Value, key: &str) -> String {
         .to_string()
 }
 
+fn system_time_to_ms(value: SystemTime) -> u64 {
+    value
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn upgrade_backup_diagnostics_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let paths = bundled_postgres::resolve_paths(app)?;
+    Ok(Path::new(&paths.upgrade_backups_dir).join(UPGRADE_BACKUP_DIAGNOSTICS_FILE))
+}
+
+fn read_upgrade_backup_diagnostics_manifest(
+    app: &tauri::AppHandle,
+) -> PostgresUpgradeBackupDiagnosticsManifest {
+    let Ok(path) = upgrade_backup_diagnostics_path(app) else {
+        return PostgresUpgradeBackupDiagnosticsManifest::default();
+    };
+    let Ok(text) = fs::read_to_string(path) else {
+        return PostgresUpgradeBackupDiagnosticsManifest::default();
+    };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn write_upgrade_backup_diagnostics_manifest(
+    app: &tauri::AppHandle,
+    manifest: &PostgresUpgradeBackupDiagnosticsManifest,
+) -> Result<(), String> {
+    let path = upgrade_backup_diagnostics_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Could not create upgrade backup diagnostics folder at {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+    let text = serde_json::to_string_pretty(manifest).map_err(|e| e.to_string())?;
+    fs::write(&path, text).map_err(|e| {
+        format!(
+            "Could not write upgrade backup diagnostics at {}: {e}",
+            path.display()
+        )
+    })
+}
+
+fn record_upgrade_backup_diagnostics(
+    app: &tauri::AppHandle,
+    result: &PostgresUpgradeBackupResult,
+) -> Result<(), String> {
+    let path = PathBuf::from(&result.path);
+    let modified_at_ms = fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .map(system_time_to_ms)
+        .unwrap_or(result.created_at_ms);
+    let entry = PostgresUpgradeBackupDiagnosticsEntry {
+        path: result.path.clone(),
+        file_name: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("KanQual upgrade backup")
+            .to_string(),
+        created_at_ms: result.created_at_ms,
+        modified_at_ms,
+        kanqual_version: result.kanqual_version.clone(),
+        postgres_version: result.postgres_version.clone(),
+        project_count: result.project_count,
+        storage_file_count: result.storage_file_count,
+        bytes: result.bytes,
+        source: "created".to_string(),
+        exists: path.is_file(),
+    };
+    let mut manifest = read_upgrade_backup_diagnostics_manifest(app);
+    manifest
+        .entries
+        .retain(|existing| existing.path != entry.path);
+    manifest.entries.insert(0, entry);
+    manifest
+        .entries
+        .sort_by(|left, right| right.created_at_ms.cmp(&left.created_at_ms));
+    manifest.entries.truncate(100);
+    write_upgrade_backup_diagnostics_manifest(app, &manifest)
+}
+
+fn storage_collection_sha256<'a>(files: impl Iterator<Item = &'a Value>) -> String {
+    let mut parts = files
+        .map(|file| {
+            format!(
+                "{}\n{}\n{}\n{}\n",
+                backup_value_string(file, "projectId"),
+                backup_value_string(file, "relativePath"),
+                file.get("sizeBytes").and_then(Value::as_u64).unwrap_or(0),
+                backup_value_string(file, "checksumSha256")
+            )
+        })
+        .collect::<Vec<_>>();
+    parts.sort();
+    sha256_hex(parts.join("").as_bytes())
+}
+
+fn storage_collection_sha256_from_records(files: &[PostgresUpgradeBackupStorageFile]) -> String {
+    let mut parts = files
+        .iter()
+        .map(|file| {
+            format!(
+                "{}\n{}\n{}\n{}\n",
+                file.project_id, file.relative_path, file.size_bytes, file.checksum_sha256
+            )
+        })
+        .collect::<Vec<_>>();
+    parts.sort();
+    sha256_hex(parts.join("").as_bytes())
+}
+
+async fn load_postgres_schema_versions_for_client<C>(client: &C) -> Result<Vec<i32>, String>
+where
+    C: GenericClient + Sync,
+{
+    let exists = client
+        .query_opt("SELECT to_regclass('public.app_schema_migrations')::text", &[])
+        .await
+        .map_err(|e| format!("Could not inspect schema migrations table: {e}"))?
+        .and_then(|row| row.get::<usize, Option<String>>(0))
+        .is_some();
+    if !exists {
+        return Err("Schema migration metadata is missing.".to_string());
+    }
+    let rows = client
+        .query("SELECT version FROM app_schema_migrations ORDER BY version", &[])
+        .await
+        .map_err(|e| format!("Could not load schema migration metadata: {e}"))?;
+    let versions = rows
+        .into_iter()
+        .map(|row| row.get::<usize, i32>(0))
+        .collect::<Vec<_>>();
+    if versions.is_empty() {
+        return Err("Schema migration metadata is empty.".to_string());
+    }
+    Ok(versions)
+}
+
 fn safe_backup_relative_path(value: &str) -> Result<PathBuf, String> {
     let path = Path::new(value);
     if path.is_absolute() {
@@ -25013,9 +25421,13 @@ fn collect_postgres_upgrade_backup_storage_files(
                     .map_err(|e| format!("Could not open project storage file: {e}"))?
                     .read_to_end(&mut bytes)
                     .map_err(|e| format!("Could not read project storage file: {e}"))?;
+                let size_bytes = bytes.len() as u64;
+                let checksum_sha256 = sha256_hex(&bytes);
                 files.push(PostgresUpgradeBackupStorageFile {
                     project_id: project_id.to_string(),
                     relative_path,
+                    size_bytes,
+                    checksum_sha256,
                     bytes_b64: BASE64_STANDARD.encode(bytes),
                 });
             }
@@ -25080,6 +25492,7 @@ async fn create_postgres_experiment_upgrade_backup_command(
         )
         .await
         .map_err(|e| format!("Could not load projects for upgrade backup: {e}"))?;
+    let control_schema_versions = load_postgres_schema_versions_for_client(&*client).await?;
     connection_task.abort();
 
     let mut projects = Vec::with_capacity(rows.len());
@@ -25106,11 +25519,18 @@ async fn create_postgres_experiment_upgrade_backup_command(
         &request.admin_password,
         &identity.app_database,
     )?;
+    let control_dump_sha256 = sha256_hex(control_dump.as_bytes());
 
     let mut project_dumps = Vec::with_capacity(projects.len());
     let mut project_manifest = Vec::with_capacity(projects.len());
     let mut storage_files = Vec::new();
     for project in &projects {
+        let (project_client, project_connection_task) =
+            connect_postgres_database(&app, &project.database_name).await?;
+        let project_schema_versions =
+            load_postgres_schema_versions_for_client(&*project_client).await?;
+        project_connection_task.abort();
+
         let sql = run_pg_dump_command(
             &pg_dump_path,
             &config.host,
@@ -25119,19 +25539,29 @@ async fn create_postgres_experiment_upgrade_backup_command(
             &request.admin_password,
             &project.database_name,
         )?;
+        let database_dump_sha256 = sha256_hex(sql.as_bytes());
         project_dumps.push(PostgresUpgradeBackupDatabaseDump {
             database_name: project.database_name.clone(),
             role: "project".to_string(),
+            sha256: database_dump_sha256.clone(),
             sql,
         });
 
+        let mut project_storage_files = Vec::new();
         let storage_path = PathBuf::from(&project.storage_path);
         if storage_path.exists() {
-            storage_files.extend(collect_postgres_upgrade_backup_storage_files(
+            project_storage_files = collect_postgres_upgrade_backup_storage_files(
                 &project.id,
                 &storage_path,
-            )?);
+            )?;
         }
+        let storage_bytes = project_storage_files
+            .iter()
+            .map(|file| file.size_bytes)
+            .sum::<u64>();
+        let storage_sha256 = storage_collection_sha256_from_records(&project_storage_files);
+        let storage_file_count = project_storage_files.len();
+        storage_files.extend(project_storage_files);
 
         project_manifest.push(PostgresUpgradeBackupProjectManifest {
             id: project.id.clone(),
@@ -25139,6 +25569,11 @@ async fn create_postgres_experiment_upgrade_backup_command(
             database_name: project.database_name.clone(),
             storage_path: project.storage_path.clone(),
             active: project.active,
+            schema_versions: project_schema_versions,
+            database_dump_sha256,
+            storage_file_count,
+            storage_bytes,
+            storage_sha256,
             created_at: project.created_at.clone(),
             updated_at: project.updated_at.clone(),
         });
@@ -25152,6 +25587,20 @@ async fn create_postgres_experiment_upgrade_backup_command(
         "kanqualVersion": env!("CARGO_PKG_VERSION"),
         "postgresVersion": postgres_version.clone(),
         "controlDatabase": identity.app_database.clone(),
+        "manifest": {
+            "backupFormatVersion": "1",
+            "backupReason": "admin-upgrade-backup",
+            "platform": std::env::consts::OS,
+            "architecture": std::env::consts::ARCH,
+            "createdAtMs": created_at_ms,
+            "kanqualVersion": env!("CARGO_PKG_VERSION"),
+            "postgresVersion": postgres_version.clone(),
+            "controlDatabase": identity.app_database.clone(),
+            "controlSchemaVersions": control_schema_versions,
+            "controlDumpSha256": control_dump_sha256,
+            "projectCount": project_manifest.len(),
+            "storageFileCount": storage_files.len(),
+        },
         "credentialPolicy": {
             "adminUsernameIncluded": false,
             "adminPasswordIncluded": false,
@@ -25161,13 +25610,15 @@ async fn create_postgres_experiment_upgrade_backup_command(
         "controlDump": PostgresUpgradeBackupDatabaseDump {
             database_name: identity.app_database.clone(),
             role: "control".to_string(),
+            sha256: control_dump_sha256,
             sql: control_dump,
         },
         "projectDumps": project_dumps,
         "projectStorageFiles": storage_files,
     });
     let payload_json = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
-    let encrypted = encrypt_backup_payload_text(payload_json, request.admin_password)?;
+    ensure_upgrade_backup_json_shape(&payload_json)?;
+    let encrypted = encrypt_backup_payload_text(payload_json, request.admin_password.clone())?;
 
     let output_path = match request
         .output_path
@@ -25204,11 +25655,25 @@ async fn create_postgres_experiment_upgrade_backup_command(
             output_path.display()
         )
     })?;
+    let encrypted_round_trip = fs::read_to_string(&output_path).map_err(|e| {
+        format!(
+            "Could not verify upgrade backup at {}: {e}",
+            output_path.display()
+        )
+    })?;
+    let decrypted_round_trip = decrypt_encrypted_backup_payload_text(
+        &encrypted_round_trip,
+        &request.admin_password,
+        Some(ensure_upgrade_backup_json_shape),
+    )
+    .map_err(|e| format!("Could not verify the written upgrade backup: {e}"))?;
+    ensure_upgrade_backup_json_shape(&decrypted_round_trip)
+        .map_err(|e| format!("Could not verify the written upgrade backup manifest: {e}"))?;
     let bytes = fs::metadata(&output_path)
         .map_err(|e| format!("Could not inspect upgrade backup file: {e}"))?
         .len();
 
-    Ok(PostgresUpgradeBackupResult {
+    let result = PostgresUpgradeBackupResult {
         path: output_path.to_string_lossy().to_string(),
         created_at_ms,
         kanqual_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -25221,6 +25686,111 @@ async fn create_postgres_experiment_upgrade_backup_command(
             .map(|items| items.len())
             .unwrap_or(0),
         bytes,
+    };
+    let _ = record_upgrade_backup_diagnostics(&app, &result);
+    Ok(result)
+}
+
+#[tauri::command]
+async fn list_postgres_experiment_upgrade_backup_diagnostics_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+) -> Result<PostgresUpgradeBackupDiagnostics, String> {
+    let session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
+    if session.auth_kind != "postgres_admin" {
+        return Err("Sign in as the PostgreSQL administrator before viewing backup diagnostics.".to_string());
+    }
+
+    let paths = bundled_postgres::resolve_paths(&app)?;
+    let upgrade_dir = PathBuf::from(&paths.upgrade_backups_dir);
+    let folder_exists = upgrade_dir.is_dir();
+    let manifest = read_upgrade_backup_diagnostics_manifest(&app);
+    let mut entries_by_path = manifest
+        .entries
+        .into_iter()
+        .map(|mut entry| {
+            let path = PathBuf::from(&entry.path);
+            entry.exists = path.is_file();
+            if let Ok(metadata) = fs::metadata(&path) {
+                entry.bytes = metadata.len();
+                if let Ok(modified) = metadata.modified() {
+                    entry.modified_at_ms = system_time_to_ms(modified);
+                }
+            }
+            (entry.path.clone(), entry)
+        })
+        .collect::<HashMap<_, _>>();
+
+    if folder_exists {
+        for entry in fs::read_dir(&upgrade_dir).map_err(|e| {
+            format!(
+                "Could not read upgrade backup folder at {}: {e}",
+                upgrade_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|e| format!("Could not inspect upgrade backup folder entry: {e}"))?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let file_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if file_name == UPGRADE_BACKUP_DIAGNOSTICS_FILE
+                || !file_name.ends_with(".kanqual-upgrade-backup")
+            {
+                continue;
+            }
+            let path_string = path.to_string_lossy().to_string();
+            if entries_by_path.contains_key(&path_string) {
+                continue;
+            }
+            let metadata = fs::metadata(&path).map_err(|e| {
+                format!(
+                    "Could not inspect upgrade backup file at {}: {e}",
+                    path.display()
+                )
+            })?;
+            let modified_at_ms = metadata.modified().map(system_time_to_ms).unwrap_or(0);
+            entries_by_path.insert(
+                path_string.clone(),
+                PostgresUpgradeBackupDiagnosticsEntry {
+                    path: path_string,
+                    file_name,
+                    created_at_ms: modified_at_ms,
+                    modified_at_ms,
+                    kanqual_version: String::new(),
+                    postgres_version: String::new(),
+                    project_count: 0,
+                    storage_file_count: 0,
+                    bytes: metadata.len(),
+                    source: "folder".to_string(),
+                    exists: true,
+                },
+            );
+        }
+    }
+
+    let mut backups = entries_by_path.into_values().collect::<Vec<_>>();
+    backups.sort_by(|left, right| {
+        right
+            .created_at_ms
+            .cmp(&left.created_at_ms)
+            .then_with(|| right.modified_at_ms.cmp(&left.modified_at_ms))
+    });
+    let last_successful_backup = backups
+        .iter()
+        .find(|entry| entry.exists)
+        .cloned()
+        .or_else(|| backups.first().cloned());
+
+    Ok(PostgresUpgradeBackupDiagnostics {
+        folder_path: paths.upgrade_backups_dir,
+        folder_exists,
+        last_successful_backup,
+        backups,
     })
 }
 
@@ -25256,13 +25826,14 @@ async fn restore_postgres_experiment_upgrade_backup_command(
             backup_path.display()
         )
     })?;
-    let plaintext =
-        decrypt_encrypted_backup_payload_text(&encrypted, &request.backup_password, None)?;
+    let plaintext = decrypt_encrypted_backup_payload_text(
+        &encrypted,
+        &request.backup_password,
+        Some(ensure_upgrade_backup_json_shape),
+    )?;
     let backup: Value = serde_json::from_str(&plaintext)
         .map_err(|_| "The decrypted upgrade backup is not valid JSON.".to_string())?;
-    if backup.get("kind").and_then(Value::as_str) != Some("kanqual-full-backend-upgrade-backup") {
-        return Err("The selected file is not a KanQual full backend upgrade backup.".to_string());
-    }
+    ensure_upgrade_backup_json_shape(&plaintext)?;
 
     let control_dump = backup
         .get("controlDump")
@@ -31243,6 +31814,7 @@ pub fn run() {
             decrypt_project_backup_payload,
             decrypt_project_backup_preview,
             create_postgres_experiment_upgrade_backup_command,
+            list_postgres_experiment_upgrade_backup_diagnostics_command,
             restore_postgres_experiment_upgrade_backup_command,
             get_multilingual_e5_status,
             get_multilingual_e5_download_preflight,

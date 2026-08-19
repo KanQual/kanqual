@@ -17,13 +17,13 @@ Generation details:
 
 ## Bundled Third-Party Components
 
-PocketBase is redistributed as a bundled application sidecar. Its upstream project identifies itself as MIT-licensed.
+PostgreSQL is redistributed as a bundled runtime. KanQual fetches the platform-specific PostgreSQL runtime archives from the `theseus-rs/postgresql-binaries` release artifacts during packaging.
 
 The corresponding license text files included with KanQual releases are kept in the [licenses](./licenses/) folder.
 
 | Component | Where Bundled | Upstream | License |
 | --- | --- | --- | --- |
-| `PocketBase server executable` | `src-tauri/binaries/local/pocketbase-x86_64-pc-windows-msvc.exe` | `https://github.com/pocketbase/pocketbase` | `MIT` |
+| `PostgreSQL runtime binaries` | `src-tauri/resources/runtime/postgresql-17/` | `https://github.com/theseus-rs/postgresql-binaries` | `PostgreSQL License` |
 
 ## Resolved JavaScript / TypeScript Dependency Inventory
 
@@ -860,4 +860,4 @@ The corresponding license text files included with KanQual releases are kept in 
 ## Included License Texts
 
 - Full license text files for the primary license families and bundled assets are included in [licenses](./licenses/).
-- PocketBase redistribution notice and MIT license text are included in [licenses/POCKETBASE-MIT.txt](./licenses/POCKETBASE-MIT.txt).
+- PostgreSQL runtime redistribution notice and license text are included in [licenses/POSTGRESQL.txt](./licenses/POSTGRESQL.txt).

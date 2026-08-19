@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "prepare:pb-sidecar": "node scripts/prepare-pocketbase-sidecar.mjs",
+    "fetch:bundled-postgres": "node scripts/fetch-bundled-postgres.mjs",
     "prepare:bundled-postgres": "node scripts/stage-bundled-postgres.mjs",
     "prepare:bundled-postgres:strict": "node scripts/stage-bundled-postgres.mjs --strict",
     "check:locales": "node scripts/check-locales.mjs",

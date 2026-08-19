@@ -20,9 +20,10 @@ It is intended to ship alongside the application and the
   components.
 - `ECHARTS-D3-BSD-3-Clause.txt`
   Apache ECharts subcomponent notice and d3.js BSD 3-Clause license text.
-- `POCKETBASE-MIT.txt`
-  PocketBase redistribution notice and MIT license text for the bundled
-  PocketBase server executable.
+- `POSTGRESQL.txt`
+  PostgreSQL license text for the bundled PostgreSQL runtime payloads. KanQual
+  currently fetches compact PostgreSQL runtime archives from the
+  `theseus-rs/postgresql-binaries` release artifacts during packaging.
 - `SIL-OFL-1.1.txt`
   License text for the bundled Inter font assets.
 - `UBUNTU-FONT-LICENCE-1.0.txt`

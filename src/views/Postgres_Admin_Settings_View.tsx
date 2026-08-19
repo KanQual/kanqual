@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { readDir, stat, writeTextFile } from "@tauri-apps/plugin-fs";
+import { copyFile, readDir, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
@@ -49,6 +49,7 @@ import {
   listPostgresAppUsers,
   listPostgresProjectUsers,
   listPostgresProjects,
+  listPostgresUpgradeBackupDiagnostics,
   prepareBundledPostgresRuntimeDirs,
   reactivatePostgresAppUser,
   removePostgresProjectFromState,
@@ -73,6 +74,7 @@ import {
   type PostgresProject,
   type PostgresProjectUser,
   type PostgresStatus,
+  type PostgresUpgradeBackupDiagnostics,
   type PostgresUpgradeBackupResult,
   type PostgresUserPreferences,
 } from "../lib/postgres";
@@ -540,12 +542,17 @@ export function PostgresAdminSettingsView({
   const [aiAssistError, setAiAssistError] = useState("");
   const [updatesNotice, setUpdatesNotice] = useState("");
   const [updatesError, setUpdatesError] = useState("");
-  const [showUpgradeBackupPasswordModal, setShowUpgradeBackupPasswordModal] = useState(false);
   const [showUpgradeBackupSuccessModal, setShowUpgradeBackupSuccessModal] = useState(false);
+  const [showUpgradeBackupPasswordModal, setShowUpgradeBackupPasswordModal] = useState(false);
   const [upgradeBackupPassword, setUpgradeBackupPassword] = useState("");
   const [upgradeBackupPasswordVisible, setUpgradeBackupPasswordVisible] = useState(false);
   const [upgradeBackupSubmitting, setUpgradeBackupSubmitting] = useState(false);
   const [lastUpgradeBackup, setLastUpgradeBackup] = useState<PostgresUpgradeBackupResult | null>(null);
+  const [upgradeBackupDiagnostics, setUpgradeBackupDiagnostics] = useState<PostgresUpgradeBackupDiagnostics | null>(null);
+  const [upgradeBackupDiagnosticsLoading, setUpgradeBackupDiagnosticsLoading] = useState(false);
+  const [upgradeBackupCopying, setUpgradeBackupCopying] = useState(false);
+  const [upgradeBackupCopyNotice, setUpgradeBackupCopyNotice] = useState("");
+  const [upgradeBackupCopyError, setUpgradeBackupCopyError] = useState("");
   const [theme, setTheme] = useState<Theme>("light");
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
@@ -689,7 +696,7 @@ export function PostgresAdminSettingsView({
     },
     {
       id: "updates",
-      title: "Updates",
+      title: "Back-up and Updates",
       description: t("appSettings.overview.updates"),
       icon: "U",
       tone: "admin" as const,
@@ -998,11 +1005,23 @@ export function PostgresAdminSettingsView({
     setError("");
   }, []);
 
+  const loadUpgradeBackupDiagnostics = useCallback(async () => {
+    setUpgradeBackupDiagnosticsLoading(true);
+    try {
+      const diagnostics = await listPostgresUpgradeBackupDiagnostics();
+      setUpgradeBackupDiagnostics(diagnostics);
+    } catch (diagnosticsError) {
+      setUpdatesError(describeUnknownError(diagnosticsError));
+    } finally {
+      setUpgradeBackupDiagnosticsLoading(false);
+    }
+  }, []);
+
   async function handleCreateUpgradeBackup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (upgradeBackupSubmitting) return;
     if (!upgradeBackupPassword.trim()) {
-      setUpdatesError("Enter the administrator password to create an upgrade backup.");
+      setUpdatesError("Enter the administrator password to create a backup.");
       setUpdatesNotice("");
       return;
     }
@@ -1011,11 +1030,34 @@ export function PostgresAdminSettingsView({
     setUpdatesError("");
     setUpdatesNotice("");
     setLastUpgradeBackup(null);
+    setUpgradeBackupCopyNotice("");
+    setUpgradeBackupCopyError("");
     try {
-      const defaultName = `kanqual-upgrade-backup-${Date.now()}.kanqual-upgrade-backup`;
+      const result = await createPostgresUpgradeBackup(upgradeBackupPassword);
+      setLastUpgradeBackup(result);
+      setUpgradeBackupPassword("");
+      setUpgradeBackupPasswordVisible(false);
+      setShowUpgradeBackupPasswordModal(false);
+      setShowUpgradeBackupSuccessModal(true);
+      setUpdatesNotice("Upgrade backup created.");
+      void loadUpgradeBackupDiagnostics();
+    } catch (backupError) {
+      setUpdatesError(describeUnknownError(backupError));
+    } finally {
+      setUpgradeBackupSubmitting(false);
+    }
+  }
+
+  async function handleCopyLastUpgradeBackup() {
+    if (!lastUpgradeBackup || upgradeBackupCopying) return;
+    setUpgradeBackupCopying(true);
+    setUpgradeBackupCopyNotice("");
+    setUpgradeBackupCopyError("");
+    try {
+      const sourceName = lastUpgradeBackup.path.split(/[\\/]/).pop() || `kanqual-upgrade-backup-${lastUpgradeBackup.createdAtMs}.kanqual-upgrade-backup`;
       const outputPath = await saveDialog({
-        title: "Save KanQual backup",
-        defaultPath: defaultName,
+        title: "Copy KanQual backup",
+        defaultPath: sourceName,
         filters: [
           {
             name: "KanQual upgrade backup",
@@ -1024,17 +1066,12 @@ export function PostgresAdminSettingsView({
         ],
       });
       if (typeof outputPath !== "string") return;
-      const result = await createPostgresUpgradeBackup(upgradeBackupPassword, outputPath);
-      setLastUpgradeBackup(result);
-      setUpgradeBackupPassword("");
-      setUpgradeBackupPasswordVisible(false);
-      setShowUpgradeBackupPasswordModal(false);
-      setShowUpgradeBackupSuccessModal(true);
-      setUpdatesNotice("Upgrade backup created.");
-    } catch (backupError) {
-      setUpdatesError(describeUnknownError(backupError));
+      await copyFile(lastUpgradeBackup.path, outputPath);
+      setUpgradeBackupCopyNotice("Backup copy created.");
+    } catch (copyError) {
+      setUpgradeBackupCopyError(describeUnknownError(copyError));
     } finally {
-      setUpgradeBackupSubmitting(false);
+      setUpgradeBackupCopying(false);
     }
   }
 
@@ -1712,6 +1749,12 @@ export function PostgresAdminSettingsView({
       void refreshAdminAuditLogs();
     }
   }, [activeModal, refreshAdminAuditLogs]);
+
+  useEffect(() => {
+    if (activeModal === "updates") {
+      void loadUpgradeBackupDiagnostics();
+    }
+  }, [activeModal, loadUpgradeBackupDiagnostics]);
 
   useEffect(() => {
     if (activeModal === "aiAssist" && aiAssistSetupDisabled && aiAssistAdminTab !== "usage") {
@@ -3761,17 +3804,104 @@ export function PostgresAdminSettingsView({
           <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
             <ModalCloseButton onClick={() => setActiveModal(null)} />
             <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Updates</h2></div>
+              <div><h2 className="settings-section-title">Back-up and Updates</h2></div>
             </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
+                {updatesNotice ? <p className="settings-inline-success">{updatesNotice}</p> : null}
+                {updatesError ? <p className="auth-error">{updatesError}</p> : null}
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+                    <h3>Backup All Data</h3>
+                  </div>
+                  <div className="app-settings-modal-section-body">
+                    <p className="settings-muted-text">
+                      Backup all the data in the current version. You can import this data after installing a newer version of KanQual.
+                    </p>
+                    <div className="backup-create-actions">
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={upgradeBackupSubmitting}
+                        onClick={() => {
+                          setUpdatesError("");
+                          setUpdatesNotice("");
+                          setUpgradeBackupPassword("");
+                          setUpgradeBackupPasswordVisible(false);
+                          setShowUpgradeBackupPasswordModal(true);
+                        }}
+                      >
+                        {upgradeBackupSubmitting ? "Backing up..." : "Backup"}
+                      </button>
+                    </div>
+                  </div>
+                </section>
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+                    <h3>Backup Diagnostics</h3>
+                  </div>
+                  <div className="app-settings-modal-section-body">
+                    <div className="home-restricted-list" style={{ marginBottom: 12 }}>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">Default folder</span>
+                        <span className="home-restricted-value">{upgradeBackupDiagnostics?.folderPath || "-"}</span>
+                      </div>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">Last successful backup</span>
+                        <span className="home-restricted-value">
+                          {upgradeBackupDiagnostics?.lastSuccessfulBackup
+                            ? formatPostgresTimestampMs(upgradeBackupDiagnostics.lastSuccessfulBackup.createdAtMs)
+                            : "-"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="backup-list">
+                      {upgradeBackupDiagnosticsLoading ? (
+                        <div className="empty-state backup-empty-state">
+                          <p>Loading backups...</p>
+                        </div>
+                      ) : upgradeBackupDiagnostics?.backups.length ? (
+                        <div className="project-log-table-wrap snapshot-table-wrap">
+                          <table className="project-log-table snapshot-table">
+                            <thead>
+                              <tr>
+                                <th>Created</th>
+                                <th>KanQual</th>
+                                <th>PostgreSQL</th>
+                                <th>Projects</th>
+                                <th>Source Files</th>
+                                <th>Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {upgradeBackupDiagnostics.backups.map((backup) => (
+                                <tr key={backup.path}>
+                                  <td className="log-cell log-cell--time snapshot-created-cell">
+                                    <span>{formatPostgresTimestampMs(backup.createdAtMs)}</span>
+                                  </td>
+                                  <td className="log-cell log-cell--time">{backup.kanqualVersion || "-"}</td>
+                                  <td className="log-cell log-cell--time">{backup.postgresVersion || "-"}</td>
+                                  <td className="log-cell log-cell--time">{backup.source === "folder" ? "-" : backup.projectCount}</td>
+                                  <td className="log-cell log-cell--time">{backup.source === "folder" ? "-" : backup.storageFileCount}</td>
+                                  <td className="log-cell log-cell--time">{formatBytes(backup.bytes)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="empty-state backup-empty-state">
+                          <p>No backups yet.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
                     <h3>Updates</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
-                    {updatesNotice ? <p className="settings-inline-success">{updatesNotice}</p> : null}
-                    {updatesError ? <p className="auth-error">{updatesError}</p> : null}
                     <div className="settings-toggle-row">
                       <span>
                         <strong>Automatically check for updates</strong>
@@ -3840,30 +3970,6 @@ export function PostgresAdminSettingsView({
                     </div>
                   </div>
                 </section>
-                <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Backup All Data</h3>
-                  </div>
-                  <div className="app-settings-modal-section-body">
-                    <p className="settings-muted-text">
-                      Backup all the data in the current version. You can import this data after installing a newer version of KanQual.
-                    </p>
-                    <div className="settings-row settings-row--compact settings-row--action-only">
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        disabled={upgradeBackupSubmitting}
-                        onClick={() => {
-                          setUpdatesError("");
-                          setUpdatesNotice("");
-                          setShowUpgradeBackupPasswordModal(true);
-                        }}
-                      >
-                        {upgradeBackupSubmitting ? "Backing up..." : "Backup"}
-                      </button>
-                    </div>
-                  </div>
-                </section>
               </div>
             </div>
             <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
@@ -3885,6 +3991,9 @@ export function PostgresAdminSettingsView({
               <div><h2 className="settings-section-title">Backup All Data</h2></div>
             </div>
             <form className="app-settings-modal-body" onSubmit={handleCreateUpgradeBackup}>
+              <div className="settings-warning settings-warning--danger">
+                Enter the administrator password to create an encrypted backup. This password will be required to restore the backup later.
+              </div>
               <label className="form-label">
                 Administrator Password
                 <div className="password-input-wrap">
@@ -3924,7 +4033,7 @@ export function PostgresAdminSettingsView({
                   className="btn btn--primary"
                   disabled={upgradeBackupSubmitting || !upgradeBackupPassword.trim()}
                 >
-                  {upgradeBackupSubmitting ? "Backing up..." : "Continue"}
+                  {upgradeBackupSubmitting ? "Backing up..." : "Backup"}
                 </button>
               </div>
             </form>
@@ -3941,9 +4050,14 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-body">
               <p className="settings-inline-success">KanQual finished backing up all data.</p>
+              <p className="settings-muted-text">
+                KanQual saved the backup in its managed backup folder. You can copy it somewhere else if you want an extra copy.
+              </p>
+              {upgradeBackupCopyNotice ? <p className="settings-inline-success">{upgradeBackupCopyNotice}</p> : null}
+              {upgradeBackupCopyError ? <p className="auth-error">{upgradeBackupCopyError}</p> : null}
               <div className="settings-diagnostics-grid settings-diagnostics-grid--compact">
                 <div>
-                  <span>Path</span>
+                  <span>Managed Path</span>
                   <strong>{lastUpgradeBackup.path}</strong>
                 </div>
                 <div>
@@ -3960,7 +4074,15 @@ export function PostgresAdminSettingsView({
                 </div>
               </div>
             </div>
-            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <div className="app-settings-modal-footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void handleCopyLastUpgradeBackup()}
+                disabled={upgradeBackupCopying}
+              >
+                {upgradeBackupCopying ? "Copying..." : "Copy to..."}
+              </button>
               <button type="button" className="btn btn--primary" onClick={() => setShowUpgradeBackupSuccessModal(false)}>
                 Done
               </button>

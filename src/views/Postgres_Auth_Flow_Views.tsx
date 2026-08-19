@@ -201,7 +201,10 @@ export function PostgresLaunchView({
   const bundledClusterInitialized = !!bundledPreflight?.status.initialized;
   const showingFirstAccountSetup = showFirstAccountSetup;
   const initializingBundledCluster =
-    submitting && !showingFirstAccountSetup && !bundledClusterInitialized && !!bundledPreflight;
+    submitting
+    && !showingFirstAccountSetup
+    && !bundledClusterInitialized
+    && !!bundledPreflight;
 
   useEffect(() => {
     let cancelled = false;
@@ -690,7 +693,7 @@ export function PostgresLaunchView({
               ) : (
                 <form onSubmit={handleInitializeBundledPostgres} className="form">
                   <div className="settings-warning settings-warning--danger">
-                    This is the first time KanQual is starting. Set an administrator password to finish setup. These credentials are critical and cannot be recovered. Please make sure you retain them securely.
+                    This is the first time KanQual is starting. Set an administrator password to finish setup. These credentials cannot be recovered if lost. Please make sure you retain them securely.
                   </div>
                   {bundledPreflight.issues.length ? (
                     <div className="settings-warning">

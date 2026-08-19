@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -7,8 +7,12 @@ const repoRoot = process.cwd();
 const sourceRoot = path.join(repoRoot, "src-tauri", "postgres-runtimes", `postgresql-${POSTGRES_VERSION}`);
 const stagedRoot = path.join(repoRoot, "src-tauri", "resources", "runtime", `postgresql-${POSTGRES_VERSION}`);
 const strict = process.argv.includes("--strict") || process.env.KANQUAL_REQUIRE_BUNDLED_POSTGRES === "1";
+const requiredExecutables = ["postgres", "initdb", "pg_ctl", "psql", "pg_dump"];
 
 function targetTriple() {
+  const explicitTarget = process.env.KANQUAL_POSTGRES_RUNTIME_TARGET;
+  if (explicitTarget) return explicitTarget;
+
   const platform = process.env.KANQUAL_POSTGRES_TARGET_PLATFORM || process.platform;
   const arch = process.env.KANQUAL_POSTGRES_TARGET_ARCH || process.arch;
 
@@ -20,12 +24,36 @@ function targetTriple() {
   throw new Error(`Unsupported bundled PostgreSQL target: platform=${platform}, arch=${arch}`);
 }
 
+function targetExecutableName(target, base) {
+  return target.startsWith("windows") ? `${base}.exe` : base;
+}
+
 async function exists(filePath) {
   try {
     await stat(filePath);
     return true;
   } catch {
     return false;
+  }
+}
+
+async function validateRuntime(target, sourceDir) {
+  for (const executable of requiredExecutables) {
+    const executablePath = path.join(sourceDir, "bin", targetExecutableName(target, executable));
+    if (!await exists(executablePath)) {
+      throw new Error(`Bundled PostgreSQL runtime for ${target} is missing ${executablePath}.`);
+    }
+  }
+}
+
+async function chmodStagedBin(target) {
+  if (target.startsWith("windows")) return;
+  const binDir = path.join(stagedRoot, "bin");
+  const entries = await readdir(binDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile() || entry.isSymbolicLink()) {
+      await chmod(path.join(binDir, entry.name), 0o755).catch(() => {});
+    }
   }
 }
 
@@ -60,9 +88,11 @@ async function main() {
     return;
   }
 
+  await validateRuntime(target, sourceDir);
   await rm(stagedRoot, { recursive: true, force: true });
   await mkdir(path.dirname(stagedRoot), { recursive: true });
   await cp(sourceDir, stagedRoot, { recursive: true });
+  await chmodStagedBin(target);
   console.log(`[kanqual] Staged bundled PostgreSQL ${POSTGRES_VERSION} runtime for ${target}.`);
 }
 

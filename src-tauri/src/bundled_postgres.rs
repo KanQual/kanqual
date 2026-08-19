@@ -306,6 +306,51 @@ fn process_is_running(_pid: u32) -> Option<bool> {
     None
 }
 
+#[cfg(windows)]
+fn process_diagnostic(pid: u32) -> serde_json::Value {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/V", "/FO", "CSV", "/NH"])
+        .output();
+    match output {
+        Ok(output) => serde_json::json!({
+            "probe": "tasklist",
+            "status": output.status.code(),
+            "stdout": String::from_utf8_lossy(&output.stdout).trim(),
+            "stderr": String::from_utf8_lossy(&output.stderr).trim(),
+        }),
+        Err(error) => serde_json::json!({
+            "probe": "tasklist",
+            "error": error.to_string(),
+        }),
+    }
+}
+
+#[cfg(unix)]
+fn process_diagnostic(pid: u32) -> serde_json::Value {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "pid=,ppid=,comm=,args="])
+        .output();
+    match output {
+        Ok(output) => serde_json::json!({
+            "probe": "ps",
+            "status": output.status.code(),
+            "stdout": String::from_utf8_lossy(&output.stdout).trim(),
+            "stderr": String::from_utf8_lossy(&output.stderr).trim(),
+        }),
+        Err(error) => serde_json::json!({
+            "probe": "ps",
+            "error": error.to_string(),
+        }),
+    }
+}
+
+#[cfg(not(any(windows, unix)))]
+fn process_diagnostic(_pid: u32) -> serde_json::Value {
+    serde_json::json!({
+        "probe": "unsupported",
+    })
+}
+
 fn latest_log_path(paths: &BundledPostgresPaths) -> Option<String> {
     let logs_dir = Path::new(&paths.logs_dir);
     let entries = fs::read_dir(logs_dir).ok()?;
@@ -569,6 +614,7 @@ pub async fn status(app: tauri::AppHandle) -> Result<BundledPostgresStatus, Stri
 }
 
 fn recover_stale_postmaster_pid(
+    app: Option<&tauri::AppHandle>,
     paths: &BundledPostgresPaths,
     reachable: bool,
 ) -> Result<bool, String> {
@@ -580,7 +626,35 @@ fn recover_stale_postmaster_pid(
     let Some(pid) = read_postmaster_pid(paths) else {
         return Ok(false);
     };
-    if process_is_running(pid).unwrap_or(true) {
+    let pid_running = process_is_running(pid);
+    if pid_running.unwrap_or(true) {
+        if let Some(app) = app {
+            append_runtime_diagnostics_event_best_effort(
+                app,
+                "bundled_postgres.postmaster_pid",
+                if pid_running == Some(true) {
+                    "live_pid_left_in_place"
+                } else {
+                    "unknown_pid_state_left_in_place"
+                },
+                if pid_running == Some(true) {
+                    "Bundled PostgreSQL postmaster.pid points to a live process while PostgreSQL is not reachable. Kanqual left the marker in place for safety."
+                } else {
+                    "Kanqual could not determine whether the postmaster.pid process is live while PostgreSQL is not reachable. Kanqual left the marker in place for safety."
+                },
+                serde_json::json!({
+                    "postmasterPidPath": path_string(&pid_path),
+                    "postmasterPid": pid,
+                    "postmasterPidRunning": pid_running,
+                    "reachable": reachable,
+                    "dataDir": paths.data_dir,
+                    "probeHost": crate::POSTGRES_DEFAULT_HOST,
+                    "probePort": crate::POSTGRES_DEFAULT_PORT,
+                    "latestLogPath": latest_log_path(paths),
+                    "process": process_diagnostic(pid),
+                }),
+            );
+        }
         return Ok(false);
     }
 
@@ -800,7 +874,8 @@ pub async fn start_runtime(
         );
         return Err("Bundled PostgreSQL postgres binary is missing.".to_string());
     }
-    let recovered_stale_pid = recover_stale_postmaster_pid(&paths, current_status.reachable)?;
+    let recovered_stale_pid =
+        recover_stale_postmaster_pid(Some(&app), &paths, current_status.reachable)?;
 
     let existing_process_id = {
         let mut guard = child_slot.lock().unwrap();
@@ -1138,7 +1213,7 @@ mod tests {
         .expect("write stale pid marker");
 
         let recovered =
-            recover_stale_postmaster_pid(&paths, false).expect("recover stale pid marker");
+            recover_stale_postmaster_pid(None, &paths, false).expect("recover stale pid marker");
 
         assert!(recovered);
         assert!(!pid_path.exists());
@@ -1155,7 +1230,7 @@ mod tests {
 
         if process_is_running(current_pid) == Some(true) {
             let recovered =
-                recover_stale_postmaster_pid(&paths, false).expect("inspect live pid marker");
+                recover_stale_postmaster_pid(None, &paths, false).expect("inspect live pid marker");
 
             assert!(!recovered);
             assert!(pid_path.exists());
