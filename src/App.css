@@ -1838,6 +1838,10 @@ body {
   margin-top: 0;
 }
 
+.ai-assist-embeddings-card .project-model-card + .project-model-card {
+  margin-top: 10px;
+}
+
 .ai-assist-compact-setup-card .project-export-actions--modal {
   margin-top: auto;
   padding-top: 12px;
@@ -2984,6 +2988,53 @@ input[type="password"].form-input::-ms-clear {
   height: 22px;
 }
 
+.project-table-card,
+.ai-process-doc-source-card {
+  width: 100%;
+  align-self: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
+.project-table-card-header,
+.ai-process-doc-source-card-header {
+  min-height: 54px;
+  padding: 10px 14px 10px 18px;
+  border-bottom: var(--border-width) solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-table-card-header h2,
+.ai-process-doc-source-card-header h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.project-table-card .users-table-wrap,
+.ai-process-doc-source-card .users-table-wrap {
+  border: 0;
+  border-radius: 0;
+}
+
+.project-table-header-icon-button {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.project-table-header-icon {
+  width: 20px;
+  height: 20px;
+}
+
 /* ─── Annotate view ─────────────────────────────────────────────────────────── */
 
 .annotate-view {
@@ -3465,6 +3516,13 @@ input[type="password"].form-input::-ms-clear {
   width: fit-content;
   max-width: min(760px, calc(100vw - 96px));
   max-height: min(620px, calc(100vh - 300px));
+  align-self: center;
+  justify-self: center;
+}
+
+.codebook-table-card {
+  width: fit-content;
+  max-width: min(760px, calc(100vw - 96px));
   align-self: center;
   justify-self: center;
 }
@@ -8790,6 +8848,10 @@ input[type="password"].form-input::-ms-clear {
   margin-top: 12px;
 }
 
+.ai-assist-llm-connection-card .ai-assist-llm-model-selection-stack {
+  margin-top: 10px;
+}
+
 @container (max-width: 220px) {
   .ai-assist-llm-connection-card .ai-assist-connection-mode-toggle {
     width: 100%;
@@ -8811,9 +8873,10 @@ input[type="password"].form-input::-ms-clear {
 }
 
 .ai-assist-llm-model-selection-stack {
-  align-self: center;
+  align-self: stretch;
   display: grid;
   gap: 12px;
+  width: 100%;
 }
 
 .ai-assist-llm-model-memory-card {
@@ -8825,7 +8888,7 @@ input[type="password"].form-input::-ms-clear {
 }
 
 .ai-assist-llm-model-selector .form-label {
-  align-self: center;
+  align-self: stretch;
 }
 
 .ai-assist-llm-model-actions {
@@ -13121,10 +13184,49 @@ input[type="password"].form-input::-ms-clear {
   place-items: center;
 }
 
+.postgres-memo-table-card {
+  width: fit-content;
+  max-width: min(980px, calc(100vw - 96px));
+  align-self: center;
+  justify-self: center;
+}
+
 .postgres-memo-table-wrap {
-  width: min(980px, 100%);
+  width: fit-content;
+  max-width: min(980px, calc(100vw - 96px));
   max-height: min(620px, calc(100vh - 300px));
   align-self: center;
+}
+
+.postgres-memo-table-wrap .users-table {
+  width: auto;
+  min-width: 0;
+  table-layout: auto;
+}
+
+.postgres-memo-table-wrap .users-th:nth-child(1),
+.postgres-memo-table-wrap .users-td:nth-child(1) {
+  width: 24rem;
+}
+
+.postgres-memo-table-wrap .users-th:nth-child(2),
+.postgres-memo-table-wrap .users-td:nth-child(2) {
+  width: 8rem;
+}
+
+.postgres-memo-table-wrap .users-th:nth-child(3),
+.postgres-memo-table-wrap .users-td:nth-child(3) {
+  width: 12rem;
+}
+
+.postgres-memo-table-wrap .users-th:nth-child(4),
+.postgres-memo-table-wrap .users-td:nth-child(4) {
+  width: 12rem;
+}
+
+.postgres-memo-table-wrap .users-td-msg {
+  text-align: center;
+  vertical-align: middle;
 }
 
 .postgres-memo-editor-layout {

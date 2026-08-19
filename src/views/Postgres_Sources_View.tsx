@@ -4500,28 +4500,6 @@ export function PostgresSourcesView({
         <div className="users-title-wrap">
           <h1>{pageTitle}</h1>
         </div>
-        <div className="view-header-actions">
-          {showAttributesTable && selectedSourceKindFilter !== "all" ? (
-            <button
-              className="btn btn--primary"
-              onClick={() => {
-                const activeKind = sourceKindFromFilterValue(selectedSourceKindFilter);
-                setAttributeDraft({
-                  name: "",
-                  dataType: "text",
-                  description: "",
-                  options: [],
-                  sourceKinds: activeKind ? [activeKind] : [],
-                });
-                setAttributeError(null);
-              }}
-              disabled={!canManageSources}
-              title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : undefined}
-            >
-              Add Attribute
-            </button>
-          ) : null}
-        </div>
       </header>
 
       {error && <p className="users-error">{error}</p>}
@@ -4723,27 +4701,6 @@ export function PostgresSourcesView({
                   </button>
                 </div>
               </div>
-              {!showAttributesTable ? (
-                <button
-                  type="button"
-                  className="btn btn--primary project-create-icon-button"
-                  aria-label="New source"
-                  title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "New source"}
-                  onClick={() => {
-                    setNewSourceOpen(true);
-                    setSubmitError(null);
-                  }}
-                  disabled={!canManageSources}
-                  style={{
-                    position: "absolute",
-                    right: 0,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                  }}
-                >
-                  <PlusIcon className="project-create-icon" />
-                </button>
-              ) : null}
             </div>
           ) : null}
           {showAttributesTable ? (
@@ -4753,6 +4710,29 @@ export function PostgresSourcesView({
                 <p>Select a source type in the left column to view its attributes.</p>
               </div>
             ) : (
+              <div className="home-project-card project-table-card">
+                <div className="project-table-card-header">
+                  <h2>Attributes</h2>
+                  <button
+                    className="btn btn--primary project-table-header-icon-button"
+                    onClick={() => {
+                      const activeKind = sourceKindFromFilterValue(selectedSourceKindFilter);
+                      setAttributeDraft({
+                        name: "",
+                        dataType: "text",
+                        description: "",
+                        options: [],
+                        sourceKinds: activeKind ? [activeKind] : [],
+                      });
+                      setAttributeError(null);
+                    }}
+                    disabled={!canManageSources}
+                    title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "Add attribute"}
+                    aria-label="Add attribute"
+                  >
+                    <PlusIcon className="project-table-header-icon" />
+                  </button>
+                </div>
               <div className="users-table-wrap case-attributes-table-wrap">
                 <table className="users-table case-attributes-table">
                   <thead>
@@ -4834,6 +4814,7 @@ export function PostgresSourcesView({
                     ))}
                   </tbody>
                 </table>
+              </div>
               </div>
             )}
             </>
@@ -4926,6 +4907,23 @@ export function PostgresSourcesView({
               ) : null}
             </>
           ) : (
+            <div className="home-project-card project-table-card">
+              <div className="project-table-card-header">
+                <h2>{pageTitle}</h2>
+                <button
+                  type="button"
+                  className="btn btn--primary project-table-header-icon-button"
+                  aria-label="New source"
+                  title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "New source"}
+                  onClick={() => {
+                    setNewSourceOpen(true);
+                    setSubmitError(null);
+                  }}
+                  disabled={!canManageSources}
+                >
+                  <PlusIcon className="project-table-header-icon" />
+                </button>
+              </div>
             <div
               className="users-table-wrap"
               style={{
@@ -4990,6 +4988,7 @@ export function PostgresSourcesView({
                   })}
                 </tbody>
               </table>
+            </div>
             </div>
           )}
         </section>

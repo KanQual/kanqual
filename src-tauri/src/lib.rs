@@ -5005,12 +5005,10 @@ fn postgres_experiment_auth_not_ready_message(
     identity: &PostgresBootstrapIdentity,
 ) -> Option<String> {
     if !identity.bootstrap_applied {
-        return Some("Complete PostgreSQL bootstrap before using PostgreSQL app auth.".to_string());
+        return Some("Finish bundled database setup before signing in.".to_string());
     }
     if !identity.admin_handoff_completed {
-        return Some(
-            "Complete PostgreSQL admin handoff before using PostgreSQL app auth.".to_string(),
-        );
+        return Some("Finish bundled database setup before signing in.".to_string());
     }
     None
 }
@@ -5132,12 +5130,6 @@ struct BootstrapPostgresExperimentResult {
     app_database: String,
     bootstrap_identity_path: String,
     database_ready: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CompletePostgresAdminHandoffRequest {
-    new_superuser_password: String,
 }
 
 #[derive(Deserialize)]
@@ -8883,95 +8875,6 @@ async fn bootstrap_postgres_experiment_command(
         bootstrap_identity_path: bootstrap_identity_path.to_string_lossy().to_string(),
         database_ready: true,
     })
-}
-
-#[tauri::command]
-async fn complete_postgres_admin_handoff_command(
-    app: tauri::AppHandle,
-    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
-    request: CompletePostgresAdminHandoffRequest,
-) -> Result<PostgresExperimentStatus, String> {
-    let new_superuser_password = request.new_superuser_password.trim().to_string();
-    if new_superuser_password.is_empty() {
-        return Err("Enter a new PostgreSQL admin password.".to_string());
-    }
-    if new_superuser_password.len() < 8 {
-        return Err("Choose a PostgreSQL admin password with at least 8 characters.".to_string());
-    }
-
-    let mut identity = load_or_create_postgres_bootstrap_identity(&app)?;
-    if !identity.bootstrap_applied {
-        return Err(
-            "Run the PostgreSQL bootstrap step before completing admin handoff.".to_string(),
-        );
-    }
-    if identity.admin_handoff_completed {
-        return get_postgres_experiment_status_command(app).await;
-    }
-    if identity.temporary_superuser_password.trim().is_empty() {
-        return Err(
-            "The temporary PostgreSQL admin credential is unavailable for handoff.".to_string(),
-        );
-    }
-    if !is_valid_postgres_superuser_name(&identity.superuser_name) {
-        return Err("The stored PostgreSQL administrator username is invalid.".to_string());
-    }
-    let psql_path = bundled_postgres_psql_path(&app)?;
-
-    run_psql_command_with_binary(
-        &psql_path,
-        &identity.host,
-        identity.port,
-        &identity.superuser_name,
-        &identity.temporary_superuser_password,
-        "postgres",
-        &format!(
-            "ALTER ROLE \"{}\" WITH PASSWORD '{}';",
-            sql_escape_identifier(&identity.superuser_name),
-            sql_escape_literal(&new_superuser_password),
-        ),
-    )
-    .map_err(|error| format!("Failed to rotate the PostgreSQL admin password: {error}"))?;
-
-    identity.temporary_superuser_password.clear();
-    identity.admin_handoff_completed = true;
-    let bootstrap_identity_path = postgres_bootstrap_identity_path(&app)?;
-    let serialized = serde_json::to_string_pretty(&identity).map_err(|e| e.to_string())?;
-    fs::write(&bootstrap_identity_path, serialized).map_err(|e| e.to_string())?;
-    save_postgres_runtime_config(&app, &postgres_runtime_config_from_identity(&identity))?;
-    if let Some(session) = resolve_postgres_experiment_auth_session(&app, Some(&runtime_auth_state))
-        .await
-        .ok()
-        .flatten()
-    {
-        append_postgres_experiment_auth_diagnostics_best_effort(
-            &app,
-            "postgres.auth.logout",
-            "success",
-            "PostgreSQL administrator session ended after admin handoff.",
-            serde_json::json!({
-                "authKind": session.auth_kind.clone(),
-                "userId": session.user.id.clone(),
-                "reason": "admin_handoff_completed",
-            }),
-        );
-        append_postgres_experiment_last_opened_project_log_best_effort(
-            &app,
-            &session,
-            "auth.logout",
-            "Signed out after admin handoff",
-            Some(&session.user.id),
-            Some(serde_json::json!({
-                "authKind": session.auth_kind.clone(),
-                "reason": "admin_handoff_completed",
-            })),
-        )
-        .await;
-    }
-    set_postgres_runtime_auth_session(&runtime_auth_state, None);
-    clear_postgres_connection_cache(&app);
-
-    get_postgres_experiment_status_command(app).await
 }
 
 #[tauri::command]
@@ -31185,7 +31088,6 @@ pub fn run() {
             get_postgres_experiment_status_command,
             set_postgres_experiment_network_mode_command,
             bootstrap_postgres_experiment_command,
-            complete_postgres_admin_handoff_command,
             ensure_postgres_experiment_schema_command,
             get_postgres_experiment_auth_status_command,
             get_postgres_experiment_installation_settings_command,

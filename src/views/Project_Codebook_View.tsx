@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import { HelpIcon } from "../components/AppIcons";
+import { HelpIcon, PlusIcon } from "../components/AppIcons";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
@@ -951,26 +951,31 @@ export function CodebookView({
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
-        <button
-          className="btn btn--primary"
-          onClick={() => {
-            setNewCodeParentId("");
-            setSubmitError(null);
-            setNewCodeOpen(true);
-          }}
-          disabled={!canCreateCodes}
-          title={
-            !canCreateCodes
-              ? t("projectCodebook.permissions.cannotCreateCodes")
-              : undefined
-          }
-        >
-          {t("projectCodebook.actions.newCode")}
-        </button>
       </header>
 
       {error && <p className="users-error">{error}</p>}
       <div className="users-content codebook-table-shell">
+      <div className="home-project-card project-table-card codebook-table-card">
+        <div className="project-table-card-header">
+          <h2>{t("projectCodebook.pageTitle")}</h2>
+          <button
+            className="btn btn--primary project-table-header-icon-button"
+            onClick={() => {
+              setNewCodeParentId("");
+              setSubmitError(null);
+              setNewCodeOpen(true);
+            }}
+            disabled={!canCreateCodes}
+            title={
+              !canCreateCodes
+                ? t("projectCodebook.permissions.cannotCreateCodes")
+                : t("projectCodebook.actions.newCode")
+            }
+            aria-label={t("projectCodebook.actions.newCode")}
+          >
+            <PlusIcon className="project-table-header-icon" />
+          </button>
+        </div>
       <div
         className="users-table-wrap codebook-table-wrap"
         style={{
@@ -1044,6 +1049,7 @@ export function CodebookView({
             ))}
           </tbody>
         </table>
+      </div>
       </div>
       </div>
 

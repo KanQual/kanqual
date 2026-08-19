@@ -1231,6 +1231,10 @@ export function AnnotationsView(props: AnnotationsViewProps) {
             paddingRight: 4,
           }}
         >
+          <div className="home-project-card project-table-card">
+            <div className="project-table-card-header">
+              <h2>{t("projectAnnotations.pageTitle")}</h2>
+            </div>
           <div
             className="users-table-wrap"
             style={{ maxHeight: 34 + (Math.max(rowCount, 1) + 2) * 36 }}
@@ -1298,6 +1302,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
         </section>
       </div>

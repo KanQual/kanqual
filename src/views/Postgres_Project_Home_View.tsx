@@ -7894,18 +7894,6 @@ export function PostgresProjectHomeView({
                   <div className="users-title-wrap">
                     <h1>Objects</h1>
                   </div>
-                  <div className="view-header-actions">
-                    {showObjectAttributesTable && selectedObjectTypeFilter !== "all" ? (
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        onClick={openObjectWorkspaceAttributeModal}
-                        disabled={graphSubmitting || objectWorkspaceAttributeTypeOptions.length === 0}
-                      >
-                        Add Attribute
-                      </button>
-                    ) : null}
-                  </div>
                 </header>
 
                 <div
@@ -8207,23 +8195,6 @@ export function PostgresProjectHomeView({
                           </button>
                         </div>
                       </div>
-                      {!showObjectAttributesTable ? (
-                        <button
-                          type="button"
-                          className="btn btn--primary project-create-icon-button"
-                          aria-label="New object"
-                          title="New object"
-                          onClick={() => openCreateObjectModal()}
-                          style={{
-                            position: "absolute",
-                            right: 0,
-                            top: "50%",
-                            transform: "translateY(-50%)",
-                          }}
-                        >
-                          <PlusIcon className="project-create-icon" />
-                        </button>
-                      ) : null}
                     </div>
                     {graphLoading ? (
                       <div className="empty-state postgres-users-empty-state">
@@ -8236,6 +8207,20 @@ export function PostgresProjectHomeView({
                             <p>Select an object type in the left column to view its attributes.</p>
                           </div>
                         ) : (
+                          <div className="home-project-card project-table-card">
+                            <div className="project-table-card-header">
+                              <h2>Attributes</h2>
+                              <button
+                                type="button"
+                                className="btn btn--primary project-table-header-icon-button"
+                                onClick={openObjectWorkspaceAttributeModal}
+                                disabled={graphSubmitting || objectWorkspaceAttributeTypeOptions.length === 0}
+                                title="Add attribute"
+                                aria-label="Add attribute"
+                              >
+                                <PlusIcon className="project-table-header-icon" />
+                              </button>
+                            </div>
                           <div className="users-table-wrap case-attributes-table-wrap">
                             <table className="users-table case-attributes-table">
                               <thead>
@@ -8319,9 +8304,23 @@ export function PostgresProjectHomeView({
                               </tbody>
                             </table>
                           </div>
+                          </div>
                         )}
                       </>
                     ) : (
+                      <div className="home-project-card project-table-card">
+                        <div className="project-table-card-header">
+                          <h2>Objects</h2>
+                          <button
+                            type="button"
+                            className="btn btn--primary project-table-header-icon-button"
+                            aria-label="New object"
+                            title="New object"
+                            onClick={() => openCreateObjectModal()}
+                          >
+                            <PlusIcon className="project-table-header-icon" />
+                          </button>
+                        </div>
                       <div className="users-table-wrap postgres-users-table-wrap">
                         <table className="users-table">
                           <thead>
@@ -8378,6 +8377,7 @@ export function PostgresProjectHomeView({
                             )}
                           </tbody>
                         </table>
+                      </div>
                       </div>
                     )}
                   </section>
@@ -9017,18 +9017,6 @@ export function PostgresProjectHomeView({
                   <div className="users-title-wrap">
                     <h1>Relationships</h1>
                   </div>
-                  <div className="view-header-actions">
-                    {showRelationshipAttributesTable && selectedRelationshipTypeFilter !== "all" ? (
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        onClick={openRelationshipWorkspaceAttributeModal}
-                        disabled={graphSubmitting || relationshipWorkspaceAttributeTypeOptions.length === 0}
-                      >
-                        Add Attribute
-                      </button>
-                    ) : null}
-                  </div>
                 </header>
 
                 <div
@@ -9336,23 +9324,6 @@ export function PostgresProjectHomeView({
                           </button>
                         </div>
                       </div>
-                      {!showRelationshipAttributesTable ? (
-                        <button
-                          type="button"
-                          className="btn btn--primary project-create-icon-button"
-                          aria-label="New relationship"
-                          title="New relationship"
-                          onClick={() => openCreateRelationshipModal()}
-                          style={{
-                            position: "absolute",
-                            right: 0,
-                            top: "50%",
-                            transform: "translateY(-50%)",
-                          }}
-                        >
-                          <PlusIcon className="project-create-icon" />
-                        </button>
-                      ) : null}
                     </div>
 
                     {graphLoading ? (
@@ -9372,6 +9343,20 @@ export function PostgresProjectHomeView({
                             </p>
                           </div>
                         ) : (
+                          <div className="home-project-card project-table-card">
+                            <div className="project-table-card-header">
+                              <h2>Attributes</h2>
+                              <button
+                                type="button"
+                                className="btn btn--primary project-table-header-icon-button"
+                                onClick={openRelationshipWorkspaceAttributeModal}
+                                disabled={graphSubmitting || relationshipWorkspaceAttributeTypeOptions.length === 0}
+                                title="Add attribute"
+                                aria-label="Add attribute"
+                              >
+                                <PlusIcon className="project-table-header-icon" />
+                              </button>
+                            </div>
                           <div className="users-table-wrap case-attributes-table-wrap">
                             <table className="users-table case-attributes-table">
                               <thead>
@@ -9455,9 +9440,23 @@ export function PostgresProjectHomeView({
                               </tbody>
                             </table>
                           </div>
+                          </div>
                         )}
                       </>
                     ) : (
+                      <div className="home-project-card project-table-card">
+                        <div className="project-table-card-header">
+                          <h2>Relationships</h2>
+                          <button
+                            type="button"
+                            className="btn btn--primary project-table-header-icon-button"
+                            aria-label="New relationship"
+                            title="New relationship"
+                            onClick={() => openCreateRelationshipModal()}
+                          >
+                            <PlusIcon className="project-table-header-icon" />
+                          </button>
+                        </div>
                       <div className="users-table-wrap postgres-users-table-wrap">
                         <table className="users-table">
                           <thead>
@@ -9586,6 +9585,7 @@ export function PostgresProjectHomeView({
                             })}
                           </tbody>
                         </table>
+                      </div>
                       </div>
                     )}
                   </section>

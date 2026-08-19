@@ -16,6 +16,7 @@ import {
 } from "../lib/postgres";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { PlusIcon } from "../components/AppIcons";
 import { orderedCodesWithDepth } from "./Postgres_Source_Coding_Shared";
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
@@ -904,28 +905,32 @@ export function PostgresMemosView({
         <div className="users-title-wrap">
           <h1>Memos</h1>
         </div>
-        {canManageMemos ? (
-          <div className="view-header-actions">
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => {
-                setError(null);
-                setNotice(null);
-                setEditorDraft(createEmptyDraft());
-              }}
-            >
-              New Memo
-            </button>
-          </div>
-        ) : null}
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}
       {notice ? <div className="success-banner">{notice}</div> : null}
 
       <div className="postgres-memo-table-shell">
-        <section className="users-table-wrap postgres-memo-table-wrap">
+        <section className="home-project-card project-table-card postgres-memo-table-card">
+          <div className="project-table-card-header">
+            <h2>Memos</h2>
+            {canManageMemos ? (
+              <button
+                type="button"
+                className="btn btn--primary project-table-header-icon-button"
+                onClick={() => {
+                  setError(null);
+                  setNotice(null);
+                  setEditorDraft(createEmptyDraft());
+                }}
+                title="New memo"
+                aria-label="New memo"
+              >
+                <PlusIcon className="project-table-header-icon" />
+              </button>
+            ) : null}
+          </div>
+        <div className="users-table-wrap postgres-memo-table-wrap">
           <table className="users-table">
             <thead>
               <tr>
@@ -968,6 +973,7 @@ export function PostgresMemosView({
               )}
             </tbody>
           </table>
+        </div>
         </section>
       </div>
 

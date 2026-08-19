@@ -3995,9 +3995,9 @@ export function PostgresAdminSettingsView({
                 >
                   <div className="home-restricted-list">
                     <div className="home-restricted-item"><span className="home-restricted-label">Host</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Restricted role ready</span><span className="home-restricted-value">{status?.bootstrapApplied ? "Yes" : "No"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Setup complete</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">Bundled database reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">Control database ready</span><span className="home-restricted-value">{status?.bootstrapApplied ? "Yes" : "No"}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">Setup finalized</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
                     <div className="home-restricted-item"><span className="home-restricted-label">Database account</span><span className="home-restricted-value">{databaseAccountStatus}</span></div>
                   </div>
                 </SettingsModalSection>
@@ -5343,9 +5343,9 @@ export function PostgresAdminSettingsView({
                   <div className="app-settings-modal-section-body">
                     <div className="home-restricted-list">
                       <div className="home-restricted-item"><span className="home-restricted-label">Host</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Restricted role ready</span><span className="home-restricted-value">{status?.bootstrapApplied ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Setup complete</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">Bundled database reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">Control database ready</span><span className="home-restricted-value">{status?.bootstrapApplied ? "Yes" : "No"}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">Setup finalized</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
                       <div className="home-restricted-item"><span className="home-restricted-label">Database account</span><span className="home-restricted-value">{databaseAccountStatus}</span></div>
                     </div>
                   </div>

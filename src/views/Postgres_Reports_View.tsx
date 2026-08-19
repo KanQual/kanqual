@@ -8,6 +8,7 @@ import {
 } from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { LoadingCard } from "../components/LoadingCard";
+import { PlusIcon } from "../components/AppIcons";
 import type { CodeReportKind } from "./Reports_Codes_View";
 import type { CoderReportKind } from "./Reports_Users_View";
 
@@ -292,9 +293,6 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
     [filteredReports],
   );
 
-  const selectedReportType = selectedReportTypeFilter === "all"
-    ? null
-    : REPORT_TYPES.find((type) => type.id === selectedReportTypeFilter) ?? null;
   const backToReportsLanding = () => setActiveBuilder(null);
 
   if (activeBuilder?.type === "code") {
@@ -347,13 +345,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       <header className="view-header">
         <div className="users-title-wrap">
           <h1>Reports</h1>
-          <p className="view-subtitle">
-            Open report builders and review saved project reports in one workspace.
-          </p>
         </div>
-        <button type="button" className="btn btn--primary" onClick={() => setShowNewReportModal(true)}>
-          New report
-        </button>
       </header>
 
       <div
@@ -392,7 +384,6 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                 <h2 style={{ margin: 0, fontSize: 18 }}>Report types</h2>
-                <span className="home-restricted-value">{REPORT_TYPES.length}</span>
               </div>
             </div>
 
@@ -492,30 +483,23 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
             paddingRight: 4,
           }}
         >
-          <div className="home-project-card" style={{ padding: 0, overflow: "hidden" }}>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-                padding: 18,
-                borderBottom: "1px solid rgba(53, 80, 112, 0.08)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 18 }}>Saved reports</h2>
-                  <p className="view-subtitle" style={{ margin: "4px 0 0" }}>
-                    {selectedReportType ? selectedReportType.title : "All report types"}
-                  </p>
-                </div>
-                <span className="home-restricted-value">{sortedReports.length}</span>
-              </div>
+          <div className="home-project-card project-table-card">
+            <div className="project-table-card-header">
+              <h2>Saved reports</h2>
+              <button
+                type="button"
+                className="btn btn--primary project-table-header-icon-button"
+                onClick={() => setShowNewReportModal(true)}
+                title="New report"
+                aria-label="New report"
+              >
+                <PlusIcon className="project-table-header-icon" />
+              </button>
             </div>
 
             {reportError ? <p className="users-error" style={{ margin: 16 }}>{reportError}</p> : null}
 
-            <div className="users-table-wrap" style={{ border: 0, borderRadius: 0 }}>
+            <div className="users-table-wrap">
               <table className="users-table">
                 <thead>
                   <tr>
@@ -528,11 +512,11 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                 <tbody>
                   {loadingReports ? (
                     <tr>
-                      <td className="users-td" colSpan={4}>Loading reports...</td>
+                      <td className="users-td-msg" colSpan={4}>Loading reports...</td>
                     </tr>
                   ) : sortedReports.length === 0 ? (
                     <tr>
-                      <td className="users-td" colSpan={4}>No PostgreSQL reports yet.</td>
+                      <td className="users-td-msg" colSpan={4}>No reports yet.</td>
                     </tr>
                   ) : (
                     sortedReports.map((report) => (

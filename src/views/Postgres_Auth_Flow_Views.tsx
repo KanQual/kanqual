@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  completePostgresAdminHandoff,
   createPostgresAppUser,
   getBundledPostgresInitPreflight,
   initializeBundledPostgresCluster,
@@ -147,123 +146,6 @@ function PasswordVisibilityIcon() {
       />
       <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
     </svg>
-  );
-}
-
-export type PostgresAdminHandoffViewProps = {
-  status: PostgresStatus;
-  onComplete: (nextStatus: PostgresStatus) => void | Promise<void>;
-};
-
-export function PostgresAdminHandoffView({
-  status,
-  onComplete,
-}: PostgresAdminHandoffViewProps) {
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordVisible, setPasswordVisible] = useState(false);
-  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    if (!password || !confirmPassword) {
-      setError("Enter the new PostgreSQL admin password twice.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Choose a PostgreSQL admin password with at least 8 characters.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("The PostgreSQL admin passwords do not match.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const nextStatus = await completePostgresAdminHandoff({
-        newSuperuserPassword: password,
-      });
-      setPassword("");
-      setConfirmPassword("");
-      await onComplete(nextStatus);
-    } catch (handoffError) {
-      setError(handoffError instanceof Error ? handoffError.message : String(handoffError));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="auth-screen">
-      <div className="auth-card" style={{ maxWidth: 760 }}>
-        <div className="auth-brand">Kanqual</div>
-        <form onSubmit={handleSubmit} className="form">
-          <h2 className="auth-panel-title">Finish local database admin setup</h2>
-          <p className="auth-hint">
-            KanQual has already initialized the local database{" "}
-            <code>{status.appDatabase}</code>.
-          </p>
-          <div className="settings-warning settings-warning--danger">
-            Set the PostgreSQL administrator password now. Kanqual will not be able to recover it for you after this handoff completes.
-          </div>
-          <label className="form-label">
-            New PostgreSQL admin password
-            <div className="password-input-wrap">
-              <input
-                className="form-input password-input-field"
-                type={passwordVisible ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                name="new-postgres-admin-password"
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                className="password-visibility-btn"
-                aria-label={passwordVisible ? "Hide password" : "Show password"}
-                aria-pressed={passwordVisible}
-                onClick={() => setPasswordVisible((current) => !current)}
-              >
-                <PasswordVisibilityIcon />
-              </button>
-            </div>
-            <p className="password-requirement-note">Minimum 8 characters.</p>
-          </label>
-          <label className="form-label">
-            Confirm PostgreSQL admin password
-            <div className="password-input-wrap">
-              <input
-                className="form-input password-input-field"
-                type={confirmPasswordVisible ? "text" : "password"}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                name="confirm-postgres-admin-password"
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                className="password-visibility-btn"
-                aria-label={confirmPasswordVisible ? "Hide password" : "Show password"}
-                aria-pressed={confirmPasswordVisible}
-                onClick={() => setConfirmPasswordVisible((current) => !current)}
-              >
-                <PasswordVisibilityIcon />
-              </button>
-            </div>
-          </label>
-          {error ? <p className="auth-error">{error}</p> : null}
-          <div className="form-actions">
-            <button type="submit" className="btn btn--primary" disabled={saving}>
-              {saving ? "Finalizing..." : "Finalize admin handoff"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   );
 }
 
@@ -533,7 +415,7 @@ export function PostgresLaunchView({
         : bundledClusterInitialized && !bootstrapApplied
           ? "resume-bootstrap"
           : bootstrapApplied && !adminHandoffCompleted
-            ? "incomplete-handoff"
+            ? "incomplete-setup"
             : databaseReady
               ? "database-ready"
               : "launch-idle";

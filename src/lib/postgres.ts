@@ -187,14 +187,6 @@ export async function bootstrapPostgres(
   });
 }
 
-export async function completePostgresAdminHandoff(data: {
-  newSuperuserPassword: string;
-}): Promise<PostgresStatus> {
-  return invoke<PostgresStatus>("complete_postgres_admin_handoff_command", {
-    request: data,
-  });
-}
-
 export type PostgresSchemaMigrationResult = {
   ready: boolean;
   appliedVersions: number[];

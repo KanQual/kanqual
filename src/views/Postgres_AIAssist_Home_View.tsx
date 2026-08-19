@@ -371,15 +371,6 @@ export function PostgresAiAssistHomeView({
   const selectedModel = appSettings.llm.connectionMode === "cloud"
     ? appSettings.llm.cloudSelectedModel
     : appSettings.llm.ollamaSelectedModel;
-  const selectedCloudProvider = CLOUD_PROVIDER_OPTIONS.find((provider) => provider.value === appSettings.llm.cloudProvider)
-    ?? CLOUD_PROVIDER_OPTIONS[0];
-  const selectedLocalProvider = LOCAL_PROVIDER_OPTIONS.find((provider) => provider.value === appSettings.llm.localProvider)
-    ?? LOCAL_PROVIDER_OPTIONS[0];
-  const rememberedGenerationProviderLabel = llmConnectionMode === "cloud"
-    ? selectedCloudProvider.label
-    : llmConnectionMode === "local"
-      ? selectedLocalProvider.label
-      : "";
   const aiAssistAllowedByAdministrator =
     installationSettings == null
       ? true
@@ -676,7 +667,7 @@ export function PostgresAiAssistHomeView({
   }
 
   function handleLlmConnectionModeChange(mode: LlmConnectionMode) {
-    if (!canManageLlmSettings) return;
+    if (!settings.enabled || !canManageLlmSettings) return;
     setOllamaError("");
     setOllamaTestFlash(null);
     setCloudError("");
@@ -693,7 +684,7 @@ export function PostgresAiAssistHomeView({
   }
 
   function handleCloudProviderChange(provider: CloudLlmProvider) {
-    if (!canManageLlmSettings) return;
+    if (!settings.enabled || !canManageLlmSettings) return;
     setCloudNotice("");
     setCloudError("");
     setCloudDiscovery(null);
@@ -710,7 +701,7 @@ export function PostgresAiAssistHomeView({
   }
 
   function handleLocalProviderChange(provider: LocalLlmProvider) {
-    if (!canManageLlmSettings) return;
+    if (!settings.enabled || !canManageLlmSettings) return;
     const profile = LOCAL_PROVIDER_OPTIONS.find((option) => option.value === provider) ?? LOCAL_PROVIDER_OPTIONS[0];
     setOllamaError("");
     setOllamaTestFlash(null);
@@ -728,7 +719,7 @@ export function PostgresAiAssistHomeView({
   }
 
   async function handleOllamaTestConnection() {
-    if (!canManageLlmSettings) return;
+    if (!settings.enabled || !canManageLlmSettings) return;
     if (!appSettings.llm.ollamaHost.trim() || appSettings.llm.ollamaPort <= 0) {
       setOllamaError("Enter a host and port before testing the local provider.");
       setOllamaTestFlash("error");
@@ -791,7 +782,7 @@ export function PostgresAiAssistHomeView({
   }
 
   async function handleCloudTestConnection() {
-    if (!canManageLlmSettings) return;
+    if (!settings.enabled || !canManageLlmSettings) return;
     setCloudBusy(true);
     setCloudError("");
     setCloudNotice("");
@@ -898,7 +889,7 @@ export function PostgresAiAssistHomeView({
   }
 
   async function handleBuildEmbeddings(): Promise<boolean> {
-    if (!isLocalWorkspace || !canManageEmbeddings || buildBusy) return false;
+    if (!settings.enabled || !isLocalWorkspace || !canManageEmbeddings || buildBusy) return false;
     setSubmitting("build");
     setNotice("");
     setError("");
@@ -934,7 +925,7 @@ export function PostgresAiAssistHomeView({
   }
 
   async function handleDeleteEmbeddings() {
-    if (!isLocalWorkspace || !canManageEmbeddings || buildBusy) return;
+    if (!settings.enabled || !isLocalWorkspace || !canManageEmbeddings || buildBusy) return;
     setSubmitting("delete");
     setNotice("");
     setError("");
@@ -956,6 +947,50 @@ export function PostgresAiAssistHomeView({
       setSubmitting(null);
     }
   }
+
+  const llmModelSelector = (
+    <div className="ai-assist-llm-model-selection-stack">
+      <fieldset className="llm-settings-grid llm-settings-grid--single ai-assist-llm-model-selector" disabled={!settings.enabled || !canManageLlmSettings || !generationDefaultsAvailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+        <label className="form-label">
+          LLM model
+          <select
+            className="form-input"
+            value={llmConnectionMode === "cloud" ? appSettings.llm.cloudSelectedModel : appSettings.llm.ollamaSelectedModel}
+            onChange={(event) => {
+              const selectedModel = event.target.value;
+              void persistAppSettings({
+                ...appSettings,
+                llm: {
+                  ...appSettings.llm,
+                  ...(llmConnectionMode === "cloud"
+                    ? {
+                      cloudSelectedModel: selectedModel,
+                      cloudSelectedModelsByProvider: {
+                        ...appSettings.llm.cloudSelectedModelsByProvider,
+                        [appSettings.llm.cloudProvider]: selectedModel,
+                      },
+                    }
+                    : {
+                      ollamaSelectedModel: selectedModel,
+                      localSelectedModelsByProvider: {
+                        ...appSettings.llm.localSelectedModelsByProvider,
+                        [appSettings.llm.localProvider]: selectedModel,
+                      },
+                    }),
+                },
+              });
+            }}
+            disabled={!settings.enabled || generationModelOptions.length === 0}
+          >
+            <option value="">{generationModelOptions.length === 0 ? "No models loaded yet" : "Select model"}</option>
+            {generationModelOptions.map((model) => (
+              <option key={model.id} value={model.id}>{model.label}</option>
+            ))}
+          </select>
+        </label>
+      </fieldset>
+    </div>
+  );
 
   return (
     <div className="view home-view ai-assist-home-view">
@@ -1143,7 +1178,10 @@ export function PostgresAiAssistHomeView({
               ) : (
                 <>
               <div className="ai-assist-home-card-row">
-                <section className="home-project-card ai-assist-home-card ai-assist-home-card--balanced ai-assist-compact-setup-card">
+                <section
+                  className="home-project-card ai-assist-home-card ai-assist-home-card--balanced ai-assist-compact-setup-card ai-assist-embeddings-card"
+                  style={{ gridColumn: "1 / -1" }}
+                >
                   <div className="home-project-card-header">
                     <div>
                       <h2>Embeddings</h2>
@@ -1155,17 +1193,27 @@ export function PostgresAiAssistHomeView({
                       <p className="project-model-description">Status: {embeddingRuntimeStatusLabel}</p>
                     </div>
                   </div>
+                  <div className="project-model-card">
+                    <div>
+                      <div className="project-model-name">Settings</div>
+                      <p className="project-model-description">Chunk size: {settings.embeddingChunkSize}</p>
+                      <p className="project-model-description">Overlap: {settings.embeddingOverlapSize}</p>
+                      <p className="project-model-description">Batch size: {settings.embeddingBatchSize}</p>
+                    </div>
+                  </div>
                   {!hasEmbeddingModel ? <div className="users-permission-note ai-assist-home-disabled-note">Download the embedding model first.</div> : null}
                   {!isLocalWorkspace ? <div className="users-permission-note">Project embedding builds run on the PostgreSQL host for remote projects.</div> : null}
                   {isLocalWorkspace && !canManageEmbeddings ? <div className="users-permission-note">Only project owners, editors, or the PostgreSQL administrator can manage embeddings.</div> : null}
-                  <div className="project-export-actions project-export-actions--modal">
+                  <div className="project-export-actions project-export-actions--modal" style={{ justifyContent: "space-between" }}>
+                    <button type="button" className="btn" onClick={() => setActiveDeviceModal("embedding-tuning")} disabled={!settings.enabled || !hasEmbeddingModel}>
+                      Settings
+                    </button>
                     {indexStatus?.exists ? (
                       <button
                         type="button"
                         className="btn btn--primary"
                         onClick={() => void handleDeleteEmbeddings()}
-                        disabled={!isLocalWorkspace || buildBusy || submitting === "delete" || !canManageEmbeddings}
-                        style={{ marginLeft: "auto" }}
+                        disabled={!settings.enabled || !isLocalWorkspace || buildBusy || submitting === "delete" || !canManageEmbeddings}
                       >
                         {submitting === "delete" ? "Deleting..." : "Delete"}
                       </button>
@@ -1174,39 +1222,17 @@ export function PostgresAiAssistHomeView({
                         type="button"
                         className="btn btn--primary"
                         onClick={() => setBuildModalOpen(true)}
-                        disabled={!isLocalWorkspace || buildBusy || !canManageEmbeddings}
-                        style={{ marginLeft: "auto" }}
+                        disabled={!settings.enabled || !isLocalWorkspace || buildBusy || !canManageEmbeddings}
                       >
                         {buildBusy ? "Generating..." : "Generate"}
                       </button>
                     )}
                   </div>
                 </section>
-
-                <section className={`home-project-card ai-assist-home-card ai-assist-home-card--balanced ai-assist-compact-setup-card${hasEmbeddingModel ? "" : " ai-assist-home-card--disabled"}`}>
-                  <div className="home-project-card-header">
-                    <div>
-                      <h2>Embedding Settings</h2>
-                    </div>
-                  </div>
-                  <div className="project-model-card">
-                    <div>
-                      <div className="project-model-name">Defaults</div>
-                      <p className="project-model-description">Chunk size: {settings.embeddingChunkSize}</p>
-                      <p className="project-model-description">Overlap: {settings.embeddingOverlapSize}</p>
-                      <p className="project-model-description">Batch size: {settings.embeddingBatchSize}</p>
-                    </div>
-                  </div>
-                  <div className="project-export-actions project-export-actions--modal">
-                    <button type="button" className="btn" onClick={() => setActiveDeviceModal("embedding-tuning")} disabled={!hasEmbeddingModel}>
-                      Edit
-                    </button>
-                  </div>
-                </section>
               </div>
 
               <div className="ai-assist-home-card-row">
-              <section className="home-project-card ai-assist-home-card ai-assist-llm-connection-card">
+              <section className="home-project-card ai-assist-home-card ai-assist-llm-connection-card" style={{ gridColumn: "1 / -1" }}>
                 <div className="home-project-card-header">
                   <div>
                     <h2>LLM Connection</h2>
@@ -1214,13 +1240,11 @@ export function PostgresAiAssistHomeView({
                 </div>
                 <div className="settings-toggle-row settings-toggle-row--stacked settings-toggle-row--compact ai-assist-connection-mode-row">
                   <div className="segmented-control ai-assist-connection-mode-toggle" role="tablist" aria-label="Connection mode">
-                    {(["none", "local", "cloud"] as const).map((mode) => {
+                    {(["local", "cloud"] as const).map((mode) => {
                       const modeUnavailable =
                         mode === "local"
                           ? enabledLocalProviderOptions.length === 0
-                          : mode === "cloud"
-                            ? enabledCloudProviderOptions.length === 0
-                            : false;
+                          : enabledCloudProviderOptions.length === 0;
                       return (
                         <button
                           key={mode}
@@ -1228,27 +1252,19 @@ export function PostgresAiAssistHomeView({
                           role="tab"
                           aria-selected={llmConnectionMode === mode}
                           className={llmConnectionMode === mode ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
-                          disabled={!canManageLlmSettings || modeUnavailable}
+                          disabled={!settings.enabled || !canManageLlmSettings || modeUnavailable}
                           onClick={() => handleLlmConnectionModeChange(mode)}
                         >
-                          {mode === "none" ? "None" : mode === "local" ? "Local" : "Cloud"}
+                          {mode === "local" ? "Local" : "Cloud"}
                         </button>
                       );
                     })}
                   </div>
                 </div>
-                {llmConnectionMode === "none" ? (
-                  <div className="project-model-card">
-                    <div>
-                      <div className="project-model-name">LLM connections disabled</div>
-                      <p className="project-model-description">Select local or cloud to use AI generation tools.</p>
-                    </div>
-                  </div>
-                ) : null}
                 {llmConnectionMode === "local" ? (
                   <>
                     {ollamaError ? <div className="form-error project-settings-error">{ollamaError}</div> : null}
-                    <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                    <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!settings.enabled || !canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                       <label className="form-label">
                         API provider
                         <select className="form-input" value={appSettings.llm.localProvider} onChange={(event) => handleLocalProviderChange(event.target.value as LocalLlmProvider)}>
@@ -1257,11 +1273,10 @@ export function PostgresAiAssistHomeView({
                           ))}
                         </select>
                       </label>
-                      <p className="ai-assist-inline-help">{selectedLocalProvider.helpText}</p>
                     </fieldset>
+                    {llmModelSelector}
                     <div className="project-export-actions project-export-actions--modal llm-connection-actions llm-connection-actions--inline">
-                      <button type="button" className="btn" onClick={() => setActiveDeviceModal("connection-settings")}>Settings</button>
-                      <button className="btn btn--primary" type="button" onClick={() => void handleOllamaTestConnection()} disabled={ollamaBusy || !canManageLlmSettings} style={{ marginLeft: "auto" }}>
+                      <button className="btn btn--primary" type="button" onClick={() => void handleOllamaTestConnection()} disabled={!settings.enabled || ollamaBusy || !canManageLlmSettings} style={{ marginLeft: "auto" }}>
                         {ollamaBusy ? "Testing..." : "Test"}
                       </button>
                     </div>
@@ -1271,7 +1286,7 @@ export function PostgresAiAssistHomeView({
                   <>
                     {cloudError ? <div className="form-error project-settings-error">{cloudError}</div> : null}
                     {cloudNotice ? <div className="settings-success project-settings-success">{cloudNotice}</div> : null}
-                    <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                    <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!settings.enabled || !canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                       <label className="form-label">
                         API provider
                         <select className="form-input" value={appSettings.llm.cloudProvider} onChange={(event) => handleCloudProviderChange(event.target.value as CloudLlmProvider)}>
@@ -1280,81 +1295,15 @@ export function PostgresAiAssistHomeView({
                           ))}
                         </select>
                       </label>
-                      <p className="ai-assist-inline-help">
-                        Cloud provider access is managed by the administrator.
-                      </p>
                     </fieldset>
+                    {llmModelSelector}
                     <div className="project-export-actions project-export-actions--modal llm-connection-actions llm-connection-actions--inline">
-                      <button className="btn btn--primary" type="button" onClick={() => void handleCloudTestConnection()} disabled={!canManageLlmSettings || cloudBusy} style={{ marginLeft: "auto" }}>
+                      <button className="btn btn--primary" type="button" onClick={() => void handleCloudTestConnection()} disabled={!settings.enabled || !canManageLlmSettings || cloudBusy} style={{ marginLeft: "auto" }}>
                         {cloudBusy ? "Testing..." : "Test"}
                       </button>
                     </div>
                   </>
                 ) : null}
-              </section>
-
-              <section className={`home-project-card ai-assist-home-card ai-assist-llm-model-card${generationDefaultsAvailable ? "" : " ai-assist-home-card--disabled"}`}>
-                <div className="home-project-card-header">
-                  <div>
-                    <h2>LLM Model</h2>
-                  </div>
-                </div>
-                <div className="ai-assist-llm-model-selection-stack">
-                  {generationDefaultsAvailable ? (
-                    <div className="project-model-card ai-assist-llm-model-memory-card">
-                      <div>
-                        <div className="project-model-name">Current Provider</div>
-                        <p className="project-model-description">
-                          {rememberedGenerationProviderLabel}
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
-                  <fieldset className="llm-settings-grid llm-settings-grid--single ai-assist-llm-model-selector" disabled={!canManageLlmSettings || !generationDefaultsAvailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-                    <label className="form-label">
-                      <select
-                        className="form-input"
-                        value={llmConnectionMode === "cloud" ? appSettings.llm.cloudSelectedModel : appSettings.llm.ollamaSelectedModel}
-                        onChange={(event) => {
-                          const selectedModel = event.target.value;
-                          void persistAppSettings({
-                            ...appSettings,
-                            llm: {
-                              ...appSettings.llm,
-                              ...(llmConnectionMode === "cloud"
-                                ? {
-                                  cloudSelectedModel: selectedModel,
-                                  cloudSelectedModelsByProvider: {
-                                    ...appSettings.llm.cloudSelectedModelsByProvider,
-                                    [appSettings.llm.cloudProvider]: selectedModel,
-                                  },
-                                }
-                                : {
-                                  ollamaSelectedModel: selectedModel,
-                                  localSelectedModelsByProvider: {
-                                    ...appSettings.llm.localSelectedModelsByProvider,
-                                    [appSettings.llm.localProvider]: selectedModel,
-                                  },
-                                }),
-                            },
-                          });
-                        }}
-                        disabled={generationModelOptions.length === 0}
-                      >
-                        <option value="">{generationModelOptions.length === 0 ? "No models loaded yet" : "Select model"}</option>
-                        {generationModelOptions.map((model) => (
-                          <option key={model.id} value={model.id}>{model.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </fieldset>
-                </div>
-                {!generationDefaultsAvailable ? <div className="users-permission-note ai-assist-home-disabled-note">Set up an LLM connection first.</div> : null}
-                <div className="project-export-actions project-export-actions--modal ai-assist-llm-model-actions">
-                  <button type="button" className="btn" onClick={() => setActiveDeviceModal("generation-defaults")} disabled={!generationDefaultsAvailable}>
-                    Settings
-                  </button>
-                </div>
               </section>
               </div>
                 </>
