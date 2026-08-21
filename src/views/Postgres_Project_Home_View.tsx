@@ -137,6 +137,7 @@ import {
 import { AttributeDefinitionModal } from "../components/AttributeDefinitionModal";
 import { LoadingCard } from "../components/LoadingCard";
 import { usePostgresAutomaticProjectSnapshots } from "../hooks/usePostgresAutomaticProjectSnapshots";
+import { OPEN_PROJECT_SETTINGS_MODAL_EVENT } from "../lib/projectBackupBanner";
 import {
   PostgresRelationshipModal,
   type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
@@ -6452,6 +6453,17 @@ export function PostgresProjectHomeView({
     [allHomeCanvasCodeIds, homeCanvasCodeSummaries, homeCanvasSectionEnabled, toggleHomeCanvasSelection, visibleHomeCanvasCodeIds],
   );
   usePostgresAutomaticProjectSnapshots(project, canManageProjectSettings);
+
+  useEffect(() => {
+    function handleOpenProjectSettingsModal() {
+      setActiveScreen("project-settings");
+    }
+
+    window.addEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    return () => {
+      window.removeEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    };
+  }, []);
   const sidebarCollaborationStatus: PostgresSidebarCollaborationStatus =
     !project
       ? "disabled"

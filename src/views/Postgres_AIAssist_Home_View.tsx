@@ -36,37 +36,6 @@ import {
 } from "../lib/projectEmbeddings";
 import { formatCurrentDateTime } from "../i18n/formatters";
 
-type OllamaModelSummary = {
-  name: string;
-  size: number | null;
-  modifiedAt: string | null;
-};
-
-type OllamaDiscoveryResult = {
-  ok: boolean;
-  baseUrl: string;
-  version: string | null;
-  modelCount: number;
-  models: OllamaModelSummary[];
-  message: string;
-};
-
-type CloudLlmModelSummary = {
-  id: string;
-  name: string;
-  publisher: string | null;
-};
-
-type CloudLlmDiscoveryResult = {
-  ok: boolean;
-  provider: string;
-  baseUrl: string;
-  version: string | null;
-  modelCount: number;
-  models: CloudLlmModelSummary[];
-  message: string;
-};
-
 const CLOUD_PROVIDER_OPTIONS: Array<{
   value: CloudLlmProvider;
   label: string;
@@ -313,17 +282,8 @@ export function PostgresAiAssistHomeView({
   const [activeDeviceModal, setActiveDeviceModal] = useState<null | "embedding-tuning" | "connection-settings" | "generation-defaults">(null);
   const [buildModalOpen, setBuildModalOpen] = useState(false);
   const [llmConnectionStatus, setLlmConnectionStatus] = useState<"checking" | "live" | "offline" | "disabled">("checking");
-  const [ollamaBusy, setOllamaBusy] = useState(false);
   const [ollamaError, setOllamaError] = useState("");
-  const [, setOllamaDiscovery] = useState<OllamaDiscoveryResult | null>(null);
-  const [ollamaModels, setOllamaModels] = useState<OllamaModelSummary[]>([]);
-  const [ollamaTestFlash, setOllamaTestFlash] = useState<null | "success" | "error">(null);
-  const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState("");
-  const [cloudNotice, setCloudNotice] = useState("");
-  const [, setCloudDiscovery] = useState<CloudLlmDiscoveryResult | null>(null);
-  const [cloudModels, setCloudModels] = useState<CloudLlmModelSummary[]>([]);
-  const [cloudTestFlash, setCloudTestFlash] = useState<null | "success" | "error">(null);
 
   const isLocalWorkspace = project.accessMode !== "remote";
   const isLocalAdministrator = authSession.authKind === "postgres_admin" || authSession.user.role === "administrator";
@@ -366,8 +326,6 @@ export function PostgresAiAssistHomeView({
   const enabledCloudProviderOptions = CLOUD_PROVIDER_OPTIONS.filter((provider) => enabledCloudProviderIds.has(provider.value));
   const enabledLocalModelsForProvider = enabledLocalCatalogEntries.filter((entry) => entry.providerId === appSettings.llm.localProvider);
   const enabledCloudModelsForProvider = enabledCloudCatalogEntries.filter((entry) => entry.providerId === appSettings.llm.cloudProvider);
-  const enabledLocalModelIds = new Set(enabledLocalModelsForProvider.map((entry) => entry.modelId));
-  const enabledCloudModelIds = new Set(enabledCloudModelsForProvider.map((entry) => entry.modelId));
   const selectedModel = appSettings.llm.connectionMode === "cloud"
     ? appSettings.llm.cloudSelectedModel
     : appSettings.llm.ollamaSelectedModel;
@@ -385,28 +343,14 @@ export function PostgresAiAssistHomeView({
       ? "Cloud"
       : "Local";
   const generationModelOptions = llmConnectionMode === "cloud"
-    ? (cloudModels.length
-      ? cloudModels
-        .filter((model) => enabledCloudModelIds.has(model.id))
-        .map((model) => ({
-          id: model.id,
-          label: `${model.name}${model.publisher ? ` (${model.publisher})` : ""}`,
-        }))
-      : enabledCloudModelsForProvider.map((model) => ({
+    ? enabledCloudModelsForProvider.map((model) => ({
         id: model.modelId,
         label: `${model.modelLabel}${model.modelPublisher ? ` (${model.modelPublisher})` : ""}`,
-      })))
-    : (ollamaModels.length
-      ? ollamaModels
-        .filter((model) => enabledLocalModelIds.has(model.name))
-        .map((model) => ({
-          id: model.name,
-          label: model.name,
-        }))
-      : enabledLocalModelsForProvider.map((model) => ({
+      }))
+    : enabledLocalModelsForProvider.map((model) => ({
         id: model.modelId,
         label: model.modelLabel,
-      })));
+      }));
   const embeddingRuntimeStatusLabel = embeddingDownloadPhase === "downloading"
     ? "Downloading"
     : embeddingDownloadPhase === "cancelling"
@@ -587,18 +531,6 @@ export function PostgresAiAssistHomeView({
   }, [buildStatus?.phase, buildStatus?.projectId, isLocalWorkspace, project.id, projectEmbeddingLlmSettings]);
 
   useEffect(() => {
-    if (!ollamaTestFlash) return;
-    const timeoutId = window.setTimeout(() => setOllamaTestFlash(null), 1600);
-    return () => window.clearTimeout(timeoutId);
-  }, [ollamaTestFlash]);
-
-  useEffect(() => {
-    if (!cloudTestFlash) return;
-    const timeoutId = window.setTimeout(() => setCloudTestFlash(null), 1600);
-    return () => window.clearTimeout(timeoutId);
-  }, [cloudTestFlash]);
-
-  useEffect(() => {
     if (!isLocalWorkspace) {
       if (remoteLlmEnabled == null || remoteSelectedModel == null || remoteLlmConnectionLive == null) {
         setLlmConnectionStatus("checking");
@@ -669,10 +601,7 @@ export function PostgresAiAssistHomeView({
   function handleLlmConnectionModeChange(mode: LlmConnectionMode) {
     if (!settings.enabled || !canManageLlmSettings) return;
     setOllamaError("");
-    setOllamaTestFlash(null);
     setCloudError("");
-    setCloudTestFlash(null);
-    setCloudNotice("");
     void persistAppSettings({
       ...appSettings,
       llm: {
@@ -685,11 +614,7 @@ export function PostgresAiAssistHomeView({
 
   function handleCloudProviderChange(provider: CloudLlmProvider) {
     if (!settings.enabled || !canManageLlmSettings) return;
-    setCloudNotice("");
     setCloudError("");
-    setCloudDiscovery(null);
-    setCloudModels([]);
-    setCloudTestFlash(null);
     void persistAppSettings({
       ...appSettings,
       llm: {
@@ -704,9 +629,6 @@ export function PostgresAiAssistHomeView({
     if (!settings.enabled || !canManageLlmSettings) return;
     const profile = LOCAL_PROVIDER_OPTIONS.find((option) => option.value === provider) ?? LOCAL_PROVIDER_OPTIONS[0];
     setOllamaError("");
-    setOllamaTestFlash(null);
-    setOllamaDiscovery(null);
-    setOllamaModels([]);
     void persistAppSettings({
       ...appSettings,
       llm: {
@@ -716,127 +638,6 @@ export function PostgresAiAssistHomeView({
         ollamaSelectedModel: appSettings.llm.localSelectedModelsByProvider[provider] ?? "",
       },
     });
-  }
-
-  async function handleOllamaTestConnection() {
-    if (!settings.enabled || !canManageLlmSettings) return;
-    if (!appSettings.llm.ollamaHost.trim() || appSettings.llm.ollamaPort <= 0) {
-      setOllamaError("Enter a host and port before testing the local provider.");
-      setOllamaTestFlash("error");
-      return;
-    }
-    setOllamaBusy(true);
-    setOllamaError("");
-    setOllamaTestFlash(null);
-    try {
-      const result = await invoke<OllamaDiscoveryResult>("discover_ollama_models", {
-        request: {
-          localProvider: appSettings.llm.localProvider,
-          protocol: appSettings.llm.ollamaProtocol,
-          host: appSettings.llm.ollamaHost,
-          port: appSettings.llm.ollamaPort,
-          timeoutSeconds: appSettings.llm.ollamaRequestTimeoutSeconds,
-        },
-      });
-      setOllamaDiscovery(result);
-      setOllamaModels(result.models);
-      setOllamaTestFlash(result.ok ? "success" : "error");
-
-      if (result.models.length > 0) {
-        const hasSelectedModel = result.models.some((model) => model.name === appSettings.llm.ollamaSelectedModel);
-        if (!hasSelectedModel) {
-          const selectedModel = result.models[0].name;
-          await persistAppSettings({
-            ...appSettings,
-            llm: {
-              ...appSettings.llm,
-              ollamaSelectedModel: selectedModel,
-              localSelectedModelsByProvider: {
-                ...appSettings.llm.localSelectedModelsByProvider,
-                [appSettings.llm.localProvider]: selectedModel,
-              },
-            },
-          });
-        }
-      } else if (appSettings.llm.ollamaSelectedModel) {
-        await persistAppSettings({
-          ...appSettings,
-          llm: {
-            ...appSettings.llm,
-            ollamaSelectedModel: "",
-            localSelectedModelsByProvider: {
-              ...appSettings.llm.localSelectedModelsByProvider,
-              [appSettings.llm.localProvider]: "",
-            },
-          },
-        });
-      }
-    } catch (testError) {
-      setOllamaDiscovery(null);
-      setOllamaModels([]);
-      setOllamaTestFlash("error");
-      setOllamaError(describeUnknownError(testError));
-    } finally {
-      setOllamaBusy(false);
-    }
-  }
-
-  async function handleCloudTestConnection() {
-    if (!settings.enabled || !canManageLlmSettings) return;
-    setCloudBusy(true);
-    setCloudError("");
-    setCloudNotice("");
-    setCloudTestFlash(null);
-    try {
-      const result = await invoke<CloudLlmDiscoveryResult>("discover_cloud_llm_models", {
-        request: {
-          provider: appSettings.llm.cloudProvider,
-          apiSecret: appSettings.llm.cloudApiSecret,
-          timeoutSeconds: appSettings.llm.ollamaRequestTimeoutSeconds,
-        },
-      });
-      setCloudDiscovery(result);
-      setCloudModels(result.models);
-      setCloudNotice(result.message);
-      setCloudTestFlash(result.ok ? "success" : "error");
-
-      if (result.models.length > 0) {
-        const hasSelectedModel = result.models.some((model) => model.id === appSettings.llm.cloudSelectedModel);
-        if (!hasSelectedModel) {
-          const selectedModel = result.models[0].id;
-          await persistAppSettings({
-            ...appSettings,
-            llm: {
-              ...appSettings.llm,
-              cloudSelectedModel: selectedModel,
-              cloudSelectedModelsByProvider: {
-                ...appSettings.llm.cloudSelectedModelsByProvider,
-                [appSettings.llm.cloudProvider]: selectedModel,
-              },
-            },
-          });
-        }
-      } else if (appSettings.llm.cloudSelectedModel) {
-        await persistAppSettings({
-          ...appSettings,
-          llm: {
-            ...appSettings.llm,
-            cloudSelectedModel: "",
-            cloudSelectedModelsByProvider: {
-              ...appSettings.llm.cloudSelectedModelsByProvider,
-              [appSettings.llm.cloudProvider]: "",
-            },
-          },
-        });
-      }
-    } catch (testError) {
-      setCloudDiscovery(null);
-      setCloudModels([]);
-      setCloudTestFlash("error");
-      setCloudError(describeUnknownError(testError));
-    } finally {
-      setCloudBusy(false);
-    }
   }
 
   async function persistSettings(next: PostgresProjectAiAssistSettings) {
@@ -1275,17 +1076,11 @@ export function PostgresAiAssistHomeView({
                       </label>
                     </fieldset>
                     {llmModelSelector}
-                    <div className="project-export-actions project-export-actions--modal llm-connection-actions llm-connection-actions--inline">
-                      <button className="btn btn--primary" type="button" onClick={() => void handleOllamaTestConnection()} disabled={!settings.enabled || ollamaBusy || !canManageLlmSettings} style={{ marginLeft: "auto" }}>
-                        {ollamaBusy ? "Testing..." : "Test"}
-                      </button>
-                    </div>
                   </>
                 ) : null}
                 {llmConnectionMode === "cloud" ? (
                   <>
                     {cloudError ? <div className="form-error project-settings-error">{cloudError}</div> : null}
-                    {cloudNotice ? <div className="settings-success project-settings-success">{cloudNotice}</div> : null}
                     <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!settings.enabled || !canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                       <label className="form-label">
                         API provider
@@ -1297,11 +1092,6 @@ export function PostgresAiAssistHomeView({
                       </label>
                     </fieldset>
                     {llmModelSelector}
-                    <div className="project-export-actions project-export-actions--modal llm-connection-actions llm-connection-actions--inline">
-                      <button className="btn btn--primary" type="button" onClick={() => void handleCloudTestConnection()} disabled={!settings.enabled || !canManageLlmSettings || cloudBusy} style={{ marginLeft: "auto" }}>
-                        {cloudBusy ? "Testing..." : "Test"}
-                      </button>
-                    </div>
                   </>
                 ) : null}
               </section>

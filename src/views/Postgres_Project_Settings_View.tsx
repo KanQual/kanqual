@@ -47,6 +47,7 @@ import {
   summarizeProjectLogDetails,
 } from "./Project_Log_View";
 import { useI18n } from "../i18n/provider";
+import { OPEN_PROJECT_SETTINGS_MODAL_EVENT } from "../lib/projectBackupBanner";
 
 export type PostgresProjectSettingsViewProps = {
   project: PostgresProject;
@@ -571,6 +572,29 @@ export function PostgresProjectSettingsView({
       setSubmitting(null);
     }
   }
+
+  function openRequestedProjectSettingsModal() {
+    const requestedModal = sessionStorage.getItem("kanqual:open-project-settings-modal");
+    if (requestedModal !== "backups") return;
+    sessionStorage.removeItem("kanqual:open-project-settings-modal");
+    setBackupError("");
+    setBackupNotice("");
+    setActiveModal("backups");
+    void loadBackups();
+  }
+
+  useEffect(() => {
+    openRequestedProjectSettingsModal();
+
+    function handleOpenProjectSettingsModal() {
+      openRequestedProjectSettingsModal();
+    }
+
+    window.addEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    return () => {
+      window.removeEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    };
+  }, [project.id]);
 
   const projectSettingsSections = [
     {

@@ -14,6 +14,7 @@ import {
 } from "../lib/processedDocumentReviews";
 import { readAppSettings } from "../lib/appSettings";
 import { buildLlmInvokeRequestFields } from "../lib/llmRuntime";
+import { notifyPostgresDocumentProcessingChanged } from "./App_Shell_Helpers";
 import {
   createPostgresSource,
   listPostgresSourceAttributeDefinitions,
@@ -919,12 +920,25 @@ export function PostgresAiAssistProcessSourcesView({
 
   async function processSelectedSources(restart: boolean) {
     if (selectedSources.length === 0 || !canUseAiProcessDocuments) return;
+    setProcessModalOpen(false);
+    setProgress(null);
     setBusy(true);
     setError("");
     setNotice("");
+    notifyPostgresDocumentProcessingChanged({
+      phase: "running",
+      projectId,
+      completedDocuments: 0,
+      totalDocuments: selectedSources.length,
+      currentDocumentName: "",
+      message: `Preparing to ${restart ? "restart" : "process"} ${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"}.`,
+      failures: [],
+    });
     try {
       const settings = readAppSettings();
       const runtime = buildLlmInvokeRequestFields(settings.llm);
+      const failures: Array<{ documentName: string; message: string }> = [];
+      let processedCount = 0;
       for (let sourceIndex = 0; sourceIndex < selectedSources.length; sourceIndex += 1) {
         const source = selectedSources[sourceIndex];
         const chunks = splitProcessingChunks(source.textContent, settings.llm.ollamaNumCtx);
@@ -961,6 +975,17 @@ export function PostgresAiAssistProcessSourcesView({
             sourceTotal: selectedSources.length,
             chunkIndex: chunk.chunkIndex + 1,
             chunkTotal: chunks.length,
+          });
+          notifyPostgresDocumentProcessingChanged({
+            phase: "running",
+            projectId,
+            completedDocuments: processedCount,
+            totalDocuments: selectedSources.length,
+            currentDocumentName: source.title,
+            message: `${restart ? "Restarting" : "Processing"} ${source.title} (${sourceIndex + 1} of ${selectedSources.length}).`,
+            failures: [...failures],
+            currentChunkIndex: chunk.chunkIndex + 1,
+            currentChunkTotal: chunks.length,
           });
           const response = await invoke<{
             processedContent: string;
@@ -1017,13 +1042,32 @@ export function PostgresAiAssistProcessSourcesView({
           sourceContentHash,
           exportedToProject: restart ? false : existing?.exportedToProject ?? false,
         });
+        processedCount += 1;
       }
-      setNotice(`Processed ${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"} and added them to the review queue.`);
-      setProcessModalOpen(false);
+      notifyPostgresDocumentProcessingChanged({
+        phase: "completed",
+        projectId,
+        completedDocuments: selectedSources.length,
+        totalDocuments: selectedSources.length,
+        currentDocumentName: "",
+        message: `Processed ${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"} and added ${selectedSources.length === 1 ? "it" : "them"} to the review queue.`,
+        failures: [],
+      });
       setSelectedSourceIds([]);
       await refresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      const message = nextError instanceof Error ? nextError.message : String(nextError);
+      notifyPostgresDocumentProcessingChanged({
+        phase: "error",
+        projectId,
+        completedDocuments: 0,
+        totalDocuments: selectedSources.length,
+        currentDocumentName: progress?.sourceTitle ?? "",
+        message,
+        failures: [],
+        error: message,
+      });
+      setError(message);
     } finally {
       setBusy(false);
       setProgress(null);
@@ -1655,7 +1699,7 @@ export function PostgresAiAssistProcessSourcesView({
           <div className="modal modal--help modal--wide" onClick={(event) => event.stopPropagation()}>
             <div className="modal-title-bar">
               <div>
-                <h2>Process Sources</h2>
+                <h2>Process into Transcript</h2>
               </div>
               <button type="button" className="modal-icon-close" onClick={() => setHelpOpen(false)} aria-label="Close" title="Close">
                 x
@@ -1673,7 +1717,7 @@ export function PostgresAiAssistProcessSourcesView({
           <div className="modal modal--wide ai-process-doc-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-title-bar">
               <div>
-                <h2>Process Sources</h2>
+                <h2>Process into Transcript</h2>
               </div>
               <button
                 type="button"
@@ -1692,45 +1736,38 @@ export function PostgresAiAssistProcessSourcesView({
                   <div className="surface-card-header">
                     <div>
                       <div className="surface-card-title">Settings</div>
-                      <p className="surface-card-description">
-                        Choose which review passes AI Assist should prepare.
-                      </p>
                     </div>
                   </div>
                   <div className="ai-process-doc-lenses">
                     {PROCESSED_DOCUMENT_REVIEW_LENSES.map((lens) => (
-                      <label key={lens.id} className="ai-process-doc-lens">
-                        <input
-                          type="checkbox"
-                          checked={reviewLenses[lens.id]}
-                          disabled={busy}
-                          onChange={() => toggleReviewLens(lens.id)}
-                        />
+                      <div key={lens.id} className="ai-process-doc-lens">
                         <span>
                           <strong>{lens.label}</strong>
-                          <small>{lens.description}</small>
                         </span>
-                      </label>
+                        <div className="segmented-control" role="tablist" aria-label={lens.label}>
+                          {([
+                            { label: "Disabled", value: false },
+                            { label: "Enabled", value: true },
+                          ] as const).map((option) => (
+                            <button
+                              key={option.label}
+                              type="button"
+                              role="tab"
+                              aria-selected={reviewLenses[lens.id] === option.value}
+                              className={reviewLenses[lens.id] === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                              disabled={busy}
+                              onClick={() => {
+                                if (reviewLenses[lens.id] !== option.value) toggleReviewLens(lens.id);
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
-
-                {progress ? (
-                  <div className="surface-card ai-process-doc-progress-card">
-                    <div className="surface-card-title">
-                      Processing source {progress.sourceIndex} of {progress.sourceTotal}
-                    </div>
-                    <div className="ai-segments-search-state">
-                      <div className="ai-segments-progress" aria-hidden="true">
-                        <span className="ai-segments-progress-bar" />
-                      </div>
-                      <div className="ai-segments-search-copy">
-                        {progress.sourceTitle}
-                        {progress.chunkIndex && progress.chunkTotal ? `, chunk ${progress.chunkIndex} of ${progress.chunkTotal}` : ""}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
 
                 {error ? <div className="form-error project-settings-error">{error}</div> : null}
               </div>
@@ -1739,19 +1776,11 @@ export function PostgresAiAssistProcessSourcesView({
             <div className="modal-actions">
               <button
                 type="button"
-                className="btn"
-                disabled={busy || selectedSources.length === 0 || !canUseAiProcessDocuments}
-                onClick={() => void processSelectedSources(true)}
-              >
-                {busy ? "Processing" : "Restart Selected"}
-              </button>
-              <button
-                type="button"
                 className="btn btn--primary"
                 disabled={busy || selectedSources.length === 0 || !canUseAiProcessDocuments}
                 onClick={() => void processSelectedSources(false)}
               >
-                {busy ? "Processing" : "Process / Resume"}
+                {busy ? "Processing" : "Process"}
               </button>
             </div>
           </div>

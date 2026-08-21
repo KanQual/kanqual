@@ -11056,10 +11056,6 @@ input[type="password"].form-input::-ms-clear {
   cursor: pointer;
 }
 
-.ai-process-doc-progress-card {
-  margin-top: 14px;
-}
-
 .ai-process-doc-review-modal {
   max-width: 1200px;
 }
@@ -11160,6 +11156,17 @@ input[type="password"].form-input::-ms-clear {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.ai-process-doc-lenses .ai-process-doc-lens {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ai-process-doc-lenses .ai-process-doc-lens .segmented-control {
+  width: fit-content;
+  max-width: 100%;
+  flex: 0 0 auto;
 }
 
 .ai-process-doc-lens small {

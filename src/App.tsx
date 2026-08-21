@@ -35,8 +35,10 @@ import {
   compareSemver,
   fetchLatestRelease,
   type ReleaseCheckResult,
+  PostgresDocumentProcessingBanner,
   PostgresEmbeddingModelDownloadBanner,
   PostgresProjectEmbeddingBuildBanner,
+  PostgresProjectSnapshotWarningBanner,
   UpdateAvailableBanner,
 } from "./views/App_Shell_Helpers";
 import packageJson from "../package.json";
@@ -666,6 +668,8 @@ function AuthGate() {
         <Suspense fallback={<ViewLoadingFallback />}>
           <PostgresEmbeddingModelDownloadBanner />
           <PostgresProjectEmbeddingBuildBanner activeProject={adminOpenedProject} />
+          <PostgresDocumentProcessingBanner />
+          <PostgresProjectSnapshotWarningBanner activeProject={adminOpenedProject} />
           <PostgresProjectHomeViewLazy
             project={adminOpenedProject}
             authSession={postgresAuthStatus.currentSession}
@@ -784,6 +788,8 @@ function AuthGate() {
               <>
                 <PostgresEmbeddingModelDownloadBanner />
                 <PostgresProjectEmbeddingBuildBanner activeProject={openedProject} />
+                <PostgresDocumentProcessingBanner />
+                <PostgresProjectSnapshotWarningBanner activeProject={openedProject} />
                 <PostgresProjectHomeViewLazy
                   project={openedProject}
                   authSession={postgresAuthStatus.currentSession!}

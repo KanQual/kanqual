@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import { useAuth } from "../context/AuthContext";
-import { useStore } from "../context/StoreContext";
 import { useI18n } from "../i18n/provider";
 import { APP_SETTINGS_KEY } from "../lib/appSettings";
 import {
@@ -26,9 +25,10 @@ import type { ProjectEmbeddingBuildStatus } from "../lib/projectEmbeddings";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  loadProjectBackupBannerIssue,
   OPEN_PROJECT_SETTINGS_MODAL_EVENT,
   PROJECT_BACKUPS_CHANGED_EVENT,
+  readPendingProjectBackupAttempt,
+  readProjectBackupBannerIssue,
   type ProjectBackupBannerIssue,
 } from "../lib/projectBackupBanner";
 
@@ -200,6 +200,7 @@ type PostgresEmbeddingModelDownloadChangedDetail = {
 let latestEmbeddingModelDownloadDetail: PostgresEmbeddingModelDownloadChangedDetail | null = null;
 let dismissedEmbeddingModelDownloadStatusKey: string | null = null;
 let dismissedEmbeddingModelDownloadTerminalPhase: PostgresEmbeddingModelDownloadStatus["phase"] | null = null;
+const dismissedProjectEmbeddingBuildStatusKeys = new Set<string>();
 
 export function notifyPostgresEmbeddingModelDownloadChanged(
   detail?: PostgresEmbeddingModelDownloadChangedDetail,
@@ -224,6 +225,21 @@ function isTerminalEmbeddingModelDownloadPhase(phase: PostgresEmbeddingModelDown
   return phase === "completed" || phase === "cancelled" || phase === "error";
 }
 
+function getProjectEmbeddingBuildStatusKey(status: ProjectEmbeddingBuildStatus): string {
+  return [
+    status.phase,
+    status.projectId ?? "",
+    status.completedItems ?? 0,
+    status.totalItems ?? 0,
+    status.progressPercent ?? "",
+    status.message ?? "",
+  ].join("|");
+}
+
+function isTerminalProjectEmbeddingBuildPhase(phase: ProjectEmbeddingBuildStatus["phase"]): boolean {
+  return phase === "completed" || phase === "cancelled" || phase === "error";
+}
+
 function clearDismissedEmbeddingModelDownloadStatus() {
   dismissedEmbeddingModelDownloadStatusKey = null;
   dismissedEmbeddingModelDownloadTerminalPhase = null;
@@ -245,6 +261,28 @@ export type ReleaseCheckResult = {
   latestVersion: string;
   releaseUrl: string;
 };
+
+export type PostgresDocumentProcessingBannerStatus = {
+  phase: "idle" | "running" | "completed" | "error";
+  projectId: string | null;
+  completedDocuments: number;
+  totalDocuments: number;
+  currentDocumentName: string;
+  message: string;
+  failures: Array<{ documentName: string; message: string }>;
+  currentChunkIndex?: number;
+  currentChunkTotal?: number;
+  error?: string;
+};
+
+export const POSTGRES_DOCUMENT_PROCESSING_CHANGED_EVENT = "kanqual:postgres-document-processing-changed";
+
+let latestDocumentProcessingStatus: PostgresDocumentProcessingBannerStatus | null = null;
+
+export function notifyPostgresDocumentProcessingChanged(status: PostgresDocumentProcessingBannerStatus) {
+  latestDocumentProcessingStatus = status;
+  window.dispatchEvent(new CustomEvent(POSTGRES_DOCUMENT_PROCESSING_CHANGED_EVENT, { detail: status }));
+}
 
 const UPDATE_RELEASES_URL = "https://github.com/KanQual/kanqual/releases";
 
@@ -301,88 +339,6 @@ export function UpdateAvailableBanner({
         </a>
         <button type="button" className="btn" onClick={onDismiss}>
           {t("common.dismiss")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-export function ProjectBackupBanner() {
-  const { t } = useI18n();
-  const { activeProject, canCurrentUser, setView } = useStore();
-  const [issue, setIssue] = useState<ProjectBackupBannerIssue | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function refreshBackupBanner() {
-      if (
-        !activeProject
-        || !(canCurrentUser("manageBackupsAndRestores")
-          || canCurrentUser("exportProject")
-          || canCurrentUser("restoreProjectBackup"))
-      ) {
-        if (!cancelled) setIssue(null);
-        return;
-      }
-
-      const nextIssue = await loadProjectBackupBannerIssue(activeProject);
-      if (!cancelled) setIssue(nextIssue);
-    }
-
-    void refreshBackupBanner();
-
-    function handleBackupsChanged(event: Event) {
-      const detail = event instanceof CustomEvent ? event.detail as { projectId?: string } | undefined : undefined;
-      if (detail?.projectId && activeProject && detail.projectId !== activeProject.id) return;
-      void refreshBackupBanner();
-    }
-
-    window.addEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
-    };
-  }, [activeProject, canCurrentUser]);
-
-  if (!activeProject || !issue) return null;
-
-  const toneClass = issue.kind === "failed" ? "embedding-build-banner--error" : "embedding-build-banner--warning";
-  const bannerCopy =
-    issue.kind === "failed"
-      ? {
-          title: t("app.backupBanner.failedTitle"),
-          detail: t("app.backupBanner.failedDetail"),
-          actionLabel: t("app.backupBanner.failedAction"),
-        }
-      : issue.kind === "interrupted"
-        ? {
-            title: t("app.backupBanner.interruptedTitle"),
-            detail: t("app.backupBanner.interruptedDetail"),
-            actionLabel: t("app.backupBanner.interruptedAction"),
-          }
-        : {
-            title: t("app.backupBanner.missingTitle"),
-            detail: t("app.backupBanner.missingDetail"),
-            actionLabel: t("app.backupBanner.missingAction"),
-          };
-
-  function openBackupSettings() {
-    sessionStorage.setItem("kanqual:open-project-settings-modal", "backups");
-    window.dispatchEvent(new CustomEvent(OPEN_PROJECT_SETTINGS_MODAL_EVENT));
-    setView("project-settings");
-  }
-
-  return (
-    <div className={`embedding-build-banner ${toneClass}`}>
-      <div className="embedding-build-banner-copy">
-        <strong>{bannerCopy.title}</strong>
-        <span>{issue.message}</span>
-        <span>{bannerCopy.detail}</span>
-      </div>
-      <div className="embedding-build-banner-actions">
-        <button type="button" className="btn btn--primary" onClick={openBackupSettings}>
-          {bannerCopy.actionLabel}
         </button>
       </div>
     </div>
@@ -462,99 +418,6 @@ export function ForcePasswordChangeView() {
   );
 }
 
-export function ProjectEmbeddingBuildBanner() {
-  const { t } = useI18n();
-  const {
-    projectEmbeddingBuildStatus,
-    projectEmbeddingBuildBannerOpen,
-    cancelProjectEmbeddingBuild,
-    dismissProjectEmbeddingBanner,
-    projects,
-    activeProject,
-  } = useStore();
-  const [nowMs, setNowMs] = useState(Date.now());
-
-  const phase = projectEmbeddingBuildStatus?.phase ?? "idle";
-  const isActive = phase === "running" || phase === "cancelling";
-  useEffect(() => {
-    if (!isActive) return;
-    const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(intervalId);
-  }, [isActive, open]);
-
-  if (!projectEmbeddingBuildBannerOpen || !projectEmbeddingBuildStatus) return null;
-  const progressPercent = Math.max(0, Math.min(100, projectEmbeddingBuildStatus.progressPercent ?? 0));
-  const progressFillPercent = isActive ? Math.max(8, progressPercent) : progressPercent;
-  const showIndeterminateProgress = isActive && progressPercent <= 0;
-  const etaSeconds =
-    isActive
-      && projectEmbeddingBuildStatus.startedAtMs
-      && projectEmbeddingBuildStatus.completedItems > 0
-      && projectEmbeddingBuildStatus.totalItems > projectEmbeddingBuildStatus.completedItems
-      ? Math.max(
-          1,
-          Math.round(
-            ((Date.now() - projectEmbeddingBuildStatus.startedAtMs) / 1000)
-            / projectEmbeddingBuildStatus.completedItems
-            * (projectEmbeddingBuildStatus.totalItems - projectEmbeddingBuildStatus.completedItems),
-          ),
-        )
-      : null;
-  const bannerProjectName =
-    (projectEmbeddingBuildStatus.projectId
-      ? projects.find((project) => project.id === projectEmbeddingBuildStatus.projectId)?.name
-      : null)
-    ?? (activeProject?.id === projectEmbeddingBuildStatus.projectId ? activeProject.name : null);
-  const elapsedRuntime = isActive && projectEmbeddingBuildStatus.startedAtMs
-    ? formatElapsedRuntime(nowMs - projectEmbeddingBuildStatus.startedAtMs)
-    : null;
-
-  return (
-    <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
-      <div className="embedding-build-banner-copy">
-        <strong>
-          {phase === "running" && t("app.embeddingBuild.runningTitle")}
-          {phase === "cancelling" && t("app.embeddingBuild.cancellingTitle")}
-          {phase === "completed" && t("app.embeddingBuild.completedTitle")}
-          {phase === "cancelled" && t("app.embeddingBuild.cancelledTitle")}
-          {phase === "error" && t("app.embeddingBuild.errorTitle")}
-        </strong>
-        <span>{projectEmbeddingBuildStatus.message ?? t("app.embeddingBuild.itemsProcessed", { completed: projectEmbeddingBuildStatus.completedItems, total: projectEmbeddingBuildStatus.totalItems })}</span>
-        {isActive && (
-          <div className="embedding-build-banner-meta">
-            {bannerProjectName && <span>{t("app.embeddingBuild.project", { name: bannerProjectName })}</span>}
-            <span>{t("app.embeddingBuild.progress", { value: formatPercent(projectEmbeddingBuildStatus.progressPercent) })}</span>
-            {projectEmbeddingBuildStatus.currentSourceIndex && projectEmbeddingBuildStatus.totalSources ? (
-              <span>{t("app.embeddingBuild.sourceProgress", { current: projectEmbeddingBuildStatus.currentSourceIndex, total: projectEmbeddingBuildStatus.totalSources })}</span>
-            ) : null}
-            {elapsedRuntime && <span>{t("app.embeddingBuild.runtime", { value: elapsedRuntime })}</span>}
-            <span>{t("app.embeddingBuild.eta", { value: etaSeconds != null ? formatDurationEstimate(etaSeconds) : t("app.embeddingBuild.estimating") })}</span>
-            {projectEmbeddingBuildStatus.currentLabel && <span title={projectEmbeddingBuildStatus.currentLabel}>{t("app.embeddingBuild.current", { label: projectEmbeddingBuildStatus.currentLabel })}</span>}
-          </div>
-        )}
-        {isActive && (
-          <div className="embedding-build-banner-progress">
-            <div className={`model-download-progress-track${showIndeterminateProgress ? " model-download-progress-track--indeterminate" : ""}`} aria-hidden="true">
-              <div className="model-download-progress-fill model-download-progress-fill--active" style={{ width: showIndeterminateProgress ? "34%" : `${progressFillPercent}%` }} />
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="embedding-build-banner-actions">
-        {isActive ? (
-          <button type="button" className="btn" onClick={() => void cancelProjectEmbeddingBuild()}>
-            {phase === "cancelling" ? t("app.embeddingBuild.cancellingAction") : t("app.embeddingBuild.cancelAction")}
-          </button>
-        ) : (
-          <button type="button" className="btn" onClick={dismissProjectEmbeddingBanner}>
-            {t("common.dismiss")}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function PostgresProjectEmbeddingBuildBanner({
   activeProject,
 }: {
@@ -572,12 +435,18 @@ export function PostgresProjectEmbeddingBuildBanner({
     const previousPhase = previousPhaseRef.current;
     const nextIsActive = nextStatus.phase === "running" || nextStatus.phase === "cancelling";
     const previousWasActive = previousPhase === "running" || previousPhase === "cancelling";
+    const nextIsTerminal = isTerminalProjectEmbeddingBuildPhase(nextStatus.phase);
+    const statusKey = getProjectEmbeddingBuildStatusKey(nextStatus);
 
     setStatus(nextStatus);
     previousPhaseRef.current = nextStatus.phase;
 
-    if (nextIsActive || previousWasActive || nextStatus.phase === "error" || nextStatus.phase === "completed" || nextStatus.phase === "cancelled") {
-      setOpen(nextStatus.phase !== "idle");
+    if (nextIsActive) {
+      dismissedProjectEmbeddingBuildStatusKeys.clear();
+    }
+
+    if (nextIsActive || previousWasActive || nextIsTerminal) {
+      setOpen(nextStatus.phase !== "idle" && (!nextIsTerminal || !dismissedProjectEmbeddingBuildStatusKeys.has(statusKey)));
     }
   }
 
@@ -709,10 +578,97 @@ export function PostgresProjectEmbeddingBuildBanner({
             {phase === "cancelling" ? t("app.embeddingBuild.cancellingAction") : t("app.embeddingBuild.cancelAction")}
           </button>
         ) : (
-          <button type="button" className="btn" onClick={() => setOpen(false)}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              if (status && isTerminalProjectEmbeddingBuildPhase(status.phase)) {
+                dismissedProjectEmbeddingBuildStatusKeys.add(getProjectEmbeddingBuildStatusKey(status));
+              }
+              setOpen(false);
+            }}
+          >
             {t("common.dismiss")}
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+export function PostgresProjectSnapshotWarningBanner({
+  activeProject,
+}: {
+  activeProject: PostgresProject | null;
+}) {
+  const [issue, setIssue] = useState<ProjectBackupBannerIssue | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshSnapshotBanner() {
+      if (!activeProject) {
+        if (!cancelled) setIssue(null);
+        return;
+      }
+
+      const storedIssue = readProjectBackupBannerIssue(activeProject.id);
+      if (storedIssue && (storedIssue.kind === "failed" || storedIssue.kind === "interrupted")) {
+        if (!cancelled) setIssue(storedIssue);
+        return;
+      }
+
+      if (readPendingProjectBackupAttempt(activeProject.id)) {
+        if (!cancelled) setIssue(null);
+        return;
+      }
+
+      if (!cancelled) setIssue(null);
+    }
+
+    void refreshSnapshotBanner();
+
+    function handleBackupsChanged(event: Event) {
+      const detail = event instanceof CustomEvent ? event.detail as { projectId?: string } | undefined : undefined;
+      if (detail?.projectId && activeProject && detail.projectId !== activeProject.id) return;
+      void refreshSnapshotBanner();
+    }
+
+    window.addEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PROJECT_BACKUPS_CHANGED_EVENT, handleBackupsChanged);
+    };
+  }, [activeProject?.id]);
+
+  if (!activeProject || !issue) return null;
+
+  const toneClass = issue.kind === "failed" ? "embedding-build-banner--error" : "embedding-build-banner--warning";
+  const title =
+    issue.kind === "failed"
+      ? "Project snapshot failed"
+      : "Project snapshot interrupted";
+  const detail =
+    issue.kind === "failed"
+      ? "Review project snapshots and create a fresh snapshot when possible."
+      : "Review project snapshots and create a fresh snapshot if needed.";
+
+  function openSnapshotSettings() {
+    sessionStorage.setItem("kanqual:open-project-settings-modal", "backups");
+    window.dispatchEvent(new CustomEvent(OPEN_PROJECT_SETTINGS_MODAL_EVENT));
+  }
+
+  return (
+    <div className={`embedding-build-banner ${toneClass}`}>
+      <div className="embedding-build-banner-copy">
+        <strong>{title}</strong>
+        <span>{issue.message}</span>
+        <span>{detail}</span>
+      </div>
+      <div className="embedding-build-banner-actions">
+        <button type="button" className="btn btn--primary" onClick={openSnapshotSettings}>
+          Snapshots
+        </button>
       </div>
     </div>
   );
@@ -991,17 +947,32 @@ export function PostgresEmbeddingModelDownloadBanner() {
   );
 }
 
-export function DocumentProcessingBanner() {
+export function PostgresDocumentProcessingBanner() {
   const { t } = useI18n();
-  const { documentProcessingStatus, documentProcessingBannerOpen, dismissDocumentProcessingBanner } = useStore();
+  const [status, setStatus] = useState<PostgresDocumentProcessingBannerStatus | null>(latestDocumentProcessingStatus);
+  const [open, setOpen] = useState(Boolean(latestDocumentProcessingStatus && latestDocumentProcessingStatus.phase !== "idle"));
 
-  if (!documentProcessingBannerOpen || !documentProcessingStatus) return null;
-  const phase = documentProcessingStatus.phase;
+  useEffect(() => {
+    function handleChanged(event: Event) {
+      const nextStatus = (event as CustomEvent<PostgresDocumentProcessingBannerStatus>).detail;
+      latestDocumentProcessingStatus = nextStatus;
+      setStatus(nextStatus);
+      setOpen(nextStatus.phase !== "idle");
+    }
+
+    window.addEventListener(POSTGRES_DOCUMENT_PROCESSING_CHANGED_EVENT, handleChanged);
+    return () => {
+      window.removeEventListener(POSTGRES_DOCUMENT_PROCESSING_CHANGED_EVENT, handleChanged);
+    };
+  }, []);
+
+  if (!open || !status) return null;
+  const phase = status.phase;
   if (phase === "idle") return null;
   const isActive = phase === "running";
-  const failures = documentProcessingStatus.failures ?? [];
-  const progressPercent = documentProcessingStatus.totalDocuments > 0
-    ? (documentProcessingStatus.completedDocuments / documentProcessingStatus.totalDocuments) * 100
+  const failures = status.failures ?? [];
+  const progressPercent = status.totalDocuments > 0
+    ? (status.completedDocuments / status.totalDocuments) * 100
     : 0;
 
   return (
@@ -1012,9 +983,9 @@ export function DocumentProcessingBanner() {
           {phase === "completed" && t("app.documentProcessing.completedTitle")}
           {phase === "error" && t("app.documentProcessing.errorTitle")}
         </strong>
-        <span>{documentProcessingStatus.message}</span>
-        {isActive && documentProcessingStatus.currentChunkIndex && documentProcessingStatus.currentChunkTotal && (
-          <span>{t("app.documentProcessing.chunkProgress", { index: documentProcessingStatus.currentChunkIndex, total: documentProcessingStatus.currentChunkTotal })}</span>
+        <span>{status.message}</span>
+        {isActive && status.currentChunkIndex && status.currentChunkTotal && (
+          <span>{t("app.documentProcessing.chunkProgress", { index: status.currentChunkIndex, total: status.currentChunkTotal })}</span>
         )}
         {failures.length > 0 && (
           <div className="embedding-build-banner-meta embedding-build-banner-meta--stacked">
@@ -1035,89 +1006,7 @@ export function DocumentProcessingBanner() {
       </div>
       <div className="embedding-build-banner-actions">
         {!isActive && (
-          <button type="button" className="btn" onClick={dismissDocumentProcessingBanner}>
-            {t("common.dismiss")}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function EmbeddingModelDownloadBanner() {
-  const { t, formatNumber } = useI18n();
-  const {
-    embeddingModelDownloadStatus,
-    embeddingModelDownloadPreflight,
-    embeddingModelDownloadBannerOpen,
-    cancelEmbeddingModelDownload,
-    dismissEmbeddingModelDownloadBanner,
-  } = useStore();
-
-  if (!embeddingModelDownloadBannerOpen || !embeddingModelDownloadStatus) return null;
-  const phase = embeddingModelDownloadStatus.phase;
-  if (phase === "idle") return null;
-  const isActive = phase === "downloading" || phase === "cancelling";
-  const totalBytes = embeddingModelDownloadPreflight?.totalBytes ?? embeddingModelDownloadStatus.totalBytes ?? 0;
-  const liveDownloadedBytes = isActive
-    ? embeddingModelDownloadStatus.downloadedBytes
-    : (embeddingModelDownloadPreflight?.existingBytes ?? embeddingModelDownloadStatus.downloadedBytes);
-  const liveRemainingBytes = Math.max(0, totalBytes - liveDownloadedBytes);
-  const liveRemainingFiles =
-    isActive && embeddingModelDownloadStatus.totalFiles > 0
-      ? Math.max(0, embeddingModelDownloadStatus.totalFiles - embeddingModelDownloadStatus.downloadedFiles)
-      : embeddingModelDownloadPreflight?.remainingFiles;
-
-  return (
-    <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
-      <div className="embedding-build-banner-copy">
-        <strong>
-          {phase === "downloading" && t("app.embeddingDownload.downloadingTitle")}
-          {phase === "cancelling" && t("app.embeddingDownload.cancellingTitle")}
-          {phase === "completed" && t("app.embeddingDownload.completedTitle")}
-          {phase === "cancelled" && t("app.embeddingDownload.cancelledTitle")}
-          {phase === "error" && t("app.embeddingDownload.errorTitle")}
-        </strong>
-        <span>
-          {embeddingModelDownloadStatus.message ??
-            (embeddingModelDownloadStatus.progressPercent != null
-              ? t("app.embeddingDownload.downloadedPercent", { percent: Math.round(embeddingModelDownloadStatus.progressPercent) })
-              : t("app.embeddingDownload.preparing"))}
-        </span>
-        {embeddingModelDownloadStatus.progressPercent != null && (
-          <span>{t("app.embeddingDownload.downloadProgress", { percent: Math.round(embeddingModelDownloadStatus.progressPercent) })}</span>
-        )}
-        {embeddingModelDownloadPreflight && (
-          <>
-            <span>{t("app.embeddingDownload.totalSize", { size: formatGigabytes(totalBytes) })}</span>
-            <span>{t("app.embeddingDownload.alreadyOnDevice", { size: formatGigabytes(liveDownloadedBytes) })}</span>
-            <span>{t("app.embeddingDownload.remainingToDownload", { size: formatGigabytes(liveRemainingBytes) })}</span>
-            {(embeddingModelDownloadPreflight.manifestAvailable || isActive) && liveRemainingFiles != null && (
-              <span>{t("app.embeddingDownload.remainingFileCount", { count: formatNumber(liveRemainingFiles) })}</span>
-            )}
-          </>
-        )}
-        {embeddingModelDownloadStatus.currentFile && (
-          <span>{t("app.embeddingDownload.currentFile", { name: embeddingModelDownloadStatus.currentFile })}</span>
-        )}
-        {isActive && (
-          <div className="embedding-build-banner-progress">
-            <div className="model-download-progress-track" aria-hidden="true">
-              <div
-                className="model-download-progress-fill model-download-progress-fill--active"
-                style={{ width: `${Math.max(6, Math.min(100, embeddingModelDownloadStatus.progressPercent ?? 0))}%` }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="embedding-build-banner-actions">
-        {isActive ? (
-          <button type="button" className="btn" onClick={() => void cancelEmbeddingModelDownload()}>
-            {phase === "cancelling" ? t("app.embeddingDownload.cancellingAction") : t("app.embeddingDownload.cancelAction")}
-          </button>
-        ) : (
-          <button type="button" className="btn" onClick={dismissEmbeddingModelDownloadBanner}>
+          <button type="button" className="btn" onClick={() => setOpen(false)}>
             {t("common.dismiss")}
           </button>
         )}
