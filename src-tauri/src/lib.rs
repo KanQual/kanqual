@@ -1698,9 +1698,19 @@ fn default_postgres_experiment_theme_state() -> PostgresExperimentThemeState {
         dark_overrides: HashMap::new(),
         border_radius: 6,
         border_width: 1,
+        canvas_grid_enabled: true,
+        canvas_grid_density: 22,
         presets: Vec::new(),
         active_preset_id: None,
     }
+}
+
+fn default_postgres_experiment_canvas_grid_enabled() -> bool {
+    true
+}
+
+fn default_postgres_experiment_canvas_grid_density() -> i32 {
+    22
 }
 
 fn default_postgres_experiment_llm_settings() -> PostgresExperimentLlmSettings {
@@ -1957,6 +1967,12 @@ fn normalize_postgres_experiment_theme_state(
                     .collect(),
                 border_radius: clamp_postgres_experiment_i32(preset.border_radius, 0, 20),
                 border_width: clamp_postgres_experiment_i32(preset.border_width, 1, 4),
+                canvas_grid_enabled: preset.canvas_grid_enabled,
+                canvas_grid_density: clamp_postgres_experiment_i32(
+                    preset.canvas_grid_density,
+                    8,
+                    48,
+                ),
             })
         })
         .take(100)
@@ -1996,6 +2012,8 @@ fn normalize_postgres_experiment_theme_state(
             .collect(),
         border_radius: clamp_postgres_experiment_i32(theme_state.border_radius, 0, 20),
         border_width: clamp_postgres_experiment_i32(theme_state.border_width, 1, 4),
+        canvas_grid_enabled: theme_state.canvas_grid_enabled,
+        canvas_grid_density: clamp_postgres_experiment_i32(theme_state.canvas_grid_density, 8, 48),
         presets: std::mem::take(&mut presets),
         active_preset_id,
     }
@@ -5964,6 +5982,10 @@ struct PostgresExperimentThemePreset {
     colors: HashMap<String, String>,
     border_radius: i32,
     border_width: i32,
+    #[serde(default = "default_postgres_experiment_canvas_grid_enabled")]
+    canvas_grid_enabled: bool,
+    #[serde(default = "default_postgres_experiment_canvas_grid_density")]
+    canvas_grid_density: i32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -5973,6 +5995,10 @@ struct PostgresExperimentThemeState {
     dark_overrides: HashMap<String, String>,
     border_radius: i32,
     border_width: i32,
+    #[serde(default = "default_postgres_experiment_canvas_grid_enabled")]
+    canvas_grid_enabled: bool,
+    #[serde(default = "default_postgres_experiment_canvas_grid_density")]
+    canvas_grid_density: i32,
     presets: Vec<PostgresExperimentThemePreset>,
     active_preset_id: Option<String>,
 }

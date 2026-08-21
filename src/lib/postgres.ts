@@ -315,6 +315,8 @@ export type PostgresUserPreferences = {
     darkOverrides: Record<string, string>;
     borderRadius: number;
     borderWidth: number;
+    canvasGridEnabled: boolean;
+    canvasGridDensity: number;
     presets: Array<{
       id: string;
       name: string;
@@ -322,6 +324,8 @@ export type PostgresUserPreferences = {
       colors: Record<string, string>;
       borderRadius: number;
       borderWidth: number;
+      canvasGridEnabled: boolean;
+      canvasGridDensity: number;
     }>;
     activePresetId: string | null;
   };

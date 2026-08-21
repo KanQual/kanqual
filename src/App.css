@@ -25,6 +25,9 @@
   --color-sidebar-active: #1A252F;
   --color-heatmap-low:   #F1DDD7;
   --color-heatmap-high:  #B04A33;
+  --canvas-background:   #F8FBFF;
+  --canvas-grid-color:   #DCE6EF;
+  --canvas-grid-density: 22px;
   --sidebar-width: 242px;
   --sidebar-collapsed-width: 64px;
   --radius: 6px;
@@ -125,6 +128,8 @@
   --color-sidebar-active: #34495E;
   --color-heatmap-low:   #5A403A;
   --color-heatmap-high:  #E29A86;
+  --canvas-background:   #1F2D3A;
+  --canvas-grid-color:   #334756;
 }
 
 html, body, #root {
@@ -2194,12 +2199,16 @@ body {
   overflow: hidden;
   border-radius: 20px;
   border: 1px solid rgba(53, 80, 112, 0.14);
-  background-color: #f8fbff;
+  background-color: var(--canvas-background, #f8fbff);
   background-image:
-    linear-gradient(rgba(53, 80, 112, 0.10) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(53, 80, 112, 0.10) 1px, transparent 1px);
-  background-size: 22px 22px, 22px 22px;
+    linear-gradient(var(--canvas-grid-color, rgba(53, 80, 112, 0.10)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--canvas-grid-color, rgba(53, 80, 112, 0.10)) 1px, transparent 1px);
+  background-size: var(--canvas-grid-density, 22px) var(--canvas-grid-density, 22px), var(--canvas-grid-density, 22px) var(--canvas-grid-density, 22px);
   background-position: 0 0, 0 0;
+}
+
+:root[data-canvas-grid="hidden"] .postgres-explore-canvas-stage {
+  background-image: none;
 }
 
 .postgres-explore-canvas-layout--embedded .postgres-explore-canvas-stage {

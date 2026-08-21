@@ -6,12 +6,17 @@ import {
   type ColorVar,
   type ThemePreset,
   COLOR_VARS,
+  DEFAULT_CANVAS_GRID_DENSITY,
+  DEFAULT_CANVAS_GRID_ENABLED,
+  applyCanvasSettings,
   getAppDefaults,
   getStoredTheme,
   getStoredOverrides,
   saveOverrides,
   getStoredRadius,
   getStoredBorderWidth,
+  getStoredCanvasGridDensity,
+  getStoredCanvasGridEnabled,
   getPresets,
   savePreset,
   deletePreset,
@@ -43,6 +48,8 @@ function currentSnapshot() {
     colors: { ...getAppDefaults(base), ...getStoredOverrides(base) },
     radius: getStoredRadius(),
     borderWidth: getStoredBorderWidth(),
+    canvasGridEnabled: getStoredCanvasGridEnabled(),
+    canvasGridDensity: getStoredCanvasGridDensity(),
   };
 }
 
@@ -51,6 +58,8 @@ function applyLive(
   colors: Record<string, string>,
   radius: number,
   borderWidth: number,
+  canvasGridEnabled: boolean,
+  canvasGridDensity: number,
 ) {
   if (base === "dark") {
     document.documentElement.setAttribute("data-theme", "dark");
@@ -65,6 +74,7 @@ function applyLive(
   }
   document.documentElement.style.setProperty("--radius", `${radius}px`);
   document.documentElement.style.setProperty("--border-width", `${borderWidth}px`);
+  applyCanvasSettings(canvasGridEnabled, canvasGridDensity);
 }
 
 function persistPreset(preset: ThemePreset) {
@@ -77,8 +87,17 @@ function persistPreset(preset: ThemePreset) {
   saveOverrides(preset.base, overrides);
   localStorage.setItem("mc_radius", String(preset.borderRadius));
   localStorage.setItem("mc_border_width", String(preset.borderWidth));
+  localStorage.setItem("mc_canvas_grid_enabled", String(preset.canvasGridEnabled));
+  localStorage.setItem("mc_canvas_grid_density", String(preset.canvasGridDensity));
   setActivePresetId(preset.id);
-  applyLive(preset.base, preset.colors, preset.borderRadius, preset.borderWidth);
+  applyLive(
+    preset.base,
+    preset.colors,
+    preset.borderRadius,
+    preset.borderWidth,
+    preset.canvasGridEnabled,
+    preset.canvasGridDensity,
+  );
 }
 
 function ColorRow({
@@ -210,10 +229,12 @@ function ThemeEditor({
   const [colors, setColors] = useState<Record<string, string>>(initial.colors);
   const [borderRadius, setBorderRadius] = useState(initial.borderRadius);
   const [borderWidth, setBorderWidth] = useState(initial.borderWidth);
+  const [canvasGridEnabled, setCanvasGridEnabled] = useState(initial.canvasGridEnabled ?? DEFAULT_CANVAS_GRID_ENABLED);
+  const [canvasGridDensity, setCanvasGridDensity] = useState(initial.canvasGridDensity ?? DEFAULT_CANVAS_GRID_DENSITY);
 
   useEffect(() => {
-    applyLive(base, colors, borderRadius, borderWidth);
-  }, [base, colors, borderRadius, borderWidth]);
+    applyLive(base, colors, borderRadius, borderWidth, canvasGridEnabled, canvasGridDensity);
+  }, [base, colors, borderRadius, borderWidth, canvasGridDensity, canvasGridEnabled]);
 
   const defaults = getAppDefaults(base);
   const groups = [...new Set(COLOR_VARS.map((v) => v.group))];
@@ -227,6 +248,8 @@ function ThemeEditor({
     setColors({ ...getAppDefaults(base) });
     setBorderRadius(6);
     setBorderWidth(1);
+    setCanvasGridEnabled(DEFAULT_CANVAS_GRID_ENABLED);
+    setCanvasGridDensity(DEFAULT_CANVAS_GRID_DENSITY);
   }
 
   const handleColorChange = useCallback((key: string, val: string) => {
@@ -248,6 +271,8 @@ function ThemeEditor({
       colors,
       borderRadius,
       borderWidth,
+      canvasGridEnabled,
+      canvasGridDensity,
     });
   }
 
@@ -315,6 +340,57 @@ function ThemeEditor({
             unit="px"
             onChange={setBorderWidth}
           />
+        </div>
+
+        <div className="theme-editor-field">
+          <div className="form-label" style={{ marginBottom: 8 }}>
+            Canvas
+          </div>
+          <div
+            className="settings-row"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) auto",
+              gap: 16,
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div className="settings-row-label">Gridlines</div>
+              <div className="settings-row-desc">Show or hide gridlines behind graph canvases</div>
+            </div>
+            <div className="segmented-control" role="tablist" aria-label="Canvas gridlines">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={canvasGridEnabled}
+                className={`segmented-control-option${canvasGridEnabled ? " segmented-control-option--active" : ""}`}
+                onClick={() => setCanvasGridEnabled(true)}
+              >
+                Show
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!canvasGridEnabled}
+                className={`segmented-control-option${!canvasGridEnabled ? " segmented-control-option--active" : ""}`}
+                onClick={() => setCanvasGridEnabled(false)}
+              >
+                Hide
+              </button>
+            </div>
+          </div>
+          <fieldset disabled={!canvasGridEnabled} style={{ border: 0, margin: 0, padding: 0 }}>
+            <SliderRow
+              label="Gridline Density"
+              desc="Distance between canvas gridlines"
+              value={canvasGridDensity}
+              min={8}
+              max={48}
+              unit="px"
+              onChange={setCanvasGridDensity}
+            />
+          </fieldset>
         </div>
 
         <div className="theme-editor-field">
@@ -479,6 +555,8 @@ export function ThemeManagerModal({
       colors: { ...snap.colors },
       borderRadius: snap.radius,
       borderWidth: snap.borderWidth,
+      canvasGridEnabled: snap.canvasGridEnabled,
+      canvasGridDensity: snap.canvasGridDensity,
     });
   }
 
@@ -491,6 +569,8 @@ export function ThemeManagerModal({
       colors: { ...getAppDefaults(base) },
       borderRadius: 6,
       borderWidth: 1,
+      canvasGridEnabled: DEFAULT_CANVAS_GRID_ENABLED,
+      canvasGridDensity: DEFAULT_CANVAS_GRID_DENSITY,
     });
   }
 
@@ -511,7 +591,14 @@ export function ThemeManagerModal({
   function handleCancel() {
     const snapshot = snapshotRef.current;
     if (snapshot) {
-      applyLive(snapshot.base, snapshot.colors, snapshot.radius, snapshot.borderWidth);
+      applyLive(
+        snapshot.base,
+        snapshot.colors,
+        snapshot.radius,
+        snapshot.borderWidth,
+        snapshot.canvasGridEnabled,
+        snapshot.canvasGridDensity,
+      );
       snapshotRef.current = null;
     }
     setEditing(null);
