@@ -840,6 +840,7 @@ export function PostgresAIAssistAttributesView({
           description: object.description,
           shapeOverride: object.shapeOverride,
           colorOverride: object.colorOverride,
+          outlineColorOverride: object.outlineColorOverride,
           fillOverride: object.fillOverride,
           imageStoragePath: object.imageStoragePath,
           eventStartAt: object.eventStartAt,

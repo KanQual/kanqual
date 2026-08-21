@@ -510,6 +510,17 @@ function yesNo(value: boolean | null | undefined): string {
   return value ? "Yes" : "No";
 }
 
+function postgresUserLoginAccessLabel(user: PostgresAppUser): string {
+  if (!user.active) return "Disabled";
+  if (user.loginPermanentlyBlocked) return "Permanently blocked";
+  if (user.loginBlockedUntilMs && user.loginBlockedUntilMs > Date.now()) return "Temporarily blocked";
+  return "Allowed";
+}
+
+function postgresUserIsLoginBlocked(user: PostgresAppUser): boolean {
+  return user.loginPermanentlyBlocked || Boolean(user.loginBlockedUntilMs && user.loginBlockedUntilMs > Date.now());
+}
+
 export function PostgresAdminSettingsView({
   authSession,
   onOpenProject,
@@ -560,6 +571,7 @@ export function PostgresAdminSettingsView({
   const [networkSwitching, setNetworkSwitching] = useState(false);
   const [confirmEnableNetworkMode, setConfirmEnableNetworkMode] = useState(false);
   const [pendingNetworkMode, setPendingNetworkMode] = useState<"network" | "internet">("network");
+  const [internetModeConfirmation, setInternetModeConfirmation] = useState("");
   const [lanPing, setLanPing] = useState<PingResult>({ status: "idle" });
   const [internetPing, setInternetPing] = useState<PingResult>({ status: "idle" });
   const [externalIp, setExternalIp] = useState<ExternalIpLookup>({ status: "idle" });
@@ -980,6 +992,24 @@ export function PostgresAdminSettingsView({
     } catch (exportError) {
       setAuditError(`Could not export administrator log: ${describeUnknownError(exportError)}`);
     }
+  }
+
+  function handleInspectUserLoginAttempts(user: PostgresAppUser) {
+    setManageUserMenu(null);
+    setAdminAuditTab("auth");
+    setAdminUsersLogFilters({
+      time: "",
+      event: "login",
+      outcome: "",
+      user: user.username,
+      ip: "",
+      reason: "",
+      message: "",
+    });
+    setAdminUsersLogSortColumn("time");
+    setAdminUsersLogSortDirection("desc");
+    setActiveModal("administratorLog");
+    void refreshAdminAuditLogs();
   }
 
   function notifyEmbeddingModelDownloadChanged(detail?: {
@@ -1982,6 +2012,7 @@ export function PostgresAdminSettingsView({
     if (networkSwitching || status?.networkMode === mode) return;
     if (mode === "internet" || (mode === "network" && status?.networkMode === "device")) {
       setPendingNetworkMode(mode);
+      setInternetModeConfirmation("");
       setConfirmEnableNetworkMode(true);
       return;
     }
@@ -1990,6 +2021,7 @@ export function PostgresAdminSettingsView({
 
   async function handleConfirmPostgresNetworkMode() {
     setConfirmEnableNetworkMode(false);
+    setInternetModeConfirmation("");
     await applyPostgresNetworkMode(pendingNetworkMode);
   }
 
@@ -2361,6 +2393,7 @@ export function PostgresAdminSettingsView({
       return;
     }
 
+    const wasLoginBlocked = postgresUserIsLoginBlocked(resetPasswordUser);
     setResettingPassword(true);
     setError("");
     setNotice("");
@@ -2383,7 +2416,9 @@ export function PostgresAdminSettingsView({
       setResetPasswordConfirmVisible(false);
       setRequiredResetUserId("");
       setNotice(
-        finalUser.active && requiredResetUserId === resetPasswordUser.id
+        wasLoginBlocked
+          ? `Reset password and removed login block for ${finalUser.username}.`
+          : finalUser.active && requiredResetUserId === resetPasswordUser.id
           ? `Enabled ${finalUser.username}. They will be asked to change their password on first login.`
           : `Reset password for ${finalUser.username}.`,
       );
@@ -2684,7 +2719,7 @@ export function PostgresAdminSettingsView({
                     <div className="settings-warning settings-warning--danger">
                       <strong>Internet mode is live.</strong>
                       <br />
-                      PostgreSQL is configured to listen on all addresses and accept app-role connections from any address. Use only with trusted routing, firewall, and credential controls.
+                      KanQual is accepting database connections from the public Internet. KanQual does not manage TLS certificates for this mode, so traffic may be readable unless you protect access with a VPN, encrypted tunnel, firewall, or equivalent network security.
                     </div>
                   ) : status?.networkMode === "network" ? (
                     <div className="settings-warning settings-warning--danger">
@@ -2743,8 +2778,8 @@ export function PostgresAdminSettingsView({
                     errorText="Database unreachable"
                   />
                   {status?.networkMode === "internet" ? (
-                    <div className="settings-warning">
-                      The Internet address is the public IP reported for this connection. It may still need router port forwarding, firewall rules, a VPN, tunnel, or a hostname before collaborators outside the network can connect.
+                    <div className="settings-warning settings-warning--danger">
+                      This is the public IP address and port for your KanQual server. Other security settings like routing, firewall, VPN, or encrypted tunnels may be necessary for others to reach it safely.
                     </div>
                   ) : null}
                 </SettingsModalSection>
@@ -5122,6 +5157,7 @@ export function PostgresAdminSettingsView({
                           <tr>
                             <th className="users-th">User</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Status</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Login</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Created</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Last Active</th>
                             <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Actions</th>
@@ -5165,6 +5201,14 @@ export function PostgresAdminSettingsView({
                                     <div className="users-td--muted">Password reset required</div>
                                   ) : null}
                                 </td>
+                                <td className="users-td" style={{ whiteSpace: "nowrap" }}>
+                                  <div>{postgresUserLoginAccessLabel(user)}</div>
+                                  {user.loginBlockedUntilMs && user.loginBlockedUntilMs > Date.now() ? (
+                                    <div className="users-td--muted">Until {formatPostgresTimestampMs(user.loginBlockedUntilMs)}</div>
+                                  ) : user.loginFailedAttemptsLastHour > 0 ? (
+                                    <div className="users-td--muted">{user.loginFailedAttemptsLastHour} failed in last hour</div>
+                                  ) : null}
+                                </td>
                                 <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>{formatPostgresDateTime(user.createdAt)}</td>
                                 <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>{user.lastLoginAt ? formatPostgresDateTime(user.lastLoginAt) : "-"}</td>
                                 <td className="users-td snapshot-table-actions">
@@ -5194,7 +5238,7 @@ export function PostgresAdminSettingsView({
                             );
                           }) : (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={5}>No PostgreSQL app users have been created yet.</td>
+                              <td className="users-td users-td--muted" colSpan={6}>No PostgreSQL app users have been created yet.</td>
                             </tr>
                           )}
                         </tbody>
@@ -5244,7 +5288,14 @@ export function PostgresAdminSettingsView({
               setError("");
             }}
           >
-            Reset Password
+            {postgresUserIsLoginBlocked(manageUserMenuUser) ? "Reset + Unblock" : "Reset Password"}
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => handleInspectUserLoginAttempts(manageUserMenuUser)}
+          >
+            Inspect Login Attempts
           </button>
           <button
             type="button"
@@ -5742,23 +5793,46 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {confirmEnableNetworkMode ? (
-        <div className="modal-overlay" onClick={() => !networkSwitching && setConfirmEnableNetworkMode(false)}>
+        <div className="modal-overlay" onClick={() => {
+          if (!networkSwitching) {
+            setConfirmEnableNetworkMode(false);
+            setInternetModeConfirmation("");
+          }
+        }}>
           <div className="modal modal--narrow" onClick={(event) => event.stopPropagation()}>
             <ModalCloseButton
-              onClick={() => setConfirmEnableNetworkMode(false)}
+              onClick={() => {
+                setConfirmEnableNetworkMode(false);
+                setInternetModeConfirmation("");
+              }}
               disabled={networkSwitching}
             />
-            <h2>{t("appSettings.network.enableTitle")}</h2>
+            <h2>{pendingNetworkMode === "internet" ? "Enable Internet Mode" : t("appSettings.network.enableTitle")}</h2>
             <p className="settings-warning settings-warning--danger">
               {pendingNetworkMode === "internet"
-                ? "Devices outside your local network may be able to connect to this PostgreSQL database if routing and firewall rules permit it."
+                ? "Internet mode can expose this KanQual server to the public Internet. KanQual does not manage TLS certificates for this mode, so database traffic may be readable unless you protect access with a VPN, encrypted tunnel, firewall, or equivalent network security. Use this only if you understand and accept that risk."
                 : "Other devices on your trusted local network may be able to connect to this PostgreSQL database."}
             </p>
+            {pendingNetworkMode === "internet" ? (
+              <label className="form-label">
+                Type ENABLE INTERNET to continue
+                <input
+                  className="form-input"
+                  value={internetModeConfirmation}
+                  onChange={(event) => setInternetModeConfirmation(event.target.value)}
+                  disabled={networkSwitching}
+                  autoFocus
+                />
+              </label>
+            ) : null}
             <div className="form-actions" style={{ justifyContent: "flex-end" }}>
               <button
                 type="button"
                 className="btn"
-                onClick={() => setConfirmEnableNetworkMode(false)}
+                onClick={() => {
+                  setConfirmEnableNetworkMode(false);
+                  setInternetModeConfirmation("");
+                }}
                 disabled={networkSwitching}
               >
                 {t("common.cancel")}
@@ -5767,7 +5841,7 @@ export function PostgresAdminSettingsView({
                 type="button"
                 className="btn btn--danger"
                 onClick={() => void handleConfirmPostgresNetworkMode()}
-                disabled={networkSwitching}
+                disabled={networkSwitching || (pendingNetworkMode === "internet" && internetModeConfirmation.trim() !== "ENABLE INTERNET")}
               >
                 {networkSwitching ? t("appSettings.network.enabling") : t("appSettings.network.enableAction")}
               </button>
@@ -5806,9 +5880,11 @@ export function PostgresAdminSettingsView({
             >
               ×
             </button>
-            <h2>Reset Password</h2>
+            <h2>{postgresUserIsLoginBlocked(resetPasswordUser) ? "Reset + Unblock" : "Reset Password"}</h2>
             <p className="settings-row-desc">
-              {requiredResetUserId === resetPasswordUser.id
+              {postgresUserIsLoginBlocked(resetPasswordUser)
+                ? `Set a new temporary password for ${resetPasswordUser.username}. The login block will be removed after the password is reset.`
+                : requiredResetUserId === resetPasswordUser.id
                 ? `Set a temporary password for ${resetPasswordUser.username} to finish enabling this account.`
                 : `Set a new temporary password for ${resetPasswordUser.username}.`}
             </p>

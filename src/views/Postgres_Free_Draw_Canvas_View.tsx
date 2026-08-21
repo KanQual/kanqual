@@ -43,7 +43,15 @@ type PostgresSourceObjectVisualKey =
   | "source_audio"
   | "source_video";
 type PostgresObjectFill = "filled" | "outline";
-type PostgresRelationshipLineShape = "solid" | "dashed" | "dotted";
+type PostgresRelationshipLineShape =
+  | "solid"
+  | "dashed"
+  | "long_dashed"
+  | "short_dashed"
+  | "dotted"
+  | "loose_dotted"
+  | "dash_dot"
+  | "dash_dot_dot";
 type PostgresRelationshipArrowhead = "one_sided" | "double_sided" | "none";
 type PostgresCanvasTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
 
@@ -104,6 +112,7 @@ type ObjectShapeSwatchProps = {
   shape: PostgresObjectTypeShape;
   fill: PostgresObjectFill;
   color: string;
+  outlineColor?: string;
   sourceVisualKey?: PostgresSourceObjectVisualKey | null;
   width: number;
   minHeight: number;
@@ -234,16 +243,19 @@ export function PostgresCanvasView({
   ) => {
     shape: PostgresObjectTypeShape;
     color: string;
+    outlineColor: string;
     fill: PostgresObjectFill;
     sourceVisualKey?: PostgresSourceObjectVisualKey | null;
     hasShapeOverride?: boolean;
     hasColorOverride?: boolean;
+    hasOutlineColorOverride?: boolean;
     hasFillOverride?: boolean;
   };
   getPostgresObjectSurfaceStyle: (
     color: string,
     fill: PostgresObjectFill,
     selected?: boolean,
+    outlineColor?: string,
   ) => {
     background: string;
     boxShadow: string;
@@ -2794,6 +2806,7 @@ export function PostgresCanvasView({
                                 shape={appearance.shape}
                                 fill={appearance.fill}
                                 color={appearance.color}
+                                outlineColor={appearance.outlineColor}
                                 sourceVisualKey={appearance.sourceVisualKey}
                                 width={22}
                                 minHeight={16}
@@ -2804,7 +2817,7 @@ export function PostgresCanvasView({
                           <div className="home-restricted-item">
                             <span className="home-restricted-label">Overrides</span>
                             <span className="home-restricted-value">
-                              {appearance.hasShapeOverride || appearance.hasColorOverride || appearance.hasFillOverride
+                              {appearance.hasShapeOverride || appearance.hasColorOverride || appearance.hasOutlineColorOverride || appearance.hasFillOverride
                                 ? [appearance.hasShapeOverride ? "Shape" : "", appearance.hasColorOverride ? "Color" : "", appearance.hasFillOverride ? "Fill" : ""].filter(Boolean).join(" + ")
                                 : "Inherited"}
                             </span>
@@ -3428,7 +3441,7 @@ export function PostgresCanvasView({
                             gap: 12,
                             padding: "12px 14px",
                             borderRadius: 14,
-                            border: `1px solid ${hexToRgba(appearance.color, 0.24)}`,
+                            border: `1px solid ${hexToRgba(appearance.outlineColor || appearance.color, 0.24)}`,
                             background: "rgba(255, 255, 255, 0.94)",
                           }}
                         >
@@ -3437,6 +3450,7 @@ export function PostgresCanvasView({
                               shape={appearance.shape}
                               fill={appearance.fill}
                               color={appearance.color}
+                              outlineColor={appearance.outlineColor}
                               sourceVisualKey={appearance.sourceVisualKey}
                               width={22}
                               minHeight={18}

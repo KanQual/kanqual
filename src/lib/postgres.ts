@@ -221,6 +221,9 @@ export type PostgresAppUser = {
   active: boolean;
   disabledAt: string | null;
   mustChangePassword: boolean;
+  loginBlockedUntilMs: number | null;
+  loginPermanentlyBlocked: boolean;
+  loginFailedAttemptsLastHour: number;
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;
@@ -452,7 +455,7 @@ export type PostgresCanvasStroke = {
   kind: "pen";
   points: PostgresCanvasPoint[];
   color: string;
-  lineStyle: "solid" | "dashed" | "dotted";
+  lineStyle: "solid" | "dashed" | "long_dashed" | "short_dashed" | "dotted" | "loose_dotted" | "dash_dot" | "dash_dot_dot";
   strokeWidth: number;
 };
 
@@ -465,7 +468,7 @@ export type PostgresCanvasRect = {
   height: number;
   color: string;
   fill: "filled" | "outline";
-  lineStyle: "solid" | "dashed" | "dotted";
+  lineStyle: "solid" | "dashed" | "long_dashed" | "short_dashed" | "dotted" | "loose_dotted" | "dash_dot" | "dash_dot_dot";
   strokeWidth: number;
 };
 
@@ -491,7 +494,7 @@ export type PostgresCanvasPlacedShape = {
   height: number;
   color: string;
   fill: "filled" | "outline";
-  lineStyle: "solid" | "dashed" | "dotted";
+  lineStyle: "solid" | "dashed" | "long_dashed" | "short_dashed" | "dotted" | "loose_dotted" | "dash_dot" | "dash_dot_dot";
   strokeWidth: number;
 };
 
@@ -796,6 +799,7 @@ export type PostgresObjectType = {
   description: string;
   shape: string;
   color: string;
+  outlineColor: string;
   fill: string;
   imageStoragePath: string;
   createdAt: string;
@@ -812,6 +816,7 @@ export type PostgresObject = {
   description: string;
   shapeOverride: string;
   colorOverride: string;
+  outlineColorOverride: string;
   fillOverride: string;
   imageStoragePath: string;
   eventStartAt: string | null;
@@ -2125,6 +2130,7 @@ export async function createPostgresObjectType(data: {
   description: string;
   shape: string;
   color: string;
+  outlineColor?: string | null;
   fill: string;
   imageStoragePath?: string | null;
 }): Promise<PostgresObjectType> {
@@ -2140,6 +2146,7 @@ export async function updatePostgresObjectType(data: {
   description: string;
   shape: string;
   color: string;
+  outlineColor?: string | null;
   fill: string;
   imageStoragePath?: string | null;
 }): Promise<PostgresObjectType> {
@@ -2155,6 +2162,7 @@ export async function savePostgresObjectType(data: {
   description: string;
   shape: string;
   color: string;
+  outlineColor?: string | null;
   fill: string;
   imageStoragePath?: string | null;
   attributes: Array<{
@@ -2337,6 +2345,7 @@ export async function createPostgresObject(data: {
   description: string;
   shapeOverride?: string | null;
   colorOverride?: string | null;
+  outlineColorOverride?: string | null;
   fillOverride?: string | null;
   imageStoragePath?: string | null;
   eventStartAt?: string | null;
@@ -2363,6 +2372,7 @@ export async function updatePostgresObject(data: {
   description: string;
   shapeOverride?: string | null;
   colorOverride?: string | null;
+  outlineColorOverride?: string | null;
   fillOverride?: string | null;
   imageStoragePath?: string | null;
   eventStartAt?: string | null;
@@ -2389,6 +2399,7 @@ export async function savePostgresObject(data: {
   description: string;
   shapeOverride?: string | null;
   colorOverride?: string | null;
+  outlineColorOverride?: string | null;
   fillOverride?: string | null;
   imageStoragePath?: string | null;
   eventStartAt?: string | null;

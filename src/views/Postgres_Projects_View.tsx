@@ -1,7 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
-  createPostgresProject,
   getPostgresInstallationSettings,
   getPostgresUserProjectState,
   listPostgresProjects,
@@ -12,7 +11,7 @@ import {
   type PostgresProjectChangeEvent,
   type PostgresRecentProject,
 } from "../lib/postgres";
-import { LogoutIcon, PlusIcon } from "../components/AppIcons";
+import { LogoutIcon } from "../components/AppIcons";
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -51,14 +50,9 @@ export function PostgresProjectsView({
   const [projects, setProjects] = useState<PostgresProject[]>([]);
   const [recentProjects, setRecentProjects] = useState<PostgresRecentProject[]>([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [openedProjectId, setOpenedProjectId] = useState<string | null>(null);
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
 
   const recordProjectOpened = useCallback(async (project: PostgresProject) => {
     const recentProject: PostgresRecentProject = {
@@ -160,37 +154,6 @@ export function PostgresProjectsView({
     }
   }, []);
 
-  async function handleCreateProject(event: React.FormEvent<HTMLFormElement>): Promise<boolean> {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    if (!name.trim()) {
-      setError("Enter a project name for the PostgreSQL.");
-      return false;
-    }
-
-    setSubmitting(true);
-    try {
-      const created = await createPostgresProject({
-        name: name.trim(),
-        description: description.trim(),
-      });
-      await recordProjectOpened(created);
-      setProjects((current) => [created, ...current.filter((project) => project.id !== created.id)]);
-      setSelectedProjectId(created.id);
-      setOpenedProjectId(created.id);
-      setName("");
-      setDescription("");
-      setNotice(`Created PostgreSQL project "${created.name}".`);
-      return true;
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : String(createError));
-      return false;
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -259,28 +222,8 @@ export function PostgresProjectsView({
             <div className="view-title-with-help">
               <h1>Projects</h1>
             </div>
-            <div className="view-header-actions">
-              {projects.length > 0 ? (
-                <button
-                  type="button"
-                  className="btn btn--primary project-create-icon-button"
-                  aria-label="New Project"
-                  title="New Project"
-                  onClick={() => {
-                    setError("");
-                    setNotice("");
-                    setName("");
-                    setDescription("");
-                    setCreateProjectOpen(true);
-                  }}
-                >
-                  <PlusIcon className="project-create-icon" />
-                </button>
-              ) : null}
-            </div>
           </header>
 
-          {notice ? <p className="settings-success">{notice}</p> : null}
           {error ? <p className="auth-error">{error}</p> : null}
 
           {loading ? (
@@ -290,23 +233,6 @@ export function PostgresProjectsView({
           ) : projects.length === 0 ? (
             <div className="empty-state">
               <p>No projects yet</p>
-              <div className="form-actions" style={{ justifyContent: "center", marginTop: 16 }}>
-                <button
-                  type="button"
-                  className="btn btn--primary project-create-icon-button"
-                  aria-label="Create your first project"
-                  title="Create your first project"
-                  onClick={() => {
-                    setError("");
-                    setNotice("");
-                    setName("");
-                    setDescription("");
-                    setCreateProjectOpen(true);
-                  }}
-                >
-                  <PlusIcon className="project-create-icon" />
-                </button>
-              </div>
             </div>
           ) : (
             <div className="project-selection-table-wrap">
@@ -341,52 +267,6 @@ export function PostgresProjectsView({
               </table>
             </div>
           )}
-
-          {createProjectOpen ? (
-            <div className="modal-overlay" onClick={() => !submitting && setCreateProjectOpen(false)}>
-              <div className="modal" onClick={(event) => event.stopPropagation()}>
-                <h2>New Project</h2>
-                <form
-                  onSubmit={async (event) => {
-                    const created = await handleCreateProject(event);
-                    if (created) {
-                      setCreateProjectOpen(false);
-                    }
-                  }}
-                  className="form"
-                >
-                  <label className="form-label">
-                    Project name
-                    <input
-                      className="form-input"
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
-                      placeholder="e.g. Dynamic Objects Pilot"
-                      autoFocus
-                    />
-                  </label>
-                  <label className="form-label">
-                    Description
-                    <textarea
-                      className="form-input form-textarea"
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      placeholder="Short note about this project"
-                      rows={3}
-                    />
-                  </label>
-                  <div className="form-actions">
-                    <button type="button" className="btn" onClick={() => setCreateProjectOpen(false)} disabled={submitting}>
-                      Cancel
-                    </button>
-                    <button type="submit" className="btn btn--primary" disabled={submitting || !name.trim()}>
-                      {submitting ? "Creating..." : "Create project"}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          ) : null}
 
         </div>
       </div>

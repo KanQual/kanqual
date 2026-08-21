@@ -244,6 +244,7 @@ body {
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
+  position: relative;
   transition: width 0.18s ease;
   will-change: width;
 }
@@ -276,11 +277,12 @@ body {
 }
 
 .sidebar:not(.sidebar--expanded):not(:hover) .sidebar-brand {
-  height: 286px;
+  height: 136px;
   align-items: flex-start;
   justify-content: center;
   padding: 14px 0;
   border-bottom-color: transparent;
+  position: static;
 }
 
 .sidebar-brand--clickable {
@@ -342,7 +344,8 @@ body {
 
 .sidebar:not(.sidebar--expanded):not(:hover) .brand-collapsed-lockup {
   position: absolute;
-  top: 224px;
+  top: auto;
+  bottom: 76px;
   left: 50%;
   display: inline-flex;
   align-items: center;
@@ -1903,26 +1906,482 @@ body {
 }
 
 .postgres-experiment-home-view {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .postgres-experiment-home-dashboard {
-  flex: 0 1 auto;
-  width: min(1120px, 100%);
+  flex: 1;
+  width: min(1480px, 100%);
   margin: 0 auto;
-  grid-template-columns: minmax(200px, 300px) minmax(220px, 240px) minmax(220px, 240px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   padding-top: 0;
+  align-items: stretch;
 }
 
 .postgres-experiment-home-primary-column {
-  align-self: center;
+  align-self: start;
+}
+
+.postgres-experiment-home-details-dashboard {
+  grid-template-columns: minmax(260px, 340px) minmax(500px, 520px);
+  align-items: start;
+  justify-content: center;
+}
+
+.postgres-experiment-home-details-dashboard .postgres-experiment-home-stats-grid {
+  grid-column: auto;
+  border-left: none;
+  padding-left: 0;
+  align-self: start;
+  align-content: start;
+}
+
+.postgres-experiment-home-details-dashboard .postgres-experiment-home-primary-column {
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.postgres-experiment-home-details-dashboard .postgres-experiment-home-primary-column > .home-project-card:not(.postgres-experiment-home-description-card) {
+  flex-shrink: 0;
+}
+
+.postgres-experiment-home-description-card {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 96px;
+  overflow: hidden;
+}
+
+.postgres-experiment-home-description-card .home-project-description {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.project-home-selector-column {
+  gap: 12px;
+  align-self: stretch;
+  justify-content: flex-start;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.project-home-selector-column--drawer {
+  width: min(300px, calc(100vw - 164px));
+  max-height: min(640px, calc(100vh - 190px));
+  padding: 0;
+  overflow-y: auto;
+}
+
+.project-home-selector-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.project-home-selector-card-header {
+  padding-right: 10px;
+}
+
+.project-home-selector-card-title-btn,
+.project-home-selector-collapse-btn {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+
+.project-home-selector-card-title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.project-home-selector-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.project-home-selector-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-home-selector-collapse-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.project-home-selector-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.project-home-selector-actions .btn {
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+}
+
+.project-home-selector-table-wrap {
+  border: 0;
+  border-radius: 0;
+}
+
+.project-home-selector-table {
+  font-size: var(--text-sm);
+}
+
+.project-home-selector-table .users-th {
+  padding: 7px 10px;
+  font-size: var(--text-xs);
+}
+
+.project-home-selector-table .users-td {
+  padding: 8px 10px;
 }
 
 .postgres-experiment-home-stats-grid {
   grid-template-columns: repeat(2, minmax(220px, 240px));
   gap: 18px;
   padding-left: 24px;
+}
+
+.postgres-experiment-home-canvas-column {
+  position: relative;
+  min-width: 0;
+  min-height: 680px;
+  display: flex;
+  border-left: none;
+  padding-left: 0;
+}
+
+.project-home-canvas-filter-control {
+  position: relative;
+  display: inline-flex;
+}
+
+.project-home-filter-drawer {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 12;
+  border: 1px solid rgba(53, 80, 112, 0.16);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  padding: 10px;
+}
+
+.project-home-canvas-create-control {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-home-canvas-create-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid rgba(53, 80, 112, 0.26);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.project-home-canvas-create-icon {
+  width: 40px;
+  height: 40px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.project-home-canvas-create-menu {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(53, 80, 112, 0.14);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+  box-shadow: none;
+}
+
+.project-home-canvas-create-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 9px;
+}
+
+.project-home-canvas-create-action svg.project-home-canvas-create-action-icon {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  display: block;
+}
+
+.postgres-experiment-home-canvas-column > .view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.postgres-explore-canvas-view {
+  min-height: 0;
+}
+
+.postgres-explore-canvas-view--embedded {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.postgres-explore-canvas-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+}
+
+.postgres-explore-canvas-layout--embedded {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+}
+
+.postgres-explore-canvas-stage {
+  position: relative;
+  min-height: 560px;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid rgba(53, 80, 112, 0.14);
+  background-color: #f8fbff;
+  background-image:
+    linear-gradient(rgba(53, 80, 112, 0.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(53, 80, 112, 0.10) 1px, transparent 1px);
+  background-size: 22px 22px, 22px 22px;
+  background-position: 0 0, 0 0;
+}
+
+.postgres-explore-canvas-layout--embedded .postgres-explore-canvas-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  border-radius: 8px;
+}
+
+.postgres-explore-canvas-surface {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+}
+
+.postgres-explore-canvas-controls {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(53, 80, 112, 0.14);
+  border-radius: 10px;
+  background: var(--color-surface, #fff);
+  box-shadow: none;
+}
+
+.postgres-explore-canvas-controls .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.postgres-explore-canvas-control-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.postgres-explore-connector-handle {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.22);
+  color: #fff;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+}
+
+.postgres-explore-connector-handle-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  pointer-events: none;
+}
+
+.postgres-explore-connector-handle:hover {
+  background: var(--color-primary-dark);
+}
+
+.postgres-explore-relationship-draft-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.postgres-explore-relationship-draft-line {
+  stroke: color-mix(in srgb, var(--color-primary) 76%, #111827);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 7 6;
+  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.20));
+}
+
+.postgres-explore-relationship-draft-line--targeted {
+  stroke: #f59e0b;
+  stroke-dasharray: none;
+}
+
+.postgres-explore-inspector-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.postgres-explore-inspector-overlay {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  width: min(300px, calc(100% - 28px));
+  pointer-events: none;
+}
+
+.postgres-explore-inspector-overlay .postgres-explore-inspector-card {
+  pointer-events: auto;
+}
+
+.postgres-explore-inspector-card {
+  gap: 12px;
+}
+
+.postgres-explore-inspector-card h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.postgres-explore-inspector-kicker {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.postgres-explore-inspector-type-detail {
+  margin-top: 2px;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.postgres-explore-inspector-title {
+  color: var(--color-text);
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+
+.postgres-explore-inspector-text {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.postgres-explore-inspector-attributes {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.postgres-explore-inspector-attribute {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.postgres-explore-inspector-attribute dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.postgres-explore-inspector-attribute dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .ai-assist-home-layout {
@@ -2146,6 +2605,20 @@ body {
 
   .ai-assist-home-layout {
     grid-template-columns: 1fr;
+  }
+
+  .postgres-experiment-home-dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .postgres-experiment-home-canvas-column {
+    border-left: none;
+    padding-left: 0;
+    min-height: 620px;
+  }
+
+  .postgres-explore-canvas-layout {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .ai-assist-home-actions-column {
@@ -5470,6 +5943,20 @@ input[type="password"].form-input::-ms-clear {
   color: var(--color-primary);
 }
 
+.users-th-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .users-sort-icon {
   font-size: var(--text-2xs);
   opacity: 0.6;
@@ -6831,6 +7318,35 @@ input[type="password"].form-input::-ms-clear {
 }
 
 .doc-upload-modal-title-row h2 { margin: 0; }
+
+.source-import-review-modal {
+  width: min(860px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.source-import-review-modal h2,
+.source-import-review-modal .users-guide-copy,
+.source-import-review-modal .auth-error,
+.source-import-review-modal .form-actions {
+  flex: 0 0 auto;
+}
+
+.source-import-review-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(420px, calc(100vh - 260px));
+  overflow: auto;
+}
+
+.source-import-review-table-wrap .users-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface);
+}
 
 .spreadsheet-mapping-panel {
   display: flex;

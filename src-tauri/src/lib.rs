@@ -62,6 +62,10 @@ const EMBEDDING_MODEL_METADATA_FILE: &str = ".kanqual-model.json";
 const EMBEDDING_MODEL_EXPECTED_SIZE_BYTES: u64 = 4_499_523_339;
 const PROJECT_EMBEDDING_METADATA_FILE: &str = "multilingual-e5-metadata.json";
 const PROJECT_EMBEDDING_BUILD_BATCH_SIZE_CAP: usize = 8;
+const POSTGRES_AUTH_THROTTLE_MAX_FAILURES: usize = 5;
+const POSTGRES_AUTH_THROTTLE_WINDOW_MS: u64 = 5 * 60 * 1000;
+const POSTGRES_AUTH_PERMANENT_BLOCK_MAX_FAILURES: usize = 10;
+const POSTGRES_AUTH_PERMANENT_BLOCK_WINDOW_MS: u64 = 60 * 60 * 1000;
 const PROJECT_EMBEDDING_CHUNKING_VERSION: u32 = 2;
 const ENCRYPTED_BACKUP_KIND: &str = "kanqual-encrypted-backup";
 const ENCRYPTED_BACKUP_VERSION: u32 = 1;
@@ -104,6 +108,7 @@ struct NetworkMode(Mutex<String>);
 struct ProjectEmbeddingBuildState(Mutex<ProjectEmbeddingBuildStatusState>);
 struct CancelledAttributeSuggestionRuns(Mutex<HashSet<String>>);
 struct PostgresExperimentAuthState(Mutex<Option<StoredPostgresExperimentAuthSession>>);
+struct PostgresExperimentAuthThrottleState(Mutex<HashMap<String, Vec<u64>>>);
 struct PostgresExperimentProjectSchemaCache(Mutex<HashSet<String>>);
 struct PostgresExperimentConnectionCache(Arc<Mutex<HashMap<String, Vec<tokio_postgres::Client>>>>);
 
@@ -443,6 +448,689 @@ fn current_time_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn postgres_auth_throttle_key(auth_kind: &str, username: &str, origin: &str) -> String {
+    format!(
+        "{}:{}:{}",
+        auth_kind.trim().to_lowercase(),
+        username.trim().to_lowercase(),
+        origin.trim().to_lowercase()
+    )
+}
+
+fn check_postgres_auth_throttle(
+    throttle_state: &PostgresExperimentAuthThrottleState,
+    auth_kind: &str,
+    username: &str,
+    origin: &str,
+) -> Result<(), String> {
+    let now = current_time_ms();
+    let key = postgres_auth_throttle_key(auth_kind, username, origin);
+    let mut attempts_by_key = throttle_state.0.lock().unwrap();
+    let attempts = attempts_by_key.entry(key).or_default();
+    attempts
+        .retain(|attempt_at| now.saturating_sub(*attempt_at) <= POSTGRES_AUTH_THROTTLE_WINDOW_MS);
+    if attempts.len() >= POSTGRES_AUTH_THROTTLE_MAX_FAILURES {
+        let oldest_attempt = attempts.iter().copied().min().unwrap_or(now);
+        let wait_ms = oldest_attempt
+            .saturating_add(POSTGRES_AUTH_THROTTLE_WINDOW_MS)
+            .saturating_sub(now);
+        let wait_seconds = wait_ms.div_ceil(1000).max(1);
+        return Err(format!(
+            "Too many failed sign-in attempts. Try again in about {wait_seconds} seconds."
+        ));
+    }
+    Ok(())
+}
+
+fn record_postgres_auth_failure(
+    throttle_state: &PostgresExperimentAuthThrottleState,
+    auth_kind: &str,
+    username: &str,
+    origin: &str,
+) {
+    let now = current_time_ms();
+    let key = postgres_auth_throttle_key(auth_kind, username, origin);
+    let mut attempts_by_key = throttle_state.0.lock().unwrap();
+    let attempts = attempts_by_key.entry(key).or_default();
+    attempts
+        .retain(|attempt_at| now.saturating_sub(*attempt_at) <= POSTGRES_AUTH_THROTTLE_WINDOW_MS);
+    attempts.push(now);
+}
+
+fn clear_postgres_auth_failures(
+    throttle_state: &PostgresExperimentAuthThrottleState,
+    auth_kind: &str,
+    username: &str,
+    origin: &str,
+) {
+    let key = postgres_auth_throttle_key(auth_kind, username, origin);
+    throttle_state.0.lock().unwrap().remove(&key);
+}
+
+#[derive(Debug, Clone, Default)]
+struct PostgresAuthBlockEntry {
+    failed_attempts_ms: Vec<u64>,
+    blocked_until_ms: Option<u64>,
+    permanently_blocked: bool,
+}
+
+fn normalize_postgres_auth_block_username(username: &str) -> String {
+    username.trim().to_lowercase()
+}
+
+fn read_postgres_auth_diagnostics_log(app: &tauri::AppHandle) -> Vec<(usize, serde_json::Value)> {
+    let Ok(paths) = bundled_postgres::resolve_paths(app) else {
+        return Vec::new();
+    };
+    let Ok(contents) = fs::read_to_string(&paths.runtime_diagnostics_log) else {
+        return Vec::new();
+    };
+    contents
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            serde_json::from_str::<serde_json::Value>(line.trim())
+                .ok()
+                .map(|value| (index, value))
+        })
+        .collect()
+}
+
+fn postgres_auth_kind_for_username(app: &tauri::AppHandle, username: &str) -> Option<String> {
+    let normalized = username.trim().to_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    let identity = load_or_create_postgres_bootstrap_identity(app).ok()?;
+    if identity
+        .superuser_name
+        .trim()
+        .eq_ignore_ascii_case(&normalized)
+    {
+        Some("postgres_admin".to_string())
+    } else {
+        Some("app_user".to_string())
+    }
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let year = year - if month <= 2 { 1 } else { 0 };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month = month as i32;
+    let day = day as i32;
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    (era * 146097 + doe - 719468) as i64
+}
+
+fn parse_postgres_log_timestamp_ms(line: &str) -> Option<u64> {
+    let bytes = line.as_bytes();
+    if bytes.len() < 19
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b' ')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return None;
+    }
+    let year = line.get(0..4)?.parse::<i32>().ok()?;
+    let month = line.get(5..7)?.parse::<u32>().ok()?;
+    let day = line.get(8..10)?.parse::<u32>().ok()?;
+    let hour = line.get(11..13)?.parse::<u64>().ok()?;
+    let minute = line.get(14..16)?.parse::<u64>().ok()?;
+    let second = line.get(17..19)?.parse::<u64>().ok()?;
+    let mut millisecond = 0_u64;
+    if line.get(19..20) == Some(".") {
+        let fraction = line
+            .get(20..)
+            .unwrap_or("")
+            .chars()
+            .take_while(|character| character.is_ascii_digit())
+            .take(3)
+            .collect::<String>();
+        if !fraction.is_empty() {
+            millisecond = format!("{fraction:0<3}").parse::<u64>().ok()?;
+        }
+    }
+    let days = days_from_civil(year, month, day);
+    if days < 0 {
+        return None;
+    }
+    Some(
+        days as u64 * 86_400_000
+            + hour * 3_600_000
+            + minute * 60_000
+            + second * 1_000
+            + millisecond,
+    )
+}
+
+fn extract_quoted_after(input: &str, marker: &str) -> Option<String> {
+    let start = input.find(marker)? + marker.len();
+    let rest = input.get(start..)?;
+    let end = rest.find('"')?;
+    Some(rest.get(..end)?.to_string())
+}
+
+fn extract_postgres_log_key_value(input: &str, key: &str) -> Option<String> {
+    let marker = format!("{key}=");
+    let start = input.find(&marker)? + marker.len();
+    let rest = input.get(start..)?.trim_start();
+    if let Some(stripped) = rest.strip_prefix('"') {
+        return stripped
+            .find('"')
+            .and_then(|end| stripped.get(..end).map(str::to_string));
+    }
+    let value = rest
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches(',')
+        .trim_matches('"')
+        .to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn parse_postgres_log_prefix_client_ip(line: &str) -> Option<String> {
+    let before_level = line
+        .split_once(" LOG: ")
+        .map(|(prefix, _)| prefix)
+        .or_else(|| line.split_once(" FATAL: ").map(|(prefix, _)| prefix))?;
+    let remote = before_level.split_whitespace().last()?.trim();
+    if remote.is_empty() || remote == "[local]" {
+        return Some("local".to_string());
+    }
+    let without_parenthesized_port = remote
+        .split_once('(')
+        .map(|(host, _)| host)
+        .unwrap_or(remote);
+    let host = without_parenthesized_port
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(without_parenthesized_port);
+    Some(host.trim_matches('[').trim_matches(']').to_string())
+}
+
+fn parse_postgres_server_auth_log_line(
+    app: Option<&tauri::AppHandle>,
+    id: String,
+    line: &str,
+) -> Option<PostgresExperimentAuthAuditEntry> {
+    let timestamp_ms = parse_postgres_log_timestamp_ms(line)?;
+    let client_ip_from_prefix = parse_postgres_log_prefix_client_ip(line);
+    let mut event = String::new();
+    let mut outcome = String::new();
+    let mut message = String::new();
+    let mut username = None;
+    let mut database = None;
+    let mut client_ip = client_ip_from_prefix;
+    let mut reason = None;
+
+    if line.contains(" LOG:  connection authorized:") {
+        event = "postgres.server.auth.login".to_string();
+        outcome = "success".to_string();
+        message = "PostgreSQL connection authorized.".to_string();
+        username = extract_postgres_log_key_value(line, "user");
+        database = extract_postgres_log_key_value(line, "database");
+    } else if line.contains(" LOG:  disconnection:") {
+        event = "postgres.server.auth.logout".to_string();
+        outcome = "success".to_string();
+        message = "PostgreSQL connection closed.".to_string();
+        username = extract_postgres_log_key_value(line, "user");
+        database = extract_postgres_log_key_value(line, "database");
+        if let Some(host) = extract_postgres_log_key_value(line, "host") {
+            client_ip = Some(if host == "[local]" {
+                "local".to_string()
+            } else {
+                host
+            });
+        }
+    } else if line.contains(" FATAL: ") {
+        event = "postgres.server.auth.login".to_string();
+        outcome = "failed".to_string();
+        message = "PostgreSQL connection rejected.".to_string();
+        username = extract_quoted_after(line, "user \"")
+            .or_else(|| extract_postgres_log_key_value(line, "user"));
+        database = extract_quoted_after(line, "database \"")
+            .or_else(|| extract_postgres_log_key_value(line, "database"));
+        if let Some(host) = extract_quoted_after(line, "host \"") {
+            client_ip = Some(if host == "[local]" {
+                "local".to_string()
+            } else {
+                host
+            });
+        }
+        reason = Some(if line.contains("password authentication failed") {
+            "password_rejected".to_string()
+        } else if line.contains("no pg_hba.conf entry") {
+            "pg_hba_rejected".to_string()
+        } else {
+            "auth_failed".to_string()
+        });
+    }
+
+    if event.is_empty() {
+        return None;
+    }
+
+    let auth_kind = app.and_then(|app| {
+        username
+            .as_deref()
+            .and_then(|value| postgres_auth_kind_for_username(app, value))
+    });
+    let details = serde_json::json!({
+        "source": "postgresql_server_log",
+        "database": database,
+        "raw": line,
+    });
+    Some(PostgresExperimentAuthAuditEntry {
+        id,
+        timestamp_ms,
+        event,
+        outcome,
+        message,
+        auth_kind,
+        user_id: None,
+        username,
+        client_ip,
+        role: None,
+        reason,
+        details_json: serde_json::to_string(&details).ok(),
+    })
+}
+
+fn read_postgres_server_auth_audit_entries(
+    app: &tauri::AppHandle,
+) -> Vec<PostgresExperimentAuthAuditEntry> {
+    let Ok(paths) = bundled_postgres::resolve_paths(app) else {
+        return Vec::new();
+    };
+    let Ok(read_dir) = fs::read_dir(&paths.logs_dir) else {
+        return Vec::new();
+    };
+    let mut log_paths: Vec<PathBuf> = read_dir
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with("postgresql-") && name.ends_with(".log"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    log_paths.sort();
+    if log_paths.len() > 30 {
+        log_paths = log_paths.split_off(log_paths.len() - 30);
+    }
+    let mut entries = Vec::new();
+    for path in log_paths {
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("postgresql-log")
+            .to_string();
+        for (index, line) in contents.lines().enumerate() {
+            let id = format!("postgres-server-auth-{file_name}-{index}");
+            if let Some(entry) = parse_postgres_server_auth_log_line(Some(app), id, line.trim()) {
+                entries.push(entry);
+            }
+        }
+    }
+    entries
+}
+
+fn kanqual_auth_diagnostics_entry_to_audit_entry(
+    index: usize,
+    parsed: serde_json::Value,
+) -> Option<PostgresExperimentAuthAuditEntry> {
+    let event = parsed
+        .get("event")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let details = parsed
+        .get("details")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let reason = details
+        .get("reason")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let include = matches!(
+        event,
+        "postgres.auth.logout" | "postgres.auth.user_password_reset" | "postgres.auth.login_block"
+    ) || (event == "postgres.auth.login"
+        && matches!(
+            reason,
+            "missing_username"
+                | "missing_password"
+                | "username_contains_whitespace"
+                | "rate_limited"
+                | "account_blocked"
+                | "account_disabled"
+                | "database_unavailable"
+        ));
+    if !include {
+        return None;
+    }
+    let details_json = serde_json::to_string(&details).ok();
+    let username = details
+        .get("username")
+        .or_else(|| details.get("email"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    Some(PostgresExperimentAuthAuditEntry {
+        id: format!("kanqual-auth-audit-{index}"),
+        timestamp_ms: parsed
+            .get("timestampMs")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        event: event.to_string(),
+        outcome: parsed
+            .get("outcome")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string(),
+        message: parsed
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string(),
+        auth_kind: details
+            .get("authKind")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        user_id: details
+            .get("userId")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        username,
+        client_ip: details
+            .get("clientIp")
+            .or_else(|| details.get("client_ip"))
+            .or_else(|| details.get("ip"))
+            .or_else(|| details.get("remoteAddress"))
+            .or_else(|| details.get("remote_addr"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        role: details
+            .get("role")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        reason: details
+            .get("reason")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        details_json,
+    })
+}
+
+fn read_kanqual_auth_diagnostics_audit_entries(
+    app: &tauri::AppHandle,
+) -> Vec<PostgresExperimentAuthAuditEntry> {
+    read_postgres_auth_diagnostics_log(app)
+        .into_iter()
+        .filter_map(|(index, parsed)| kanqual_auth_diagnostics_entry_to_audit_entry(index, parsed))
+        .collect()
+}
+
+fn read_combined_postgres_auth_audit_entries(
+    app: &tauri::AppHandle,
+) -> Vec<PostgresExperimentAuthAuditEntry> {
+    let mut entries = read_postgres_server_auth_audit_entries(app);
+    entries.extend(read_kanqual_auth_diagnostics_audit_entries(app));
+    entries.sort_by(|a, b| {
+        b.timestamp_ms
+            .cmp(&a.timestamp_ms)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    entries
+}
+
+fn active_postgres_auth_block_entry(
+    app: &tauri::AppHandle,
+    username: &str,
+) -> Option<PostgresAuthBlockEntry> {
+    let normalized_username = normalize_postgres_auth_block_username(username);
+    if normalized_username.is_empty() {
+        return None;
+    }
+    let now = current_time_ms();
+    let entries = read_combined_postgres_auth_audit_entries(app);
+    let mut reset_boundary_ms = 0_u64;
+    let mut failed_attempts = Vec::new();
+
+    for entry in entries {
+        let timestamp_ms = entry.timestamp_ms;
+        let event = entry.event.as_str();
+        let outcome = entry.outcome.as_str();
+        let auth_kind = entry.auth_kind.as_deref().unwrap_or("");
+        let event_username = entry
+            .username
+            .as_deref()
+            .map(normalize_postgres_auth_block_username)
+            .unwrap_or_default();
+        if event_username != normalized_username {
+            continue;
+        }
+        let is_unblock_boundary = (event == "postgres.server.auth.login" && outcome == "success")
+            || event == "postgres.auth.user_password_reset";
+        if is_unblock_boundary && timestamp_ms > reset_boundary_ms {
+            reset_boundary_ms = timestamp_ms;
+        }
+        let reason = entry.reason.as_deref().unwrap_or("");
+        let is_failed_app_user_login = event == "postgres.server.auth.login"
+            && outcome == "failed"
+            && auth_kind == "app_user"
+            && matches!(
+                reason,
+                "password_rejected" | "pg_hba_rejected" | "auth_failed"
+            );
+        if is_failed_app_user_login {
+            failed_attempts.push(timestamp_ms);
+        }
+    }
+
+    failed_attempts.retain(|attempt_at| *attempt_at > reset_boundary_ms);
+    failed_attempts.sort_unstable();
+    let failed_attempts_last_hour: Vec<u64> = failed_attempts
+        .iter()
+        .copied()
+        .filter(|attempt_at| {
+            now.saturating_sub(*attempt_at) <= POSTGRES_AUTH_PERMANENT_BLOCK_WINDOW_MS
+        })
+        .collect();
+    let failed_attempts_last_five_minutes: Vec<u64> = failed_attempts
+        .iter()
+        .copied()
+        .filter(|attempt_at| now.saturating_sub(*attempt_at) <= POSTGRES_AUTH_THROTTLE_WINDOW_MS)
+        .collect();
+
+    let mut permanently_blocked = false;
+    for window_start_index in 0..failed_attempts.len() {
+        let window_start = failed_attempts[window_start_index];
+        let count = failed_attempts
+            .iter()
+            .skip(window_start_index)
+            .take_while(|attempt_at| {
+                attempt_at.saturating_sub(window_start) <= POSTGRES_AUTH_PERMANENT_BLOCK_WINDOW_MS
+            })
+            .count();
+        if count >= POSTGRES_AUTH_PERMANENT_BLOCK_MAX_FAILURES {
+            permanently_blocked = true;
+            break;
+        }
+    }
+
+    let blocked_until_ms = if !permanently_blocked
+        && failed_attempts_last_five_minutes.len() >= POSTGRES_AUTH_THROTTLE_MAX_FAILURES
+    {
+        failed_attempts_last_five_minutes
+            .iter()
+            .min()
+            .map(|oldest| oldest.saturating_add(POSTGRES_AUTH_THROTTLE_WINDOW_MS))
+            .filter(|blocked_until| *blocked_until > now)
+    } else {
+        None
+    };
+
+    if !permanently_blocked && blocked_until_ms.is_none() && failed_attempts_last_hour.is_empty() {
+        return None;
+    }
+
+    Some(PostgresAuthBlockEntry {
+        failed_attempts_ms: failed_attempts_last_hour,
+        blocked_until_ms,
+        permanently_blocked,
+    })
+}
+
+fn check_persistent_postgres_auth_block(
+    app: &tauri::AppHandle,
+    username: &str,
+) -> Result<(), String> {
+    let Some(entry) = active_postgres_auth_block_entry(app, username) else {
+        return Ok(());
+    };
+    if entry.permanently_blocked {
+        return Err(
+            "This account is blocked after too many failed sign-in attempts. Ask the administrator to reset the password."
+                .to_string(),
+        );
+    }
+    if let Some(blocked_until) = entry.blocked_until_ms {
+        let now = current_time_ms();
+        if blocked_until > now {
+            let wait_seconds = blocked_until.saturating_sub(now).div_ceil(1000).max(1);
+            return Err(format!(
+                "Too many failed sign-in attempts. Try again in about {wait_seconds} seconds."
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod postgres_auth_regression_tests {
+    use super::*;
+
+    fn throttle_state() -> PostgresExperimentAuthThrottleState {
+        PostgresExperimentAuthThrottleState(Mutex::new(HashMap::new()))
+    }
+
+    #[test]
+    fn auth_throttle_keys_are_case_and_whitespace_insensitive() {
+        assert_eq!(
+            postgres_auth_throttle_key(" App_User ", " TestUser ", " LOCAL "),
+            "app_user:testuser:local"
+        );
+    }
+
+    #[test]
+    fn auth_throttle_blocks_after_five_recent_failures() {
+        let state = throttle_state();
+
+        for _ in 0..POSTGRES_AUTH_THROTTLE_MAX_FAILURES {
+            assert!(check_postgres_auth_throttle(&state, "app_user", "testuser", "local").is_ok());
+            record_postgres_auth_failure(&state, "app_user", "testuser", "local");
+        }
+
+        let blocked = check_postgres_auth_throttle(&state, "app_user", "testuser", "local");
+        assert!(blocked.is_err());
+        assert!(blocked
+            .unwrap_err()
+            .contains("Too many failed sign-in attempts"));
+    }
+
+    #[test]
+    fn auth_throttle_is_scoped_by_username_origin_and_auth_kind() {
+        let state = throttle_state();
+
+        for _ in 0..POSTGRES_AUTH_THROTTLE_MAX_FAILURES {
+            record_postgres_auth_failure(&state, "app_user", "testuser", "local");
+        }
+
+        assert!(check_postgres_auth_throttle(&state, "app_user", "testuser", "local").is_err());
+        assert!(check_postgres_auth_throttle(&state, "app_user", "otheruser", "local").is_ok());
+        assert!(
+            check_postgres_auth_throttle(&state, "app_user", "testuser", "192.168.1.25").is_ok()
+        );
+        assert!(
+            check_postgres_auth_throttle(&state, "postgres_admin", "testuser", "local").is_ok()
+        );
+    }
+
+    #[test]
+    fn successful_login_can_clear_auth_throttle_failures() {
+        let state = throttle_state();
+
+        for _ in 0..POSTGRES_AUTH_THROTTLE_MAX_FAILURES {
+            record_postgres_auth_failure(&state, "app_user", "testuser", "local");
+        }
+        assert!(check_postgres_auth_throttle(&state, "app_user", "testuser", "local").is_err());
+
+        clear_postgres_auth_failures(&state, "app_user", "testuser", "local");
+        assert!(check_postgres_auth_throttle(&state, "app_user", "testuser", "local").is_ok());
+    }
+
+    #[test]
+    fn parses_postgres_authorized_connection_log_line() {
+        let entry = parse_postgres_server_auth_log_line(
+            None,
+            "test-auth-success".to_string(),
+            "2026-08-21 13:44:12.123 UTC [1234] testuser@kanqual 127.0.0.1(51234) LOG:  connection authorized: user=testuser database=kanqual application_name=kanqual",
+        )
+        .expect("expected auth log entry");
+
+        assert_eq!(entry.event, "postgres.server.auth.login");
+        assert_eq!(entry.outcome, "success");
+        assert_eq!(entry.username.as_deref(), Some("testuser"));
+        assert_eq!(entry.client_ip.as_deref(), Some("127.0.0.1"));
+        assert_eq!(entry.timestamp_ms, 1_787_319_852_123);
+    }
+
+    #[test]
+    fn parses_postgres_failed_password_log_line() {
+        let entry = parse_postgres_server_auth_log_line(
+            None,
+            "test-auth-failure".to_string(),
+            "2026-08-21 13:44:13.000 UTC [1235] @ 192.168.1.25(51235) FATAL:  password authentication failed for user \"testuser\"",
+        )
+        .expect("expected auth log entry");
+
+        assert_eq!(entry.event, "postgres.server.auth.login");
+        assert_eq!(entry.outcome, "failed");
+        assert_eq!(entry.username.as_deref(), Some("testuser"));
+        assert_eq!(entry.client_ip.as_deref(), Some("192.168.1.25"));
+        assert_eq!(entry.reason.as_deref(), Some("password_rejected"));
+    }
+
+    #[test]
+    fn parses_postgres_disconnection_log_line() {
+        let entry = parse_postgres_server_auth_log_line(
+            None,
+            "test-auth-disconnect".to_string(),
+            "2026-08-21 13:44:14.000 UTC [1236] testuser@kanqual 127.0.0.1(51236) LOG:  disconnection: session time: 0:00:01.234 user=testuser database=kanqual host=127.0.0.1 port=51236",
+        )
+        .expect("expected auth log entry");
+
+        assert_eq!(entry.event, "postgres.server.auth.logout");
+        assert_eq!(entry.outcome, "success");
+        assert_eq!(entry.username.as_deref(), Some("testuser"));
+        assert_eq!(entry.client_ip.as_deref(), Some("127.0.0.1"));
+    }
 }
 
 fn backend_identity_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -2196,6 +2884,7 @@ async fn ensure_postgres_experiment_project_schema(
                     description TEXT NOT NULL DEFAULT '',
                     shape_override TEXT,
                     color_override TEXT,
+                    outline_color_override TEXT,
                     fill_override TEXT,
                     image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -2208,6 +2897,7 @@ async fn ensure_postgres_experiment_project_schema(
                     description TEXT NOT NULL DEFAULT '',
                     shape TEXT NOT NULL DEFAULT 'rounded',
                     color TEXT NOT NULL DEFAULT '#355070',
+                    outline_color TEXT NOT NULL DEFAULT '',
                     fill TEXT NOT NULL DEFAULT 'filled',
                     image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -2639,11 +3329,13 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'rounded';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#355070';
+                ALTER TABLE object_types ADD COLUMN IF NOT EXISTS outline_color TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS fill TEXT NOT NULL DEFAULT 'filled';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS object_type_id TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS shape_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS color_override TEXT;
+                ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS outline_color_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS fill_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS object_type_id TEXT;
@@ -3505,10 +4197,11 @@ fn map_postgres_experiment_object_type_row(
         description: row.get(3),
         shape: row.get(4),
         color: row.get(5),
-        fill: row.get(6),
-        image_storage_path: row.get(7),
-        created_at: row.get(8),
-        updated_at: row.get(9),
+        outline_color: row.get(6),
+        fill: row.get(7),
+        image_storage_path: row.get(8),
+        created_at: row.get(9),
+        updated_at: row.get(10),
     }
 }
 
@@ -3600,19 +4293,20 @@ fn map_postgres_experiment_object_row(
         description: row.get(5),
         shape_override: row.get::<usize, Option<String>>(6).unwrap_or_default(),
         color_override: row.get::<usize, Option<String>>(7).unwrap_or_default(),
-        fill_override: row.get::<usize, Option<String>>(8).unwrap_or_default(),
-        image_storage_path: row.get::<usize, Option<String>>(9).unwrap_or_default(),
-        event_start_at: row.get(10),
-        event_end_at: row.get(11),
-        event_time_precision: row.get(12),
-        event_timezone: row.get(13),
-        event_is_instant: row.get(14),
+        outline_color_override: row.get::<usize, Option<String>>(8).unwrap_or_default(),
+        fill_override: row.get::<usize, Option<String>>(9).unwrap_or_default(),
+        image_storage_path: row.get::<usize, Option<String>>(10).unwrap_or_default(),
+        event_start_at: row.get(11),
+        event_end_at: row.get(12),
+        event_time_precision: row.get(13),
+        event_timezone: row.get(14),
+        event_is_instant: row.get(15),
         attribute_values: attribute_values_by_object_id
             .get(&object_id)
             .cloned()
             .unwrap_or_default(),
-        created_at: row.get(15),
-        updated_at: row.get(16),
+        created_at: row.get(16),
+        updated_at: row.get(17),
     }
 }
 
@@ -3690,11 +4384,26 @@ fn row_to_postgres_experiment_app_user_record(
             active: row.get(4),
             disabled_at: row.get(5),
             must_change_password: row.get(6),
+            login_blocked_until_ms: None,
+            login_permanently_blocked: false,
+            login_failed_attempts_last_hour: 0,
             created_at: row.get(7),
             updated_at: row.get(8),
             last_login_at: row.get(9),
         },
     }
+}
+
+fn with_postgres_auth_block_state(
+    app: &tauri::AppHandle,
+    mut user: PostgresExperimentAppUser,
+) -> PostgresExperimentAppUser {
+    if let Some(entry) = active_postgres_auth_block_entry(app, &user.username) {
+        user.login_blocked_until_ms = entry.blocked_until_ms;
+        user.login_permanently_blocked = entry.permanently_blocked;
+        user.login_failed_attempts_last_hour = entry.failed_attempts_ms.len();
+    }
+    user
 }
 
 async fn count_postgres_experiment_app_users(app: &tauri::AppHandle) -> Result<i64, String> {
@@ -3712,7 +4421,8 @@ async fn load_postgres_experiment_app_user_by_username(
     username: &str,
 ) -> Result<Option<PostgresExperimentAppUserRecord>, String> {
     let (client, connection_task) = connect_postgres_runtime(app).await?;
-    load_postgres_experiment_app_user_by_username_for_client(&*client, username, connection_task).await
+    load_postgres_experiment_app_user_by_username_for_client(&*client, username, connection_task)
+        .await
 }
 
 async fn load_postgres_experiment_app_user_by_username_for_client(
@@ -3743,7 +4453,12 @@ async fn load_postgres_experiment_app_user_by_username_with_credentials(
 ) -> Result<Option<PostgresExperimentAppUserRecord>, String> {
     let (client, connection_task) =
         connect_postgres_runtime_with_credentials(app, username, password).await?;
-    load_postgres_experiment_app_user_by_username_for_client(&*client, app_username, connection_task).await
+    load_postgres_experiment_app_user_by_username_for_client(
+        &*client,
+        app_username,
+        connection_task,
+    )
+    .await
 }
 
 async fn load_postgres_experiment_app_user_by_id(
@@ -3795,7 +4510,12 @@ async fn load_postgres_experiment_app_user_last_login_map(
 
     Ok(rows
         .into_iter()
-        .map(|row| (row.get::<usize, String>(0), row.get::<usize, Option<String>>(1)))
+        .map(|row| {
+            (
+                row.get::<usize, String>(0),
+                row.get::<usize, Option<String>>(1),
+            )
+        })
         .collect())
 }
 
@@ -4390,7 +5110,7 @@ fn ensure_postgres_login_role_for_app_user(
     }
 
     let create_role_sql = format!(
-        "CREATE ROLE \"{role_ident}\" LOGIN CREATEDB PASSWORD '{role_password}'; \
+        "CREATE ROLE \"{role_ident}\" LOGIN PASSWORD '{role_password}'; \
          GRANT CONNECT ON DATABASE \"{app_database}\" TO \"{role_ident}\";",
     );
     run_psql_command_with_binary(
@@ -4625,6 +5345,9 @@ fn build_postgres_experiment_local_admin_user(
         active: true,
         disabled_at: None,
         must_change_password: false,
+        login_blocked_until_ms: None,
+        login_permanently_blocked: false,
+        login_failed_attempts_last_hour: 0,
         created_at: "local".to_string(),
         updated_at: "local".to_string(),
         last_login_at: None,
@@ -5179,6 +5902,9 @@ struct PostgresExperimentAppUser {
     active: bool,
     disabled_at: Option<String>,
     must_change_password: bool,
+    login_blocked_until_ms: Option<u64>,
+    login_permanently_blocked: bool,
+    login_failed_attempts_last_hour: usize,
     created_at: String,
     updated_at: String,
     last_login_at: Option<String>,
@@ -5570,6 +6296,7 @@ struct PostgresExperimentObject {
     description: String,
     shape_override: String,
     color_override: String,
+    outline_color_override: String,
     fill_override: String,
     image_storage_path: String,
     event_start_at: Option<String>,
@@ -5592,6 +6319,7 @@ struct PostgresExperimentObjectType {
     description: String,
     shape: String,
     color: String,
+    outline_color: String,
     fill: String,
     image_storage_path: String,
     created_at: String,
@@ -5992,7 +6720,7 @@ struct PostgresExperimentAdminProjectLogEntry {
     restored_at: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PostgresExperimentAuthAuditEntry {
     id: String,
@@ -6627,6 +7355,7 @@ struct CreatePostgresExperimentObjectRequest {
     description: String,
     shape_override: Option<String>,
     color_override: Option<String>,
+    outline_color_override: Option<String>,
     fill_override: Option<String>,
     image_storage_path: Option<String>,
     event_start_at: Option<String>,
@@ -6650,6 +7379,7 @@ struct UpdatePostgresExperimentObjectRequest {
     description: String,
     shape_override: Option<String>,
     color_override: Option<String>,
+    outline_color_override: Option<String>,
     fill_override: Option<String>,
     image_storage_path: Option<String>,
     event_start_at: Option<String>,
@@ -6673,6 +7403,7 @@ struct SavePostgresExperimentObjectRequest {
     description: String,
     shape_override: Option<String>,
     color_override: Option<String>,
+    outline_color_override: Option<String>,
     fill_override: Option<String>,
     image_storage_path: Option<String>,
     event_start_at: Option<String>,
@@ -6701,6 +7432,7 @@ struct CreatePostgresExperimentObjectTypeRequest {
     description: String,
     shape: String,
     color: String,
+    outline_color: Option<String>,
     fill: String,
     image_storage_path: Option<String>,
 }
@@ -6714,6 +7446,7 @@ struct UpdatePostgresExperimentObjectTypeRequest {
     description: String,
     shape: String,
     color: String,
+    outline_color: Option<String>,
     fill: String,
     image_storage_path: Option<String>,
 }
@@ -6738,6 +7471,7 @@ struct SavePostgresExperimentObjectTypeRequest {
     description: String,
     shape: String,
     color: String,
+    outline_color: Option<String>,
     fill: String,
     image_storage_path: Option<String>,
     #[serde(default)]
@@ -9974,7 +10708,10 @@ async fn create_postgres_experiment_app_user_command(
                 &stored_admin_session.postgres_username,
                 &stored_admin_session.postgres_password,
                 "postgres",
-                &format!("DROP ROLE IF EXISTS \"{}\";", sql_escape_identifier(&username)),
+                &format!(
+                    "DROP ROLE IF EXISTS \"{}\";",
+                    sql_escape_identifier(&username)
+                ),
             );
             return Err(format!(
                 "Could not create PostgreSQL experiment app user: {error}"
@@ -9990,6 +10727,9 @@ async fn create_postgres_experiment_app_user_command(
         active: row.get(4),
         disabled_at: row.get(5),
         must_change_password: row.get(6),
+        login_blocked_until_ms: None,
+        login_permanently_blocked: false,
+        login_failed_attempts_last_hour: 0,
         created_at: row.get(7),
         updated_at: row.get(8),
         last_login_at: row.get(9),
@@ -10026,6 +10766,7 @@ async fn create_postgres_experiment_app_user_command(
 async fn login_postgres_experiment_admin_command(
     app: tauri::AppHandle,
     runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    auth_throttle_state: tauri::State<'_, PostgresExperimentAuthThrottleState>,
     request: LoginPostgresExperimentAdminRequest,
 ) -> Result<PostgresExperimentAuthSession, String> {
     ensure_postgres_experiment_auth_bootstrap_ready(&app)?;
@@ -10033,6 +10774,7 @@ async fn login_postgres_experiment_admin_command(
     let identity = load_or_create_postgres_bootstrap_identity(&app)?;
     let username = identity.superuser_name.clone();
     let password = request.password.trim().to_string();
+    let auth_origin = "local";
     append_postgres_experiment_auth_diagnostics_best_effort(
         &app,
         "postgres.auth.login",
@@ -10040,6 +10782,9 @@ async fn login_postgres_experiment_admin_command(
         "PostgreSQL administrator login attempted.",
         serde_json::json!({
             "authKind": "postgres_admin",
+            "username": username.clone(),
+            "clientIp": auth_origin,
+            "origin": auth_origin,
             "rememberSession": request.remember_session,
         }),
     );
@@ -10051,10 +10796,34 @@ async fn login_postgres_experiment_admin_command(
             "PostgreSQL administrator login rejected.",
             serde_json::json!({
                 "authKind": "postgres_admin",
+                "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": "missing_password",
             }),
         );
         return Err("Enter the PostgreSQL administrator password.".to_string());
+    }
+    if let Err(throttle_error) = check_postgres_auth_throttle(
+        &auth_throttle_state,
+        "postgres_admin",
+        &username,
+        auth_origin,
+    ) {
+        append_postgres_experiment_auth_diagnostics_best_effort(
+            &app,
+            "postgres.auth.login",
+            "rejected",
+            "PostgreSQL administrator login rejected by sign-in throttling.",
+            serde_json::json!({
+                "authKind": "postgres_admin",
+                "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
+                "reason": "rate_limited",
+            }),
+        );
+        return Err(throttle_error);
     }
     let psql_path = bundled_postgres_psql_path(&app)?;
     let admin_login_result = run_psql_command_with_binary(
@@ -10075,6 +10844,9 @@ async fn login_postgres_experiment_admin_command(
             "PostgreSQL administrator login failed.",
             serde_json::json!({
                 "authKind": "postgres_admin",
+                "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": if runtime_unavailable { "database_unavailable" } else { "password_rejected" },
                 "postgresError": login_error,
             }),
@@ -10085,8 +10857,20 @@ async fn login_postgres_experiment_admin_command(
                     .to_string(),
             );
         }
+        record_postgres_auth_failure(
+            &auth_throttle_state,
+            "postgres_admin",
+            &username,
+            auth_origin,
+        );
         return Err("The PostgreSQL administrator password was not accepted.".to_string());
     }
+    clear_postgres_auth_failures(
+        &auth_throttle_state,
+        "postgres_admin",
+        &username,
+        auth_origin,
+    );
 
     let session = PostgresExperimentAuthSession {
         auth_kind: "postgres_admin".to_string(),
@@ -10110,6 +10894,9 @@ async fn login_postgres_experiment_admin_command(
         serde_json::json!({
             "authKind": session.auth_kind.clone(),
             "userId": session.user.id.clone(),
+            "username": username.clone(),
+            "clientIp": auth_origin,
+            "origin": auth_origin,
             "rememberSession": request.remember_session,
         }),
     );
@@ -10132,12 +10919,14 @@ async fn login_postgres_experiment_admin_command(
 async fn login_postgres_experiment_app_user_command(
     app: tauri::AppHandle,
     runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    auth_throttle_state: tauri::State<'_, PostgresExperimentAuthThrottleState>,
     request: LoginPostgresExperimentAppUserRequest,
 ) -> Result<PostgresExperimentAuthSession, String> {
     ensure_postgres_experiment_auth_bootstrap_ready(&app)?;
 
     let username = request.username.trim().to_lowercase();
     let password = request.password.trim().to_string();
+    let auth_origin = "local";
     append_postgres_experiment_auth_diagnostics_best_effort(
         &app,
         "postgres.auth.login",
@@ -10146,6 +10935,8 @@ async fn login_postgres_experiment_app_user_command(
         serde_json::json!({
             "authKind": "app_user",
             "username": username.clone(),
+            "clientIp": auth_origin,
+            "origin": auth_origin,
             "rememberSession": request.remember_session,
         }),
     );
@@ -10158,6 +10949,8 @@ async fn login_postgres_experiment_app_user_command(
             "PostgreSQL app user login rejected.",
             serde_json::json!({
                 "authKind": "app_user",
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": "missing_username",
             }),
         );
@@ -10172,6 +10965,8 @@ async fn login_postgres_experiment_app_user_command(
             serde_json::json!({
                 "authKind": "app_user",
                 "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": "username_contains_whitespace",
             }),
         );
@@ -10186,10 +10981,46 @@ async fn login_postgres_experiment_app_user_command(
             serde_json::json!({
                 "authKind": "app_user",
                 "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": "missing_password",
             }),
         );
         return Err("Enter your password.".to_string());
+    }
+    if let Err(block_error) = check_persistent_postgres_auth_block(&app, &username) {
+        append_postgres_experiment_auth_diagnostics_best_effort(
+            &app,
+            "postgres.auth.login",
+            "rejected",
+            "PostgreSQL app user login rejected by account block.",
+            serde_json::json!({
+                "authKind": "app_user",
+                "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
+                "reason": "account_blocked",
+            }),
+        );
+        return Err(block_error);
+    }
+    if let Err(throttle_error) =
+        check_postgres_auth_throttle(&auth_throttle_state, "app_user", &username, auth_origin)
+    {
+        append_postgres_experiment_auth_diagnostics_best_effort(
+            &app,
+            "postgres.auth.login",
+            "rejected",
+            "PostgreSQL app user login rejected by sign-in throttling.",
+            serde_json::json!({
+                "authKind": "app_user",
+                "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
+                "reason": "rate_limited",
+            }),
+        );
+        return Err(throttle_error);
     }
 
     let config = load_postgres_runtime_config(&app)?;
@@ -10205,6 +11036,8 @@ async fn login_postgres_experiment_app_user_command(
             serde_json::json!({
                 "authKind": "app_user",
                 "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": if runtime_unavailable { "database_unavailable" } else { "password_rejected" },
                 "postgresError": login_error,
             }),
@@ -10212,6 +11045,28 @@ async fn login_postgres_experiment_app_user_command(
         if runtime_unavailable {
             return Err(
                 "KanQual's local database is still starting or is not reachable yet. Wait a few seconds and try again."
+                    .to_string(),
+            );
+        }
+        record_postgres_auth_failure(&auth_throttle_state, "app_user", &username, auth_origin);
+        let block_entry = active_postgres_auth_block_entry(&app, &username).unwrap_or_default();
+        if block_entry.permanently_blocked {
+            append_postgres_experiment_auth_diagnostics_best_effort(
+                &app,
+                "postgres.auth.login_block",
+                "success",
+                "PostgreSQL app user permanently blocked after repeated failed login attempts.",
+                serde_json::json!({
+                    "authKind": "app_user",
+                    "username": username.clone(),
+                    "clientIp": auth_origin,
+                    "origin": auth_origin,
+                    "reason": "too_many_failed_attempts",
+                    "failedAttemptsLastHour": block_entry.failed_attempts_ms.len(),
+                }),
+            );
+            return Err(
+                "This account is blocked after too many failed sign-in attempts. Ask the administrator to reset the password."
                     .to_string(),
             );
         }
@@ -10231,9 +11086,33 @@ async fn login_postgres_experiment_app_user_command(
             serde_json::json!({
                 "authKind": "app_user",
                 "username": username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": "account_not_found",
             }),
         );
+        record_postgres_auth_failure(&auth_throttle_state, "app_user", &username, auth_origin);
+        let block_entry = active_postgres_auth_block_entry(&app, &username).unwrap_or_default();
+        if block_entry.permanently_blocked {
+            append_postgres_experiment_auth_diagnostics_best_effort(
+                &app,
+                "postgres.auth.login_block",
+                "success",
+                "PostgreSQL app user permanently blocked after repeated failed login attempts.",
+                serde_json::json!({
+                    "authKind": "app_user",
+                    "username": username.clone(),
+                    "clientIp": auth_origin,
+                    "origin": auth_origin,
+                    "reason": "too_many_failed_attempts",
+                    "failedAttemptsLastHour": block_entry.failed_attempts_ms.len(),
+                }),
+            );
+            return Err(
+                "This account is blocked after too many failed sign-in attempts. Ask the administrator to reset the password."
+                    .to_string(),
+            );
+        }
         return Err("No account was found for that username and password.".to_string());
     };
     if !user_record.user.active {
@@ -10246,6 +11125,8 @@ async fn login_postgres_experiment_app_user_command(
                 "authKind": "app_user",
                 "userId": user_record.user.id.clone(),
                 "username": user_record.user.username.clone(),
+                "clientIp": auth_origin,
+                "origin": auth_origin,
                 "reason": "account_disabled",
             }),
         );
@@ -10276,6 +11157,7 @@ async fn login_postgres_experiment_app_user_command(
         user: user_record.user,
         started_at_ms: current_time_ms(),
     };
+    clear_postgres_auth_failures(&auth_throttle_state, "app_user", &username, auth_origin);
     let stored_session = StoredPostgresExperimentAuthSession {
         auth_kind: "app_user".to_string(),
         user_id: session.user.id.clone(),
@@ -10295,6 +11177,8 @@ async fn login_postgres_experiment_app_user_command(
             "userId": session.user.id.clone(),
             "username": session.user.username.clone(),
             "role": session.user.role.clone(),
+            "clientIp": auth_origin,
+            "origin": auth_origin,
             "rememberSession": request.remember_session,
         }),
     );
@@ -10394,7 +11278,9 @@ async fn update_postgres_experiment_app_user_profile_command(
         );
     }
 
-    if let Some(existing_user) = load_postgres_experiment_app_user_by_username(&app, &username).await? {
+    if let Some(existing_user) =
+        load_postgres_experiment_app_user_by_username(&app, &username).await?
+    {
         if existing_user.user.id != session.user.id {
             return Err("An account with that username already exists.".to_string());
         }
@@ -10425,6 +11311,9 @@ async fn update_postgres_experiment_app_user_profile_command(
         active: row.get(4),
         disabled_at: row.get(5),
         must_change_password: row.get(6),
+        login_blocked_until_ms: None,
+        login_permanently_blocked: false,
+        login_failed_attempts_last_hour: 0,
         created_at: row.get(7),
         updated_at: row.get(8),
         last_login_at: row.get(9),
@@ -10526,6 +11415,9 @@ async fn change_postgres_experiment_app_user_password_command(
         active: row.get(4),
         disabled_at: row.get(5),
         must_change_password: row.get(6),
+        login_blocked_until_ms: None,
+        login_permanently_blocked: false,
+        login_failed_attempts_last_hour: 0,
         created_at: row.get(7),
         updated_at: row.get(8),
         last_login_at: row.get(9),
@@ -10641,6 +11533,9 @@ async fn deactivate_postgres_experiment_app_user_command(
         active: row.get(4),
         disabled_at: row.get(5),
         must_change_password: row.get(6),
+        login_blocked_until_ms: None,
+        login_permanently_blocked: false,
+        login_failed_attempts_last_hour: 0,
         created_at: row.get(7),
         updated_at: row.get(8),
         last_login_at: row.get(9),
@@ -10747,6 +11642,9 @@ async fn reactivate_postgres_experiment_app_user_command(
         active: row.get(4),
         disabled_at: row.get(5),
         must_change_password: row.get(6),
+        login_blocked_until_ms: None,
+        login_permanently_blocked: false,
+        login_failed_attempts_last_hour: 0,
         created_at: row.get(7),
         updated_at: row.get(8),
         last_login_at: row.get(9),
@@ -10828,7 +11726,7 @@ async fn reset_postgres_experiment_app_user_password_command(
         .map_err(|e| format!("Could not update PostgreSQL experiment app user after password reset: {e}"))?;
     connection_task.abort();
 
-    let updated = PostgresExperimentAppUser {
+    let updated_without_block_state = PostgresExperimentAppUser {
         id: row.get(0),
         name: row.get(1),
         username: row.get(2),
@@ -10836,6 +11734,9 @@ async fn reset_postgres_experiment_app_user_password_command(
         active: row.get(4),
         disabled_at: row.get(5),
         must_change_password: row.get(6),
+        login_blocked_until_ms: None,
+        login_permanently_blocked: false,
+        login_failed_attempts_last_hour: 0,
         created_at: row.get(7),
         updated_at: row.get(8),
         last_login_at: row.get(9),
@@ -10846,11 +11747,12 @@ async fn reset_postgres_experiment_app_user_password_command(
         "success",
         "PostgreSQL app user password reset.",
         serde_json::json!({
-            "userId": updated.id.clone(),
-            "username": updated.username.clone(),
+            "userId": updated_without_block_state.id.clone(),
+            "username": updated_without_block_state.username.clone(),
             "actorUserId": session.user.id.clone(),
         }),
     );
+    let updated = with_postgres_auth_block_state(&app, updated_without_block_state);
     append_postgres_experiment_last_opened_project_log_best_effort(
         &app,
         &session,
@@ -10888,17 +11790,25 @@ async fn list_postgres_experiment_app_users_command(
     connection_task.abort();
     Ok(rows
         .into_iter()
-        .map(|row| PostgresExperimentAppUser {
-            id: row.get(0),
-            name: row.get(1),
-            username: row.get(2),
-            role: row.get(3),
-            active: row.get(4),
-            disabled_at: row.get(5),
-            must_change_password: row.get(6),
-            created_at: row.get(7),
-            updated_at: row.get(8),
-            last_login_at: row.get(9),
+        .map(|row| {
+            with_postgres_auth_block_state(
+                &app,
+                PostgresExperimentAppUser {
+                    id: row.get(0),
+                    name: row.get(1),
+                    username: row.get(2),
+                    role: row.get(3),
+                    active: row.get(4),
+                    disabled_at: row.get(5),
+                    must_change_password: row.get(6),
+                    login_blocked_until_ms: None,
+                    login_permanently_blocked: false,
+                    login_failed_attempts_last_hour: 0,
+                    created_at: row.get(7),
+                    updated_at: row.get(8),
+                    last_login_at: row.get(9),
+                },
+            )
         })
         .collect())
 }
@@ -10996,6 +11906,9 @@ async fn create_postgres_experiment_project_command(
     let session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
     let name = request.name.trim().to_string();
     let description = request.description.trim().to_string();
+    if session.auth_kind != "postgres_admin" {
+        return Err("Only the local PostgreSQL administrator can create projects.".to_string());
+    }
     if name.is_empty() {
         return Err("Enter a project name.".to_string());
     }
@@ -12021,10 +12934,7 @@ async fn list_postgres_experiment_project_users_command(
             last_active_at: None,
         })
         .collect();
-    let app_user_ids: Vec<String> = users
-        .iter()
-        .map(|user| user.app_user_id.clone())
-        .collect();
+    let app_user_ids: Vec<String> = users.iter().map(|user| user.app_user_id.clone()).collect();
     let last_login_by_user_id =
         load_postgres_experiment_app_user_last_login_map(&app, &app_user_ids).await?;
     for user in users.iter_mut() {
@@ -12196,8 +13106,7 @@ async fn update_postgres_experiment_project_user_command(
     let existing_role: String = existing.get(4);
     if role == "owner" || existing_role == "owner" {
         let requester_role =
-            postgres_experiment_project_membership_role(&app, &project, &session)
-                .await?;
+            postgres_experiment_project_membership_role(&app, &project, &session).await?;
         if !postgres_experiment_session_is_admin(&session)
             && requester_role.as_deref() != Some("owner")
         {
@@ -12312,8 +13221,7 @@ async fn delete_postgres_experiment_project_user_command(
     }
     if existing_role == "owner" {
         let requester_role =
-            postgres_experiment_project_membership_role(&app, &project, &session)
-                .await?;
+            postgres_experiment_project_membership_role(&app, &project, &session).await?;
         if !postgres_experiment_session_is_admin(&session)
             && requester_role.as_deref() != Some("owner")
         {
@@ -13117,7 +14025,7 @@ async fn load_postgres_experiment_object_types_for_client(
     let rows = client
         .query(
             "
-            SELECT id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            SELECT id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
             FROM object_types
             ORDER BY lower(name) ASC, created_at ASC, id ASC
             ",
@@ -14609,6 +15517,7 @@ async fn load_postgres_experiment_object_for_client(
                 o.description,
                 o.shape_override,
                 o.color_override,
+                o.outline_color_override,
                 o.fill_override,
                 o.image_storage_path,
                 e.start_at::text,
@@ -17195,14 +18104,23 @@ async fn list_postgres_experiment_admin_project_audit_log_command(
 ) -> Result<Vec<PostgresExperimentAdminProjectLogEntry>, String> {
     let session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
     if session.auth_kind != "postgres_admin" {
-        return Err("Sign in as the PostgreSQL administrator to view the administrator audit log.".to_string());
+        return Err(
+            "Sign in as the PostgreSQL administrator to view the administrator audit log."
+                .to_string(),
+        );
     }
 
-    let projects = list_postgres_experiment_projects_command(app.clone(), runtime_auth_state).await?;
+    let projects =
+        list_postgres_experiment_projects_command(app.clone(), runtime_auth_state).await?;
     let mut entries = Vec::new();
     for project in projects {
-        if let Err(error) = ensure_postgres_experiment_project_schema(&app, &project.database_name).await {
-            eprintln!("Could not prepare project audit log for {}: {error}", project.id);
+        if let Err(error) =
+            ensure_postgres_experiment_project_schema(&app, &project.database_name).await
+        {
+            eprintln!(
+                "Could not prepare project audit log for {}: {error}",
+                project.id
+            );
             let error_message = error.to_string();
             let project_id = project.id.clone();
             let project_name = project.name.clone();
@@ -17222,49 +18140,58 @@ async fn list_postgres_experiment_admin_project_audit_log_command(
             );
             continue;
         }
-        let (client, connection_task) = match connect_postgres_database(&app, &project.database_name).await {
-            Ok(connection) => connection,
-            Err(error) => {
-                eprintln!("Could not connect to project audit log for {}: {error}", project.id);
-                let error_message = error.to_string();
-                let project_id = project.id.clone();
-                let project_name = project.name.clone();
-                let database_name = project.database_name.clone();
-                append_postgres_experiment_auth_diagnostics_best_effort(
-                    &app,
-                    "postgres.project_database.unreachable",
-                    "failed",
-                    "A project database could not be reached for administrator audit.",
-                    serde_json::json!({
-                        "projectId": project_id,
-                        "projectName": project_name,
-                        "databaseName": database_name,
-                        "phase": "connect",
-                        "error": error_message,
-                    }),
-                );
-                continue;
-            }
-        };
+        let (client, connection_task) =
+            match connect_postgres_database(&app, &project.database_name).await {
+                Ok(connection) => connection,
+                Err(error) => {
+                    eprintln!(
+                        "Could not connect to project audit log for {}: {error}",
+                        project.id
+                    );
+                    let error_message = error.to_string();
+                    let project_id = project.id.clone();
+                    let project_name = project.name.clone();
+                    let database_name = project.database_name.clone();
+                    append_postgres_experiment_auth_diagnostics_best_effort(
+                        &app,
+                        "postgres.project_database.unreachable",
+                        "failed",
+                        "A project database could not be reached for administrator audit.",
+                        serde_json::json!({
+                            "projectId": project_id,
+                            "projectName": project_name,
+                            "databaseName": database_name,
+                            "phase": "connect",
+                            "error": error_message,
+                        }),
+                    );
+                    continue;
+                }
+            };
         match load_postgres_experiment_project_log_for_client(&client, &project.id).await {
             Ok(project_entries) => {
-                entries.extend(project_entries.into_iter().map(|entry| PostgresExperimentAdminProjectLogEntry {
-                    id: entry.id,
-                    project_id: entry.project_id,
-                    project_name: project.name.clone(),
-                    user_id: entry.user_id,
-                    user_name: entry.user_name,
-                    access_mode: entry.access_mode,
-                    action: entry.action,
-                    label: entry.label,
-                    record_id: entry.record_id,
-                    details_json: entry.details_json,
-                    occurred_at: entry.occurred_at,
-                    restored_at: entry.restored_at,
+                entries.extend(project_entries.into_iter().map(|entry| {
+                    PostgresExperimentAdminProjectLogEntry {
+                        id: entry.id,
+                        project_id: entry.project_id,
+                        project_name: project.name.clone(),
+                        user_id: entry.user_id,
+                        user_name: entry.user_name,
+                        access_mode: entry.access_mode,
+                        action: entry.action,
+                        label: entry.label,
+                        record_id: entry.record_id,
+                        details_json: entry.details_json,
+                        occurred_at: entry.occurred_at,
+                        restored_at: entry.restored_at,
+                    }
                 }));
             }
             Err(error) => {
-                eprintln!("Could not load project audit log for {}: {error}", project.id);
+                eprintln!(
+                    "Could not load project audit log for {}: {error}",
+                    project.id
+                );
                 let error_message = error.to_string();
                 let project_id = project.id.clone();
                 let project_name = project.name.clone();
@@ -17301,96 +18228,13 @@ async fn list_postgres_experiment_admin_auth_audit_log_command(
 ) -> Result<Vec<PostgresExperimentAuthAuditEntry>, String> {
     let session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
     if session.auth_kind != "postgres_admin" {
-        return Err("Sign in as the PostgreSQL administrator to view the authentication audit log.".to_string());
+        return Err(
+            "Sign in as the PostgreSQL administrator to view the authentication audit log."
+                .to_string(),
+        );
     }
 
-    let paths = bundled_postgres::resolve_paths(&app)?;
-    let contents = match fs::read_to_string(&paths.runtime_diagnostics_log) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(format!(
-                "Could not read KanQual runtime diagnostics log at {}: {error}",
-                paths.runtime_diagnostics_log
-            ));
-        }
-    };
-
-    let mut entries = Vec::new();
-    for (index, line) in contents.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let parsed: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        let event = parsed
-            .get("event")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
-        if !event.starts_with("postgres.auth.") && event != "postgres.project_database.unreachable" {
-            continue;
-        }
-        let details = parsed
-            .get("details")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        let details_json = serde_json::to_string(&details).ok();
-        let username = details
-            .get("email")
-            .or_else(|| details.get("username"))
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
-        entries.push(PostgresExperimentAuthAuditEntry {
-            id: format!("auth-audit-{}", index),
-            timestamp_ms: parsed
-                .get("timestampMs")
-                .and_then(|value| value.as_u64())
-                .unwrap_or(0),
-            event,
-            outcome: parsed
-                .get("outcome")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .to_string(),
-            message: parsed
-                .get("message")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .to_string(),
-            auth_kind: details
-                .get("authKind")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            user_id: details
-                .get("userId")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            username,
-            client_ip: details
-                .get("clientIp")
-                .or_else(|| details.get("client_ip"))
-                .or_else(|| details.get("ip"))
-                .or_else(|| details.get("remoteAddress"))
-                .or_else(|| details.get("remote_addr"))
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            role: details
-                .get("role")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            reason: details
-                .get("reason")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            details_json,
-        });
-    }
-    entries.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms).then_with(|| b.id.cmp(&a.id)));
-    Ok(entries)
+    Ok(read_combined_postgres_auth_audit_entries(&app))
 }
 
 #[tauri::command]
@@ -19626,6 +20470,12 @@ async fn create_postgres_experiment_object_type_command(
     let description = request.description.trim().to_string();
     let shape = request.shape.trim().to_string();
     let color = request.color.trim().to_string();
+    let outline_color = request
+        .outline_color
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     let fill = request.fill.trim().to_string();
     let image_storage_path = request
         .image_storage_path
@@ -19667,11 +20517,11 @@ async fn create_postgres_experiment_object_type_command(
     let row = client
         .query_one(
             "
-            INSERT INTO object_types (id, name, description, shape, color, fill, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            INSERT INTO object_types (id, name, description, shape, color, outline_color, fill, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
+            &[&object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment object type: {e}"))?;
@@ -19687,6 +20537,7 @@ async fn create_postgres_experiment_object_type_command(
             "name": created.name,
             "shape": created.shape,
             "color": created.color,
+            "outlineColor": created.outline_color,
             "fill": created.fill,
             "attributeCount": 0,
         })),
@@ -19715,6 +20566,12 @@ async fn update_postgres_experiment_object_type_command(
     let description = request.description.trim().to_string();
     let shape = request.shape.trim().to_string();
     let color = request.color.trim().to_string();
+    let outline_color = request
+        .outline_color
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     let fill = request.fill.trim().to_string();
     let image_storage_path = request
         .image_storage_path
@@ -19763,13 +20620,14 @@ async fn update_postgres_experiment_object_type_command(
                 description = $3,
                 shape = $4,
                 color = $5,
-                fill = $6,
-                image_storage_path = $7,
+                outline_color = $6,
+                fill = $7,
+                image_storage_path = $8,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
+            &[&object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment object type: {e}"))?;
@@ -19785,8 +20643,9 @@ async fn update_postgres_experiment_object_type_command(
             "name": updated.name,
             "shape": updated.shape,
             "color": updated.color,
+            "outlineColor": updated.outline_color,
             "fill": updated.fill,
-            "changedFields": ["name", "description", "shape", "color", "fill", "image_storage_path"],
+            "changedFields": ["name", "description", "shape", "color", "outline_color", "fill", "image_storage_path"],
         })),
     )
     .await?;
@@ -19840,7 +20699,7 @@ async fn import_postgres_experiment_object_type_image_command(
             SET image_storage_path = $2,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
             ",
             &[&object_type_id, &image_storage_path],
         )
@@ -19893,7 +20752,7 @@ async fn remove_postgres_experiment_object_type_image_command(
             SET image_storage_path = $2,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
             ",
             &[&object_type_id, &empty_path],
         )
@@ -19929,6 +20788,12 @@ async fn save_postgres_experiment_object_type_command(
     let description = request.description.trim().to_string();
     let shape = request.shape.trim().to_string();
     let color = request.color.trim().to_string();
+    let outline_color = request
+        .outline_color
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
     let fill = request.fill.trim().to_string();
     let image_storage_path = request
         .image_storage_path
@@ -20005,11 +20870,11 @@ async fn save_postgres_experiment_object_type_command(
     let object_type_row = if created {
         tx.query_one(
             "
-            INSERT INTO object_types (id, name, description, shape, color, fill, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            INSERT INTO object_types (id, name, description, shape, color, outline_color, fill, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&resolved_object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
+            &[&resolved_object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
         ).await
     } else {
         tx.query_one(
@@ -20019,13 +20884,14 @@ async fn save_postgres_experiment_object_type_command(
                 description = $3,
                 shape = $4,
                 color = $5,
-                fill = $6,
-                image_storage_path = $7,
+                outline_color = $6,
+                fill = $7,
+                image_storage_path = $8,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&resolved_object_type_id, &name, &description, &shape, &color, &fill, &image_storage_path],
+            &[&resolved_object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
         ).await
     }
     .map_err(|e| format!("Could not save PostgreSQL experiment object type: {e}"))?;
@@ -20225,9 +21091,10 @@ async fn save_postgres_experiment_object_type_command(
             "name": object_type.name,
             "shape": object_type.shape,
             "color": object_type.color,
+            "outlineColor": object_type.outline_color,
             "fill": object_type.fill,
             "attributeCount": attribute_definitions.len(),
-            "changedFields": if created { serde_json::Value::Null } else { serde_json::json!(["name", "description", "shape", "color", "fill", "attributes"]) },
+            "changedFields": if created { serde_json::Value::Null } else { serde_json::json!(["name", "description", "shape", "color", "outline_color", "fill", "attributes"]) },
         })),
     ).await?;
     connection_task.abort();
@@ -21154,6 +22021,7 @@ async fn list_postgres_experiment_objects_command(
                 o.description,
                 o.shape_override,
                 o.color_override,
+                o.outline_color_override,
                 o.fill_override,
                 o.image_storage_path,
                 e.start_at::text,
@@ -21429,6 +22297,12 @@ async fn create_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let outline_color_override = request
+        .outline_color_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let fill_override = request
         .fill_override
         .as_deref()
@@ -21474,10 +22348,10 @@ async fn create_postgres_experiment_object_command(
     client
         .execute(
             "
-            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, fill_override, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, outline_color_override, fill_override, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ",
-            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override, &image_storage_path],
+            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment object: {e}"))?;
@@ -21551,6 +22425,12 @@ async fn update_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let outline_color_override = request
+        .outline_color_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let fill_override = request
         .fill_override
         .as_deref()
@@ -21602,8 +22482,9 @@ async fn update_postgres_experiment_object_command(
                 description = $5,
                 shape_override = $6,
                 color_override = $7,
-                fill_override = $8,
-                image_storage_path = $9,
+                outline_color_override = $8,
+                fill_override = $9,
+                image_storage_path = $10,
                 updated_at = NOW()
             WHERE id = $1
             ",
@@ -21615,6 +22496,7 @@ async fn update_postgres_experiment_object_command(
                 &description,
                 &shape_override,
                 &color_override,
+                &outline_color_override,
                 &fill_override,
                 &image_storage_path,
             ],
@@ -21660,7 +22542,7 @@ async fn update_postgres_experiment_object_command(
             "title": updated.title,
             "objectType": updated.object_type,
             "attributeValueCount": updated.attribute_values.len(),
-            "changedFields": ["object_type_id", "title", "description", "shape_override", "color_override", "fill_override", "event_fields", "attribute_values"],
+            "changedFields": ["object_type_id", "title", "description", "shape_override", "color_override", "outline_color_override", "fill_override", "event_fields", "attribute_values"],
         })),
     )
     .await?;
@@ -21693,6 +22575,12 @@ async fn save_postgres_experiment_object_command(
         .map(str::to_string);
     let color_override = request
         .color_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let outline_color_override = request
+        .outline_color_override
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -21756,10 +22644,10 @@ async fn save_postgres_experiment_object_command(
     if created {
         tx.execute(
             "
-            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, fill_override, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, outline_color_override, fill_override, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ",
-            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override, &image_storage_path],
+            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &image_storage_path],
         ).await
     } else {
         tx.execute(
@@ -21771,12 +22659,13 @@ async fn save_postgres_experiment_object_command(
                 description = $5,
                 shape_override = $6,
                 color_override = $7,
-                fill_override = $8,
-                image_storage_path = $9,
+                outline_color_override = $8,
+                fill_override = $9,
+                image_storage_path = $10,
                 updated_at = NOW()
             WHERE id = $1
             ",
-            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &fill_override, &image_storage_path],
+            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &image_storage_path],
         ).await
     }
     .map_err(|e| format!("Could not save PostgreSQL experiment object: {e}"))?;
@@ -21836,7 +22725,7 @@ async fn save_postgres_experiment_object_command(
             "title": saved.title,
             "objectType": saved.object_type,
             "attributeValueCount": saved.attribute_values.len(),
-            "changedFields": if created { serde_json::Value::Null } else { serde_json::json!(["object_type_id", "title", "description", "shape_override", "color_override", "fill_override", "event_fields", "attribute_values"]) },
+            "changedFields": if created { serde_json::Value::Null } else { serde_json::json!(["object_type_id", "title", "description", "shape_override", "color_override", "outline_color_override", "fill_override", "event_fields", "attribute_values"]) },
         })),
     ).await?;
     connection_task.abort();
@@ -24821,7 +25710,11 @@ fn value_string_required<'a>(value: &'a Value, key: &str, label: &str) -> Result
         .ok_or_else(|| format!("The upgrade backup is missing {label}."))
 }
 
-fn value_array_required<'a>(value: &'a Value, key: &str, label: &str) -> Result<&'a Vec<Value>, String> {
+fn value_array_required<'a>(
+    value: &'a Value,
+    key: &str,
+    label: &str,
+) -> Result<&'a Vec<Value>, String> {
     value
         .get(key)
         .and_then(Value::as_array)
@@ -24880,14 +25773,19 @@ fn validate_upgrade_backup_storage_file(value: &Value) -> Result<(), String> {
         .get("sizeBytes")
         .and_then(Value::as_u64)
         .ok_or_else(|| "The upgrade backup is missing a storage file size.".to_string())?;
-    let bytes = BASE64_STANDARD
-        .decode(bytes_b64)
-        .map_err(|_| "A storage file payload in the upgrade backup is not valid base64.".to_string())?;
+    let bytes = BASE64_STANDARD.decode(bytes_b64).map_err(|_| {
+        "A storage file payload in the upgrade backup is not valid base64.".to_string()
+    })?;
     if bytes.len() as u64 != expected_size {
-        return Err("A storage file payload in the upgrade backup does not match its recorded size.".to_string());
+        return Err(
+            "A storage file payload in the upgrade backup does not match its recorded size."
+                .to_string(),
+        );
     }
     if sha256_hex(&bytes) != expected_sha256 {
-        return Err("A storage file payload in the upgrade backup does not match its checksum.".to_string());
+        return Err(
+            "A storage file payload in the upgrade backup does not match its checksum.".to_string(),
+        );
     }
     Ok(())
 }
@@ -24898,17 +25796,21 @@ fn validate_upgrade_backup_project_manifest(
     storage_files: &[Value],
 ) -> Result<(), String> {
     let database_name = value_string_required(project, "databaseName", "a project database name")?;
-    let expected_dump_sha256 =
-        value_string_required(project, "databaseDumpSha256", "a project database dump checksum")?;
-    let actual_dump_sha256 = project_dumps
-        .get(database_name)
-        .ok_or_else(|| format!("The upgrade backup is missing a dump for project database {database_name}."))?;
+    let expected_dump_sha256 = value_string_required(
+        project,
+        "databaseDumpSha256",
+        "a project database dump checksum",
+    )?;
+    let actual_dump_sha256 = project_dumps.get(database_name).ok_or_else(|| {
+        format!("The upgrade backup is missing a dump for project database {database_name}.")
+    })?;
     if actual_dump_sha256 != expected_dump_sha256 {
         return Err(format!(
             "The upgrade backup project manifest checksum does not match project database {database_name}."
         ));
     }
-    let schema_versions = value_array_required(project, "schemaVersions", "project schema versions")?;
+    let schema_versions =
+        value_array_required(project, "schemaVersions", "project schema versions")?;
     validate_upgrade_backup_schema_versions(
         schema_versions,
         &format!("project {database_name}"),
@@ -24992,7 +25894,9 @@ fn ensure_upgrade_backup_json_shape(text: &str) -> Result<(), String> {
     let control_schema_versions = manifest
         .get("controlSchemaVersions")
         .and_then(Value::as_array)
-        .ok_or_else(|| "The upgrade backup manifest is missing control schema versions.".to_string())?;
+        .ok_or_else(|| {
+            "The upgrade backup manifest is missing control schema versions.".to_string()
+        })?;
     validate_upgrade_backup_schema_versions(
         control_schema_versions,
         "control",
@@ -25008,14 +25912,19 @@ fn ensure_upgrade_backup_json_shape(text: &str) -> Result<(), String> {
             .and_then(Value::as_str)
             .unwrap_or_default()
     {
-        return Err("The upgrade backup control dump checksum does not match its manifest.".to_string());
+        return Err(
+            "The upgrade backup control dump checksum does not match its manifest.".to_string(),
+        );
     }
 
     let project_dumps = value_array_required(&parsed, "projectDumps", "project database dumps")?;
     let mut dump_checksums = std::collections::HashMap::new();
     for dump in project_dumps {
         let database_name = value_string_required(dump, "databaseName", "a project database name")?;
-        validate_upgrade_backup_database_dump(dump, &format!("project database dump {database_name}"))?;
+        validate_upgrade_backup_database_dump(
+            dump,
+            &format!("project database dump {database_name}"),
+        )?;
         dump_checksums.insert(
             database_name.to_string(),
             value_string_required(dump, "sha256", "a project database checksum")?.to_string(),
@@ -25346,7 +26255,10 @@ where
     C: GenericClient + Sync,
 {
     let exists = client
-        .query_opt("SELECT to_regclass('public.app_schema_migrations')::text", &[])
+        .query_opt(
+            "SELECT to_regclass('public.app_schema_migrations')::text",
+            &[],
+        )
         .await
         .map_err(|e| format!("Could not inspect schema migrations table: {e}"))?
         .and_then(|row| row.get::<usize, Option<String>>(0))
@@ -25355,7 +26267,10 @@ where
         return Err("Schema migration metadata is missing.".to_string());
     }
     let rows = client
-        .query("SELECT version FROM app_schema_migrations ORDER BY version", &[])
+        .query(
+            "SELECT version FROM app_schema_migrations ORDER BY version",
+            &[],
+        )
         .await
         .map_err(|e| format!("Could not load schema migration metadata: {e}"))?;
     let versions = rows
@@ -25550,10 +26465,8 @@ async fn create_postgres_experiment_upgrade_backup_command(
         let mut project_storage_files = Vec::new();
         let storage_path = PathBuf::from(&project.storage_path);
         if storage_path.exists() {
-            project_storage_files = collect_postgres_upgrade_backup_storage_files(
-                &project.id,
-                &storage_path,
-            )?;
+            project_storage_files =
+                collect_postgres_upgrade_backup_storage_files(&project.id, &storage_path)?;
         }
         let storage_bytes = project_storage_files
             .iter()
@@ -25698,7 +26611,10 @@ async fn list_postgres_experiment_upgrade_backup_diagnostics_command(
 ) -> Result<PostgresUpgradeBackupDiagnostics, String> {
     let session = require_postgres_experiment_auth_session(&app, Some(&runtime_auth_state)).await?;
     if session.auth_kind != "postgres_admin" {
-        return Err("Sign in as the PostgreSQL administrator before viewing backup diagnostics.".to_string());
+        return Err(
+            "Sign in as the PostgreSQL administrator before viewing backup diagnostics."
+                .to_string(),
+        );
     }
 
     let paths = bundled_postgres::resolve_paths(&app)?;
@@ -25728,7 +26644,8 @@ async fn list_postgres_experiment_upgrade_backup_diagnostics_command(
                 upgrade_dir.display()
             )
         })? {
-            let entry = entry.map_err(|e| format!("Could not inspect upgrade backup folder entry: {e}"))?;
+            let entry =
+                entry.map_err(|e| format!("Could not inspect upgrade backup folder entry: {e}"))?;
             let path = entry.path();
             if !path.is_file() {
                 continue;
@@ -25946,7 +26863,10 @@ async fn restore_postgres_experiment_upgrade_backup_command(
         .await
         .map_err(|e| format!("Could not mark restored users for password reset: {e}"))?;
     let user_rows = client
-        .query("SELECT username FROM app_users ORDER BY lower(username) ASC", &[])
+        .query(
+            "SELECT username FROM app_users ORDER BY lower(username) ASC",
+            &[],
+        )
         .await
         .map_err(|e| format!("Could not load restored users: {e}"))?;
     for row in &user_rows {
@@ -31607,6 +32527,9 @@ pub fn run() {
         .manage(CancelledAttributeSuggestionRuns(Mutex::new(HashSet::new())))
         .manage(NetworkMode(Mutex::new("local".to_string())))
         .manage(PostgresExperimentAuthState(Mutex::new(None)))
+        .manage(PostgresExperimentAuthThrottleState(Mutex::new(
+            HashMap::new(),
+        )))
         .manage(PostgresExperimentProjectSchemaCache(Mutex::new(
             HashSet::new(),
         )))

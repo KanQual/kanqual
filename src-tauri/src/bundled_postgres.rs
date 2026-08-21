@@ -490,7 +490,7 @@ fn hba_remote_cidrs_for_mode(mode: &str, local_ip: Option<&str>) -> Result<Vec<S
 pub fn write_managed_config(
     paths: &BundledPostgresPaths,
     mode: &str,
-    _superuser_name: &str,
+    superuser_name: &str,
     _app_role_name: &str,
     local_ip: Option<&str>,
 ) -> Result<(String, String), String> {
@@ -521,6 +521,10 @@ log_rotation_age = '1d'
 log_rotation_size = '10MB'
 log_min_messages = warning
 log_min_error_statement = error
+log_connections = on
+log_disconnections = on
+log_line_prefix = '%m [%p] %u@%d %r '
+log_timezone = 'UTC'
 datestyle = 'iso, mdy'
 timezone = 'UTC'
 default_text_search_config = 'pg_catalog.english'
@@ -544,6 +548,12 @@ default_text_search_config = 'pg_catalog.english'
         "host all all 127.0.0.1/32 scram-sha-256".to_string(),
         "host all all ::1/128 scram-sha-256".to_string(),
     ];
+    let trimmed_superuser_name = superuser_name.trim();
+    if !trimmed_superuser_name.is_empty() {
+        for cidr in &remote_cidrs {
+            hba_lines.push(format!("host all {trimmed_superuser_name} {cidr} reject"));
+        }
+    }
     for cidr in remote_cidrs {
         hba_lines.push(format!("host all all {cidr} scram-sha-256"));
     }
@@ -566,6 +576,102 @@ fn write_device_mode_config(
     superuser_name: &str,
 ) -> Result<(String, String), String> {
     write_managed_config(paths, "device", superuser_name, "", None)
+}
+
+#[cfg(test)]
+mod managed_config_tests {
+    use super::*;
+
+    fn test_paths(test_name: &str) -> BundledPostgresPaths {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("kanqual_{test_name}_{unique}"));
+        let data_dir = root.join("data");
+        let logs_dir = root.join("logs");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::create_dir_all(&logs_dir).unwrap();
+        BundledPostgresPaths {
+            distribution: "test".to_string(),
+            expected_version: "17".to_string(),
+            app_resource_dir: None,
+            executable_dir: path_string(&root.join("exe")),
+            runtime_root: path_string(&root.join("runtime")),
+            bin_dir: path_string(&root.join("bin")),
+            postgres_binary: path_string(&root.join("bin").join("postgres")),
+            initdb_binary: path_string(&root.join("bin").join("initdb")),
+            pg_ctl_binary: path_string(&root.join("bin").join("pg_ctl")),
+            psql_binary: path_string(&root.join("bin").join("psql")),
+            pg_dump_binary: path_string(&root.join("bin").join("pg_dump")),
+            data_root: path_string(&root),
+            app_logs_dir: path_string(&root.join("app-logs")),
+            runtime_diagnostics_log: path_string(&root.join("runtime.log")),
+            postgres_root: path_string(&root.join("postgres")),
+            data_dir: path_string(&data_dir),
+            logs_dir: path_string(&logs_dir),
+            run_dir: path_string(&root.join("run")),
+            config_dir: path_string(&root.join("config")),
+            backups_root: path_string(&root.join("backups")),
+            automatic_backups_dir: path_string(&root.join("backups").join("automatic")),
+            manual_backups_dir: path_string(&root.join("backups").join("manual")),
+            upgrade_backups_dir: path_string(&root.join("backups").join("upgrade")),
+            exports_root: path_string(&root.join("exports")),
+        }
+    }
+
+    fn generated_config(mode: &str, local_ip: Option<&str>) -> (String, String) {
+        let paths = test_paths(mode);
+        write_managed_config(&paths, mode, "kanqual_admin_test", "kanqual_app", local_ip).unwrap();
+        let postgresql_conf =
+            fs::read_to_string(Path::new(&paths.data_dir).join("postgresql.conf")).unwrap();
+        let pg_hba_conf =
+            fs::read_to_string(Path::new(&paths.data_dir).join("pg_hba.conf")).unwrap();
+        let _ = fs::remove_dir_all(Path::new(&paths.data_root));
+        (postgresql_conf, pg_hba_conf)
+    }
+
+    #[test]
+    fn device_mode_only_writes_loopback_hba_rules() {
+        let (postgresql_conf, pg_hba_conf) = generated_config("device", None);
+
+        assert!(postgresql_conf.contains("listen_addresses = 'localhost'"));
+        assert!(postgresql_conf.contains("log_connections = on"));
+        assert!(postgresql_conf.contains("log_disconnections = on"));
+        assert!(postgresql_conf.contains("log_line_prefix = '%m [%p] %u@%d %r '"));
+        assert!(postgresql_conf.contains("log_timezone = 'UTC'"));
+        assert!(pg_hba_conf.contains("host all all 127.0.0.1/32 scram-sha-256"));
+        assert!(pg_hba_conf.contains("host all all ::1/128 scram-sha-256"));
+        assert!(!pg_hba_conf.contains("0.0.0.0/0"));
+        assert!(!pg_hba_conf.contains("192.168.1.0/24"));
+        assert!(!pg_hba_conf.contains("reject"));
+    }
+
+    #[test]
+    fn lan_mode_rejects_remote_superuser_before_allowing_lan_users() {
+        let (postgresql_conf, pg_hba_conf) = generated_config("network", Some("192.168.1.50"));
+
+        assert!(postgresql_conf.contains("listen_addresses = 'localhost,192.168.1.50'"));
+        let reject = "host all kanqual_admin_test 192.168.1.0/24 reject";
+        let allow = "host all all 192.168.1.0/24 scram-sha-256";
+        assert!(pg_hba_conf.contains(reject));
+        assert!(pg_hba_conf.contains(allow));
+        assert!(pg_hba_conf.find(reject).unwrap() < pg_hba_conf.find(allow).unwrap());
+    }
+
+    #[test]
+    fn internet_mode_rejects_remote_superuser_before_broad_user_rules() {
+        let (postgresql_conf, pg_hba_conf) = generated_config("internet", Some("192.168.1.50"));
+
+        assert!(postgresql_conf.contains("listen_addresses = '*'"));
+        for cidr in ["0.0.0.0/0", "::/0"] {
+            let reject = format!("host all kanqual_admin_test {cidr} reject");
+            let allow = format!("host all all {cidr} scram-sha-256");
+            assert!(pg_hba_conf.contains(&reject));
+            assert!(pg_hba_conf.contains(&allow));
+            assert!(pg_hba_conf.find(&reject).unwrap() < pg_hba_conf.find(&allow).unwrap());
+        }
+    }
 }
 
 fn remove_password_file(path: &Path) {

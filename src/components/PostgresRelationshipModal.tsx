@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import type { PostgresRelationshipAttributeDefinition, PostgresRelationshipType } from "../lib/postgres";
 
 export type PostgresRelationshipEndpointOption = {
@@ -10,12 +10,18 @@ export type PostgresRelationshipEndpointOption = {
 };
 
 type RelationshipTab = "details" | "graphics" | "attributes";
+type RelationshipGraphicMode = "inherit" | "select";
 
 const DEFAULT_RELATIONSHIP_COLOR = "#355070";
 const LINE_SHAPE_OPTIONS = [
   { value: "solid", label: "Solid" },
   { value: "dashed", label: "Dashed" },
+  { value: "long_dashed", label: "Long dash" },
+  { value: "short_dashed", label: "Short dash" },
   { value: "dotted", label: "Dotted" },
+  { value: "loose_dotted", label: "Loose dots" },
+  { value: "dash_dot", label: "Dash-dot" },
+  { value: "dash_dot_dot", label: "Dash-dot-dot" },
 ] as const;
 const LINE_WEIGHT_OPTIONS = [
   { value: 1, label: "Light" },
@@ -36,7 +42,12 @@ function normalizeColor(value: string): string {
 
 function strokeDasharray(shape: string): string | undefined {
   if (shape === "dashed") return "8 6";
+  if (shape === "long_dashed") return "14 7";
+  if (shape === "short_dashed") return "5 5";
   if (shape === "dotted") return "2 6";
+  if (shape === "loose_dotted") return "2 10";
+  if (shape === "dash_dot") return "10 5 2 5";
+  if (shape === "dash_dot_dot") return "10 5 2 5 2 5";
   return undefined;
 }
 
@@ -52,7 +63,9 @@ function hexToRgba(hex: string, alpha: number): string {
 function pickerOptionStyle(selected: boolean, color: string) {
   return {
     borderColor: selected ? color : hexToRgba(color, 0.22),
-    background: `linear-gradient(180deg, ${hexToRgba(color, selected ? 0.14 : 0.06)}, rgba(255, 255, 255, 0.96))`,
+    background: selected
+      ? "linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 16%, var(--color-surface)) 0%, rgba(255, 255, 255, 0.96) 100%)"
+      : "linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)) 0%, rgba(255, 255, 255, 0.96) 100%)",
     boxShadow: selected ? `0 0 0 1px ${hexToRgba(color, 0.35)}` : undefined,
   };
 }
@@ -68,6 +81,36 @@ function RelationshipEndpointSingleSelect({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const [sortKey, setSortKey] = useState<"name" | "type">("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const selectedRowRef = useRef<HTMLTableRowElement | null>(null);
+  const sortedOptions = useMemo(() => {
+    return [...options].sort((left, right) => {
+      const primary = left[sortKey].localeCompare(right[sortKey], undefined, { sensitivity: "base", numeric: true });
+      const fallback = left.name.localeCompare(right.name, undefined, { sensitivity: "base", numeric: true });
+      const comparison = primary || fallback;
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [options, sortDirection, sortKey]);
+
+  useEffect(() => {
+    selectedRowRef.current?.scrollIntoView({ block: "center" });
+  }, [sortedOptions, value]);
+
+  function handleSort(nextSortKey: "name" | "type") {
+    if (sortKey === nextSortKey) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextSortKey);
+    setSortDirection("asc");
+  }
+
+  function sortIcon(column: "name" | "type") {
+    if (sortKey !== column) return " ↕";
+    return sortDirection === "asc" ? " ↑" : " ↓";
+  }
+
   return (
     <label className="form-label">
       {label}
@@ -75,16 +118,25 @@ function RelationshipEndpointSingleSelect({
         <table className="users-table">
           <thead>
             <tr>
-              <th className="users-th" style={{ width: "62%" }}>Name</th>
-              <th className="users-th" style={{ width: "38%" }}>Type</th>
+              <th className="users-th" style={{ width: "62%" }} aria-sort={sortKey === "name" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                <button type="button" className="users-th-sort" onClick={() => handleSort("name")}>
+                  Name<span className="users-sort-icon">{sortIcon("name")}</span>
+                </button>
+              </th>
+              <th className="users-th" style={{ width: "38%" }} aria-sort={sortKey === "type" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                <button type="button" className="users-th-sort" onClick={() => handleSort("type")}>
+                  Type<span className="users-sort-icon">{sortIcon("type")}</span>
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
-            {options.length === 0 ? (
+            {sortedOptions.length === 0 ? (
               <tr><td className="users-td-msg" colSpan={2}>No matching endpoints.</td></tr>
-            ) : options.map((option) => (
+            ) : sortedOptions.map((option) => (
               <tr
                 key={option.key}
+                ref={value === option.key ? selectedRowRef : undefined}
                 className="users-row"
                 style={{ background: value === option.key ? "rgba(53, 80, 112, 0.10)" : undefined, cursor: "pointer" }}
                 onClick={() => onChange(option.key)}
@@ -208,6 +260,11 @@ export function PostgresRelationshipModal({
   const inheritedArrowhead = selectedType?.arrowhead || "one_sided";
   const effectiveArrowhead = arrowheadOverride.trim() || inheritedArrowhead;
   const [validationWarning, setValidationWarning] = useState("");
+  const [graphicMode, setGraphicMode] = useState<RelationshipGraphicMode>(
+    colorOverride.trim() || lineShapeOverride.trim() || lineWeightOverride != null || arrowheadOverride.trim()
+      ? "select"
+      : "inherit",
+  );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     const fromIsValid = availableFromEndpoints.some((option) => option.key === fromEndpointKey);
@@ -220,6 +277,24 @@ export function PostgresRelationshipModal({
     }
     setValidationWarning("");
     void onSubmit(event);
+  }
+
+  function handleSwapEndpoints() {
+    setValidationWarning("");
+    const nextFromEndpointKey = toEndpointKey;
+    const nextToEndpointKey = fromEndpointKey;
+    setFromEndpointKey(nextFromEndpointKey);
+    setToEndpointKey(nextToEndpointKey);
+  }
+
+  function handleGraphicModeChange(nextMode: RelationshipGraphicMode) {
+    setGraphicMode(nextMode);
+    if (nextMode === "inherit") {
+      setColorOverride("");
+      setLineShapeOverride("");
+      setLineWeightOverride(null);
+      setArrowheadOverride("");
+    }
   }
 
   return (
@@ -277,11 +352,55 @@ export function PostgresRelationshipModal({
                   <option value="__new_relationship_type__">Add new relationship type...</option>
                 </select>
               </label>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+                  gap: 12,
+                  alignItems: "start",
+                }}
+              >
                 <RelationshipEndpointSingleSelect label="From" options={availableFromEndpoints} value={fromEndpointKey} onChange={(value) => {
                   setValidationWarning("");
                   setFromEndpointKey(value);
                 }} />
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    height: 188,
+                    marginTop: 28,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleSwapEndpoints}
+                    disabled={submitting || !fromEndpointKey || !toEndpointKey}
+                    aria-label="Switch from and to endpoints"
+                    title="Switch from and to endpoints"
+                    style={{
+                      width: 24,
+                      height: 24,
+                      padding: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M7 6h12m0 0-4-4m4 4-4 4M17 18H5m0 0 4 4m-4-4 4-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
                 <RelationshipEndpointSingleSelect label="To" options={availableToEndpoints} value={toEndpointKey} onChange={(value) => {
                   setValidationWarning("");
                   setToEndpointKey(value);
@@ -294,52 +413,77 @@ export function PostgresRelationshipModal({
             </>
           ) : tab === "graphics" ? (
             <>
-              <label className="form-label">
-                <OverrideHeader label="Color" inherited={!colorOverride.trim()} onReset={() => setColorOverride("")} />
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <input className="form-input form-input--color" type="color" value={effectiveColor} onChange={(event) => setColorOverride(event.target.value)} />
-                  <input className="form-input" value={!colorOverride.trim() ? inheritedColor : colorOverride} onChange={(event) => setColorOverride(event.target.value)} style={{ flex: "0 0 148px", fontFamily: "monospace" }} />
-                </div>
-              </label>
-              <label className="form-label">
-                <OverrideHeader label="Line shape" inherited={!lineShapeOverride.trim()} onReset={() => setLineShapeOverride("")} />
-                <div className="shape-picker-grid shape-picker-grid--lines" role="radiogroup" aria-label="Line shape selection">
-                  {LINE_SHAPE_OPTIONS.map((option) => (
-                    <button key={option.value} type="button" className={`shape-picker-option${effectiveLineShape === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setLineShapeOverride(option.value === inheritedLineShape ? "" : option.value)} style={pickerOptionStyle(effectiveLineShape === option.value, effectiveColor)}>
-                      <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
-                        <svg width="92" height="18" viewBox="0 0 92 18"><line x1="4" y1="9" x2="88" y2="9" stroke={effectiveColor} strokeWidth="3" strokeDasharray={strokeDasharray(option.value)} /></svg>
-                      </div>
-                      <span className="shape-picker-label">{option.label}</span>
+              <div style={{ display: "flex", justifyContent: "center" }}>
+                <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label="Relationship graphic source">
+                  {(["inherit", "select"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="tab"
+                      aria-selected={graphicMode === mode}
+                      className={`segmented-control-option ${graphicMode === mode ? "segmented-control-option--active" : ""}`}
+                      onClick={() => handleGraphicModeChange(mode)}
+                      disabled={submitting}
+                    >
+                      {mode.slice(0, 1).toUpperCase() + mode.slice(1)}
                     </button>
                   ))}
                 </div>
-              </label>
-              <label className="form-label">
-                <OverrideHeader label="Line weight" inherited={lineWeightOverride == null} onReset={() => setLineWeightOverride(null)} />
-                <div className="shape-picker-grid shape-picker-grid--lines" role="radiogroup" aria-label="Line weight selection">
-                  {LINE_WEIGHT_OPTIONS.map((option) => (
-                    <button key={option.value} type="button" className={`shape-picker-option${effectiveLineWeight === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setLineWeightOverride(option.value === inheritedLineWeight ? null : option.value)} style={pickerOptionStyle(effectiveLineWeight === option.value, effectiveColor)}>
-                      <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
-                        <svg width="108" height="24" viewBox="0 0 108 24"><line x1="10" y1="12" x2="98" y2="12" stroke={effectiveColor} strokeWidth={option.value} strokeLinecap="round" /></svg>
-                      </div>
-                      <span className="shape-picker-label">{option.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </label>
-              <label className="form-label">
-                <OverrideHeader label="Arrowheads" inherited={!arrowheadOverride.trim()} onReset={() => setArrowheadOverride("")} />
-                <div className="shape-picker-grid shape-picker-grid--lines" role="radiogroup" aria-label="Arrowhead selection">
-                  {ARROWHEAD_OPTIONS.map((option) => (
-                    <button key={option.value} type="button" className={`shape-picker-option${effectiveArrowhead === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setArrowheadOverride(option.value === inheritedArrowhead ? "" : option.value)} style={pickerOptionStyle(effectiveArrowhead === option.value, effectiveColor)}>
-                      <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
-                        <svg width="92" height="18" viewBox="0 0 92 18"><line x1="4" y1="9" x2="88" y2="9" stroke={effectiveColor} strokeWidth="2" markerEnd={option.value !== "none" ? "url(#arrow-shared)" : undefined} markerStart={option.value === "double_sided" ? "url(#arrow-shared)" : undefined} /><defs><marker id="arrow-shared" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={effectiveColor} /></marker></defs></svg>
-                      </div>
-                      <span className="shape-picker-label">{option.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </label>
+              </div>
+              {graphicMode === "inherit" ? (
+                <p className="auth-hint" style={{ margin: "4px 0 0", textAlign: "center" }}>
+                  This relationship will inherit its graphical elements from its relationship type.
+                </p>
+              ) : (
+                <>
+                  <label className="form-label">
+                    <OverrideHeader label="Color" inherited={!colorOverride.trim()} onReset={() => setColorOverride("")} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <input className="form-input form-input--color" type="color" value={effectiveColor} onChange={(event) => setColorOverride(event.target.value)} />
+                      <input className="form-input" value={!colorOverride.trim() ? inheritedColor : colorOverride} onChange={(event) => setColorOverride(event.target.value)} style={{ flex: "0 0 148px", fontFamily: "monospace" }} />
+                    </div>
+                  </label>
+                  <label className="form-label">
+                    <OverrideHeader label="Line shape" inherited={!lineShapeOverride.trim()} onReset={() => setLineShapeOverride("")} />
+                    <div className="shape-picker-grid shape-picker-grid--lines" role="radiogroup" aria-label="Line shape selection">
+                      {LINE_SHAPE_OPTIONS.map((option) => (
+                        <button key={option.value} type="button" className={`shape-picker-option${effectiveLineShape === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setLineShapeOverride(option.value === inheritedLineShape ? "" : option.value)} style={pickerOptionStyle(effectiveLineShape === option.value, effectiveColor)}>
+                          <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
+                            <svg width="92" height="18" viewBox="0 0 92 18"><line x1="4" y1="9" x2="88" y2="9" stroke={effectiveColor} strokeWidth="3" strokeDasharray={strokeDasharray(option.value)} /></svg>
+                          </div>
+                          <span className="shape-picker-label">{option.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </label>
+                  <label className="form-label">
+                    <OverrideHeader label="Line weight" inherited={lineWeightOverride == null} onReset={() => setLineWeightOverride(null)} />
+                    <div className="shape-picker-grid shape-picker-grid--lines" role="radiogroup" aria-label="Line weight selection">
+                      {LINE_WEIGHT_OPTIONS.map((option) => (
+                        <button key={option.value} type="button" className={`shape-picker-option${effectiveLineWeight === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setLineWeightOverride(option.value === inheritedLineWeight ? null : option.value)} style={pickerOptionStyle(effectiveLineWeight === option.value, effectiveColor)}>
+                          <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
+                            <svg width="108" height="24" viewBox="0 0 108 24"><line x1="10" y1="12" x2="98" y2="12" stroke={effectiveColor} strokeWidth={option.value} strokeLinecap="round" /></svg>
+                          </div>
+                          <span className="shape-picker-label">{option.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </label>
+                  <label className="form-label">
+                    <OverrideHeader label="Arrowheads" inherited={!arrowheadOverride.trim()} onReset={() => setArrowheadOverride("")} />
+                    <div className="shape-picker-grid shape-picker-grid--lines" role="radiogroup" aria-label="Arrowhead selection">
+                      {ARROWHEAD_OPTIONS.map((option) => (
+                        <button key={option.value} type="button" className={`shape-picker-option${effectiveArrowhead === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setArrowheadOverride(option.value === inheritedArrowhead ? "" : option.value)} style={pickerOptionStyle(effectiveArrowhead === option.value, effectiveColor)}>
+                          <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
+                            <svg width="92" height="18" viewBox="0 0 92 18"><line x1="4" y1="9" x2="88" y2="9" stroke={effectiveColor} strokeWidth="2" markerEnd={option.value !== "none" ? "url(#arrow-shared)" : undefined} markerStart={option.value === "double_sided" ? "url(#arrow-shared)" : undefined} /><defs><marker id="arrow-shared" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={effectiveColor} /></marker></defs></svg>
+                          </div>
+                          <span className="shape-picker-label">{option.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </label>
+                </>
+              )}
             </>
           ) : attributeDefinitions.length > 0 ? (
             <div className="case-detail-attributes-table-wrap">

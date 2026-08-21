@@ -19,11 +19,23 @@ type CanvasObjectShape =
   | "trapezoid"
   | "tag"
   | "star";
-type CanvasRelationshipLineShape = "solid" | "dashed" | "dotted";
+type CanvasRelationshipLineShape =
+  | "solid"
+  | "dashed"
+  | "long_dashed"
+  | "short_dashed"
+  | "dotted"
+  | "loose_dotted"
+  | "dash_dot"
+  | "dash_dot_dot";
 type CanvasRelationshipArrowhead = "one_sided" | "double_sided" | "none";
+
+export const POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON =
+  "-0.84 -0.92 0.28 -0.92 0.84 -0.36 0.84 0.82 -0.84 0.82";
 
 type PostgresCanvasCytoscapeNodeData = {
   color: string;
+  outlineColor: string;
   backgroundColor: string;
   backgroundOpacity: number;
   borderWidth: number;
@@ -31,12 +43,31 @@ type PostgresCanvasCytoscapeNodeData = {
   shadowOpacity: number;
   fill: CanvasObjectFill;
   shape: CanvasObjectShape;
+  sourceImage?: string;
+  sourceImageWidth?: number;
+  sourceImageHeight?: number;
+  sourceSilhouettePolygon?: string;
   textColor: string;
   textMaxWidth: number;
   width: number;
   height: number;
   label: string;
 };
+
+function getPostgresCanvasCytoscapeLineStyle(lineShape: CanvasRelationshipLineShape): "solid" | "dashed" | "dotted" {
+  if (lineShape === "solid") return "solid";
+  if (lineShape === "dotted" || lineShape === "loose_dotted") return "dotted";
+  return "dashed";
+}
+
+function getPostgresCanvasCytoscapeDashPattern(lineShape: CanvasRelationshipLineShape): number[] | undefined {
+  if (lineShape === "long_dashed") return [14, 7];
+  if (lineShape === "short_dashed") return [5, 5];
+  if (lineShape === "loose_dotted") return [2, 10];
+  if (lineShape === "dash_dot") return [10, 5, 2, 5];
+  if (lineShape === "dash_dot_dot") return [10, 5, 2, 5, 2, 5];
+  return undefined;
+}
 
 function getPostgresCanvasCytoscapeShape(shape: CanvasObjectShape): string {
   switch (shape) {
@@ -115,12 +146,17 @@ export function buildPostgresCanvasCytoscapeElements(args: {
   ) => {
     shape: CanvasObjectShape;
     color: string;
+    outlineColor?: string;
     fill: CanvasObjectFill;
+    sourceImage?: string;
+    sourceImageWidth?: number;
+    sourceImageHeight?: number;
   };
   getObjectSurfaceStyle: (
     color: string,
     fill: CanvasObjectFill,
     selected?: boolean,
+    outlineColor?: string,
   ) => {
     textColor: string;
   };
@@ -158,30 +194,39 @@ export function buildPostgresCanvasCytoscapeElements(args: {
     if (!nodeState) return elements;
     const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
     const appearance = getObjectAppearance(object, objectTypeRecord);
-    const surface = getObjectSurfaceStyle(appearance.color, appearance.fill, false);
+    const outlineColor = appearance.outlineColor || appearance.color;
+    const surface = getObjectSurfaceStyle(appearance.color, appearance.fill, false, outlineColor);
     const { width, height } = getNodeRenderedDimensions(appearance.shape, nodeState);
     const isFilled = appearance.fill === "filled";
+    const sourceImage = appearance.sourceImage ?? "";
+    const sourceImageWidth = Math.max(42, width * 0.98);
+    const sourceImageHeight = Math.max(42, height * 0.98);
 
     elements.push({
       group: "nodes",
       data: {
         id: object.id,
         color: appearance.color,
+        outlineColor,
         backgroundColor: appearance.color,
         backgroundOpacity: isFilled ? 1 : 0,
         borderWidth: isFilled ? 2 : 3,
-        shadowColor: appearance.color,
+        shadowColor: outlineColor,
         shadowOpacity: isFilled ? 0.18 : 0.1,
         fill: appearance.fill,
         shape: appearance.shape,
+        sourceImage,
+        sourceImageWidth: appearance.sourceImageWidth ?? sourceImageWidth,
+        sourceImageHeight: appearance.sourceImageHeight ?? sourceImageHeight,
+        sourceSilhouettePolygon: sourceImage ? POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON : "",
         textColor: surface.textColor,
         textMaxWidth: Math.max(72, getPostgresCanvasTextMaxWidth(appearance.shape, width)),
         width,
         height,
-        label: getPostgresCanvasNodeLabel(object),
+        label: sourceImage ? "" : getPostgresCanvasNodeLabel(object),
       } satisfies PostgresCanvasCytoscapeNodeData & { id: string },
       position: { x: nodeState.x + width / 2, y: nodeState.y + height / 2 },
-      classes: `canvas-object canvas-object--${appearance.shape}`,
+      classes: `canvas-object canvas-object--${appearance.shape}${sourceImage ? " canvas-object--source-image" : ""}`,
     });
     return elements;
   }, []);
@@ -206,7 +251,8 @@ export function buildPostgresCanvasCytoscapeElements(args: {
           label: relationship.relationshipType,
           color: appearance.color,
           strokeWidth: getRelationshipStrokeWidth(appearance.lineWeight),
-          lineStyle: appearance.lineShape,
+          lineStyle: getPostgresCanvasCytoscapeLineStyle(appearance.lineShape),
+          lineDashPattern: getPostgresCanvasCytoscapeDashPattern(appearance.lineShape),
           targetArrow: appearance.arrowhead === "none" ? "none" : "triangle",
           sourceArrow: appearance.arrowhead === "double_sided" ? "triangle" : "none",
         },
@@ -228,7 +274,7 @@ export const POSTGRES_CYTOSCAPE_STYLESHEET = [
       "background-color": (element: { data: (key: string) => string | number }) => String(element.data("backgroundColor")),
       "background-opacity": (element: { data: (key: string) => string | number }) => Number(element.data("backgroundOpacity")),
       "border-width": (element: { data: (key: string) => string | number }) => Number(element.data("borderWidth")),
-      "border-color": (element: { data: (key: string) => string }) => element.data("color"),
+      "border-color": (element: { data: (key: string) => string }) => element.data("outlineColor"),
       "border-style": "solid",
       label: (element: { data: (key: string) => string }) => element.data("label"),
       color: (element: { data: (key: string) => string }) => element.data("textColor"),
@@ -266,6 +312,44 @@ export const POSTGRES_CYTOSCAPE_STYLESHEET = [
     },
   },
   {
+    selector: "node.canvas-object.relationship-draft-target",
+    style: {
+      "outline-width": 10,
+      "outline-color": "rgba(245, 158, 11, 0.34)",
+      "outline-opacity": 1,
+      "outline-offset": 3,
+    },
+  },
+  {
+    selector: "node.canvas-object--source-image",
+    style: {
+      shape: "polygon",
+      "shape-polygon-points": (element: { data: (key: string) => string }) => element.data("sourceSilhouettePolygon") || POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON,
+      "background-image": (element: { data: (key: string) => string }) => element.data("sourceImage"),
+      "background-fit": "none",
+      "background-width": (element: { data: (key: string) => number }) => element.data("sourceImageWidth"),
+      "background-height": (element: { data: (key: string) => number }) => element.data("sourceImageHeight"),
+      "background-position-x": "50%",
+      "background-position-y": "50%",
+      "background-repeat": "no-repeat",
+      "background-clip": "none",
+      "background-image-opacity": 1,
+      "background-opacity": 0,
+      "border-width": (element: { data: (key: string) => string | number }) => Math.max(2, Number(element.data("borderWidth"))),
+      "text-valign": "bottom",
+      "text-margin-y": 10,
+    },
+  },
+  {
+    selector: "node.canvas-object--source-image:selected",
+    style: {
+      "outline-opacity": 0,
+      "border-width": 4,
+      "border-color": "#3b82f6",
+      "shadow-opacity": 0.24,
+    },
+  },
+  {
     selector: "node.canvas-object.connect-source",
     style: {
       "outline-width": 10,
@@ -296,6 +380,7 @@ export const POSTGRES_CYTOSCAPE_STYLESHEET = [
     style: {
       width: (element: { data: (key: string) => number }) => element.data("strokeWidth"),
       "line-style": (element: { data: (key: string) => string }) => element.data("lineStyle"),
+      "line-dash-pattern": (element: { data: (key: string) => number[] | undefined }) => element.data("lineDashPattern"),
       "line-color": (element: { data: (key: string) => string }) => element.data("color"),
       "target-arrow-color": (element: { data: (key: string) => string }) => element.data("color"),
       "source-arrow-color": (element: { data: (key: string) => string }) => element.data("color"),

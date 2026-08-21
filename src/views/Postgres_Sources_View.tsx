@@ -219,6 +219,7 @@ type SourceRelationshipRow = {
   otherEndpointName: string;
   otherEndpointType: string;
   description: string;
+  relationship: PostgresRelationship;
 };
 
 type SourceAttributeDefinitionRow = {
@@ -629,7 +630,7 @@ function describeUploadProcessing(file: File): string {
   return "Original file will be stored without text extraction.";
 }
 
-function inferUploadMediaType(file: File): string | null {
+export function inferUploadMediaType(file: File): string | null {
   if (file.type.trim()) return file.type;
   const ext = sourceImportFileExtension(file);
   return mediaTypeFromFileExtension(ext);
@@ -986,6 +987,12 @@ function toRelationshipAttributePayload(
   }));
 }
 
+function valuesForPostgresRelationship(relationship: PostgresRelationship): Record<string, string> {
+  return Object.fromEntries(
+    relationship.attributeValues.map((value) => [value.attributeDefinitionId, value.value]),
+  );
+}
+
 function buildCodeOptions(codes: PostgresCode[]): CodeOption[] {
   const childrenOf = new Map<string, PostgresCode[]>();
   const roots: PostgresCode[] = [];
@@ -1056,7 +1063,7 @@ function RichTextEditor({
   );
 }
 
-function SourceImportModal({
+export function SourceImportModal({
   importSettings,
   saving,
   error,
@@ -1493,12 +1500,12 @@ function SourceImportModal({
       </div>
       {reviewOpen ? (
         <div className="modal-overlay" onClick={() => !saving && setReviewOpen(false)}>
-          <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
+          <div className="modal modal--wide source-import-review-modal" onClick={(event) => event.stopPropagation()}>
             <h2>Approve Sources</h2>
             <p className="users-guide-copy" style={{ marginTop: 0, marginBottom: 16 }}>
               Review these files before creating sources.
             </p>
-            <div className="users-table-wrap">
+            <div className="users-table-wrap source-import-review-table-wrap">
               <table className="users-table">
                 <thead>
                   <tr>
@@ -1579,7 +1586,7 @@ function SourceImportModal({
   );
 }
 
-function SourceEditorModal({
+export function SourceEditorModal({
   title,
   initialRow,
   attributeDefinitions,
@@ -1816,6 +1823,7 @@ function SourceObjectsModal({
 
 function CreateSourceRelationshipModal({
   source,
+  relationship,
   projectId,
   sources,
   objects,
@@ -1828,6 +1836,7 @@ function CreateSourceRelationshipModal({
   onSave,
 }: {
   source: SourceRow;
+  relationship?: PostgresRelationship | null;
   projectId: string;
   sources: SourceRow[];
   objects: PostgresObject[];
@@ -1841,6 +1850,7 @@ function CreateSourceRelationshipModal({
     attributeDefinitions: PostgresRelationshipAttributeDefinition[],
   ) => void;
   onSave: (payload: {
+    relationshipId: string | null;
     relationshipTypeId: string;
     fromEntityType: "object" | "source";
     fromEntityId: string;
@@ -1858,19 +1868,21 @@ function CreateSourceRelationshipModal({
     () => [...relationshipTypes].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
     [relationshipTypes],
   );
-  const [relationshipTypeId, setRelationshipTypeId] = useState(availableRelationshipTypes[0]?.id ?? "");
+  const [relationshipTypeId, setRelationshipTypeId] = useState(relationship?.relationshipTypeId ?? availableRelationshipTypes[0]?.id ?? "");
   const selectedRelationshipType = relationshipTypes.find((relationshipType) => relationshipType.id === relationshipTypeId) ?? null;
-  const [fromEntityType, setFromEntityType] = useState<"object" | "source">("source");
-  const [fromEntityId, setFromEntityId] = useState(source.id);
-  const [toEntityType, setToEntityType] = useState<"object" | "source">("object");
-  const [toEntityId, setToEntityId] = useState("");
+  const [fromEntityType, setFromEntityType] = useState<"object" | "source">(relationship?.fromEntityType ?? "source");
+  const [fromEntityId, setFromEntityId] = useState(relationship?.fromEntityId ?? source.id);
+  const [toEntityType, setToEntityType] = useState<"object" | "source">(relationship?.toEntityType ?? "object");
+  const [toEntityId, setToEntityId] = useState(relationship?.toEntityId ?? "");
   const [modalTab, setModalTab] = useState<"details" | "graphics" | "attributes">("details");
-  const [description, setDescription] = useState("");
-  const [lineShapeOverride, setLineShapeOverride] = useState("");
-  const [lineWeightOverride, setLineWeightOverride] = useState<number | null>(null);
-  const [arrowheadOverride, setArrowheadOverride] = useState("");
-  const [colorOverride, setColorOverride] = useState("");
-  const [attributeValues, setAttributeValues] = useState<Record<string, string>>({});
+  const [description, setDescription] = useState(relationship?.description ?? "");
+  const [lineShapeOverride, setLineShapeOverride] = useState(relationship?.lineShapeOverride ?? "");
+  const [lineWeightOverride, setLineWeightOverride] = useState<number | null>(relationship?.lineWeightOverride ?? null);
+  const [arrowheadOverride, setArrowheadOverride] = useState(relationship?.arrowheadOverride ?? "");
+  const [colorOverride, setColorOverride] = useState(relationship?.colorOverride ?? "");
+  const [attributeValues, setAttributeValues] = useState<Record<string, string>>(
+    relationship ? valuesForPostgresRelationship(relationship) : {},
+  );
   const [newTypeOpen, setNewTypeOpen] = useState(false);
   const [newTypeName, setNewTypeName] = useState("");
   const [newTypeError, setNewTypeError] = useState("");
@@ -1960,6 +1972,7 @@ function CreateSourceRelationshipModal({
     event.preventDefault();
     if (!relationshipTypeId || !fromEntityId || !toEntityId) return;
     void onSave({
+      relationshipId: relationship?.id ?? null,
       relationshipTypeId,
       fromEntityType,
       fromEntityId,
@@ -2023,11 +2036,11 @@ function CreateSourceRelationshipModal({
   return (
     <>
       <PostgresRelationshipModal
-        title="Create relationship"
-        ariaLabel="Create relationship tabs"
+        title={relationship ? "Edit relationship" : "Create relationship"}
+        ariaLabel={relationship ? "Edit relationship tabs" : "Create relationship tabs"}
         tab={modalTab}
         setTab={setModalTab}
-        submitLabel="Create relationship"
+        submitLabel={relationship ? "Save" : "Create relationship"}
         relationshipTypes={availableRelationshipTypes}
         relationshipTypeId={relationshipTypeId}
         setRelationshipTypeId={setRelationshipTypeId}
@@ -2135,6 +2148,7 @@ function PostgresSourceDetail({
   onDeleteAnnotation,
   onKickSourceLock,
   onCreateRelationship,
+  onEditRelationship,
   onSaveSourceObjects,
   canManageSourceRecord,
   projectStoragePath,
@@ -2162,6 +2176,7 @@ function PostgresSourceDetail({
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
   onKickSourceLock: (lock: PostgresSourceLock) => Promise<void>;
   onCreateRelationship: () => void;
+  onEditRelationship: (relationship: PostgresRelationship) => void;
   onSaveSourceObjects: (sourceId: string, objectIds: string[]) => Promise<void>;
   canManageSourceRecord: boolean;
   projectStoragePath: string;
@@ -2635,7 +2650,19 @@ function PostgresSourceDetail({
               <ul className="code-ann-list">
                 {relationships.map((relationship) => (
                   <li key={relationship.id} className="code-ann-item">
-                    <div className="code-ann-doc">{relationship.relationshipType || "Relationship"}</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <div className="code-ann-doc">{relationship.relationshipType || "Relationship"}</div>
+                      {canManageSourceRecord ? (
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          style={{ padding: "2px 8px", fontSize: 12 }}
+                          onClick={() => onEditRelationship(relationship.relationship)}
+                        >
+                          Edit
+                        </button>
+                      ) : null}
+                    </div>
                     <div className="code-ann-meta">
                       {relationship.otherEndpointName}
                       {relationship.otherEndpointType ? ` (${relationship.otherEndpointType})` : ""}
@@ -3084,6 +3111,7 @@ export function PostgresSourcesView({
   });
   const [newSourceOpen, setNewSourceOpen] = useState(false);
   const [newRelationshipSource, setNewRelationshipSource] = useState<SourceRow | null>(null);
+  const [editingSourceRelationship, setEditingSourceRelationship] = useState<PostgresRelationship | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<SourceRow | null>(null);
   const [deleteRow, setDeleteRow] = useState<SourceRow | null>(null);
@@ -3792,6 +3820,7 @@ export function PostgresSourcesView({
   }
 
   async function handleCreateSourceRelationship(payload: {
+    relationshipId: string | null;
     relationshipTypeId: string;
     fromEntityType: "object" | "source";
     fromEntityId: string;
@@ -3810,7 +3839,7 @@ export function PostgresSourcesView({
     try {
       await savePostgresRelationship({
         projectId,
-        relationshipId: null,
+        relationshipId: payload.relationshipId,
         fromEntityType: payload.fromEntityType,
         fromEntityId: payload.fromEntityId,
         toEntityType: payload.toEntityType,
@@ -3824,9 +3853,10 @@ export function PostgresSourcesView({
         attributeValues: payload.attributeValues,
       });
       setNewRelationshipSource(null);
+      setEditingSourceRelationship(null);
       await loadSources();
     } catch (relationshipError) {
-      setSubmitError(relationshipError instanceof Error ? relationshipError.message : "Failed to create relationship.");
+      setSubmitError(relationshipError instanceof Error ? relationshipError.message : "Failed to save relationship.");
       throw relationshipError;
     } finally {
       setSubmitting(false);
@@ -4163,6 +4193,7 @@ export function PostgresSourcesView({
           otherEndpointName: other.name,
           otherEndpointType: other.type,
           description: relationship.description,
+          relationship,
         };
       })
       .sort((left, right) =>
@@ -4395,6 +4426,12 @@ export function PostgresSourcesView({
           onKickSourceLock={handleKickSourceLock}
           onCreateRelationship={() => {
             setNewRelationshipSource(selectedRow);
+            setEditingSourceRelationship(null);
+            setSubmitError(null);
+          }}
+          onEditRelationship={(relationship) => {
+            setNewRelationshipSource(selectedRow);
+            setEditingSourceRelationship(relationship);
             setSubmitError(null);
           }}
           onSaveSourceObjects={handleSaveSourceObjects}
@@ -4462,6 +4499,7 @@ export function PostgresSourcesView({
         {newRelationshipSource ? (
           <CreateSourceRelationshipModal
             source={newRelationshipSource}
+            relationship={editingSourceRelationship}
             projectId={projectId}
             sources={rows}
             objects={objects}
@@ -4472,6 +4510,7 @@ export function PostgresSourcesView({
             onCancel={() => {
               if (submitting) return;
               setNewRelationshipSource(null);
+              setEditingSourceRelationship(null);
               setSubmitError(null);
             }}
             onRelationshipTypeCreated={(relationshipType, attributeDefinitions) => {
@@ -4841,6 +4880,12 @@ export function PostgresSourcesView({
                 onKickSourceLock={handleKickSourceLock}
                 onCreateRelationship={() => {
                   setNewRelationshipSource(selectedRow);
+                  setEditingSourceRelationship(null);
+                  setSubmitError(null);
+                }}
+                onEditRelationship={(relationship) => {
+                  setNewRelationshipSource(selectedRow);
+                  setEditingSourceRelationship(relationship);
                   setSubmitError(null);
                 }}
                 onSaveSourceObjects={handleSaveSourceObjects}
@@ -5036,9 +5081,10 @@ export function PostgresSourcesView({
         />
       )}
       {newRelationshipSource ? (
-        <CreateSourceRelationshipModal
-          source={newRelationshipSource}
-          projectId={projectId}
+          <CreateSourceRelationshipModal
+            source={newRelationshipSource}
+            relationship={editingSourceRelationship}
+            projectId={projectId}
           sources={rows}
           objects={objects}
           relationshipTypes={relationshipTypes}
@@ -5048,6 +5094,7 @@ export function PostgresSourcesView({
           onCancel={() => {
             if (submitting) return;
             setNewRelationshipSource(null);
+            setEditingSourceRelationship(null);
             setSubmitError(null);
           }}
           onRelationshipTypeCreated={(relationshipType, attributeDefinitions) => {

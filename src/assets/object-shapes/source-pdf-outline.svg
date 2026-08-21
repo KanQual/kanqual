@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Outline PDF source">
-  <path d="M14 8 H64 L86 30 V92 H14 Z" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" />
-  <path d="M64 8 V30 H86" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M12 8 H64 L88 32 V88 H12 Z" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" />
+  <path d="M64 8 V32 H88" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" />
   <path d="M24 44 H76 V70 H24 Z" fill="#111111" />
   <text x="50" y="63" text-anchor="middle" font-size="17" font-weight="900" font-family="Arial, sans-serif" letter-spacing="1" fill="#ffffff">PDF</text>
   <path d="M30 80 H70" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" />

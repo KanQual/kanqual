@@ -100,6 +100,54 @@ export function PlusIcon({ className }: IconProps) {
   );
 }
 
+export function MinusIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M5 11h14v2H5z"
+      />
+    </svg>
+  );
+}
+
+export function FitCornersIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z"
+      />
+    </svg>
+  );
+}
+
+export function LayoutNetworkIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M7 5a3 3 0 1 1-2.8 4H3V7h1.2A3 3 0 0 1 7 5m10 0a3 3 0 1 1-2.8 4H9.8a3.7 3.7 0 0 0 0-2h4.4A3 3 0 0 1 17 5M7 7a1 1 0 1 0 0 2 1 1 0 0 0 0-2m10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2M7 15a3 3 0 0 1 2.8 2h4.4a3 3 0 1 1 0 2H9.8A3 3 0 1 1 7 15m0 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2m10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2"
+      />
+    </svg>
+  );
+}
+
 export function CloseIcon({ className }: IconProps) {
   return (
     <svg
@@ -111,6 +159,38 @@ export function CloseIcon({ className }: IconProps) {
       <path
         fill="currentColor"
         d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z"
+      />
+    </svg>
+  );
+}
+
+export function EyeIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M12 5c5.2 0 8.7 4.2 9.8 6.2l.4.8-.4.8C20.7 14.8 17.2 19 12 19s-8.7-4.2-9.8-6.2L1.8 12l.4-.8C3.3 9.2 6.8 5 12 5m0 2C8 7 5.2 10 4.2 12 5.2 14 8 17 12 17s6.8-3 7.8-5C18.8 10 16 7 12 7m0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6m0 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2"
+      />
+    </svg>
+  );
+}
+
+export function EyeOffIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M4.3 3 21 19.7 19.7 21l-3-3A10.8 10.8 0 0 1 12 19c-5.2 0-8.7-4.2-9.8-6.2L1.8 12l.4-.8A15 15 0 0 1 6 6.4L3 4.3zm3.2 4.8A13.3 13.3 0 0 0 4.2 12C5.2 14 8 17 12 17c1.1 0 2.1-.2 3-.6l-1.7-1.7A3 3 0 0 1 9.3 10.7zM12 5c5.2 0 8.7 4.2 9.8 6.2l.4.8-.4.8a13.2 13.2 0 0 1-2.5 3.2l-1.4-1.4c.9-.9 1.5-1.9 1.9-2.6C18.8 10 16 7 12 7c-.8 0-1.5.1-2.2.3L8.2 5.7A11 11 0 0 1 12 5m2.8 6.6-2.4-2.4a3 3 0 0 1 2.4 2.4"
       />
     </svg>
   );
@@ -159,6 +239,70 @@ export function ProcessTranscriptIcon({ className }: IconProps) {
       <path
         fill="currentColor"
         d="M5 3h9l5 5v5.1a6.4 6.4 0 0 0-2-.9V9h-4V5H7v14h5.2a6.4 6.4 0 0 0 .9 2H5zm10 2.4V7h1.6zM9 11h6v2H9zm0 4h4v2H9zm9 0 .5 1.2 1.3.1.2 1.4-1.1.7.4 1.2-1.2.8-1-.9-1 .9-1.2-.8.4-1.2-1.1-.7.2-1.4 1.3-.1.5-1.2zm-1 2.9a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2"
+      />
+    </svg>
+  );
+}
+
+export function SourceIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M5 3h10l4 4v14H5zm9 2.4V8h2.6zM7 5v14h10V10h-5V5zm2 7h6v2H9zm0 4h6v2H9z"
+      />
+    </svg>
+  );
+}
+
+export function ObjectIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M12 3 21 8v8l-9 5-9-5V8zm0 2.3L6.1 8.6 12 12l5.9-3.4zm-7 5v4.5l6 3.3v-4.5zm14 0-6 3.3v4.5l6-3.3z"
+      />
+    </svg>
+  );
+}
+
+export function RelationshipIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M7 5a4 4 0 0 1 3.5 2h3A4 4 0 1 1 13 9h-2a4 4 0 1 1-4-4m0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4m10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4M7 13a4 4 0 0 1 3.5 2h3a4 4 0 1 1 0 2h-3A4 4 0 1 1 7 13m0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4m10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4"
+      />
+    </svg>
+  );
+}
+
+export function CodeIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M11 3h8v8l-9.5 9.5L3 14zm1 2-6.2 9L9.5 17.7 17 10.2V5zm3 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4"
       />
     </svg>
   );
