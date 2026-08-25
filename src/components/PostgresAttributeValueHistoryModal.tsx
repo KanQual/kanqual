@@ -5,6 +5,7 @@ import {
   type PostgresAttributeValueHistoryEntry,
   type PostgresAttributeValueHistoryOwnerKind,
 } from "../lib/postgres";
+import { SettingsModal } from "./SettingsModal";
 
 export type PostgresAttributeValueHistoryTarget = {
   projectId: string;
@@ -81,26 +82,13 @@ export function PostgresAttributeValueHistoryModal({
   }, [target.ownerId, target.ownerKind, target.ownerName]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-title-bar">
-          <div>
-            <h2>Attribute value history</h2>
-        <p className="auth-hint" style={{ marginTop: 0 }}>
-          {target.attributeName} · {ownerLabel}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="modal-icon-close"
-            onClick={onClose}
-            aria-label="Close"
-            title="Close"
-          >
-            x
-          </button>
-        </div>
-
+    <SettingsModal
+      title="Attribute value history"
+      subtitle={`${target.attributeName} · ${ownerLabel}`}
+      onClose={onClose}
+      modalClassName="modal--wide"
+    >
+      <div className="app-settings-modal-body">
         {loading ? (
           <p className="case-card-empty">Loading history...</p>
         ) : error ? (
@@ -135,8 +123,7 @@ export function PostgresAttributeValueHistoryModal({
             </table>
           </div>
         )}
-
       </div>
-    </div>
+    </SettingsModal>
   );
 }

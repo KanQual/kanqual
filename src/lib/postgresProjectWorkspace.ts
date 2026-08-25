@@ -13,6 +13,7 @@ import {
   listPostgresSourceAttributeValues,
   listPostgresSourceLocks,
   listPostgresSourceObjectLinks,
+  listPostgresSourceTypeSettings,
   listPostgresSources,
   type PostgresAnnotationSummary,
   type PostgresCode,
@@ -28,6 +29,7 @@ import {
   type PostgresSourceAttributeValue,
   type PostgresSourceLock,
   type PostgresSourceObjectLink,
+  type PostgresSourceTypeSetting,
 } from "./postgres";
 
 export type PostgresProjectWorkspaceSnapshot = {
@@ -45,6 +47,7 @@ export type PostgresProjectWorkspaceSnapshot = {
   sourceObjectLinks: PostgresSourceObjectLink[];
   sourceAttributeDefinitions: PostgresSourceAttributeDefinition[];
   sourceAttributeValues: PostgresSourceAttributeValue[];
+  sourceTypeSettings: PostgresSourceTypeSetting[];
 };
 
 export type PostgresProjectWorkspaceLegacySnapshot = {
@@ -101,7 +104,7 @@ function mapAnnotationToLegacyAnnotation(annotation: PostgresAnnotationSummary):
 export async function loadPostgresProjectWorkspaceSnapshot(
   projectId: string,
 ): Promise<PostgresProjectWorkspaceSnapshot> {
-  const [sources, codes, annotations, memos, objects, objectTypes, objectAttributeDefinitions, relationships, relationshipTypes, relationshipAttributeDefinitions, sourceLocks, sourceObjectLinks, sourceAttributeDefinitions, sourceAttributeValues] = await Promise.all([
+  const [sources, codes, annotations, memos, objects, objectTypes, objectAttributeDefinitions, relationships, relationshipTypes, relationshipAttributeDefinitions, sourceLocks, sourceObjectLinks, sourceAttributeDefinitions, sourceAttributeValues, sourceTypeSettings] = await Promise.all([
     listPostgresSources(projectId),
     listPostgresCodes(projectId),
     listPostgresAnnotationSummaries(projectId),
@@ -116,6 +119,7 @@ export async function loadPostgresProjectWorkspaceSnapshot(
     listPostgresSourceObjectLinks(projectId),
     listPostgresSourceAttributeDefinitions(projectId),
     listPostgresSourceAttributeValues(projectId),
+    listPostgresSourceTypeSettings(projectId),
   ]);
 
   return {
@@ -133,6 +137,7 @@ export async function loadPostgresProjectWorkspaceSnapshot(
     sourceObjectLinks,
     sourceAttributeDefinitions,
     sourceAttributeValues,
+    sourceTypeSettings,
   };
 }
 

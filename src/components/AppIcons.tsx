@@ -116,6 +116,22 @@ export function MinusIcon({ className }: IconProps) {
   );
 }
 
+export function ZoomIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M10.5 4a6.5 6.5 0 0 1 5.16 10.45l4.44 4.45-1.4 1.4-4.45-4.44A6.5 6.5 0 1 1 10.5 4m0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9m-1 2h2v1.5H13v2h-1.5V13h-2v-1.5H8v-2h1.5z"
+      />
+    </svg>
+  );
+}
+
 export function FitCornersIcon({ className }: IconProps) {
   return (
     <svg
@@ -159,6 +175,38 @@ export function CloseIcon({ className }: IconProps) {
       <path
         fill="currentColor"
         d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z"
+      />
+    </svg>
+  );
+}
+
+export function EditIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M4 16.8 15.8 5 19 8.2 7.2 20H4zm13.2-13.2 1.1-1.1a1.7 1.7 0 0 1 2.4 0l.8.8a1.7 1.7 0 0 1 0 2.4l-1.1 1.1zM6 17.6V18h.4L17.6 6.8l-.4-.4z"
+      />
+    </svg>
+  );
+}
+
+export function DeleteIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-.8 11H6.8zm3 2 .4 7h1.8l-.3-7zm3 0v7h2v-7zm3.1 0-.3 7h1.8l.4-7z"
       />
     </svg>
   );

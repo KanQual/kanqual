@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { useI18n } from "../i18n/provider";
+import { SettingsModal } from "./SettingsModal";
 
 export type SharedAttributeDataType = "text" | "number" | "datetime" | "categorical";
+export type SharedTimelineAttributeRole =
+  | ""
+  | "timeline_start"
+  | "timeline_end"
+  | "timeline_label"
+  | "timeline_item_type"
+  | "timeline_group";
 
 export type SharedAttributeDraft = {
   id?: string;
@@ -9,6 +17,7 @@ export type SharedAttributeDraft = {
   dataType: SharedAttributeDataType;
   description: string;
   options: string[];
+  timelineRole?: SharedTimelineAttributeRole;
 };
 
 export type SharedAttributeModalRow = {
@@ -24,6 +33,13 @@ function inputTypeForDataType(dataType: SharedAttributeDataType) {
 
 function normalizeAttributeOptions(options: string[]): string[] {
   return options.map((option) => option.trim()).filter(Boolean);
+}
+
+function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], dataType: SharedAttributeDataType): boolean {
+  if (!role) return true;
+  if (role === "timeline_start" || role === "timeline_end") return dataType === "datetime";
+  if (role === "timeline_item_type") return dataType === "categorical";
+  return dataType === "text" || dataType === "categorical";
 }
 
 export function AttributeValuesModal({
@@ -67,26 +83,16 @@ export function AttributeValuesModal({
     { value: "datetime", label: t("attributeModal.types.datetime") },
     { value: "categorical", label: t("attributeModal.types.categorical") },
   ];
+  const effectiveTimelineRole = timelineRoleFitsDataType(draft.timelineRole, dataType) ? draft.timelineRole ?? "" : "";
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-title-bar">
-          <div>
-            <h2>{draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}</h2>
-          </div>
-          <button
-            type="button"
-            className="modal-icon-close"
-            onClick={onCancel}
-            disabled={saving}
-            aria-label={t("common.cancel")}
-            title={t("common.cancel")}
-          >
-            x
-          </button>
-        </div>
-
+    <SettingsModal
+      title={draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}
+      onClose={onCancel}
+      closeDisabled={saving}
+      modalClassName="modal--wide"
+    >
+      <div className="app-settings-modal-body">
         <div className="attribute-values-details">
           <label className="form-group">
             <span className="form-label">{t("attributeModal.attributeName")}</span>
@@ -189,8 +195,9 @@ export function AttributeValuesModal({
           )}
         </div>
         {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
+      </div>
 
-        <div className="modal-actions">
+      <div className={`app-settings-modal-footer${onBack ? "" : " app-settings-modal-footer--actions-only"}`}>
           {onBack && <button className="btn" onClick={onBack} disabled={saving}>{t("attributeModal.back")}</button>}
           <button
             className="btn btn--primary"
@@ -202,6 +209,7 @@ export function AttributeValuesModal({
                   dataType,
                   description: description.trim(),
                   options: normalizeAttributeOptions(options),
+                  timelineRole: effectiveTimelineRole,
                 },
                 valuesByOwner,
               )
@@ -210,8 +218,7 @@ export function AttributeValuesModal({
           >
             {saving ? t("attributeModal.saving") : t("attributeModal.save")}
           </button>
-        </div>
       </div>
-    </div>
+    </SettingsModal>
   );
 }

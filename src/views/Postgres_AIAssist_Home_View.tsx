@@ -35,6 +35,7 @@ import {
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { SettingsModal } from "../components/SettingsModal";
 
 const CLOUD_PROVIDER_OPTIONS: Array<{
   value: CloudLlmProvider;
@@ -182,16 +183,7 @@ function DeviceDetailsModal({
   if (!open) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="settings-section-header modal-title-bar">
-          <div>
-            <h2 className="settings-section-title">{title}</h2>
-          </div>
-          <button type="button" className="modal-icon-close" onClick={onClose} aria-label="Close" title="Close">
-            x
-          </button>
-        </div>
+    <SettingsModal title={title} onClose={onClose} modalClassName="modal--wide">
         <div className="app-settings-modal-body">
           <div className="app-settings-modal-sections">
             <section className="app-settings-modal-section">
@@ -199,8 +191,7 @@ function DeviceDetailsModal({
             </section>
           </div>
         </div>
-      </div>
-    </div>
+    </SettingsModal>
   );
 }
 
@@ -220,31 +211,22 @@ function EmbeddingBuildModal({
   if (!open) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal--wide app-settings-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="settings-section-header modal-title-bar">
-          <div>
-            <h2 className="settings-section-title">
-              {hasExistingIndex ? "Rebuild project embeddings" : "Build project embeddings"}
-            </h2>
-            <p className="project-model-modal-copy">
-              AI Assist will index PostgreSQL project sources, objects, codes, annotations, and memos.
-            </p>
-          </div>
-          <button type="button" className="modal-icon-close" onClick={onClose} disabled={busy} aria-label="Close" title="Close">
-            x
-          </button>
-        </div>
+    <SettingsModal
+      title={hasExistingIndex ? "Rebuild project embeddings" : "Build project embeddings"}
+      subtitle="AI Assist will index PostgreSQL project sources, objects, codes, annotations, and memos."
+      onClose={onClose}
+      closeDisabled={busy}
+      modalClassName="modal--wide"
+    >
         <div className="app-settings-modal-body">
           <p>This can take a while for larger projects. You can keep working while the build runs.</p>
         </div>
-        <div className="app-settings-modal-footer modal-actions">
+        <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
           <button type="button" className="btn btn--primary" onClick={onRun} disabled={busy}>
             {busy ? "Starting..." : hasExistingIndex ? "Rebuild" : "Build"}
           </button>
         </div>
-      </div>
-    </div>
+    </SettingsModal>
   );
 }
 
@@ -1108,7 +1090,7 @@ export function PostgresAiAssistHomeView({
         title={`${activeEmbeddingModelName} settings`}
         onClose={() => setActiveDeviceModal(null)}
       >
-        <div className="llm-settings-grid">
+        <div className="llm-settings-grid llm-settings-grid--single">
           <label className="form-label">
             Chunk size
             <span className="settings-field-hint">Target characters per segment before overlap is applied.</span>

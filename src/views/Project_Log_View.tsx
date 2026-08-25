@@ -30,6 +30,7 @@ export const PROJECT_LOG_ACTION_LABELS: Record<string, string> = {
   "project.ai_chat.message": "AI chat message sent",
   "project.ai_chat.response": "AI chat response received",
   "project.ai_assist.embeddings.delete": "Project AI Assist embeddings deleted",
+  "project.ai_processed_document.process_start": "Transcript processing started",
   "project.ai_processed_document.export": "Processed document exported",
   "project_uploaded_file.create": "Retained source file created",
   "project_uploaded_file.delete": "Original file deleted",
@@ -133,6 +134,7 @@ export function projectLogActionLabel(action: string, t: ReturnType<typeof useI1
     case "project.ai_chat.message": return t("projectLog.actions.projectAiChatMessage");
     case "project.ai_chat.response": return t("projectLog.actions.projectAiChatResponse");
     case "project.ai_assist.embeddings.delete": return t("projectLog.actions.projectAiAssistEmbeddingsDelete");
+    case "project.ai_processed_document.process_start": return t("projectLog.actions.projectAiProcessedDocumentProcessStart");
     case "project.ai_processed_document.export": return t("projectLog.actions.projectAiProcessedDocumentExport");
     case "project_uploaded_file.create": return t("projectLog.actions.projectUploadedFileCreate");
     case "project_uploaded_file.delete": return t("projectLog.actions.projectUploadedFileDelete");
@@ -586,6 +588,12 @@ export function projectLogDescriptionLabel(
       return entry.label || projectLogActionLabel(entry.action, t);
     case "project.ai_assist.embeddings.delete":
       return t("projectLog.labels.projectAiAssistEmbeddingsDeleted");
+    case "project.ai_processed_document.process_start": {
+      const name = typeof details?.sourceTitle === "string" ? details.sourceTitle : "";
+      return name
+        ? t("projectLog.labels.projectAiProcessedDocumentProcessStart", { name })
+        : entry.label || projectLogActionLabel(entry.action, t);
+    }
     case "project.ai_chat.message": {
       const chat =
         typeof details?.chatTitle === "string"

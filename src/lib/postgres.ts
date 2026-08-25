@@ -570,6 +570,20 @@ export type PostgresSource = {
   updatedAt: string;
 };
 
+export type PostgresSourceTypeSetting = {
+  projectId: string;
+  sourceKind: string;
+  name: string;
+  description: string;
+  shape: string;
+  color: string;
+  outlineColor: string;
+  fill: string;
+  imageStoragePath: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PostgresSourceObjectLink = {
   sourceId: string;
   objectId: string;
@@ -593,6 +607,14 @@ export type AcquirePostgresSourceLockResult = {
   conflict: PostgresSourceLock | null;
 };
 
+export type PostgresTimelineAttributeRole =
+  | ""
+  | "timeline_start"
+  | "timeline_end"
+  | "timeline_label"
+  | "timeline_item_type"
+  | "timeline_group";
+
 export type PostgresSourceAttributeDefinition = {
   id: string;
   projectId: string;
@@ -601,6 +623,7 @@ export type PostgresSourceAttributeDefinition = {
   description: string;
   options: string[];
   sourceKinds: string[];
+  timelineRole: PostgresTimelineAttributeRole;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -842,6 +865,7 @@ export type PostgresObjectAttributeDefinition = {
   dataType: "text" | "number" | "datetime" | "categorical";
   description: string;
   options: string[];
+  timelineRole: PostgresTimelineAttributeRole;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -941,6 +965,7 @@ export type PostgresRelationshipAttributeDefinition = {
   dataType: "text" | "number" | "datetime" | "categorical";
   description: string;
   options: string[];
+  timelineRole: PostgresTimelineAttributeRole;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -1571,6 +1596,51 @@ export async function deletePostgresSource(projectId: string, sourceId: string):
   });
 }
 
+export async function listPostgresSourceTypeSettings(
+  projectId: string,
+): Promise<PostgresSourceTypeSetting[]> {
+  return invoke<PostgresSourceTypeSetting[]>("list_postgres_experiment_source_type_settings_command", {
+    projectId,
+  });
+}
+
+export async function savePostgresSourceTypeSetting(data: {
+  projectId: string;
+  sourceKind: string;
+  name: string;
+  description?: string | null;
+  shape: string;
+  color: string;
+  outlineColor?: string | null;
+  fill: string;
+  imageStoragePath?: string | null;
+}): Promise<PostgresSourceTypeSetting> {
+  return invoke<PostgresSourceTypeSetting>("save_postgres_experiment_source_type_setting_command", {
+    request: data,
+  });
+}
+
+export async function importPostgresSourceTypeImage(data: {
+  projectId: string;
+  sourceKind: string;
+  originalFileName: string;
+  fileBytesBase64: string;
+}): Promise<PostgresSourceTypeSetting> {
+  return invoke<PostgresSourceTypeSetting>("import_postgres_experiment_source_type_image_command", {
+    request: data,
+  });
+}
+
+export async function removePostgresSourceTypeImage(
+  projectId: string,
+  sourceKind: string,
+): Promise<PostgresSourceTypeSetting> {
+  return invoke<PostgresSourceTypeSetting>("remove_postgres_experiment_source_type_image_command", {
+    projectId,
+    sourceKind,
+  });
+}
+
 export async function listPostgresSourceLocks(
   projectId: string,
 ): Promise<PostgresSourceLock[]> {
@@ -1616,16 +1686,6 @@ export async function listPostgresSourceObjectLinks(
   });
 }
 
-export async function setPostgresSourceObjects(data: {
-  projectId: string;
-  sourceId: string;
-  objectIds: string[];
-}): Promise<PostgresSourceObjectLink[]> {
-  return invoke<PostgresSourceObjectLink[]>("set_postgres_experiment_source_objects_command", {
-    request: data,
-  });
-}
-
 export async function listPostgresSourceAttributeDefinitions(
   projectId: string,
 ): Promise<PostgresSourceAttributeDefinition[]> {
@@ -1660,6 +1720,7 @@ export async function savePostgresSourceAttribute(data: {
   dataType: "text" | "number" | "datetime" | "categorical";
   description: string;
   options: string[];
+  timelineRole?: PostgresTimelineAttributeRole | null;
   sourceKinds?: string[];
   values: Array<{
     sourceId: string;
@@ -2175,6 +2236,7 @@ export async function savePostgresObjectType(data: {
     dataType: "text" | "number" | "datetime" | "categorical";
     description: string;
     options: string[];
+    timelineRole?: PostgresTimelineAttributeRole | null;
   }>;
 }): Promise<PostgresObjectTypeSaveResult> {
   return invoke<PostgresObjectTypeSaveResult>("save_postgres_experiment_object_type_command", {
@@ -2274,6 +2336,7 @@ export async function savePostgresRelationshipType(data: {
     dataType: "text" | "number" | "datetime" | "categorical";
     description: string;
     options: string[];
+    timelineRole?: PostgresTimelineAttributeRole | null;
   }>;
 }): Promise<PostgresRelationshipTypeSaveResult> {
   return invoke<PostgresRelationshipTypeSaveResult>("save_postgres_experiment_relationship_type_command", {
@@ -2306,6 +2369,7 @@ export async function createPostgresObjectAttributeDefinition(data: {
   dataType: "text" | "number" | "datetime" | "categorical";
   description: string;
   options: string[];
+  timelineRole?: PostgresTimelineAttributeRole | null;
 }): Promise<PostgresObjectAttributeDefinition> {
   return invoke<PostgresObjectAttributeDefinition>(
     "create_postgres_experiment_object_attribute_definition_command",
@@ -2323,6 +2387,7 @@ export async function updatePostgresObjectAttributeDefinition(data: {
   dataType: "text" | "number" | "datetime" | "categorical";
   description: string;
   options: string[];
+  timelineRole?: PostgresTimelineAttributeRole | null;
 }): Promise<PostgresObjectAttributeDefinition> {
   return invoke<PostgresObjectAttributeDefinition>(
     "update_postgres_experiment_object_attribute_definition_command",
@@ -2474,6 +2539,7 @@ export async function createPostgresRelationshipAttributeDefinition(data: {
   dataType: "text" | "number" | "datetime" | "categorical";
   description: string;
   options: string[];
+  timelineRole?: PostgresTimelineAttributeRole | null;
 }): Promise<PostgresRelationshipAttributeDefinition> {
   return invoke<PostgresRelationshipAttributeDefinition>(
     "create_postgres_experiment_relationship_attribute_definition_command",
@@ -2491,6 +2557,7 @@ export async function updatePostgresRelationshipAttributeDefinition(data: {
   dataType: "text" | "number" | "datetime" | "categorical";
   description: string;
   options: string[];
+  timelineRole?: PostgresTimelineAttributeRole | null;
 }): Promise<PostgresRelationshipAttributeDefinition> {
   return invoke<PostgresRelationshipAttributeDefinition>(
     "update_postgres_experiment_relationship_attribute_definition_command",

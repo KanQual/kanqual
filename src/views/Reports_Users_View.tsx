@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
 import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import {
@@ -268,9 +269,8 @@ function NewCoderReportModal({
   ];
 
   return (
-    <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsUsers.newModal.title")}</h2>
+    <SettingsModal title={t("reportsUsers.newModal.title")} onClose={onClose} modalClassName="modal--wide">
+      <div className="app-settings-modal-body">
         <div
           style={{
             display: "grid",
@@ -308,11 +308,11 @@ function NewCoderReportModal({
             </button>
           ))}
         </div>
-        <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose}>{t("reportsUsers.cancel")}</button>
-        </div>
       </div>
-    </div>
+      <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+        <button className="btn" onClick={onClose}>{t("reportsUsers.cancel")}</button>
+      </div>
+    </SettingsModal>
   );
 }
 
@@ -1592,12 +1592,8 @@ function CoderReportCreationPage({
       </div>
 
       {showCaseAttributeFilters && (
-        <div className="modal-overlay" onClick={() => setShowCaseAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>{t("reportsUsers.filters.title")}</h2>
-              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsUsers.close")}</button>
-            </div>
+        <SettingsModal title={t("reportsUsers.filters.title")} onClose={() => setShowCaseAttributeFilters(false)} modalClassName="modal--wide">
+          <div className="app-settings-modal-body">
             {!isFrozen && !loadingFilters && caseAttributeItems.length > 0 && (
               <div style={{ paddingBottom: 8, display: "flex", gap: 8 }}>
                 <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={selectAllCaseAttributes}>{t("reportsUsers.actions.all")}</button>
@@ -1640,7 +1636,7 @@ function CoderReportCreationPage({
               updateCaseAttributeFilter,
             )}
           </div>
-        </div>
+        </SettingsModal>
       )}
     </div>
   );
@@ -1872,9 +1868,8 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
       </div>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("reportsUsers.help.title")}</h2>
+        <SettingsModal title={t("reportsUsers.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               {t("reportsUsers.help.line1")}
             </p>
@@ -1884,13 +1879,13 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
             <p className="users-guide-copy">
               {t("reportsUsers.help.line3")}
             </p>
-            <div className="form-actions">
-              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                {t("reportsUsers.close")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              {t("reportsUsers.close")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {contextMenu && (
@@ -1905,18 +1900,17 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
       )}
 
       {confirmDelete && (
-        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("reportsUsers.deleteTitle")}</h2>
+        <SettingsModal title={t("reportsUsers.deleteTitle")} onClose={() => setConfirmDelete(null)} closeDisabled={deleteLoading}>
+          <div className="app-settings-modal-body">
             <p>{t("reportsUsers.deleteBody", { name: confirmDelete.name })}</p>
-            <div className="modal-actions">
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsUsers.cancel")}</button>
-              <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? t("reportsUsers.deleting") : t("reportsUsers.deleteReport")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsUsers.cancel")}</button>
+            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+              {deleteLoading ? t("reportsUsers.deleting") : t("reportsUsers.deleteReport")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {showNewModal && (

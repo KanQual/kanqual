@@ -6,7 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
-import { SettingsModalCloseButton as ModalCloseButton } from "../components/SettingsModal";
+import { SettingsModal } from "../components/SettingsModal";
 import { CloseIcon, DownloadIcon, HelpIcon, LogoutIcon, PlusIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { LoadingCard } from "../components/LoadingCard";
@@ -2451,23 +2451,21 @@ export function PostgresAdminSettingsView({
       {error ? <p className="auth-error">{error}</p> : null}
 
       {helpOpen ? (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setHelpOpen(false)} />
-            <h2>App Settings Help</h2>
+        <SettingsModal title="App Settings Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               Manage language, appearance, AI runtime defaults, updates, storage, and PostgreSQL administration.
             </p>
             <p className="users-guide-copy">
               PostgreSQL-backed settings are shared through the local installation database. Appearance and recent-project display preferences are stored per signed-in app user.
             </p>
-            <div className="form-actions">
-              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       <div className="app-settings-overview-shell">
@@ -2534,12 +2532,7 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {activeModal === "appearance" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Appearance</h2></div>
-            </div>
+        <SettingsModal title="Appearance" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               {membershipNotice ? <p className="settings-success">{membershipNotice}</p> : null}
               {membershipError ? <p className="auth-error">{membershipError}</p> : null}
@@ -2592,17 +2585,11 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "storage" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">{t("appSettings.storage.localStorageTitle")}</h2></div>
-            </div>
+        <SettingsModal title={t("appSettings.storage.localStorageTitle")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection title={t("appSettings.storage.localStorageTitle")}>
@@ -2659,30 +2646,18 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "network" ? (
-        <div
-          className="modal-overlay"
-          onClick={() => {
+        <SettingsModal
+          title={t("appSettings.sectionTitles.network")}
+          onClose={() => {
             setActiveModal(null);
             setNetworkNotice("");
             setNetworkError("");
           }}
         >
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => {
-                setActiveModal(null);
-                setNetworkNotice("");
-                setNetworkError("");
-              }}
-            />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">{t("appSettings.sectionTitles.network")}</h2></div>
-            </div>
             <div className="app-settings-modal-body">
               {networkNotice ? <p className="settings-success">{networkNotice}</p> : null}
               {networkError ? <p className="auth-error">{networkError}</p> : null}
@@ -2800,17 +2775,12 @@ export function PostgresAdminSettingsView({
                 Done
               </button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "aiAssist" ? (
-        <div className="modal-overlay" onClick={closeAiAssistModal}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={closeAiAssistModal} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">AI Assist</h2></div>
-            </div>
+        <>
+          <SettingsModal title="AI Assist" onClose={closeAiAssistModal}>
             <div className="app-settings-modal-body">
               {aiAssistNotice ? <p className="settings-success">{aiAssistNotice}</p> : null}
               {aiAssistError ? <p className="auth-error">{aiAssistError}</p> : null}
@@ -3364,20 +3334,12 @@ export function PostgresAdminSettingsView({
               <span>{aiAssistPolicySaving ? "Saving..." : ""}</span>
               <button type="button" className="btn btn--primary" onClick={closeAiAssistModal}>Done</button>
             </div>
-          </div>
+          </SettingsModal>
           {localProviderModalOpen && localProviderDraft ? (
-            <div
-              className="modal-overlay"
-              onClick={(event) => {
-                event.stopPropagation();
-                closeLocalProviderModal();
-              }}
+            <SettingsModal
+              title="Local Provider"
+              onClose={closeLocalProviderModal}
             >
-              <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-                <ModalCloseButton onClick={closeLocalProviderModal} />
-                <div className="settings-section-header">
-                  <div><h2 className="settings-section-title">Local Provider</h2></div>
-                </div>
                 <div className="app-settings-modal-body">
                   {aiAssistNotice ? <p className="settings-success">{aiAssistNotice}</p> : null}
                   {aiAssistError ? <p className="auth-error">{aiAssistError}</p> : null}
@@ -3530,22 +3492,13 @@ export function PostgresAdminSettingsView({
                     {aiAssistPolicySaving ? "Saving..." : "Save Provider"}
                   </button>
                 </div>
-              </div>
-            </div>
+            </SettingsModal>
           ) : null}
           {cloudProviderModalOpen && cloudProviderDraft ? (
-            <div
-              className="modal-overlay"
-              onClick={(event) => {
-                event.stopPropagation();
-                closeCloudProviderModal();
-              }}
+            <SettingsModal
+              title="Cloud Provider"
+              onClose={closeCloudProviderModal}
             >
-              <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-                <ModalCloseButton onClick={closeCloudProviderModal} />
-                <div className="settings-section-header">
-                  <div><h2 className="settings-section-title">Cloud Provider</h2></div>
-                </div>
                 <div className="app-settings-modal-body">
                   <div className="app-settings-modal-sections">
                     <SettingsModalSection title="Connection">
@@ -3672,8 +3625,7 @@ export function PostgresAdminSettingsView({
                     {aiAssistPolicySaving ? "Saving..." : "Save Provider"}
                   </button>
                 </div>
-              </div>
-            </div>
+            </SettingsModal>
           ) : null}
           {localProviderMenu ? (
             <div
@@ -3732,18 +3684,10 @@ export function PostgresAdminSettingsView({
             </div>
           ) : null}
           {activeEmbeddingModelModal === "download" ? (
-            <div
-              className="modal-overlay"
-              onClick={(event) => {
-                event.stopPropagation();
-                setActiveEmbeddingModelModal(null);
-              }}
+            <SettingsModal
+              title="Download Custom Model"
+              onClose={() => setActiveEmbeddingModelModal(null)}
             >
-              <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-                <ModalCloseButton onClick={() => setActiveEmbeddingModelModal(null)} />
-                <div className="settings-section-header">
-                  <div><h2 className="settings-section-title">Download Custom Model</h2></div>
-                </div>
                 <div className="app-settings-modal-body">
                   <label className="settings-field">
                     <span className="settings-row-label">Model URL or repository</span>
@@ -3769,22 +3713,13 @@ export function PostgresAdminSettingsView({
                     {embeddingModelSubmitting === "custom-download" ? "Starting..." : "Download"}
                   </button>
                 </div>
-              </div>
-            </div>
+            </SettingsModal>
           ) : null}
           {activeEmbeddingModelModal === "folder" ? (
-            <div
-              className="modal-overlay"
-              onClick={(event) => {
-                event.stopPropagation();
-                setActiveEmbeddingModelModal(null);
-              }}
+            <SettingsModal
+              title="Select Local Model Folder"
+              onClose={() => setActiveEmbeddingModelModal(null)}
             >
-              <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-                <ModalCloseButton onClick={() => setActiveEmbeddingModelModal(null)} />
-                <div className="settings-section-header">
-                  <div><h2 className="settings-section-title">Select Local Model Folder</h2></div>
-                </div>
                 <div className="app-settings-modal-body">
                   <div
                     className={`doc-dropzone${customEmbeddingFolderPath ? " doc-dropzone--filled" : ""}`}
@@ -3828,19 +3763,13 @@ export function PostgresAdminSettingsView({
                     {embeddingModelSubmitting === "import" ? "Importing..." : "Import"}
                   </button>
                 </div>
-              </div>
-            </div>
+            </SettingsModal>
           ) : null}
-        </div>
+        </>
       ) : null}
 
       {activeModal === "updates" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Back-up and Updates</h2></div>
-            </div>
+        <SettingsModal title="Back-up and Updates" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 {updatesNotice ? <p className="settings-inline-success">{updatesNotice}</p> : null}
@@ -4010,21 +3939,17 @@ export function PostgresAdminSettingsView({
             <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {showUpgradeBackupPasswordModal ? (
-        <div className="modal-overlay" onClick={() => !upgradeBackupSubmitting && setShowUpgradeBackupPasswordModal(false)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => {
-                if (!upgradeBackupSubmitting) setShowUpgradeBackupPasswordModal(false);
-              }}
-            />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Backup All Data</h2></div>
-            </div>
+        <SettingsModal
+          title="Backup All Data"
+          onClose={() => {
+            if (!upgradeBackupSubmitting) setShowUpgradeBackupPasswordModal(false);
+          }}
+          closeDisabled={upgradeBackupSubmitting}
+        >
             <form className="app-settings-modal-body" onSubmit={handleCreateUpgradeBackup}>
               <div className="settings-warning settings-warning--danger">
                 Enter the administrator password to create an encrypted backup. This password will be required to restore the backup later.
@@ -4072,17 +3997,11 @@ export function PostgresAdminSettingsView({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {showUpgradeBackupSuccessModal && lastUpgradeBackup ? (
-        <div className="modal-overlay" onClick={() => setShowUpgradeBackupSuccessModal(false)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setShowUpgradeBackupSuccessModal(false)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Backup Complete</h2></div>
-            </div>
+        <SettingsModal title="Backup Complete" onClose={() => setShowUpgradeBackupSuccessModal(false)}>
             <div className="app-settings-modal-body">
               <p className="settings-inline-success">KanQual finished backing up all data.</p>
               <p className="settings-muted-text">
@@ -4122,17 +4041,11 @@ export function PostgresAdminSettingsView({
                 Done
               </button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "diagnostics" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">{t("appSettings.sectionTitles.diagnostics")}</h2></div>
-            </div>
+        <SettingsModal title={t("appSettings.sectionTitles.diagnostics")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection
@@ -4233,17 +4146,11 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "administratorLog" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Administrator Log</h2></div>
-            </div>
+        <SettingsModal title="Administrator Log" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -4454,17 +4361,11 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "administratorLog" && adminLogFilterOpen ? (
-        <div className="modal-overlay" onClick={() => setAdminLogFilterOpen(false)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setAdminLogFilterOpen(false)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Filter {adminAuditTab === "auth" ? "Users" : "Projects"} Log</h2></div>
-            </div>
+        <SettingsModal title={`Filter ${adminAuditTab === "auth" ? "Users" : "Projects"} Log`} onClose={() => setAdminLogFilterOpen(false)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -4546,17 +4447,11 @@ export function PostgresAdminSettingsView({
               </button>
               <button type="button" className="btn btn--primary" onClick={() => setAdminLogFilterOpen(false)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "permissions" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">{t("appSettings.permissions.title")}</h2></div>
-            </div>
+        <SettingsModal title={t("appSettings.permissions.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection title={t("appSettings.permissions.roleMatrixTitle")}>
@@ -4603,23 +4498,18 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "addProject" ? (
-        <div className="modal-overlay" onClick={() => !creatingProject && setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => {
-                resetAddProjectModal();
-                setActiveModal(null);
-              }}
-              disabled={creatingProject}
-            />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Add Project</h2></div>
-            </div>
+        <SettingsModal
+          title="Add Project"
+          onClose={() => {
+            resetAddProjectModal();
+            setActiveModal(null);
+          }}
+          closeDisabled={creatingProject}
+        >
             <form id="postgres-admin-add-project-form" className="app-settings-modal-body" onSubmit={handleCreatePostgresProject}>
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -4753,17 +4643,11 @@ export function PostgresAdminSettingsView({
                 )}
               </div>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "manageProjects" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Manage Projects</h2></div>
-            </div>
+        <SettingsModal title="Manage Projects" onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -4864,8 +4748,7 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "manageProjects" && manageProjectMenu && manageProjectMenuProject ? (
@@ -4932,18 +4815,14 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {activeModal === "addUser" ? (
-        <div className="modal-overlay" onClick={() => !creatingUser && setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => {
-                resetAddUserModal();
-                setActiveModal(null);
-              }}
-              disabled={creatingUser}
-            />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Add User</h2></div>
-            </div>
+        <SettingsModal
+          title="Add User"
+          onClose={() => {
+            resetAddUserModal();
+            setActiveModal(null);
+          }}
+          closeDisabled={creatingUser}
+        >
             <form id="postgres-admin-add-user-form" className="app-settings-modal-body" onSubmit={handleCreatePostgresUser}>
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -5118,30 +4997,18 @@ export function PostgresAdminSettingsView({
                 )}
               </div>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "manageUsers" ? (
-        <div
-          className="modal-overlay"
-          onClick={() => {
+        <SettingsModal
+          title="Manage Users"
+          onClose={() => {
             setMembershipUser(null);
             setManageUserMenu(null);
             setActiveModal(null);
           }}
         >
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => {
-                setMembershipUser(null);
-                setManageUserMenu(null);
-                setActiveModal(null);
-              }}
-            />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">Manage Users</h2></div>
-            </div>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -5262,8 +5129,7 @@ export function PostgresAdminSettingsView({
                 Done
               </button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "manageUsers" && manageUserMenu && manageUserMenuUser ? (
@@ -5343,14 +5209,7 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {activeModal === "manageUsers" && membershipUser ? (
-        <div className="modal-overlay" onClick={closeMembershipModal}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={closeMembershipModal} />
-            <div className="settings-section-header">
-              <div>
-                <h2 className="settings-section-title">{membershipUser.username}</h2>
-              </div>
-            </div>
+        <SettingsModal title={membershipUser.username} onClose={closeMembershipModal}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -5485,20 +5344,19 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={closeMembershipModal}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "administration" ? (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal app-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton onClick={() => setActiveModal(null)} />
-            <div className="settings-section-header">
-              <div><h2 className="settings-section-title">{t("appSettings.admin.title")}</h2></div>
-              <button type="button" className="btn" onClick={() => void refreshPostgresDetails()} disabled={loading}>
-                {loading ? "Refreshing..." : "Refresh"}
-              </button>
-            </div>
+        <SettingsModal
+          title={t("appSettings.admin.title")}
+          onClose={() => setActiveModal(null)}
+          subtitle={(
+            <button type="button" className="btn" onClick={() => void refreshPostgresDetails()} disabled={loading}>
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          )}
+        >
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -5630,24 +5488,24 @@ export function PostgresAdminSettingsView({
               <span />
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {membershipRemovalWarning ? (
-        <div className="modal-overlay" onClick={() => !removingMembershipId && setMembershipRemovalWarning(null)}>
-          <div className="modal modal--narrow" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => setMembershipRemovalWarning(null)}
-              disabled={removingMembershipId === membershipRemovalWarning.id}
-            />
-            <h2>Remove Project Access</h2>
+        <SettingsModal
+          title="Remove Project Access"
+          onClose={() => setMembershipRemovalWarning(null)}
+          closeDisabled={removingMembershipId === membershipRemovalWarning.id}
+          modalClassName="modal--narrow"
+        >
+          <div className="app-settings-modal-body">
             <p className="settings-warning settings-warning--danger">
               {`This will remove ${membershipRemovalWarning.email}'s access to ${
                 projectById.get(membershipRemovalWarning.projectId)?.name ?? "this project"
               }.`}
             </p>
-            <div className="form-actions membership-removal-actions" style={{ justifyContent: "flex-end" }}>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only membership-removal-actions">
               <button
                 type="button"
                 className="btn"
@@ -5664,28 +5522,27 @@ export function PostgresAdminSettingsView({
               >
                 {removingMembershipId === membershipRemovalWarning.id ? "Removing..." : "Remove"}
               </button>
-            </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {projectAccessWarning ? (
-        <div className="modal-overlay" onClick={() => setProjectAccessWarning(null)}>
-          <div className="modal modal--narrow" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => setProjectAccessWarning(null)}
-              disabled={
-                updatingProjectStatusId === projectAccessWarning.project.id ||
-                deletingProjectId === projectAccessWarning.project.id
-              }
-            />
-            <h2>
-              {projectAccessWarning.action === "delete"
-                ? "Delete Project"
-                : projectAccessWarning.action === "disable"
-                  ? "Disable Project"
-                  : "Enable Project"}
-            </h2>
+        <SettingsModal
+          title={
+            projectAccessWarning.action === "delete"
+              ? "Delete Project"
+              : projectAccessWarning.action === "disable"
+                ? "Disable Project"
+                : "Enable Project"
+          }
+          onClose={() => setProjectAccessWarning(null)}
+          closeDisabled={
+            updatingProjectStatusId === projectAccessWarning.project.id ||
+            deletingProjectId === projectAccessWarning.project.id
+          }
+          modalClassName="modal--narrow"
+        >
+          <div className="app-settings-modal-body">
             <p className={projectAccessWarning.action === "delete" ? "settings-warning settings-warning--danger" : "settings-warning"}>
               {projectAccessWarning.action === "delete"
                 ? `This will permanently delete ${projectAccessWarning.project.name}, including its PostgreSQL database and local project storage. This cannot be undone.`
@@ -5693,7 +5550,8 @@ export function PostgresAdminSettingsView({
                   ? `Users will lose access to ${projectAccessWarning.project.name} until the project is enabled again.`
                   : `Users with project memberships will regain access to ${projectAccessWarning.project.name}.`}
             </p>
-            <div className="form-actions" style={{ justifyContent: "flex-end" }}>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
               <button
                 type="button"
                 className="btn"
@@ -5730,27 +5588,21 @@ export function PostgresAdminSettingsView({
                     ? projectAccessWarning.action === "enable" ? "Enabling..." : "Disabling..."
                     : projectAccessWarning.action === "enable" ? "Enable" : "Disable"}
               </button>
-            </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {userAccessWarning ? (
-        <div className="modal-overlay" onClick={() => setUserAccessWarning(null)}>
-          <div className="modal modal--narrow" onClick={(event) => event.stopPropagation()}>
-            <button
-              type="button"
-              className="modal-close-icon"
-              aria-label="Close"
-              onClick={() => setUserAccessWarning(null)}
-              disabled={
-                deactivatingUserId === userAccessWarning.user.id ||
-                reactivatingUserId === userAccessWarning.user.id
-              }
-            >
-              ×
-            </button>
-            <h2>{userAccessWarning.action === "disable" ? "Disable User" : "Enable User"}</h2>
+        <SettingsModal
+          title={userAccessWarning.action === "disable" ? "Disable User" : "Enable User"}
+          onClose={() => setUserAccessWarning(null)}
+          closeDisabled={
+            deactivatingUserId === userAccessWarning.user.id ||
+            reactivatingUserId === userAccessWarning.user.id
+          }
+          modalClassName="modal--narrow"
+        >
+          <div className="app-settings-modal-body">
             <p className="settings-row-desc">
               {userAccessWarning.action === "disable"
                 ? `${userAccessWarning.user.username} will lose access to KanQual, the PostgreSQL server, and every project.`
@@ -5789,25 +5641,20 @@ export function PostgresAdminSettingsView({
               </button>
             </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {confirmEnableNetworkMode ? (
-        <div className="modal-overlay" onClick={() => {
-          if (!networkSwitching) {
+        <SettingsModal
+          title={pendingNetworkMode === "internet" ? "Enable Internet Mode" : t("appSettings.network.enableTitle")}
+          onClose={() => {
             setConfirmEnableNetworkMode(false);
             setInternetModeConfirmation("");
-          }
-        }}>
-          <div className="modal modal--narrow" onClick={(event) => event.stopPropagation()}>
-            <ModalCloseButton
-              onClick={() => {
-                setConfirmEnableNetworkMode(false);
-                setInternetModeConfirmation("");
-              }}
-              disabled={networkSwitching}
-            />
-            <h2>{pendingNetworkMode === "internet" ? "Enable Internet Mode" : t("appSettings.network.enableTitle")}</h2>
+          }}
+          closeDisabled={networkSwitching}
+          modalClassName="modal--narrow"
+        >
+          <div className="app-settings-modal-body">
             <p className="settings-warning settings-warning--danger">
               {pendingNetworkMode === "internet"
                 ? "Internet mode can expose this KanQual server to the public Internet. KanQual does not manage TLS certificates for this mode, so database traffic may be readable unless you protect access with a VPN, encrypted tunnel, firewall, or equivalent network security. Use this only if you understand and accept that risk."
@@ -5825,7 +5672,8 @@ export function PostgresAdminSettingsView({
                 />
               </label>
             ) : null}
-            <div className="form-actions" style={{ justifyContent: "flex-end" }}>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
               <button
                 type="button"
                 className="btn"
@@ -5845,15 +5693,14 @@ export function PostgresAdminSettingsView({
               >
                 {networkSwitching ? t("appSettings.network.enabling") : t("appSettings.network.enableAction")}
               </button>
-            </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {resetPasswordUser ? (
-        <div
-          className="modal-overlay"
-          onClick={() => {
+        <SettingsModal
+          title={postgresUserIsLoginBlocked(resetPasswordUser) ? "Reset + Unblock" : "Reset Password"}
+          onClose={() => {
             if (!resettingPassword && requiredResetUserId !== resetPasswordUser.id) {
               setResetPasswordUser(null);
               setResetPasswordValue("");
@@ -5862,25 +5709,10 @@ export function PostgresAdminSettingsView({
               setResetPasswordConfirmVisible(false);
             }
           }}
+          closeDisabled={resettingPassword || requiredResetUserId === resetPasswordUser.id}
+          modalClassName="modal--narrow"
         >
-          <div className="modal modal--narrow" onClick={(event) => event.stopPropagation()}>
-            <button
-              type="button"
-              className="modal-close-icon"
-              aria-label="Close"
-              onClick={() => {
-                if (requiredResetUserId === resetPasswordUser.id) return;
-                setResetPasswordUser(null);
-                setResetPasswordValue("");
-                setResetPasswordConfirmValue("");
-                setResetPasswordVisible(false);
-                setResetPasswordConfirmVisible(false);
-              }}
-              disabled={resettingPassword || requiredResetUserId === resetPasswordUser.id}
-            >
-              ×
-            </button>
-            <h2>{postgresUserIsLoginBlocked(resetPasswordUser) ? "Reset + Unblock" : "Reset Password"}</h2>
+          <div className="app-settings-modal-body">
             <p className="settings-row-desc">
               {postgresUserIsLoginBlocked(resetPasswordUser)
                 ? `Set a new temporary password for ${resetPasswordUser.username}. The login block will be removed after the password is reset.`
@@ -5957,7 +5789,7 @@ export function PostgresAdminSettingsView({
               </div>
             </form>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {showThemeManager ? (

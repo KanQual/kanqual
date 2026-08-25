@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HelpIcon, PlusIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import {
   createPostgresAiAnalysis,
@@ -828,23 +829,12 @@ export function PostgresAIAssistAnalyzeView({
       </div>
 
       {citationModal ? (
-        <div className="modal-overlay" onClick={() => setCitationModal(null)}>
-          <div className="modal modal--wide ai-citation-detail-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="annotate-card-header">
-              <div>
-                <h2>Citation [{citationModal.index + 1}]</h2>
-                <p className="backup-field-hint">Annotation</p>
-              </div>
-              <button
-                type="button"
-                className="ai-citation-detail-close"
-                onClick={() => setCitationModal(null)}
-                aria-label="Close citation"
-                title="Close"
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal
+          title={`Citation [${citationModal.index + 1}]`}
+          subtitle="Annotation"
+          onClose={() => setCitationModal(null)}
+          modalClassName="modal--wide ai-citation-detail-modal"
+        >
             <div className="ai-citation-detail-body">
               <div className="ai-citation-detail-summary">
                 <span>Source</span>
@@ -870,24 +860,15 @@ export function PostgresAIAssistAnalyzeView({
                 Open
               </button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {helpOpen ? (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-title-bar">
-              <div>
-                <h2>Analyze Codes</h2>
-              </div>
-              <button type="button" className="modal-icon-close" onClick={() => setHelpOpen(false)} aria-label="Close" title="Close">
-                x
-              </button>
-            </div>
+        <SettingsModal title="Analyze Codes" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">Select a code, choose one or more analysis actions, run grounded AI analyses, and open citations back in the coding view.</p>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
     </div>
   );

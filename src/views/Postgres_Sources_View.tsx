@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { type CSSProperties, type FormEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -30,6 +30,10 @@ import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-out
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
 import { type SharedAttributeDataType, type SharedAttributeDraft } from "../components/AttributeValuesModal";
 import {
+  EditableAttributesMatrix,
+  type EditableAttributeMatrixValues,
+} from "../components/EditableAttributesMatrix";
+import {
   PostgresAttributeValueHistoryModal,
   type PostgresAttributeValueHistoryTarget,
 } from "../components/PostgresAttributeValueHistoryModal";
@@ -38,6 +42,7 @@ import {
   PostgresRelationshipModal,
   type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
 } from "../components/PostgresRelationshipModal";
+import { SettingsModal } from "../components/SettingsModal";
 import { ProcessedTranscriptView, getProcessedTranscriptQuestionOutline, parseProcessedTranscriptSegments } from "../components/ProcessedTranscriptView";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -55,25 +60,27 @@ import {
   type PostgresCode,
   type PostgresAnnotationSummary,
   type PostgresObject,
-  type PostgresObjectType,
   type PostgresRelationship,
   type PostgresRelationshipAttributeDefinition,
   type PostgresRelationshipType,
   type PostgresSourceAttributeDefinition,
   type PostgresSourceAttributeValue,
   type PostgresSourceLock,
-  type PostgresSourceObjectLink,
+  type PostgresSourceTypeSetting,
   createPostgresSource,
   deletePostgresSource,
+  deletePostgresSourceAttributeDefinition,
   getPostgresProjectDocumentImportSettings,
   importPostgresSourceFile,
+  importPostgresSourceTypeImage,
   kickPostgresSourceLock,
   listPostgresProjects,
   releasePostgresSourceLock,
+  removePostgresSourceTypeImage,
   savePostgresSourceAttribute,
+  savePostgresSourceTypeSetting,
   savePostgresRelationship,
   savePostgresRelationshipType,
-  setPostgresSourceObjects,
   updatePostgresAnnotation,
   updatePostgresCode,
   updatePostgresSource,
@@ -206,13 +213,6 @@ export type CodeOption = {
   color: string;
 };
 
-type SourceObjectRow = {
-  id: string;
-  title: string;
-  objectType: string;
-  objectTypeSystemKey: string | null;
-};
-
 type SourceRelationshipRow = {
   id: string;
   relationshipType: string;
@@ -229,6 +229,7 @@ type SourceAttributeDefinitionRow = {
   description: string;
   options: string[];
   sourceKinds: string[];
+  timelineRole?: SharedAttributeDraft["timelineRole"];
   sortOrder: number;
 };
 
@@ -241,6 +242,11 @@ type SourceAttributeValueRow = {
   sourceId: string;
   attributeDefinitionId: string;
   value: string;
+};
+
+type BulkSourceAttributeTarget = {
+  attribute: SourceAttributeDefinitionRow;
+  rows: SourceRow[];
 };
 
 const SOURCE_LOCK_HEARTBEAT_MS = 15_000;
@@ -274,14 +280,6 @@ const SOURCE_IMPORT_TEXT_EXTS = new Set(["txt", "rtf", "docx", "csv"]);
 const SOURCE_IMPORT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 const SOURCE_IMPORT_AUDIO_EXTS = new Set(["mp3", "wav", "m4a", "aac", "ogg", "flac"]);
 const SOURCE_IMPORT_VIDEO_EXTS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
-const POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS = [
-  "source_text",
-  "source_processed_transcript",
-  "source_pdf",
-  "source_image",
-  "source_audio",
-  "source_video",
-] as const;
 const POSTGRES_SOURCE_KIND_OPTIONS = [
   { value: "text", label: "Text" },
   { value: "Transcript", label: "Transcript" },
@@ -316,6 +314,18 @@ const SOURCE_OBJECT_SHAPE_ASSET_URLS: Record<SourceObjectTypeShape, { filled: st
   tag: { filled: buildSvgDataUrl(tagFilledShapeSvg), outline: buildSvgDataUrl(tagOutlineShapeSvg) },
   star: { filled: buildSvgDataUrl(starFilledShapeSvg), outline: buildSvgDataUrl(starOutlineShapeSvg) },
 };
+const SOURCE_OBJECT_SHAPE_OPTIONS: Array<{ value: SourceObjectTypeShape; label: string }> = [
+  { value: "rounded", label: "Circle" },
+  { value: "rectangle", label: "Rectangle" },
+  { value: "triangle", label: "Triangle" },
+  { value: "diamond", label: "Diamond" },
+  { value: "hexagon", label: "Hexagon" },
+  { value: "octagon", label: "Octagon" },
+  { value: "parallelogram", label: "Parallelogram" },
+  { value: "trapezoid", label: "Trapezoid" },
+  { value: "tag", label: "Tag" },
+  { value: "star", label: "Star" },
+];
 const SOURCE_OBJECT_VISUAL_ASSET_URLS: Record<SourceObjectVisualKey, string> = {
   source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
   source_processed_transcript: buildSvgDataUrl(sourceProcessedTranscriptOutlineShapeSvg),
@@ -351,6 +361,11 @@ function normalizeSourceObjectFill(value: string): SourceObjectFill {
 function normalizeSourceObjectColor(value: string): string {
   const normalized = value.trim();
   return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : SOURCE_OBJECT_TYPE_DEFAULT_COLOR;
+}
+
+function normalizeOptionalSourceObjectColor(value: string): string {
+  const normalized = value.trim();
+  return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : "";
 }
 
 function getSourceObjectVisualKey(systemKey: string | null | undefined): SourceObjectVisualKey | null {
@@ -389,12 +404,15 @@ function SourceObjectTypeSwatch(props: {
   shape: SourceObjectTypeShape;
   fill: SourceObjectFill;
   color: string;
+  outlineColor?: string;
   sourceVisualKey: SourceObjectVisualKey | null;
+  width?: number;
+  height?: number;
 }) {
-  const { shape, fill, color, sourceVisualKey } = props;
+  const { shape, fill, color, outlineColor, sourceVisualKey, width = 24, height = 18 } = props;
   const sourceOutlineAsset = sourceVisualKey ? SOURCE_OBJECT_VISUAL_ASSET_URLS[sourceVisualKey] : null;
   const shapeAssets = sourceVisualKey ? null : SOURCE_OBJECT_SHAPE_ASSET_URLS[shape];
-  const edgeColor = color;
+  const edgeColor = outlineColor || color;
   const background = fill === "outline" ? "transparent" : `${color}2e`;
 
   return (
@@ -403,8 +421,8 @@ function SourceObjectTypeSwatch(props: {
       style={{
         position: "relative",
         display: "inline-flex",
-        width: 24,
-        height: 18,
+        width,
+        height,
         overflow: "hidden",
         flexShrink: 0,
         verticalAlign: "middle",
@@ -433,6 +451,591 @@ function SourceObjectTypeSwatch(props: {
   );
 }
 
+type SourceTypeEditModalDraft = {
+  name: string;
+  description: string;
+  shape: SourceObjectTypeShape;
+  color: string;
+  outlineColor: string;
+  fill: SourceObjectFill;
+  imageStoragePath: string;
+  attributes: SourceTypeAttributeDraft[];
+  attributeValuesByDraftId: EditableAttributeMatrixValues;
+  removedAttributeIds: string[];
+};
+
+type SourceTypeAttributeDraft = SourceAttributeDraft & {
+  localId: string;
+  originalSourceKinds: string[];
+};
+
+function createSourceTypeAttributeDraft(sourceKind: string): SourceTypeAttributeDraft {
+  return {
+    localId: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    name: "",
+    dataType: "text",
+    description: "",
+    options: [],
+    timelineRole: "",
+    sourceKinds: [sourceKind],
+    originalSourceKinds: [],
+  };
+}
+
+function SourceTypeEditModal({
+  sourceType,
+  attributeDefinitions,
+  sources,
+  attributeValues,
+  initialTab = "details",
+  saving,
+  uploading,
+  error,
+  onCancel,
+  onSave,
+  onUploadImage,
+  onRemoveImage,
+}: {
+  sourceType: PostgresSourceTypeSetting;
+  attributeDefinitions: PostgresSourceAttributeDefinition[];
+  sources: SourceRow[];
+  attributeValues: PostgresSourceAttributeValue[];
+  initialTab?: "details" | "graphics" | "attributes" | "timeline";
+  saving: boolean;
+  uploading: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSave: (draft: SourceTypeEditModalDraft) => void;
+  onUploadImage: (sourceKind: string, file: File) => Promise<PostgresSourceTypeSetting>;
+  onRemoveImage: (sourceKind: string) => Promise<PostgresSourceTypeSetting>;
+}) {
+  const [tab, setTab] = useState<"details" | "graphics" | "attributes" | "timeline">(initialTab);
+  const [graphicsTab, setGraphicsTab] = useState<"default" | "geometry" | "upload">("default");
+  const [editingAttributeDraft, setEditingAttributeDraft] = useState<SourceTypeAttributeDraft | null>(null);
+  const [removedAttributeIds, setRemovedAttributeIds] = useState<string[]>([]);
+  const [name, setName] = useState(sourceType.name);
+  const [description, setDescription] = useState(sourceType.description);
+  const [shape, setShape] = useState<SourceObjectTypeShape>(normalizeSourceObjectTypeShape(sourceType.shape));
+  const [color, setColor] = useState(normalizeSourceObjectColor(sourceType.color));
+  const [outlineColor, setOutlineColor] = useState(
+    normalizeOptionalSourceObjectColor(sourceType.outlineColor) || normalizeSourceObjectColor(sourceType.color),
+  );
+  const [fill, setFill] = useState<SourceObjectFill>(normalizeSourceObjectFill(sourceType.fill));
+  const [imageStoragePath, setImageStoragePath] = useState(sourceType.imageStoragePath ?? "");
+  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const sourceVisualKey = sourceObjectTypeSystemKeyFromKind(sourceType.sourceKind);
+  const normalizedColor = normalizeSourceObjectColor(color);
+  const normalizedOutlineColor = normalizeOptionalSourceObjectColor(outlineColor) || normalizedColor;
+  const sourceTypeAttributeOptions = [{ kind: sourceType.sourceKind, label: sourceType.name, count: 0 }];
+  const [attributeDrafts, setAttributeDrafts] = useState<SourceTypeAttributeDraft[]>(() => {
+    const currentKind = normalizeSourceKindFilterValue(sourceType.sourceKind);
+    return attributeDefinitions
+      .filter((definition) => (definition.sourceKinds ?? []).some((kind) => normalizeSourceKindFilterValue(kind) === currentKind))
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+      .map((definition) => ({
+        localId: definition.id,
+        id: definition.id,
+        name: definition.name,
+        dataType: definition.dataType,
+        description: definition.description,
+        options: definition.options,
+        timelineRole: definition.timelineRole ?? "",
+        sourceKinds: [sourceType.sourceKind],
+        originalSourceKinds: definition.sourceKinds ?? [],
+      }));
+  });
+  const matrixRows = useMemo(
+    () => sources
+      .filter((source) => normalizeSourceKindFilterValue(source.type) === normalizeSourceKindFilterValue(sourceType.sourceKind))
+      .map((source) => ({ id: source.id, name: source.name }))
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [sourceType.sourceKind, sources],
+  );
+  const [attributeValuesByDraftId, setAttributeValuesByDraftId] = useState<EditableAttributeMatrixValues>(() => {
+    const sourceIds = new Set(
+      sources
+        .filter((source) => normalizeSourceKindFilterValue(source.type) === normalizeSourceKindFilterValue(sourceType.sourceKind))
+        .map((source) => source.id),
+    );
+    return Object.fromEntries(
+      attributeDefinitions
+        .filter((definition) => (definition.sourceKinds ?? []).some((kind) => normalizeSourceKindFilterValue(kind) === normalizeSourceKindFilterValue(sourceType.sourceKind)))
+        .map((definition) => [
+          definition.id,
+          Object.fromEntries(
+            attributeValues
+              .filter((value) => value.attributeDefinitionId === definition.id && sourceIds.has(value.sourceId))
+              .map((value) => [value.sourceId, value.value]),
+          ),
+        ]),
+    );
+  });
+
+  async function handleUploadFile(file: File | null | undefined) {
+    if (!file || saving || uploading) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const previewUrl = URL.createObjectURL(new Blob([bytes], { type: file.type || "image/*" }));
+    try {
+      const saved = await onUploadImage(sourceType.sourceKind, file);
+      setImageStoragePath(saved.imageStoragePath ?? "");
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return previewUrl;
+      });
+      setGraphicsTab("upload");
+    } catch {
+      URL.revokeObjectURL(previewUrl);
+    } finally {
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleRemoveImage() {
+    if (saving || uploading || !imageStoragePath) return;
+    try {
+      const saved = await onRemoveImage(sourceType.sourceKind);
+      setImageStoragePath(saved.imageStoragePath ?? "");
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+    } catch {
+      // The parent owns the visible modal error text.
+    }
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    onSave({
+      name,
+      description,
+      shape,
+      color: normalizedColor,
+      outlineColor: normalizedOutlineColor,
+      fill,
+      imageStoragePath,
+      attributes: attributeDrafts,
+      attributeValuesByDraftId,
+      removedAttributeIds,
+    });
+  }
+
+  function openNewAttributeDraft() {
+    setEditingAttributeDraft(createSourceTypeAttributeDraft(sourceType.sourceKind));
+  }
+
+  function openEditAttributeDraft(draft: SourceTypeAttributeDraft) {
+    setEditingAttributeDraft({ ...draft, options: [...draft.options], sourceKinds: [sourceType.sourceKind] });
+  }
+
+  function saveAttributeDraft(draft: SourceAttributeDraft) {
+    setAttributeDrafts((current) => {
+      const existing = current.find((entry) => entry.localId === editingAttributeDraft?.localId);
+      const nextDraft: SourceTypeAttributeDraft = {
+        ...(existing ?? createSourceTypeAttributeDraft(sourceType.sourceKind)),
+        ...draft,
+        sourceKinds: [sourceType.sourceKind],
+        originalSourceKinds: existing?.originalSourceKinds ?? editingAttributeDraft?.originalSourceKinds ?? [],
+      };
+      const found = current.some((entry) => entry.localId === nextDraft.localId);
+      setAttributeValuesByDraftId((values) => values[nextDraft.localId] ? values : { ...values, [nextDraft.localId]: {} });
+      return found
+        ? current.map((entry) => (entry.localId === nextDraft.localId ? nextDraft : entry))
+        : [...current, nextDraft];
+    });
+    setEditingAttributeDraft(null);
+  }
+
+  function deleteAttributeDraft(localId: string) {
+    setAttributeDrafts((current) => {
+      const draft = current.find((entry) => entry.localId === localId);
+      if (draft?.id) {
+        setRemovedAttributeIds((ids) => ids.includes(draft.id!) ? ids : [...ids, draft.id!]);
+      }
+      setAttributeValuesByDraftId((values) => {
+        const next = { ...values };
+        delete next[localId];
+        return next;
+      });
+      return current.filter((entry) => entry.localId !== localId);
+    });
+  }
+
+  function updateMatrixValue(attributeLocalId: string, sourceId: string, value: string) {
+    setAttributeValuesByDraftId((current) => ({
+      ...current,
+      [attributeLocalId]: {
+        ...(current[attributeLocalId] ?? {}),
+        [sourceId]: value,
+      },
+    }));
+  }
+
+  function updateTimelineField(role: TimelineFieldRole, value: string) {
+    if (value === "__create__") {
+      const option = TIMELINE_FIELD_OPTIONS.find((entry) => entry.role === role)!;
+      setEditingAttributeDraft({
+        ...createSourceTypeAttributeDraft(sourceType.sourceKind),
+        name: option.defaultName,
+        dataType: option.dataTypes[0],
+        options: defaultTimelineAttributeOptions(role),
+        timelineRole: role,
+      });
+      return;
+    }
+    setAttributeDrafts((current) => current.map((draft) => ({
+      ...draft,
+      timelineRole: draft.localId === value ? role : draft.timelineRole === role ? "" : draft.timelineRole,
+    })));
+  }
+
+  function renderTimelineFieldMappings() {
+    return (
+      <div className="postgres-attribute-modal-section">
+        <div className="postgres-attribute-modal-title">Timeline Fields</div>
+        <div className="case-detail-attributes-table-wrap">
+          <table className="case-detail-attributes-table">
+            <tbody>
+              {TIMELINE_FIELD_OPTIONS.map((field) => {
+                const selectedDraft = attributeDrafts.find((draft) => draft.timelineRole === field.role);
+                const eligibleDrafts = attributeDrafts
+                  .filter((draft) => field.dataTypes.includes(draft.dataType))
+                  .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+                return (
+                  <tr key={field.role}>
+                    <th className="case-detail-attributes-label" scope="row">{field.label}</th>
+                    <td className="case-detail-attributes-value">
+                      <select
+                        className="form-input"
+                        value={selectedDraft?.localId ?? ""}
+                        onChange={(event) => updateTimelineField(field.role, event.target.value)}
+                      >
+                        <option value="">None</option>
+                        {eligibleDrafts.map((draft) => (
+                          <option key={draft.localId} value={draft.localId}>{draft.name || "Untitled attribute"}</option>
+                        ))}
+                        <option value="__create__">Create new attribute...</option>
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderColorControls() {
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
+        <label className="form-label">
+          Fill
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+            <input
+              className="form-input form-input--color"
+              type="color"
+              value={normalizedColor}
+              onChange={(event) => setColor(event.target.value)}
+              style={{ width: 92, minWidth: 92, height: 56 }}
+            />
+            <input
+              className="form-input"
+              value={color}
+              onChange={(event) => setColor(event.target.value)}
+              style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
+            />
+          </div>
+        </label>
+        <label className="form-label">
+          Outline
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+            <input
+              className="form-input form-input--color"
+              type="color"
+              value={normalizedOutlineColor}
+              onChange={(event) => setOutlineColor(event.target.value)}
+              style={{ width: 92, minWidth: 92, height: 56 }}
+            />
+            <input
+              className="form-input"
+              value={outlineColor}
+              onChange={(event) => setOutlineColor(event.target.value)}
+              style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
+            />
+          </div>
+        </label>
+      </div>
+    );
+  }
+
+  function renderOutlineColorControl() {
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(220px, 1fr)",
+          gap: 14,
+        }}
+      >
+        <label className="form-label">
+          Outline
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+            <input
+              className="form-input form-input--color"
+              type="color"
+              value={normalizedOutlineColor}
+              onChange={(event) => setOutlineColor(event.target.value)}
+              style={{ width: 92, minWidth: 92, height: 56 }}
+            />
+            <input
+              className="form-input"
+              value={outlineColor}
+              onChange={(event) => setOutlineColor(event.target.value)}
+              style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
+            />
+          </div>
+        </label>
+      </div>
+    );
+  }
+
+  function renderFillOptions(sourceKey: SourceObjectVisualKey | null) {
+    return (
+      <label className="form-label">
+        Fill Style
+        <div className="shape-picker-grid" role="radiogroup" aria-label="Source type fill style">
+          {(["filled", "outline"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={`shape-picker-option${fill === option ? " shape-picker-option--selected" : ""}`}
+              onClick={() => setFill(option)}
+              aria-pressed={fill === option}
+            >
+              <div className="shape-picker-preview" aria-hidden="true">
+                <SourceObjectTypeSwatch
+                  shape={shape}
+                  fill={option}
+                  color={normalizedColor}
+                  outlineColor={normalizedOutlineColor}
+                  sourceVisualKey={sourceKey}
+                  width={72}
+                  height={54}
+                />
+              </div>
+              <span className="shape-picker-label">{option === "filled" ? "Filled" : "Outline"}</span>
+            </button>
+          ))}
+        </div>
+      </label>
+    );
+  }
+
+  return (
+    <SettingsModal
+      title="Edit source type"
+      onClose={onCancel}
+      closeDisabled={saving || uploading}
+      modalClassName="modal--wide"
+    >
+      <form className="form" onSubmit={submit}>
+        <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Edit source type tabs">
+          {(["details", "graphics", "attributes", "timeline"] as const).map((tabId) => (
+            <button
+              key={tabId}
+              type="button"
+              className={`segmented-control-option ${tab === tabId ? "segmented-control-option--active" : ""}`}
+              onClick={() => setTab(tabId)}
+            >
+              {tabId.slice(0, 1).toUpperCase() + tabId.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {tab === "details" ? (
+          <>
+            <label className="form-label">
+              Source type name
+              <input
+                className="form-input"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                autoFocus
+              />
+            </label>
+            <label className="form-label">
+              Description
+              <textarea
+                className="form-input form-textarea"
+                rows={4}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+          </>
+        ) : tab === "graphics" ? (
+          <>
+            <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label="Source type graphics tabs">
+              {(["default", "geometry", "upload"] as const).map((tabId) => (
+                <button
+                  key={tabId}
+                  type="button"
+                  className={`segmented-control-option ${graphicsTab === tabId ? "segmented-control-option--active" : ""}`}
+                  onClick={() => setGraphicsTab(tabId)}
+                >
+                  {tabId.slice(0, 1).toUpperCase() + tabId.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {graphicsTab === "default" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "center", padding: "8px 0 2px" }}>
+                  <div className="shape-picker-preview" aria-hidden="true" style={{ width: 112, minHeight: 84 }}>
+                    <SourceObjectTypeSwatch
+                      shape={shape}
+                      fill="outline"
+                      color={normalizedColor}
+                      outlineColor={normalizedOutlineColor}
+                      sourceVisualKey={sourceVisualKey}
+                      width={96}
+                      height={72}
+                    />
+                  </div>
+                </div>
+                {renderOutlineColorControl()}
+              </>
+            ) : graphicsTab === "geometry" ? (
+              <>
+                <label className="form-label">
+                  Shape
+                  <div className="shape-picker-grid" role="radiogroup" aria-label="Source type shape">
+                    {SOURCE_OBJECT_SHAPE_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`shape-picker-option${shape === option.value ? " shape-picker-option--selected" : ""}`}
+                        onClick={() => setShape(option.value)}
+                        aria-pressed={shape === option.value}
+                      >
+                        <div className="shape-picker-preview" aria-hidden="true">
+                          <SourceObjectTypeSwatch
+                            shape={option.value}
+                            fill={fill}
+                            color={normalizedColor}
+                            outlineColor={normalizedOutlineColor}
+                            sourceVisualKey={null}
+                            width={72}
+                            height={54}
+                          />
+                        </div>
+                        <span className="shape-picker-label">{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </label>
+                {renderColorControls()}
+                {renderFillOptions(null)}
+              </>
+            ) : (
+              <div className="settings-modal-panel" style={{ display: "grid", gap: 14 }}>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  style={{ display: "none" }}
+                  onChange={(event) => void handleUploadFile(event.currentTarget.files?.[0])}
+                />
+                <div className="shape-picker-preview" style={{ minHeight: 160, display: "grid", placeItems: "center" }}>
+                  {imagePreviewUrl ? (
+                    <img
+                      src={imagePreviewUrl}
+                      alt=""
+                      style={{ maxWidth: "100%", maxHeight: 150, objectFit: "contain" }}
+                    />
+                  ) : imageStoragePath ? (
+                    <span className="settings-small-text">Custom image saved.</span>
+                  ) : (
+                    <span className="settings-small-text">No custom image selected.</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  {imageStoragePath ? (
+                    <button type="button" className="btn" onClick={() => void handleRemoveImage()} disabled={saving || uploading}>
+                      Clear
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => uploadInputRef.current?.click()}
+                    disabled={saving || uploading}
+                  >
+                    {uploading ? "Uploading..." : "Select Image"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        ) : tab === "timeline" ? (
+          renderTimelineFieldMappings()
+        ) : (
+          <EditableAttributesMatrix
+            definitions={attributeDrafts.map((draft) => ({
+              id: draft.localId,
+              name: draft.name || "Untitled attribute",
+              dataType: draft.dataType,
+              description: draft.description,
+              options: draft.options,
+            }))}
+            rows={matrixRows}
+            values={attributeValuesByDraftId}
+            disabled={saving || uploading}
+            emptyDefinitionsLabel="No attributes for this source type yet."
+            emptyRowsLabel="No sources of this type yet."
+            onAddAttribute={openNewAttributeDraft}
+            onEditAttribute={(localId) => {
+              const draft = attributeDrafts.find((entry) => entry.localId === localId);
+              if (draft) openEditAttributeDraft(draft);
+            }}
+            onDeleteAttribute={deleteAttributeDraft}
+            onChangeValue={updateMatrixValue}
+          />
+        )}
+
+        {error ? <p className="auth-error">{error}</p> : null}
+        <div className="app-settings-modal-footer">
+          <button type="button" className="btn" onClick={onCancel} disabled={saving || uploading}>Cancel</button>
+          <button type="submit" className="btn btn--primary" disabled={saving || uploading || !name.trim()}>
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </form>
+      {editingAttributeDraft ? (
+        <SourceAttributeTypesModal
+          draft={editingAttributeDraft}
+          sourceTypeOptions={sourceTypeAttributeOptions}
+          saving={saving}
+          onCancel={() => setEditingAttributeDraft(null)}
+          onSave={saveAttributeDraft}
+        />
+      ) : null}
+    </SettingsModal>
+  );
+}
+
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
 async function loadPdfJs() {
@@ -454,7 +1057,7 @@ function normalizeSourceKindSelection(value: string | null | undefined): string 
 }
 
 function fmtDate(iso: string): string {
-  if (!iso) return "—";
+  if (!iso) return "\u2014";
   try {
     return formatCurrentDateTime(iso, {
       year: "numeric",
@@ -464,7 +1067,7 @@ function fmtDate(iso: string): string {
       minute: "2-digit",
     });
   } catch {
-    return "—";
+    return "\u2014";
   }
 }
 
@@ -776,8 +1379,42 @@ function sourceKindDisplayLabel(kind: string, fallbackLabel?: string): string {
   return fallbackLabel || kind || "Source";
 }
 
+function sourceObjectTypeSystemKeyFromKind(value: string | null | undefined): SourceObjectVisualKey | null {
+  const normalized = normalizeSourceKindFilterValue(value ?? "");
+  const visualKey = getSourceObjectVisualKey(normalized);
+  if (visualKey) return visualKey;
+  const visual = POSTGRES_SOURCE_KIND_VISUALS[normalized];
+  if (visual) return visual.systemKey;
+  return null;
+}
+
 function normalizeAttributeOptions(options: string[]): string[] {
   return options.map((option) => option.trim()).filter(Boolean);
+}
+
+type TimelineFieldRole = Exclude<NonNullable<SharedAttributeDraft["timelineRole"]>, "">;
+
+const TIMELINE_FIELD_OPTIONS: Array<{
+  role: TimelineFieldRole;
+  label: string;
+  dataTypes: SharedAttributeDataType[];
+  defaultName: string;
+}> = [
+  { role: "timeline_start", label: "Start", dataTypes: ["datetime"], defaultName: "Timeline start" },
+  { role: "timeline_end", label: "End", dataTypes: ["datetime"], defaultName: "Timeline end" },
+  { role: "timeline_label", label: "Label", dataTypes: ["text", "categorical"], defaultName: "Timeline label" },
+  { role: "timeline_item_type", label: "Item Type", dataTypes: ["categorical"], defaultName: "Timeline item type" },
+  { role: "timeline_group", label: "Group", dataTypes: ["text", "categorical"], defaultName: "Timeline group" },
+];
+
+function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], dataType: SharedAttributeDataType): boolean {
+  if (!role) return true;
+  const option = TIMELINE_FIELD_OPTIONS.find((entry) => entry.role === role);
+  return option ? option.dataTypes.includes(dataType) : false;
+}
+
+function defaultTimelineAttributeOptions(role: TimelineFieldRole): string[] {
+  return role === "timeline_item_type" ? ["Point", "Range"] : [];
 }
 
 function normalizeSourceAttributeKinds(sourceKinds: string[]): string[] {
@@ -816,11 +1453,16 @@ function SourceAttributeTypesModal({
     { value: "categorical", label: t("attributeModal.types.categorical") },
   ];
   const normalizedOptions = normalizeAttributeOptions(options);
+  const effectiveTimelineRole = timelineRoleFitsDataType(draft.timelineRole, dataType) ? draft.timelineRole ?? "" : "";
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <h2>{draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}</h2>
+    <SettingsModal
+      title={draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}
+      onClose={onCancel}
+      closeDisabled={saving}
+      modalClassName="modal--wide"
+    >
+      <div className="app-settings-modal-body">
         <div className="attribute-values-details">
           <label className="form-group">
             <span className="form-label">{t("attributeModal.attributeName")}</span>
@@ -891,25 +1533,153 @@ function SourceAttributeTypesModal({
           )}
         </div>
         {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
-          <button
-            className="btn btn--primary"
-            onClick={() => onSave({
-              ...draft,
-              name: name.trim(),
-              dataType,
-              description: description.trim(),
-              options: normalizedOptions,
-              sourceKinds,
-            })}
-            disabled={saving || !name.trim() || sourceKinds.length === 0 || (dataType === "categorical" && normalizedOptions.length < 2)}
-          >
-            {saving ? t("attributeModal.saving") : t("attributeModal.save")}
-          </button>
+      </div>
+      <div className="app-settings-modal-footer">
+        <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
+        <button
+          className="btn btn--primary"
+          onClick={() => onSave({
+            ...draft,
+            name: name.trim(),
+            dataType,
+            description: description.trim(),
+            options: normalizedOptions,
+            timelineRole: effectiveTimelineRole,
+            sourceKinds,
+          })}
+          disabled={saving || !name.trim() || sourceKinds.length === 0 || (dataType === "categorical" && normalizedOptions.length < 2)}
+        >
+          {saving ? t("attributeModal.saving") : t("attributeModal.save")}
+        </button>
+      </div>
+    </SettingsModal>
+  );
+}
+
+function BulkSourceAttributeValuesModal({
+  target,
+  valuesBySource,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  target: BulkSourceAttributeTarget;
+  valuesBySource: Record<string, SourceAttributeValueRow>;
+  saving: boolean;
+  error?: string | null;
+  onCancel: () => void;
+  onSave: (valuesBySourceId: Record<string, string>) => void;
+}) {
+  const [draftValues, setDraftValues] = useState<Record<string, string>>(() => (
+    Object.fromEntries(
+      target.rows.map((row) => [
+        row.id,
+        valuesBySource[valueKey(row.id, target.attribute.id)]?.value ?? "",
+      ]),
+    )
+  ));
+  const attribute = target.attribute;
+
+  function updateValue(sourceId: string, value: string) {
+    setDraftValues((current) => ({
+      ...current,
+      [sourceId]: value,
+    }));
+  }
+
+  function renderInput(row: SourceRow) {
+    const value = draftValues[row.id] ?? "";
+    if (attribute.dataType === "categorical") {
+      return (
+        <select
+          className="form-input"
+          value={value}
+          onChange={(event) => updateValue(row.id, event.target.value)}
+          disabled={saving}
+        >
+          <option value="">-</option>
+          {attribute.options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    if (attribute.dataType === "number") {
+      return (
+        <input
+          className="form-input"
+          type="number"
+          value={value}
+          onChange={(event) => updateValue(row.id, event.target.value)}
+          disabled={saving}
+        />
+      );
+    }
+    if (attribute.dataType === "datetime") {
+      return (
+        <input
+          className="form-input"
+          type="datetime-local"
+          value={value}
+          onChange={(event) => updateValue(row.id, event.target.value)}
+          disabled={saving}
+        />
+      );
+    }
+    return (
+      <input
+        className="form-input"
+        type="text"
+        value={value}
+        onChange={(event) => updateValue(row.id, event.target.value)}
+        disabled={saving}
+      />
+    );
+  }
+
+  return (
+    <SettingsModal
+      title={`Edit ${attribute.name}`}
+      onClose={onCancel}
+      closeDisabled={saving}
+      modalClassName="modal--wide"
+    >
+      <div className="bulk-attribute-values-modal">
+        {error ? <p className="auth-error">{error}</p> : null}
+        <div className="users-table-wrap bulk-attribute-values-table-wrap">
+          <table className="users-table bulk-attribute-values-table">
+            <thead>
+              <tr>
+                <th className="users-th" style={{ width: "42%" }}>Source</th>
+                <th className="users-th">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {target.rows.length === 0 ? (
+                <tr><td className="users-td-msg" colSpan={2}>No sources to edit.</td></tr>
+              ) : target.rows.map((row) => (
+                <tr key={row.id} className="users-row">
+                  <td className="users-td users-td--name">{row.name}</td>
+                  <td className="users-td">{renderInput(row)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
-    </div>
+      <div className="app-settings-modal-footer">
+        <button type="button" className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => onSave(draftValues)}
+          disabled={saving}
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+    </SettingsModal>
   );
 }
 
@@ -951,6 +1721,18 @@ function formatAttributeDisplay(value: string, dataType: SharedAttributeDataType
     }
   }
   return value;
+}
+
+function sourceRowMatchesAttributeDefinition(row: SourceRow, definition: Pick<SourceAttributeDefinitionRow, "sourceKinds">): boolean {
+  const sourceKinds = definition.sourceKinds ?? [];
+  if (sourceKinds.length === 0) return true;
+  const rowKindKeys = new Set([
+    normalizeSourceKindFilterValue(row.type),
+    normalizeSourceKindFilterValue(row.sourceObjectType),
+    normalizeSourceKindFilterValue(row.sourceObjectTypeSystemKey ?? ""),
+    normalizeSourceKindFilterValue(sourceKindFromFilterValue(row.sourceObjectTypeSystemKey ?? row.type) ?? ""),
+  ].filter(Boolean));
+  return sourceKinds.some((kind) => rowKindKeys.has(normalizeSourceKindFilterValue(kind)));
 }
 
 function relationshipTypeAllowsSourceEndpoint(
@@ -1342,13 +2124,14 @@ export function SourceImportModal({
 
   return (
     <>
-      <div className="modal-overlay" onClick={() => !saving && onCancel()}>
-        <div
-          className={`modal doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : ""}`}
-          onClick={(event) => event.stopPropagation()}
-        >
-        <div className="doc-upload-modal-title-row">
-          <h2>New Source</h2>
+      <SettingsModal
+        title="New Source"
+        onClose={onCancel}
+        closeDisabled={saving}
+        modalClassName={`doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : ""}`}
+      >
+        <div className="app-settings-modal-body">
+          <div className="doc-upload-modal-title-row">
           <div className="segmented-control">
             <button
               type="button"
@@ -1393,7 +2176,7 @@ export function SourceImportModal({
               Text Entry
             </button>
           </div>
-        </div>
+          </div>
         <div className="form">
           {mode === "upload" ? (
             <>
@@ -1471,37 +2254,41 @@ export function SourceImportModal({
           )}
 
           {(error || extractError) && <p className="auth-error">{error ?? extractError}</p>}
-          <div className="form-actions">
-            <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
-            <button
-              className="btn btn--primary"
-              disabled={saving || !canSubmit}
-              onClick={() => {
-                if (mode === "paste") {
-                  const rawContent = pastedRef.current?.innerHTML ?? "";
-                  const content = importSettings.trimImportedText ? rawContent.trim() : rawContent;
-                  void onSave({
-                    mode,
-                    title: title.trim(),
-                    sourceKind,
-                    notes,
-                    content,
-                  });
-                  return;
-                }
-                setReviewOpen(true);
-              }}
-            >
-              {saving ? "Saving..." : mode === "upload" ? "Create Source" : "Create Source"}
-            </button>
-          </div>
         </div>
         </div>
-      </div>
+        <div className="app-settings-modal-footer">
+          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button
+            className="btn btn--primary"
+            disabled={saving || !canSubmit}
+            onClick={() => {
+              if (mode === "paste") {
+                const rawContent = pastedRef.current?.innerHTML ?? "";
+                const content = importSettings.trimImportedText ? rawContent.trim() : rawContent;
+                void onSave({
+                  mode,
+                  title: title.trim(),
+                  sourceKind,
+                  notes,
+                  content,
+                });
+                return;
+              }
+              setReviewOpen(true);
+            }}
+          >
+            {saving ? "Saving..." : "Create Source"}
+          </button>
+        </div>
+      </SettingsModal>
       {reviewOpen ? (
-        <div className="modal-overlay" onClick={() => !saving && setReviewOpen(false)}>
-          <div className="modal modal--wide source-import-review-modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Approve Sources</h2>
+        <SettingsModal
+          title="Approve Sources"
+          onClose={() => setReviewOpen(false)}
+          closeDisabled={saving}
+          modalClassName="modal--wide source-import-review-modal"
+        >
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy" style={{ marginTop: 0, marginBottom: 16 }}>
               Review these files before creating sources.
             </p>
@@ -1544,7 +2331,7 @@ export function SourceImportModal({
                         ) : null}
                       </td>
                       <td className="users-td users-td--muted">
-                        {draft.characterCount != null ? formatCurrentNumber(draft.characterCount) : "—"}
+                        {draft.characterCount != null ? formatCurrentNumber(draft.characterCount) : "\u2014"}
                       </td>
                       <td className="users-td">
                         <input
@@ -1559,7 +2346,8 @@ export function SourceImportModal({
               </table>
             </div>
             {(error || extractError) && <p className="auth-error">{error ?? extractError}</p>}
-            <div className="form-actions" style={{ marginTop: 20 }}>
+          </div>
+          <div className="app-settings-modal-footer">
               <button className="btn" onClick={() => setReviewOpen(false)} disabled={saving}>Back</button>
               <button
                 className="btn btn--primary"
@@ -1578,9 +2366,8 @@ export function SourceImportModal({
               >
                 {saving ? "Creating..." : "Approve and Create"}
               </button>
-            </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
     </>
   );
@@ -1611,7 +2398,7 @@ export function SourceEditorModal({
     attributeValuesByDefinitionId: Record<string, string>;
   }) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"details" | "attributes">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "attributes" | "timeline">("details");
   const [sourceKind, setSourceKind] = useState(normalizeSourceKindSelection(initialRow?.type));
   const [name, setName] = useState(initialRow?.name || "");
   const [notes, setNotes] = useState(initialRow?.notes || "");
@@ -1619,6 +2406,17 @@ export function SourceEditorModal({
   const [attributeDraftValues, setAttributeDraftValues] = useState<Record<string, string>>(() => ({
     ...attributeValuesByDefinitionId,
   }));
+  const displayedAttributeDefinitions = useMemo(
+    () => attributeDefinitions.filter((definition) => {
+      const sourceKinds = definition.sourceKinds ?? [];
+      return sourceKinds.length === 0 || sourceKinds.includes(sourceKind);
+    }),
+    [attributeDefinitions, sourceKind],
+  );
+  const displayedTimelineDefinitions = useMemo(
+    () => displayedAttributeDefinitions.filter((definition) => (definition.timelineRole ?? "").trim()),
+    [displayedAttributeDefinitions],
+  );
 
   function updateAttributeValue(attributeDefinitionId: string, value: string) {
     setAttributeDraftValues((current) => ({
@@ -1628,9 +2426,8 @@ export function SourceEditorModal({
   }
 
   return (
-    <div className="modal-overlay" onClick={() => !saving && onCancel()}>
-      <div className="modal modal--wide assoc-doc-modal" onClick={(event) => event.stopPropagation()}>
-        <h2>{title}</h2>
+    <SettingsModal title={title} onClose={onCancel} closeDisabled={saving} modalClassName="modal--wide assoc-doc-modal">
+      <div className="app-settings-modal-body">
         <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Source editor tabs">
           <button
             type="button"
@@ -1645,6 +2442,13 @@ export function SourceEditorModal({
             onClick={() => setActiveTab("attributes")}
           >
             Attributes
+          </button>
+          <button
+            type="button"
+            className={activeTab === "timeline" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+            onClick={() => setActiveTab("timeline")}
+          >
+            Timeline
           </button>
         </div>
         <div className="form">
@@ -1673,19 +2477,51 @@ export function SourceEditorModal({
                 <textarea className="form-input" rows={14} value={content} onChange={(event) => setContent(event.target.value)} />
               </label>
             </>
-          ) : attributeDefinitions.length === 0 ? (
+          ) : activeTab === "timeline" ? (
+            displayedTimelineDefinitions.length === 0 ? (
+              <p className="case-card-empty">No timeline fields have been configured for this source type yet.</p>
+            ) : (
+              <div className="case-detail-attributes-table-wrap">
+                <table className="case-detail-attributes-table">
+                  <tbody>
+                    {displayedTimelineDefinitions.map((definition) => (
+                      <tr key={definition.id}>
+                        <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                        <td className="case-detail-attributes-value">
+                          {definition.dataType === "categorical" ? (
+                            <select
+                              className="form-input"
+                              value={attributeDraftValues[definition.id] ?? ""}
+                              onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                            >
+                              <option value="">-</option>
+                              {definition.options.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              className="form-input"
+                              type={definition.dataType === "number" ? "number" : definition.dataType === "datetime" ? "datetime-local" : "text"}
+                              step={definition.dataType === "number" ? "any" : undefined}
+                              value={attributeDraftValues[definition.id] ?? ""}
+                              onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : displayedAttributeDefinitions.length === 0 ? (
             <p className="case-card-empty">No source attributes have been created yet.</p>
           ) : (
             <div className="case-detail-attributes-table-wrap">
               <table className="case-detail-attributes-table">
-                <thead>
-                  <tr>
-                    <th className="case-detail-attributes-label" scope="col">Attribute</th>
-                    <th className="case-detail-attributes-value" scope="col">Value</th>
-                  </tr>
-                </thead>
                 <tbody>
-                  {attributeDefinitions.map((definition) => (
+                  {displayedAttributeDefinitions.map((definition) => (
                     <tr key={definition.id}>
                       <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
                       <td className="case-detail-attributes-value">
@@ -1718,106 +2554,18 @@ export function SourceEditorModal({
           )}
         </div>
         {error && <p className="auth-error">{error}</p>}
-        <div className="form-actions">
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            onClick={() => onSave({ sourceKind, name, notes, content, attributeValuesByDefinitionId: attributeDraftValues })}
-            disabled={saving || !name.trim()}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
-        </div>
       </div>
-    </div>
-  );
-}
-
-function SourceObjectsModal({
-  sourceName,
-  objects,
-  selectedObjectIds,
-  saving,
-  error,
-  onCancel,
-  onSave,
-}: {
-  sourceName: string;
-  objects: SourceObjectRow[];
-  selectedObjectIds: string[];
-  saving: boolean;
-  error: string | null;
-  onCancel: () => void;
-  onSave: (objectIds: string[]) => Promise<void>;
-}) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(selectedObjectIds));
-
-  useEffect(() => {
-    setSelected(new Set(selectedObjectIds));
-  }, [selectedObjectIds]);
-
-  function toggleObject(objectId: string) {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(objectId)) next.delete(objectId);
-      else next.add(objectId);
-      return next;
-    });
-  }
-
-  return (
-    <div className="modal-overlay" onClick={() => !saving && onCancel()}>
-      <div className="modal modal--wide assoc-doc-modal" onClick={(event) => event.stopPropagation()}>
-        <h2>Associate Objects</h2>
-        <p className="users-guide-copy" style={{ marginBottom: 16 }}>
-          Choose the research objects linked to <strong>{sourceName}</strong>.
-        </p>
-        {objects.length === 0 ? (
-          <p className="case-card-empty">Create research objects before associating them with this source.</p>
-        ) : (
-          <div
-            style={{
-              maxHeight: 320,
-              overflow: "auto",
-              border: "1px solid var(--color-border, rgba(53, 80, 112, 0.14))",
-              borderRadius: 12,
-              padding: 10,
-              background: "rgba(255,255,255,0.92)",
-            }}
-          >
-            {objects.map((object) => (
-              <label
-                key={object.id}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", cursor: "pointer" }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(object.id)}
-                  onChange={() => toggleObject(object.id)}
-                />
-                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  <span>{object.title}</span>
-                  <span className="users-guide-copy" style={{ margin: 0 }}>
-                    {object.objectType || "Object"}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
-        {error && <p className="auth-error">{error}</p>}
-        <div className="form-actions">
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            onClick={() => void onSave([...selected])}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Save Associations"}
-          </button>
-        </div>
+      <div className="app-settings-modal-footer">
+        <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button
+          className="btn btn--primary"
+          onClick={() => onSave({ sourceKind, name, notes, content, attributeValuesByDefinitionId: attributeDraftValues })}
+          disabled={saving || !name.trim()}
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
       </div>
-    </div>
+    </SettingsModal>
   );
 }
 
@@ -1874,7 +2622,7 @@ function CreateSourceRelationshipModal({
   const [fromEntityId, setFromEntityId] = useState(relationship?.fromEntityId ?? source.id);
   const [toEntityType, setToEntityType] = useState<"object" | "source">(relationship?.toEntityType ?? "object");
   const [toEntityId, setToEntityId] = useState(relationship?.toEntityId ?? "");
-  const [modalTab, setModalTab] = useState<"details" | "graphics" | "attributes">("details");
+  const [modalTab, setModalTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
   const [description, setDescription] = useState(relationship?.description ?? "");
   const [lineShapeOverride, setLineShapeOverride] = useState(relationship?.lineShapeOverride ?? "");
   const [lineWeightOverride, setLineWeightOverride] = useState<number | null>(relationship?.lineWeightOverride ?? null);
@@ -2097,10 +2845,14 @@ function CreateSourceRelationshipModal({
         }}
       />
       {newTypeOpen ? (
-        <div className="modal-overlay" style={{ zIndex: 120 }} onClick={() => !newTypeSaving && setNewTypeOpen(false)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Add relationship type</h2>
-            <form className="form" onSubmit={handleCreateRelationshipType}>
+        <SettingsModal
+          title="Add relationship type"
+          onClose={() => setNewTypeOpen(false)}
+          closeDisabled={newTypeSaving}
+          overlayStyle={{ zIndex: 120 }}
+        >
+          <form className="form app-settings-modal-form" onSubmit={handleCreateRelationshipType}>
+            <div className="app-settings-modal-body">
               <label className="form-label">
                 Relationship type name
                 <input
@@ -2111,17 +2863,17 @@ function CreateSourceRelationshipModal({
                 />
               </label>
               {newTypeError ? <p className="auth-error">{newTypeError}</p> : null}
-              <div className="form-actions">
-                <button type="button" className="btn" onClick={() => setNewTypeOpen(false)} disabled={newTypeSaving}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn--primary" disabled={newTypeSaving || !newTypeName.trim()}>
-                  {newTypeSaving ? "Saving..." : "Add relationship type"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <button type="button" className="btn" onClick={() => setNewTypeOpen(false)} disabled={newTypeSaving}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn--primary" disabled={newTypeSaving || !newTypeName.trim()}>
+                {newTypeSaving ? "Saving..." : "Add relationship type"}
+              </button>
+            </div>
+          </form>
+        </SettingsModal>
       ) : null}
     </>
   );
@@ -2131,10 +2883,8 @@ function CreateSourceRelationshipModal({
 function PostgresSourceDetail({
   row,
   codeOptions,
-  linkedObjects,
   relationships,
   attributeValues,
-  availableObjects,
   currentUserId,
   sourceLock,
   sourceLockConflict,
@@ -2149,7 +2899,6 @@ function PostgresSourceDetail({
   onKickSourceLock,
   onCreateRelationship,
   onEditRelationship,
-  onSaveSourceObjects,
   canManageSourceRecord,
   projectStoragePath,
   onOpenAttributeHistory,
@@ -2159,10 +2908,8 @@ function PostgresSourceDetail({
 }: {
   row: SourceRow;
   codeOptions: CodeOption[];
-  linkedObjects: SourceObjectRow[];
   relationships: SourceRelationshipRow[];
   attributeValues: Array<SharedAttributeDraft & { value: string }>;
-  availableObjects: SourceObjectRow[];
   currentUserId: string;
   sourceLock: PostgresSourceLock | null;
   sourceLockConflict: PostgresSourceLock | null;
@@ -2177,7 +2924,6 @@ function PostgresSourceDetail({
   onKickSourceLock: (lock: PostgresSourceLock) => Promise<void>;
   onCreateRelationship: () => void;
   onEditRelationship: (relationship: PostgresRelationship) => void;
-  onSaveSourceObjects: (sourceId: string, objectIds: string[]) => Promise<void>;
   canManageSourceRecord: boolean;
   projectStoragePath: string;
   onOpenAttributeHistory: (attribute: SharedAttributeDraft) => void;
@@ -2193,7 +2939,6 @@ function PostgresSourceDetail({
   const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<SourceAnnotationRow | null>(null);
   const [removingAnnotation, setRemovingAnnotation] = useState<SourceAnnotationRow | null>(null);
-  const [editingSourceObjects, setEditingSourceObjects] = useState(false);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
@@ -2571,7 +3316,7 @@ function PostgresSourceDetail({
             <dt>{t("projectDocuments.columns.type")}</dt> <dd>{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType)}</dd>
             <dt>{t("projectDocuments.columns.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
             <dt>File Name</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
-            <dt>Extension</dt> <dd>{fileExt ? `.${fileExt}` : "—"}</dd>
+            <dt>Extension</dt> <dd>{fileExt ? `.${fileExt}` : "\u2014"}</dd>
             {isImageSource && row.extractedFromVideoSourceId ? (
               <>
                 <dt>Extracted From Video</dt> <dd>{row.extractedFromVideoSourceId}</dd>
@@ -2619,7 +3364,7 @@ function PostgresSourceDetail({
                       </button>
                     </td>
                     {/*
-                    <dt>{attribute.name}</dt> <dd>{formatAttributeDisplay(attribute.value, attribute.dataType) || "—"}</dd>
+                    <dt>{attribute.name}</dt> <dd>{formatAttributeDisplay(attribute.value, attribute.dataType) || "\u2014"}</dd>
                     */}
                   </tr>
                 ))}
@@ -2693,7 +3438,7 @@ function PostgresSourceDetail({
                         aria-expanded={outlineOpen}
                         onClick={() => setOutlineOpen((open) => !open)}
                       >
-                        ≡
+                        {"\u2261"}
                       </button>
                       {outlineOpen && (
                         <div className="processed-transcript-outline-menu">
@@ -2745,7 +3490,7 @@ function PostgresSourceDetail({
                           aria-label="Previous search match"
                           title="Previous"
                         >
-                          ↑
+                          {"\u2191"}
                         </button>
                         <button
                           type="button"
@@ -2755,7 +3500,7 @@ function PostgresSourceDetail({
                           aria-label="Next search match"
                           title="Next"
                         >
-                          ↓
+                          {"\u2193"}
                         </button>
                       </>
                     ) : null}
@@ -2989,47 +3734,33 @@ function PostgresSourceDetail({
       ) : null}
 
       {removingAnnotation && canEditAnnotations ? (
-        <div className="modal-overlay" onClick={() => !saving && setRemovingAnnotation(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete Annotation</h2>
+        <SettingsModal
+          title="Delete Annotation"
+          onClose={() => setRemovingAnnotation(null)}
+          closeDisabled={saving}
+        >
+          <div className="app-settings-modal-body">
             <blockquote className="annotation-quote" style={{ margin: "0 0 16px" }}>
               "{removingAnnotation.quote}"
             </blockquote>
             {error ? <p className="auth-error">{error}</p> : null}
-            <div className="form-actions">
-              <button className="btn" onClick={() => setRemovingAnnotation(null)} disabled={saving}>Cancel</button>
-              <button
-                className="btn btn--danger"
-                onClick={async () => {
-                  await onDeleteAnnotation(removingAnnotation.id);
-                  setRemovingAnnotation(null);
-                }}
-                disabled={saving}
-              >
-                {saving ? "Deleting..." : "Delete"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setRemovingAnnotation(null)} disabled={saving}>Cancel</button>
+            <button
+              className="btn btn--danger"
+              onClick={async () => {
+                await onDeleteAnnotation(removingAnnotation.id);
+                setRemovingAnnotation(null);
+              }}
+              disabled={saving}
+            >
+              {saving ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
-      {editingSourceObjects ? (
-        <SourceObjectsModal
-          sourceName={row.name}
-          objects={availableObjects}
-          selectedObjectIds={linkedObjects.map((object) => object.id)}
-          saving={saving}
-          error={error}
-          onCancel={() => {
-            if (saving) return;
-            setEditingSourceObjects(false);
-          }}
-          onSave={async (objectIds) => {
-            await onSaveSourceObjects(row.id, objectIds);
-            setEditingSourceObjects(false);
-          }}
-        />
-      ) : null}
     </div>
   );
 }
@@ -3076,12 +3807,11 @@ export function PostgresSourcesView({
   const [codes, setCodes] = useState<PostgresCode[]>([]);
   const [annotations, setAnnotations] = useState<PostgresAnnotationSummary[]>([]);
   const [objects, setObjects] = useState<PostgresObject[]>([]);
-  const [objectTypes, setObjectTypes] = useState<PostgresObjectType[]>([]);
   const [relationships, setRelationships] = useState<PostgresRelationship[]>([]);
   const [relationshipTypes, setRelationshipTypes] = useState<PostgresRelationshipType[]>([]);
   const [relationshipAttributeDefinitions, setRelationshipAttributeDefinitions] = useState<PostgresRelationshipAttributeDefinition[]>([]);
+  const [sourceTypeSettings, setSourceTypeSettings] = useState<PostgresSourceTypeSetting[]>([]);
   const [sourceLocks, setSourceLocks] = useState<PostgresSourceLock[]>([]);
-  const [sourceObjectLinks, setSourceObjectLinks] = useState<PostgresSourceObjectLink[]>([]);
   const [sourceAttributeDefinitions, setSourceAttributeDefinitions] = useState<PostgresSourceAttributeDefinition[]>([]);
   const [sourceAttributeValues, setSourceAttributeValues] = useState<PostgresSourceAttributeValue[]>([]);
   const [loading, setLoading] = useState(false);
@@ -3100,6 +3830,8 @@ export function PostgresSourcesView({
   const [attributeDraft, setAttributeDraft] = useState<SourceAttributeDraft | null>(null);
   const [attributeHistoryTarget, setAttributeHistoryTarget] = useState<PostgresAttributeValueHistoryTarget | null>(null);
   const [activeAttributeHistoryCell, setActiveAttributeHistoryCell] = useState<{ sourceId: string; attributeDefinitionId: string } | null>(null);
+  const [hoveredAttributeColumnId, setHoveredAttributeColumnId] = useState<string | null>(null);
+  const [bulkAttributeTarget, setBulkAttributeTarget] = useState<BulkSourceAttributeTarget | null>(null);
   const [attributeSaving, setAttributeSaving] = useState(false);
   const [attributeError, setAttributeError] = useState<string | null>(null);
   const [sourceImportSettings, setSourceImportSettings] = useState({
@@ -3124,6 +3856,14 @@ export function PostgresSourcesView({
   const [sourceContextMenu, setSourceContextMenu] = useState<{ x: number; y: number; row: SourceRow } | null>(null);
   const sourceContextMenuRef = useRef<HTMLDivElement | null>(null);
   const sourceContextMenuStyle = useViewportContextMenuStyle(sourceContextMenu, sourceContextMenuRef);
+  const [sourceTypeContextMenu, setSourceTypeContextMenu] = useState<{ x: number; y: number; sourceKind: string } | null>(null);
+  const sourceTypeContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const sourceTypeContextMenuStyle = useViewportContextMenuStyle(sourceTypeContextMenu, sourceTypeContextMenuRef);
+  const [editingSourceTypeKind, setEditingSourceTypeKind] = useState<string | null>(null);
+  const [sourceTypeSaving, setSourceTypeSaving] = useState(false);
+  const [sourceTypeUploading, setSourceTypeUploading] = useState(false);
+  const [sourceTypeError, setSourceTypeError] = useState<string | null>(null);
+  const [sourceTypeInitialTab, setSourceTypeInitialTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
 
   const loadSources = useCallback(async () => {
     setLoading(true);
@@ -3137,12 +3877,11 @@ export function PostgresSourcesView({
       setCodes(snapshot.codes);
       setAnnotations(snapshot.annotations);
       setObjects(snapshot.objects);
-      setObjectTypes(snapshot.objectTypes);
       setRelationships(snapshot.relationships);
       setRelationshipTypes(snapshot.relationshipTypes);
       setRelationshipAttributeDefinitions(snapshot.relationshipAttributeDefinitions);
+      setSourceTypeSettings(snapshot.sourceTypeSettings);
       setSourceLocks(snapshot.sourceLocks);
-      setSourceObjectLinks(snapshot.sourceObjectLinks);
       setSourceAttributeDefinitions(snapshot.sourceAttributeDefinitions);
       setSourceAttributeValues(snapshot.sourceAttributeValues);
       const annotationCountBySourceId = new Map<string, number>();
@@ -3184,7 +3923,7 @@ export function PostgresSourcesView({
         }),
       );
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load sources.");
+      setError(loadError instanceof Error ? loadError.message : typeof loadError === "string" ? loadError : "Failed to load sources.");
     } finally {
       setLoading(false);
     }
@@ -3227,16 +3966,22 @@ export function PostgresSourcesView({
   }, [projectId]);
 
   useEffect(() => {
-    if (!sourceContextMenu) return;
+    if (!sourceContextMenu && !sourceTypeContextMenu) return;
 
     function handlePointerDown(event: MouseEvent) {
       if (!sourceContextMenuRef.current?.contains(event.target as Node)) {
         setSourceContextMenu(null);
       }
+      if (!sourceTypeContextMenuRef.current?.contains(event.target as Node)) {
+        setSourceTypeContextMenu(null);
+      }
     }
 
     function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setSourceContextMenu(null);
+      if (event.key === "Escape") {
+        setSourceContextMenu(null);
+        setSourceTypeContextMenu(null);
+      }
     }
 
     document.addEventListener("mousedown", handlePointerDown);
@@ -3245,7 +3990,7 @@ export function PostgresSourcesView({
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [sourceContextMenu]);
+  }, [sourceContextMenu, sourceTypeContextMenu]);
 
   const allowedSourceKindSet = useMemo(() => {
     if (!allowedSourceKinds || allowedSourceKinds.length === 0) return null;
@@ -3362,47 +4107,71 @@ export function PostgresSourcesView({
       label: string;
       meta: string;
       count: number;
+      attributeDefinitionCount: number;
       shape: SourceObjectTypeShape;
       color: string;
+      outlineColor: string;
       fill: SourceObjectFill;
       systemKey: string | null;
     }>();
-    for (const objectType of objectTypes) {
-      const systemKey = objectType.systemKey;
-      if (!systemKey || !POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS.includes(systemKey as (typeof POSTGRES_SOURCE_OBJECT_TYPE_SYSTEM_KEYS)[number])) {
-        continue;
-      }
+    for (const setting of sourceTypeSettings) {
+      const systemKey = sourceObjectTypeSystemKeyFromKind(setting.sourceKind);
+      if (!systemKey) continue;
       if (allowedSourceKindSet && ![
+        setting.sourceKind,
         systemKey,
-        objectType.name,
+        setting.name,
       ].some((value) => allowedSourceKindSet.has(normalizeSourceKindFilterValue(value)))) {
         continue;
       }
+      const sourceKindAttributeKeys = new Set([
+        normalizeSourceKindFilterValue(setting.sourceKind),
+        normalizeSourceKindFilterValue(setting.name),
+        normalizeSourceKindFilterValue(sourceKindFromFilterValue(systemKey) ?? ""),
+        systemKey,
+      ].filter(Boolean));
       summaryByKind.set(systemKey, {
-        label: objectType.name,
+        label: setting.name,
         meta: systemKey,
         count: 0,
-        shape: normalizeSourceObjectTypeShape(objectType.shape),
-        color: normalizeSourceObjectColor(objectType.color),
-        fill: normalizeSourceObjectFill(objectType.fill),
+        attributeDefinitionCount: sourceAttributeDefinitions.filter((definition) =>
+          (definition.sourceKinds ?? []).some((kind) => sourceKindAttributeKeys.has(normalizeSourceKindFilterValue(kind)))
+        ).length,
+        shape: normalizeSourceObjectTypeShape(setting.shape),
+        color: normalizeSourceObjectColor(setting.color),
+        outlineColor: normalizeOptionalSourceObjectColor(setting.outlineColor) || normalizeSourceObjectColor(setting.color),
+        fill: normalizeSourceObjectFill(setting.fill),
         systemKey,
       });
     }
     for (const row of visibleRows) {
       const kindKey = row.sourceObjectTypeSystemKey || row.sourceObjectType || row.type || "source";
-      const current = summaryByKind.get(kindKey);
+      const normalizedKindKey = sourceObjectTypeSystemKeyFromKind(kindKey) ?? kindKey;
+      const current = summaryByKind.get(normalizedKindKey);
       if (current) {
         current.count += 1;
       } else {
         const sourceVisual = getSourceKindVisual(row.type);
-        summaryByKind.set(kindKey, {
+        const fallbackSystemKey = row.sourceObjectTypeSystemKey ?? sourceVisual?.systemKey ?? sourceObjectTypeSystemKeyFromKind(row.type);
+        const fallbackKind = fallbackSystemKey ?? kindKey;
+        const fallbackAttributeKeys = new Set([
+          normalizeSourceKindFilterValue(row.type),
+          normalizeSourceKindFilterValue(row.sourceObjectType),
+          normalizeSourceKindFilterValue(sourceKindFromFilterValue(fallbackKind) ?? ""),
+          normalizeSourceKindFilterValue(fallbackKind),
+        ].filter(Boolean));
+        summaryByKind.set(fallbackKind, {
           label: sourceVisual?.label ?? row.sourceObjectType ?? row.type ?? "Source",
           meta: row.sourceObjectTypeSystemKey || row.type || "source",
           count: 1,
+          attributeDefinitionCount: sourceAttributeDefinitions.filter((definition) =>
+            (definition.sourceKinds ?? []).some((kind) => fallbackAttributeKeys.has(normalizeSourceKindFilterValue(kind)))
+          ).length,
           shape: "rounded",
           color: sourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
+          outlineColor: sourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
           fill: "outline",
-          systemKey: row.sourceObjectTypeSystemKey ?? sourceVisual?.systemKey ?? null,
+          systemKey: fallbackSystemKey ?? null,
         });
       }
     }
@@ -3412,8 +4181,10 @@ export function PostgresSourcesView({
         label: summary.label,
         meta: summary.meta,
         count: summary.count,
+        attributeDefinitionCount: summary.attributeDefinitionCount,
         shape: summary.shape,
         color: summary.color,
+        outlineColor: summary.outlineColor,
         fill: summary.fill,
         systemKey: summary.systemKey,
       }))
@@ -3429,7 +4200,7 @@ export function PostgresSourcesView({
         }
         return sourceKindSortDir === "asc" ? comparison : -comparison;
       });
-  }, [allowedSourceKindSet, objectTypes, sourceKindSortCol, sourceKindSortDir, visibleRows]);
+  }, [allowedSourceKindSet, sourceAttributeDefinitions, sourceKindSortCol, sourceKindSortDir, sourceTypeSettings, visibleRows]);
   const sourceTypeOptions = useMemo(
     () => sourceKindSummaries
       .map((summary) => {
@@ -3478,6 +4249,9 @@ export function PostgresSourcesView({
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
+  const editingSourceType = editingSourceTypeKind
+    ? sourceTypeSettings.find((setting) => setting.sourceKind === editingSourceTypeKind) ?? null
+    : null;
   const sourceLockBySourceId = useMemo(
     () => new Map(sourceLocks.map((lock) => [lock.sourceId, lock])),
     [sourceLocks],
@@ -3502,6 +4276,145 @@ export function PostgresSourcesView({
   function handleSelectSourceKind(kind: string) {
     setSelectedSourceKindFilter(kind);
     setSelectedRow(null);
+  }
+
+  function openSourceTypeContextMenu(
+    event: ReactMouseEvent<HTMLElement>,
+    summary: { kind: string; systemKey: string | null; label: string; meta: string },
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canManageSources) return;
+    const resolvedSystemKey = summary.systemKey
+      ?? sourceObjectTypeSystemKeyFromKind(summary.kind)
+      ?? sourceObjectTypeSystemKeyFromKind(summary.meta)
+      ?? sourceObjectTypeSystemKeyFromKind(summary.label);
+    const sourceKind = sourceKindFromFilterValue(resolvedSystemKey ?? summary.kind)
+      ?? sourceKindFromFilterValue(summary.meta)
+      ?? sourceKindFromFilterValue(summary.label);
+    if (!sourceKind) return;
+    setSourceContextMenu(null);
+    setSourceTypeContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      sourceKind,
+    });
+  }
+
+  function handleSourceTypeContextMouseDown(
+    event: ReactMouseEvent<HTMLElement>,
+    summary: { kind: string; systemKey: string | null; label: string; meta: string },
+  ) {
+    if (event.button !== 2) return;
+    openSourceTypeContextMenu(event, summary);
+  }
+
+  async function handleSaveSourceType(draft: SourceTypeEditModalDraft) {
+    const sourceType = editingSourceTypeKind
+      ? sourceTypeSettings.find((setting) => setting.sourceKind === editingSourceTypeKind) ?? null
+      : null;
+    if (!sourceType) return;
+    setSourceTypeSaving(true);
+    setSourceTypeError(null);
+    try {
+      const saved = await savePostgresSourceTypeSetting({
+        projectId,
+        sourceKind: sourceType.sourceKind,
+        name: draft.name.trim(),
+        description: draft.description,
+        shape: draft.shape,
+        color: normalizeSourceObjectColor(draft.color),
+        outlineColor: normalizeOptionalSourceObjectColor(draft.outlineColor) || normalizeSourceObjectColor(draft.color),
+        fill: draft.fill,
+        imageStoragePath: draft.imageStoragePath || null,
+      });
+      const currentKind = normalizeSourceKindFilterValue(sourceType.sourceKind);
+      for (const removedAttributeId of draft.removedAttributeIds) {
+        const definition = sourceAttributeDefinitions.find((entry) => entry.id === removedAttributeId);
+        if (!definition) continue;
+        const remainingSourceKinds = (definition.sourceKinds ?? [])
+          .filter((kind) => normalizeSourceKindFilterValue(kind) !== currentKind);
+        if (remainingSourceKinds.length === 0) {
+          await deletePostgresSourceAttributeDefinition(projectId, removedAttributeId);
+        } else {
+          await savePostgresSourceAttribute({
+            projectId,
+            attributeDefinitionId: definition.id,
+            name: definition.name,
+            dataType: definition.dataType,
+            description: definition.description,
+            options: definition.options,
+            timelineRole: definition.timelineRole ?? "",
+            sourceKinds: remainingSourceKinds,
+            values: [],
+          });
+        }
+      }
+      for (const attributeDraft of draft.attributes) {
+        const otherSourceKinds = attributeDraft.originalSourceKinds
+          .filter((kind) => normalizeSourceKindFilterValue(kind) !== currentKind);
+        const valuesForCurrentKind = rows
+          .filter((row) => normalizeSourceKindFilterValue(row.type) === currentKind)
+          .map((row) => ({
+            sourceId: row.id,
+            value: draft.attributeValuesByDraftId[attributeDraft.localId]?.[row.id] ?? "",
+          }));
+        await savePostgresSourceAttribute({
+          projectId,
+          attributeDefinitionId: attributeDraft.id ?? null,
+          name: attributeDraft.name.trim(),
+          dataType: attributeDraft.dataType,
+          description: attributeDraft.description,
+          options: attributeDraft.options,
+          timelineRole: attributeDraft.timelineRole ?? "",
+          sourceKinds: [...otherSourceKinds, sourceType.sourceKind],
+          values: valuesForCurrentKind,
+        });
+      }
+      setSourceTypeSettings((current) => current.map((entry) => (entry.sourceKind === saved.sourceKind ? saved : entry)));
+      setEditingSourceTypeKind(null);
+      await loadSources();
+    } catch (saveError) {
+      setSourceTypeError(saveError instanceof Error ? saveError.message : "Failed to save source type.");
+    } finally {
+      setSourceTypeSaving(false);
+    }
+  }
+
+  async function handleUploadSourceTypeImage(sourceKind: string, file: File): Promise<PostgresSourceTypeSetting> {
+    setSourceTypeUploading(true);
+    setSourceTypeError(null);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const saved = await importPostgresSourceTypeImage({
+        projectId,
+        sourceKind,
+        originalFileName: file.name,
+        fileBytesBase64: bytesToBase64(bytes),
+      });
+      setSourceTypeSettings((current) => current.map((entry) => (entry.sourceKind === saved.sourceKind ? saved : entry)));
+      return saved;
+    } catch (uploadError) {
+      setSourceTypeError(uploadError instanceof Error ? uploadError.message : "Failed to upload source type image.");
+      throw uploadError;
+    } finally {
+      setSourceTypeUploading(false);
+    }
+  }
+
+  async function handleRemoveSourceTypeImage(sourceKind: string): Promise<PostgresSourceTypeSetting> {
+    setSourceTypeUploading(true);
+    setSourceTypeError(null);
+    try {
+      const saved = await removePostgresSourceTypeImage(projectId, sourceKind);
+      setSourceTypeSettings((current) => current.map((entry) => (entry.sourceKind === saved.sourceKind ? saved : entry)));
+      return saved;
+    } catch (removeError) {
+      setSourceTypeError(removeError instanceof Error ? removeError.message : "Failed to remove source type image.");
+      throw removeError;
+    } finally {
+      setSourceTypeUploading(false);
+    }
   }
 
   async function handleSaveSource(payload: {
@@ -3801,24 +4714,6 @@ export function PostgresSourcesView({
     }
   }
 
-  async function handleSaveSourceObjects(sourceId: string, objectIds: string[]) {
-    setSubmitting(true);
-    setSubmitError(null);
-    try {
-      await setPostgresSourceObjects({
-        projectId,
-        sourceId,
-        objectIds,
-      });
-      await loadSources();
-    } catch (sourceObjectError) {
-      setSubmitError(sourceObjectError instanceof Error ? sourceObjectError.message : "Failed to save source associations.");
-      throw sourceObjectError;
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   async function handleCreateSourceRelationship(payload: {
     relationshipId: string | null;
     relationshipTypeId: string;
@@ -3918,6 +4813,7 @@ export function PostgresSourcesView({
         dataType: draft.dataType,
         description: draft.description,
         options: draft.options,
+        timelineRole: draft.timelineRole ?? "",
         sourceKinds: normalizedSourceKinds,
         values: rows
           .filter((row) => normalizedSourceKinds.length === 0 || normalizedSourceKinds.includes(row.type))
@@ -3930,6 +4826,40 @@ export function PostgresSourcesView({
       await loadSources();
     } catch (saveError) {
       setAttributeError(saveError instanceof Error ? saveError.message : "Failed to save source attribute.");
+    } finally {
+      setAttributeSaving(false);
+    }
+  }
+
+  async function handleSaveBulkAttributeValues(
+    attribute: SourceAttributeDefinitionRow,
+    editedValuesBySource: Record<string, string>,
+  ) {
+    setAttributeSaving(true);
+    setAttributeError(null);
+    try {
+      await savePostgresSourceAttribute({
+        projectId,
+        attributeDefinitionId: attribute.id,
+        name: attribute.name.trim(),
+        dataType: attribute.dataType,
+        description: attribute.description,
+        options: attribute.options,
+        timelineRole: attribute.timelineRole ?? "",
+        sourceKinds: normalizeSourceAttributeKinds(attribute.sourceKinds),
+        values: rows
+          .filter((row) => sourceRowMatchesAttributeDefinition(row, attribute))
+          .map((row) => ({
+            sourceId: row.id,
+            value: editedValuesBySource[row.id] ?? sourceAttributeValues.find((value) =>
+              value.sourceId === row.id && value.attributeDefinitionId === attribute.id
+            )?.value ?? "",
+          })),
+      });
+      setBulkAttributeTarget(null);
+      await loadSources();
+    } catch (saveError) {
+      setAttributeError(saveError instanceof Error ? saveError.message : "Failed to save source attribute values.");
     } finally {
       setAttributeSaving(false);
     }
@@ -4077,6 +5007,7 @@ export function PostgresSourcesView({
         description: definition.description,
         options: definition.options,
         sourceKinds: definition.sourceKinds ?? [],
+        timelineRole: definition.timelineRole ?? "",
         sortOrder: definition.sortOrder,
       })),
     [selectedSourceKind, sourceAttributeDefinitionsForEditor],
@@ -4107,17 +5038,6 @@ export function PostgresSourcesView({
       ]),
     );
   }
-  const availableObjects = useMemo<SourceObjectRow[]>(
-    () => [...objects]
-      .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }))
-      .map((object) => ({
-        id: object.id,
-        title: object.title,
-        objectType: object.objectType,
-        objectTypeSystemKey: object.objectTypeSystemKey,
-      })),
-    [objects],
-  );
   const selectedSourceAnnotations = useMemo<SourceAnnotationRow[]>(() => {
     if (!selectedRow) return [];
     const codeById = new Map(codes.map((code) => [code.id, code]));
@@ -4147,15 +5067,6 @@ export function PostgresSourcesView({
     if (initialAnnotationId && !selectedSourceAnnotations.some((annotation) => annotation.id === initialAnnotationId)) return;
     onInitialNavigationHandled?.();
   }, [initialAnnotationId, initialSourceId, onInitialNavigationHandled, selectedRow?.id, selectedSourceAnnotations]);
-  const selectedSourceObjects = useMemo<SourceObjectRow[]>(() => {
-    if (!selectedRow) return [];
-    const objectById = new Map(availableObjects.map((object) => [object.id, object]));
-    return sourceObjectLinks
-      .filter((link) => link.sourceId === selectedRow.id)
-      .map((link) => objectById.get(link.objectId) ?? null)
-      .filter((object): object is SourceObjectRow => object != null)
-      .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }));
-  }, [availableObjects, selectedRow, sourceObjectLinks]);
   const selectedSourceRelationships = useMemo<SourceRelationshipRow[]>(() => {
     if (!selectedRow) return [];
     const objectById = new Map(objects.map((object) => [object.id, object]));
@@ -4201,10 +5112,6 @@ export function PostgresSourcesView({
         || left.otherEndpointName.localeCompare(right.otherEndpointName, undefined, { sensitivity: "base" })
       );
   }, [objects, relationships, rows, selectedRow]);
-  const availableObjectsForSelectedSource = useMemo(
-    () => availableObjects,
-    [availableObjects],
-  );
   const selectedSourceAttributeValues = useMemo<Array<SharedAttributeDraft & { value: string }>>(() => {
     if (!selectedRow) return [];
     return attributeDefs
@@ -4405,13 +5312,11 @@ export function PostgresSourcesView({
   if (!codingEnabled && !showAttributesTable && selectedRow) {
     return (
       <div className="view users-view">
-        <PostgresSourceDetail
-          row={selectedRow}
-          codeOptions={codeOptions}
-          linkedObjects={selectedSourceObjects}
+          <PostgresSourceDetail
+            row={selectedRow}
+            codeOptions={codeOptions}
           relationships={selectedSourceRelationships}
           attributeValues={selectedSourceAttributeValues}
-          availableObjects={availableObjectsForSelectedSource}
           currentUserId={currentUserId}
           sourceLock={selectedSourceLock}
           sourceLockConflict={sourceLockConflict}
@@ -4434,7 +5339,6 @@ export function PostgresSourcesView({
             setEditingSourceRelationship(relationship);
             setSubmitError(null);
           }}
-          onSaveSourceObjects={handleSaveSourceObjects}
           canManageSourceRecord={canManageSources}
           projectStoragePath={projectStoragePath}
           onOpenAttributeHistory={(attribute) => {
@@ -4480,21 +5384,24 @@ export function PostgresSourcesView({
           />
         ) : null}
         {deleteRow ? (
-          <div className="modal-overlay" onClick={() => !submitting && setDeleteRow(null)}>
-            <div className="modal" onClick={(event) => event.stopPropagation()}>
-              <h2>Delete Source</h2>
+          <SettingsModal
+            title="Delete Source"
+            onClose={() => setDeleteRow(null)}
+            closeDisabled={submitting}
+          >
+            <div className="app-settings-modal-body">
               <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                 Delete <strong>{deleteRow.name}</strong>?
               </p>
               {submitError && <p className="auth-error">{submitError}</p>}
-              <div className="form-actions" style={{ marginTop: 24 }}>
-                <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
-                <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
-                  {submitting ? "Deleting..." : "Delete"}
-                </button>
-              </div>
             </div>
-          </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
+              <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
+                {submitting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </SettingsModal>
         ) : null}
         {newRelationshipSource ? (
           <CreateSourceRelationshipModal
@@ -4613,7 +5520,7 @@ export function PostgresSourcesView({
                     >
                       Type
                       <span className="users-sort-icon">
-                        {sourceKindSortCol === "label" ? (sourceKindSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                        {sourceKindSortCol === "label" ? (sourceKindSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                       </span>
                     </th>
                     <th
@@ -4623,7 +5530,7 @@ export function PostgresSourcesView({
                     >
                       Count
                       <span className="users-sort-icon">
-                        {sourceKindSortCol === "count" ? (sourceKindSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                        {sourceKindSortCol === "count" ? (sourceKindSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                       </span>
                     </th>
                   </tr>
@@ -4663,11 +5570,15 @@ export function PostgresSourcesView({
                         cursor: "pointer",
                       }}
                       onClick={() => handleSelectSourceKind(summary.kind)}
+                      onMouseDown={(event) => handleSourceTypeContextMouseDown(event, summary)}
+                      onContextMenu={(event) => openSourceTypeContextMenu(event, summary)}
                     >
                       <td
                         className="users-td users-td--name"
                         role="button"
                         tabIndex={0}
+                        onMouseDown={(event) => handleSourceTypeContextMouseDown(event, summary)}
+                        onContextMenu={(event) => openSourceTypeContextMenu(event, summary)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
@@ -4680,14 +5591,26 @@ export function PostgresSourcesView({
                             shape={summary.shape}
                             fill={summary.fill}
                             color={summary.color}
+                            outlineColor={summary.outlineColor}
                             sourceVisualKey={getSourceObjectVisualKey(summary.systemKey)}
                           />
-                          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {sourceTypeRowLabel(summary.label)}
-                          </span>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+                            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {sourceTypeRowLabel(summary.label)}
+                            </span>
+                            <span className="postgres-users-meta" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {summary.attributeDefinitionCount} attributes
+                            </span>
+                          </div>
                         </div>
                       </td>
-                      <td className="users-td users-td--muted">{summary.count}</td>
+                      <td
+                        className="users-td users-td--muted"
+                        onMouseDown={(event) => handleSourceTypeContextMouseDown(event, summary)}
+                        onContextMenu={(event) => openSourceTypeContextMenu(event, summary)}
+                      >
+                        {summary.count}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -4755,17 +5678,18 @@ export function PostgresSourcesView({
                   <button
                     className="btn btn--primary project-table-header-icon-button"
                     onClick={() => {
-                      const activeKind = sourceKindFromFilterValue(selectedSourceKindFilter);
-                      setAttributeDraft({
-                        name: "",
-                        dataType: "text",
-                        description: "",
-                        options: [],
-                        sourceKinds: activeKind ? [activeKind] : [],
-                      });
+                      const activeSetting = sourceTypeSettings.find(
+                        (setting) => normalizeSourceKindFilterValue(setting.sourceKind) === normalizeSourceKindFilterValue(selectedSourceKindFilter),
+                      );
+                      if (!activeSetting) return;
+                      setSourceTypeInitialTab("attributes");
+                      setEditingSourceTypeKind(activeSetting.sourceKind);
                       setAttributeError(null);
+                      setSourceTypeError(null);
                     }}
-                    disabled={!canManageSources}
+                    disabled={!canManageSources || !sourceTypeSettings.some(
+                      (setting) => normalizeSourceKindFilterValue(setting.sourceKind) === normalizeSourceKindFilterValue(selectedSourceKindFilter),
+                    )}
                     title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "Add attribute"}
                     aria-label="Add attribute"
                   >
@@ -4782,18 +5706,25 @@ export function PostgresSourcesView({
                       >
                         Source
                         <span className="users-sort-icon">
-                          {attributeSortCol === "name" ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                          {attributeSortCol === "name" ? (attributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                         </span>
                       </th>
                       {attributeDefs.map((attribute) => (
                         <th
                           key={attribute.id}
-                          className={`users-th case-attributes-value-col${attributeSortCol === attribute.id ? " users-th--sorted" : ""}`}
-                          onClick={() => handleAttributeSort(attribute.id)}
+                          className={`users-th case-attributes-value-col case-attributes-value-col--editable${attributeSortCol === attribute.id ? " users-th--sorted" : ""}${hoveredAttributeColumnId === attribute.id ? " case-attributes-col--hovered" : ""}`}
+                          onMouseEnter={() => setHoveredAttributeColumnId(attribute.id)}
+                          onMouseLeave={() => setHoveredAttributeColumnId(null)}
+                          onClick={() => {
+                            if (!canManageSources) return;
+                            setBulkAttributeTarget({ attribute, rows: sortedAttributeRows });
+                            setAttributeError(null);
+                          }}
+                          title={canManageSources ? "Edit values for this attribute" : "Only project owners, administrators, or editors can edit source attributes."}
                         >
                           {attribute.name}
                           <span className="users-sort-icon">
-                            {attributeSortCol === attribute.id ? (attributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                            {attributeSortCol === attribute.id ? (attributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                           </span>
                           <span className="case-attribute-type-label">{attribute.dataType}</span>
                         </th>
@@ -4814,7 +5745,7 @@ export function PostgresSourcesView({
                           return (
                           <td
                             key={attribute.id}
-                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}`}
+                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}${hoveredAttributeColumnId === attribute.id ? " case-attributes-col--hovered" : ""}`}
                             role="button"
                             tabIndex={0}
                             title="View attribute value history"
@@ -4845,7 +5776,7 @@ export function PostgresSourcesView({
                           >
                             {attributeValues[valueKey(row.id, attribute.id)]?.value
                               ? formatAttributeDisplay(attributeValues[valueKey(row.id, attribute.id)]!.value, attribute.dataType)
-                              : <span className="cases-no-docs">—</span>}
+                              : <span className="cases-no-docs">{"\u2014"}</span>}
                           </td>
                           );
                         })}
@@ -4862,10 +5793,8 @@ export function PostgresSourcesView({
               <PostgresSourceDetail
                 row={selectedRow}
                 codeOptions={codeOptions}
-                linkedObjects={selectedSourceObjects}
                 relationships={selectedSourceRelationships}
                 attributeValues={selectedSourceAttributeValues}
-                availableObjects={availableObjectsForSelectedSource}
                 currentUserId={currentUserId}
                 sourceLock={selectedSourceLock}
                 sourceLockConflict={sourceLockConflict}
@@ -4888,7 +5817,6 @@ export function PostgresSourcesView({
                   setEditingSourceRelationship(relationship);
                   setSubmitError(null);
                 }}
-                onSaveSourceObjects={handleSaveSourceObjects}
                 canManageSourceRecord={canManageSources && !codingEnabled}
                 projectStoragePath={projectStoragePath}
                 onOpenAttributeHistory={(attribute) => {
@@ -4934,21 +5862,24 @@ export function PostgresSourcesView({
                 />
               ) : null}
               {deleteRow ? (
-                <div className="modal-overlay" onClick={() => !submitting && setDeleteRow(null)}>
-                  <div className="modal" onClick={(event) => event.stopPropagation()}>
-                    <h2>Delete Source</h2>
+                <SettingsModal
+                  title="Delete Source"
+                  onClose={() => setDeleteRow(null)}
+                  closeDisabled={submitting}
+                >
+                  <div className="app-settings-modal-body">
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                       Delete <strong>{deleteRow.name}</strong>?
                     </p>
                     {submitError && <p className="auth-error">{submitError}</p>}
-                    <div className="form-actions" style={{ marginTop: 24 }}>
-                      <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
-                      <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
-                        {submitting ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
                   </div>
-                </div>
+                  <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+                    <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
+                    <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
+                      {submitting ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                </SettingsModal>
               ) : null}
             </>
           ) : (
@@ -4984,7 +5915,7 @@ export function PostgresSourcesView({
                       onClick={() => handleSort("name")}
                     >
                       {t("projectDocuments.columns.name")}
-                      <span className="users-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
+                      <span className="users-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}</span>
                     </th>
                     <th style={{ width: "18%" }} className="users-th">
                       {t("projectDocuments.columns.type")}
@@ -4998,7 +5929,7 @@ export function PostgresSourcesView({
                       onClick={() => handleSort("createdAt")}
                     >
                       {t("projectDocuments.columns.created")}
-                      <span className="users-sort-icon">{sortCol === "createdAt" ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
+                      <span className="users-sort-icon">{sortCol === "createdAt" ? (sortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}</span>
                     </th>
                   </tr>
                 </thead>
@@ -5067,6 +5998,45 @@ export function PostgresSourcesView({
         </div>
       ) : null}
 
+      {sourceTypeContextMenu ? (
+        <div ref={sourceTypeContextMenuRef} className="context-menu" style={sourceTypeContextMenuStyle}>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              setSourceTypeInitialTab("details");
+              setEditingSourceTypeKind(sourceTypeContextMenu.sourceKind);
+              setSourceTypeError(null);
+              setSourceTypeContextMenu(null);
+            }}
+          >
+            Edit
+          </button>
+        </div>
+      ) : null}
+
+      {editingSourceType ? (
+        <SourceTypeEditModal
+          sourceType={editingSourceType}
+          attributeDefinitions={sourceAttributeDefinitionsForEditor}
+          initialTab={sourceTypeInitialTab}
+          saving={sourceTypeSaving}
+          uploading={sourceTypeUploading}
+          error={sourceTypeError}
+          onCancel={() => {
+            if (sourceTypeSaving || sourceTypeUploading) return;
+            setEditingSourceTypeKind(null);
+            setSourceTypeError(null);
+            setAttributeError(null);
+          }}
+          onSave={(draft) => void handleSaveSourceType(draft)}
+          onUploadImage={handleUploadSourceTypeImage}
+          onRemoveImage={handleRemoveSourceTypeImage}
+          sources={rows}
+          attributeValues={sourceAttributeValues}
+        />
+      ) : null}
+
       {newSourceOpen && (
         <SourceImportModal
           importSettings={sourceImportSettings}
@@ -5125,21 +6095,24 @@ export function PostgresSourcesView({
         />
       )}
       {deleteRow && !selectedRow && (
-        <div className="modal-overlay" onClick={() => !submitting && setDeleteRow(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete Source</h2>
+        <SettingsModal
+          title="Delete Source"
+          onClose={() => setDeleteRow(null)}
+          closeDisabled={submitting}
+        >
+          <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
               Delete <strong>{deleteRow.name}</strong>?
             </p>
             {submitError && <p className="auth-error">{submitError}</p>}
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
-              <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
-                {submitting ? "Deleting..." : "Delete"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
+            <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
+              {submitting ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </SettingsModal>
       )}
       {attributeDraft ? (
         <SourceAttributeTypesModal
@@ -5153,6 +6126,20 @@ export function PostgresSourcesView({
             setAttributeError(null);
           }}
           onSave={(draft) => void handleSaveAttribute(draft, {})}
+        />
+      ) : null}
+      {bulkAttributeTarget ? (
+        <BulkSourceAttributeValuesModal
+          target={bulkAttributeTarget}
+          valuesBySource={attributeValues}
+          saving={attributeSaving}
+          error={attributeError}
+          onCancel={() => {
+            if (attributeSaving) return;
+            setBulkAttributeTarget(null);
+            setAttributeError(null);
+          }}
+          onSave={(valuesBySourceId) => void handleSaveBulkAttributeValues(bulkAttributeTarget.attribute, valuesBySourceId)}
         />
       ) : null}
       {attributeHistoryTarget ? (

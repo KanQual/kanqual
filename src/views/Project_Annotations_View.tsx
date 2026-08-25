@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import type { PostgresCode } from "../lib/postgres";
@@ -1308,9 +1309,12 @@ export function AnnotationsView(props: AnnotationsViewProps) {
       </div>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("projectAnnotations.help.title")}</h2>
+        <SettingsModal
+          title={t("projectAnnotations.help.title")}
+          onClose={() => setHelpOpen(false)}
+          modalClassName="modal--help"
+        >
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               {t("projectAnnotations.help.line1")}
             </p>
@@ -1323,13 +1327,13 @@ export function AnnotationsView(props: AnnotationsViewProps) {
             <p className="users-guide-copy">
               {t("projectAnnotations.help.line4")}
             </p>
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                {t("common.close")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              {t("common.close")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
     </div>
   );

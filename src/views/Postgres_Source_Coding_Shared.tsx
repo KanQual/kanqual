@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
+import { SettingsModal } from "../components/SettingsModal";
 import type {
   PostgresCode,
   PostgresSourceLock,
@@ -453,9 +454,8 @@ export function AnnotationEditorModal({
   }
 
   return (
-    <div className="modal-overlay" onClick={() => !saving && onCancel()}>
-      <div className="modal modal--wide assoc-doc-modal" onClick={(event) => event.stopPropagation()}>
-        <h2>{title}</h2>
+    <SettingsModal title={title} onClose={onCancel} closeDisabled={saving} modalClassName="modal--wide assoc-doc-modal">
+      <div className="app-settings-modal-body">
         <p className="users-guide-copy" style={{ marginBottom: selection.quote ? 12 : 16 }}>
           {selection.displayLabel ?? `${selection.startOffset}-${selection.endOffset}`}
         </p>
@@ -511,7 +511,8 @@ export function AnnotationEditorModal({
           </label>
         </div>
         {error && <p className="auth-error">{error}</p>}
-        <div className="form-actions">
+      </div>
+      <div className="app-settings-modal-footer">
           {initialAnnotation && onDelete ? (
             <button className="btn btn--danger" onClick={onDelete} disabled={saving}>
               {saving ? "Deleting..." : "Delete"}
@@ -525,9 +526,8 @@ export function AnnotationEditorModal({
           >
             {saving ? "Saving..." : "Save Annotation"}
           </button>
-        </div>
       </div>
-    </div>
+    </SettingsModal>
   );
 }
 
@@ -583,9 +583,8 @@ export function PostgresSourceCodingFiltersModal({
   );
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal--wide annotation-filter-modal" onClick={(event) => event.stopPropagation()}>
-        <h2>Filters</h2>
+    <SettingsModal title="Filters" onClose={onClose} modalClassName="modal--wide annotation-filter-modal">
+      <div className="app-settings-modal-body">
         <p style={{ marginBottom: 16, lineHeight: 1.5 }}>
           Choose which coded annotations stay visible in this workspace.
         </p>
@@ -652,11 +651,11 @@ export function PostgresSourceCodingFiltersModal({
             )}
           </div>
         </div>
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
-        </div>
       </div>
-    </div>
+      <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+          <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
+      </div>
+    </SettingsModal>
   );
 }
 

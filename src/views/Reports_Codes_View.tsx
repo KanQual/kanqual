@@ -8,6 +8,7 @@ import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
@@ -1364,9 +1365,8 @@ function ExportModal({
   ] as const;
 
   return (
-    <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsCodes.exportTitle")}</h2>
+    <SettingsModal title={t("reportsCodes.exportTitle")} onClose={onClose} closeDisabled={!!exportingFormat} modalClassName="modal--wide">
+      <div className="app-settings-modal-body">
         <div
           style={{
             display: "grid",
@@ -1405,11 +1405,11 @@ function ExportModal({
             </button>
           ))}
         </div>
-        <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("reportsCodes.cancel")}</button>
-        </div>
       </div>
-    </div>
+      <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+        <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("reportsCodes.cancel")}</button>
+      </div>
+    </SettingsModal>
   );
 }
 
@@ -1437,9 +1437,8 @@ function NewCodeReportModal({
   ] as const;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsCodes.newModal.title")}</h2>
+    <SettingsModal title={t("reportsCodes.newModal.title")} onClose={onClose} modalClassName="modal--wide">
+      <div className="app-settings-modal-body">
         <div
           style={{
             display: "grid",
@@ -1477,11 +1476,11 @@ function NewCodeReportModal({
             </button>
           ))}
         </div>
-        <div className="form-actions" style={{ marginTop: 20 }}>
-          <button className="btn" onClick={onClose}>{t("reportsCodes.cancel")}</button>
-        </div>
       </div>
-    </div>
+      <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+        <button className="btn" onClick={onClose}>{t("reportsCodes.cancel")}</button>
+      </div>
+    </SettingsModal>
   );
 }
 
@@ -4365,12 +4364,8 @@ function CodeReportCreationPage({
       )}
 
       {showCaseAttributeFilters && (
-        <div className="modal-overlay" onClick={() => setShowCaseAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>{t("reportsCodes.filters.caseTitle")}</h2>
-              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsCodes.close")}</button>
-            </div>
+        <SettingsModal title={t("reportsCodes.filters.caseTitle")} onClose={() => setShowCaseAttributeFilters(false)} modalClassName="modal--wide">
+          <div className="app-settings-modal-body">
             {!isFrozen && !loadingFilters && caseTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
@@ -4446,16 +4441,12 @@ function CodeReportCreationPage({
               updateCaseAttributeFilter,
             )}
           </div>
-        </div>
+        </SettingsModal>
       )}
 
       {showDocumentAttributeFilters && (
-        <div className="modal-overlay" onClick={() => setShowDocumentAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>{t("reportsCodes.filters.documentTitle")}</h2>
-              <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>{t("reportsCodes.close")}</button>
-            </div>
+        <SettingsModal title={t("reportsCodes.filters.documentTitle")} onClose={() => setShowDocumentAttributeFilters(false)} modalClassName="modal--wide">
+          <div className="app-settings-modal-body">
             {!isFrozen && !loadingFilters && documentTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
@@ -4531,7 +4522,7 @@ function CodeReportCreationPage({
               updateDocumentAttributeFilter,
             )}
           </div>
-        </div>
+        </SettingsModal>
       )}
     </div>
   );
@@ -4769,9 +4760,8 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, p
       </div>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("reportsCodes.help.title")}</h2>
+        <SettingsModal title={t("reportsCodes.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               {t("reportsCodes.help.line1")}
             </p>
@@ -4781,13 +4771,13 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, p
             <p className="users-guide-copy">
               {t("reportsCodes.help.line3")}
             </p>
-            <div className="form-actions">
-              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                {t("reportsCodes.close")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              {t("reportsCodes.close")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {contextMenu && (
@@ -4802,21 +4792,20 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, p
       )}
 
       {confirmDelete && (
-        <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("reportsCodes.deleteTitle")}</h2>
+        <SettingsModal title={t("reportsCodes.deleteTitle")} onClose={() => setConfirmDelete(null)} closeDisabled={deleteLoading}>
+          <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
               {t("reportsCodes.deleteBody", { name: confirmDelete.name })}
             </p>
             <p className="modal-warning-text">{t("reportsCodes.deleteWarning")}</p>
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsCodes.cancel")}</button>
-              <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? t("reportsCodes.deleting") : t("reportsCodes.deleteReport")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsCodes.cancel")}</button>
+            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+              {deleteLoading ? t("reportsCodes.deleting") : t("reportsCodes.deleteReport")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {showNewModal && (

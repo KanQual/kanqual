@@ -44,6 +44,8 @@ const POSTGRES_BOOTSTRAP_IDENTITY_FILE: &str = "postgres_bootstrap_identity.json
 const POSTGRES_RUNTIME_CONFIG_FILE: &str = "postgres_runtime_config.json";
 const POSTGRES_DEFAULT_HOST: &str = "127.0.0.1";
 const POSTGRES_DEFAULT_PORT: u16 = 5432;
+const POSTGRES_IDLE_CONNECTION_CACHE_MAX_PER_KEY: usize = 2;
+const POSTGRES_IDLE_CONNECTION_CACHE_MAX_TOTAL: usize = 12;
 const POSTGRES_ADMIN_ROLE_PREFIX: &str = "kanqual_admin_";
 const POSTGRES_DEFAULT_DATABASE: &str = "kanqual";
 const POSTGRES_PROJECT_DATABASE_PREFIX: &str = "kq_proj_";
@@ -125,6 +127,40 @@ struct CachedPostgresClient {
     cache: Arc<Mutex<HashMap<String, Vec<tokio_postgres::Client>>>>,
 }
 
+fn prune_postgres_connection_cache(
+    cached_connections: &mut HashMap<String, Vec<tokio_postgres::Client>>,
+) {
+    cached_connections.retain(|_, clients| {
+        clients.retain(|client| !client.is_closed());
+        if clients.len() > POSTGRES_IDLE_CONNECTION_CACHE_MAX_PER_KEY {
+            clients.truncate(POSTGRES_IDLE_CONNECTION_CACHE_MAX_PER_KEY);
+        }
+        !clients.is_empty()
+    });
+
+    let mut total_idle = cached_connections
+        .values()
+        .map(Vec::len)
+        .sum::<usize>();
+    if total_idle <= POSTGRES_IDLE_CONNECTION_CACHE_MAX_TOTAL {
+        return;
+    }
+
+    let keys = cached_connections.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        if total_idle <= POSTGRES_IDLE_CONNECTION_CACHE_MAX_TOTAL {
+            break;
+        }
+        let Some(clients) = cached_connections.get_mut(&key) else {
+            continue;
+        };
+        while total_idle > POSTGRES_IDLE_CONNECTION_CACHE_MAX_TOTAL && clients.pop().is_some() {
+            total_idle -= 1;
+        }
+    }
+    cached_connections.retain(|_, clients| !clients.is_empty());
+}
+
 impl PostgresConnectionLease {
     fn abort(self) {}
 }
@@ -154,10 +190,11 @@ impl Drop for CachedPostgresClient {
                 return;
             }
             let mut cached_connections = self.cache.lock().unwrap();
-            cached_connections
-                .entry(self.cache_key.clone())
-                .or_default()
-                .push(client);
+            let clients = cached_connections.entry(self.cache_key.clone()).or_default();
+            if clients.len() < POSTGRES_IDLE_CONNECTION_CACHE_MAX_PER_KEY {
+                clients.push(client);
+            }
+            prune_postgres_connection_cache(&mut cached_connections);
         }
     }
 }
@@ -1625,6 +1662,7 @@ async fn connect_postgres_database_with_config(
     let cache_handle = connection_cache.0.clone();
     {
         let mut cached_connections = cache_handle.lock().unwrap();
+        prune_postgres_connection_cache(&mut cached_connections);
         if let Some(clients) = cached_connections.get_mut(&cache_key) {
             while let Some(client) = clients.pop() {
                 if !client.is_closed() {
@@ -2929,6 +2967,7 @@ async fn ensure_postgres_experiment_project_schema(
                     data_type TEXT NOT NULL,
                     description TEXT NOT NULL DEFAULT '',
                     options_json TEXT NOT NULL DEFAULT '[]',
+                    timeline_role TEXT NOT NULL DEFAULT '',
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -3000,6 +3039,7 @@ async fn ensure_postgres_experiment_project_schema(
                     data_type TEXT NOT NULL,
                     description TEXT NOT NULL DEFAULT '',
                     options_json TEXT NOT NULL DEFAULT '[]',
+                    timeline_role TEXT NOT NULL DEFAULT '',
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -3056,6 +3096,18 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE sources ADD COLUMN IF NOT EXISTS video_frame_index_json TEXT NOT NULL DEFAULT '';
                 ALTER TABLE sources ADD COLUMN IF NOT EXISTS extracted_from_video_source_id TEXT NOT NULL DEFAULT '';
                 ALTER TABLE sources ADD COLUMN IF NOT EXISTS extracted_from_video_time_ms BIGINT;
+                CREATE TABLE IF NOT EXISTS source_type_settings (
+                    source_kind TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    shape TEXT NOT NULL DEFAULT 'rounded',
+                    color TEXT NOT NULL DEFAULT '#355070',
+                    outline_color TEXT NOT NULL DEFAULT '',
+                    fill TEXT NOT NULL DEFAULT 'outline',
+                    image_storage_path TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
                 CREATE TABLE IF NOT EXISTS source_files (
                     id TEXT PRIMARY KEY,
                     source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
@@ -3280,6 +3332,7 @@ async fn ensure_postgres_experiment_project_schema(
                     description TEXT NOT NULL DEFAULT '',
                     options_json TEXT NOT NULL DEFAULT '[]',
                     source_kinds TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+                    timeline_role TEXT NOT NULL DEFAULT '',
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -3358,6 +3411,7 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS object_type_id TEXT;
                 ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS object_type TEXT NOT NULL DEFAULT '';
+                ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS timeline_role TEXT NOT NULL DEFAULT '';
                 ALTER TABLE relationship_types ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
                 ALTER TABLE relationship_types ADD COLUMN IF NOT EXISTS line_shape TEXT NOT NULL DEFAULT 'solid';
                 ALTER TABLE relationship_types ADD COLUMN IF NOT EXISTS line_weight INTEGER NOT NULL DEFAULT 2;
@@ -3383,6 +3437,8 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE relationship_attribute_definitions ADD COLUMN IF NOT EXISTS relationship_type_id TEXT;
                 ALTER TABLE relationship_attribute_definitions ADD COLUMN IF NOT EXISTS relationship_type TEXT NOT NULL DEFAULT '';
                 ALTER TABLE source_attribute_definitions ADD COLUMN IF NOT EXISTS source_kinds TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+                ALTER TABLE relationship_attribute_definitions ADD COLUMN IF NOT EXISTS timeline_role TEXT NOT NULL DEFAULT '';
+                ALTER TABLE source_attribute_definitions ADD COLUMN IF NOT EXISTS timeline_role TEXT NOT NULL DEFAULT '';
                 ALTER TABLE sources ALTER COLUMN source_kind SET DEFAULT 'Text';
                 ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS ai_assist_enabled BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS ai_semantic_search_allowed BOOLEAN NOT NULL DEFAULT TRUE;
@@ -4246,6 +4302,56 @@ fn map_postgres_experiment_source_row(
     }
 }
 
+fn default_postgres_experiment_source_type_color(source_kind: &str) -> &'static str {
+    match source_kind {
+        "Transcript" => "#2a9d8f",
+        "PDF" => "#7f5539",
+        "Image" => "#6d597a",
+        "Audio" => "#b56576",
+        "Video" => "#457b9d",
+        _ => "#355070",
+    }
+}
+
+fn default_postgres_experiment_source_type_setting(
+    project_id: &str,
+    source_kind: &str,
+) -> PostgresExperimentSourceTypeSetting {
+    let color = default_postgres_experiment_source_type_color(source_kind).to_string();
+    PostgresExperimentSourceTypeSetting {
+        project_id: project_id.to_string(),
+        source_kind: source_kind.to_string(),
+        name: source_kind.to_string(),
+        description: String::new(),
+        shape: "rounded".to_string(),
+        color: color.clone(),
+        outline_color: color,
+        fill: "outline".to_string(),
+        image_storage_path: String::new(),
+        created_at: String::new(),
+        updated_at: String::new(),
+    }
+}
+
+fn map_postgres_experiment_source_type_setting_row(
+    project_id: &str,
+    row: tokio_postgres::Row,
+) -> PostgresExperimentSourceTypeSetting {
+    PostgresExperimentSourceTypeSetting {
+        project_id: project_id.to_string(),
+        source_kind: row.get(0),
+        name: row.get(1),
+        description: row.get(2),
+        shape: row.get(3),
+        color: row.get(4),
+        outline_color: row.get(5),
+        fill: row.get(6),
+        image_storage_path: row.get(7),
+        created_at: row.get(8),
+        updated_at: row.get(9),
+    }
+}
+
 fn map_postgres_experiment_source_object_link_row(
     row: tokio_postgres::Row,
 ) -> PostgresExperimentSourceObjectLink {
@@ -4269,9 +4375,10 @@ fn map_postgres_experiment_source_attribute_definition_row(
         description: row.get(3),
         options: parse_postgres_experiment_attribute_options_json(&options_json),
         source_kinds: row.get(5),
-        sort_order: row.get(6),
-        created_at: row.get(7),
-        updated_at: row.get(8),
+        timeline_role: row.get(6),
+        sort_order: row.get(7),
+        created_at: row.get(8),
+        updated_at: row.get(9),
     }
 }
 
@@ -6372,6 +6479,22 @@ struct PostgresExperimentSource {
     updated_at: String,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct PostgresExperimentSourceTypeSetting {
+    project_id: String,
+    source_kind: String,
+    name: String,
+    description: String,
+    shape: String,
+    color: String,
+    outline_color: String,
+    fill: String,
+    image_storage_path: String,
+    created_at: String,
+    updated_at: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PostgresExperimentSourceObjectLink {
@@ -6403,6 +6526,7 @@ struct PostgresExperimentSourceAttributeDefinition {
     description: String,
     options: Vec<String>,
     source_kinds: Vec<String>,
+    timeline_role: String,
     sort_order: i32,
     created_at: String,
     updated_at: String,
@@ -6634,6 +6758,7 @@ struct PostgresExperimentObjectAttributeDefinition {
     data_type: String,
     description: String,
     options: Vec<String>,
+    timeline_role: String,
     sort_order: i32,
     created_at: String,
     updated_at: String,
@@ -6687,6 +6812,7 @@ struct PostgresExperimentRelationshipAttributeDefinition {
     data_type: String,
     description: String,
     options: Vec<String>,
+    timeline_role: String,
     sort_order: i32,
     created_at: String,
     updated_at: String,
@@ -6930,6 +7056,20 @@ struct UpdatePostgresExperimentSourceRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SavePostgresExperimentSourceTypeSettingRequest {
+    project_id: String,
+    source_kind: String,
+    name: String,
+    description: Option<String>,
+    shape: String,
+    color: String,
+    outline_color: Option<String>,
+    fill: String,
+    image_storage_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ImportPostgresExperimentSourceFileRequest {
     project_id: String,
     source_kind: String,
@@ -7034,6 +7174,8 @@ struct SavePostgresExperimentSourceAttributeRequest {
     description: String,
     #[serde(default)]
     options: Vec<String>,
+    #[serde(default)]
+    timeline_role: Option<String>,
     #[serde(default)]
     source_kinds: Vec<String>,
     #[serde(default)]
@@ -7486,6 +7628,8 @@ struct SavePostgresExperimentObjectTypeAttributeDefinitionInput {
     description: String,
     #[serde(default)]
     options: Vec<String>,
+    #[serde(default)]
+    timeline_role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7518,6 +7662,15 @@ struct ImportPostgresExperimentObjectImageRequest {
 struct ImportPostgresExperimentObjectTypeImageRequest {
     project_id: String,
     object_type_id: String,
+    original_file_name: String,
+    file_bytes_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportPostgresExperimentSourceTypeImageRequest {
+    project_id: String,
+    source_kind: String,
     original_file_name: String,
     file_bytes_base64: String,
 }
@@ -7580,6 +7733,8 @@ struct SavePostgresExperimentRelationshipTypeAttributeDefinitionInput {
     description: String,
     #[serde(default)]
     options: Vec<String>,
+    #[serde(default)]
+    timeline_role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7644,6 +7799,8 @@ struct CreatePostgresExperimentObjectAttributeDefinitionRequest {
     description: String,
     #[serde(default)]
     options: Vec<String>,
+    #[serde(default)]
+    timeline_role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7657,6 +7814,8 @@ struct UpdatePostgresExperimentObjectAttributeDefinitionRequest {
     description: String,
     #[serde(default)]
     options: Vec<String>,
+    #[serde(default)]
+    timeline_role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7758,6 +7917,8 @@ struct CreatePostgresExperimentRelationshipAttributeDefinitionRequest {
     description: String,
     #[serde(default)]
     options: Vec<String>,
+    #[serde(default)]
+    timeline_role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7771,6 +7932,8 @@ struct UpdatePostgresExperimentRelationshipAttributeDefinitionRequest {
     description: String,
     #[serde(default)]
     options: Vec<String>,
+    #[serde(default)]
+    timeline_role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -8811,6 +8974,75 @@ fn normalize_postgres_experiment_attribute_data_type(value: &str) -> Option<&'st
         "datetime" => Some("datetime"),
         "categorical" => Some("categorical"),
         _ => None,
+    }
+}
+
+fn normalize_postgres_experiment_timeline_role(value: Option<&str>) -> Result<String, String> {
+    let Some(value) = value else {
+        return Ok(String::new());
+    };
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "none" => Ok(String::new()),
+        "start" | "timeline_start" => Ok("timeline_start".to_string()),
+        "end" | "timeline_end" => Ok("timeline_end".to_string()),
+        "label" | "content" | "timeline_label" | "timeline_content" => {
+            Ok("timeline_label".to_string())
+        }
+        "item_type" | "type" | "timeline_item_type" => Ok("timeline_item_type".to_string()),
+        "group" | "lane" | "timeline_group" | "timeline_lane" => {
+            Ok("timeline_group".to_string())
+        }
+        _ => Err("Choose a valid timeline attribute role.".to_string()),
+    }
+}
+
+fn validate_postgres_experiment_timeline_attribute_role(
+    timeline_role: &str,
+    data_type: &str,
+    options: &[String],
+    owner_label: &str,
+) -> Result<(), String> {
+    match timeline_role {
+        "" => Ok(()),
+        "timeline_start" | "timeline_end" => {
+            if data_type == "datetime" {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{owner_label} timeline start and end attributes must use the datetime type."
+                ))
+            }
+        }
+        "timeline_label" | "timeline_group" => {
+            if data_type == "text" || data_type == "categorical" {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{owner_label} timeline label and group attributes must use text or categorical values."
+                ))
+            }
+        }
+        "timeline_item_type" => {
+            if data_type != "categorical" {
+                return Err(format!(
+                    "{owner_label} timeline item type attributes must use categorical values."
+                ));
+            }
+            let allowed = ["point", "box", "range", "background"];
+            if options.is_empty()
+                || options
+                    .iter()
+                    .all(|option| allowed.contains(&option.trim().to_ascii_lowercase().as_str()))
+            {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{owner_label} timeline item type options must be point, box, range, or background."
+                ))
+            }
+        }
+        _ => Err("Choose a valid timeline attribute role.".to_string()),
     }
 }
 
@@ -10488,6 +10720,7 @@ async fn remember_postgres_experiment_project_closed_command(
     if let Err(error) = log_result {
         eprintln!("Could not append PostgreSQL experiment project-close log: {error}");
     }
+    clear_postgres_connection_cache(&app);
 
     Ok(())
 }
@@ -12432,6 +12665,7 @@ async fn create_postgres_experiment_project_snapshot_command(
     if !pg_dump_path.is_file() {
         return Err("Bundled PostgreSQL pg_dump binary is missing.".to_string());
     }
+    clear_postgres_connection_cache(&app);
     let postgres_version = if psql_path.is_file() {
         run_psql_command_with_binary(
             &psql_path,
@@ -12447,6 +12681,7 @@ async fn create_postgres_experiment_project_snapshot_command(
         String::new()
     };
 
+    clear_postgres_connection_cache(&app);
     let database_dump = run_pg_dump_command(
         &pg_dump_path,
         &config.host,
@@ -13996,9 +14231,10 @@ fn map_postgres_experiment_object_attribute_definition_row(
         data_type: row.get(4),
         description: row.get(5),
         options: parse_postgres_experiment_attribute_options_json(&options_json),
-        sort_order: row.get(7),
-        created_at: row.get(8),
-        updated_at: row.get(9),
+        timeline_role: row.get(7),
+        sort_order: row.get(8),
+        created_at: row.get(9),
+        updated_at: row.get(10),
     }
 }
 
@@ -14016,9 +14252,10 @@ fn map_postgres_experiment_relationship_attribute_definition_row(
         data_type: row.get(4),
         description: row.get(5),
         options: parse_postgres_experiment_attribute_options_json(&options_json),
-        sort_order: row.get(7),
-        created_at: row.get(8),
-        updated_at: row.get(9),
+        timeline_role: row.get(7),
+        sort_order: row.get(8),
+        created_at: row.get(9),
+        updated_at: row.get(10),
     }
 }
 
@@ -14029,7 +14266,7 @@ async fn load_postgres_experiment_object_attribute_definitions_for_client(
     let rows = client
         .query(
             "
-            SELECT d.id, d.object_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.sort_order, d.created_at::text, d.updated_at::text
+            SELECT d.id, d.object_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.timeline_role, d.sort_order, d.created_at::text, d.updated_at::text
             FROM object_attribute_definitions d
             LEFT JOIN object_types t ON t.id = d.object_type_id
             ORDER BY d.sort_order ASC, d.created_at ASC, d.id ASC
@@ -14083,6 +14320,73 @@ async fn load_postgres_experiment_sources_for_client(
     Ok(rows
         .into_iter()
         .map(|row| map_postgres_experiment_source_row(project_id, row))
+        .collect())
+}
+
+async fn ensure_postgres_experiment_source_type_settings_table_for_client(
+    client: &impl GenericClient,
+) -> Result<(), String> {
+    client
+        .batch_execute(
+            "
+            CREATE TABLE IF NOT EXISTS source_type_settings (
+                source_kind TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                shape TEXT NOT NULL DEFAULT 'rounded',
+                color TEXT NOT NULL DEFAULT '#355070',
+                outline_color TEXT NOT NULL DEFAULT '',
+                fill TEXT NOT NULL DEFAULT 'outline',
+                image_storage_path TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            ",
+        )
+        .await
+        .map_err(|e| format!("Could not create PostgreSQL experiment source type settings table: {e}"))?;
+    Ok(())
+}
+
+async fn load_postgres_experiment_source_type_settings_for_client(
+    client: &tokio_postgres::Client,
+    project_id: &str,
+) -> Result<Vec<PostgresExperimentSourceTypeSetting>, String> {
+    ensure_postgres_experiment_source_type_settings_table_for_client(client).await?;
+    let rows = client
+        .query(
+            "
+            SELECT source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            FROM source_type_settings
+            ORDER BY CASE source_kind
+                WHEN 'Text' THEN 1
+                WHEN 'Transcript' THEN 2
+                WHEN 'PDF' THEN 3
+                WHEN 'Image' THEN 4
+                WHEN 'Audio' THEN 5
+                WHEN 'Video' THEN 6
+                ELSE 7
+            END, lower(name) ASC
+            ",
+            &[],
+        )
+        .await
+        .map_err(|e| format!("Could not load PostgreSQL experiment source type settings: {e}"))?;
+    let mut by_kind: HashMap<String, PostgresExperimentSourceTypeSetting> = rows
+        .into_iter()
+        .map(|row| {
+            let setting = map_postgres_experiment_source_type_setting_row(project_id, row);
+            (setting.source_kind.clone(), setting)
+        })
+        .collect();
+    let source_kinds = ["Text", "Transcript", "PDF", "Image", "Audio", "Video"];
+    Ok(source_kinds
+        .iter()
+        .map(|source_kind| {
+            by_kind
+                .remove(*source_kind)
+                .unwrap_or_else(|| default_postgres_experiment_source_type_setting(project_id, source_kind))
+        })
         .collect())
 }
 
@@ -14193,7 +14497,7 @@ async fn load_postgres_experiment_source_attribute_definitions_for_client(
     let rows = client
         .query(
             "
-            SELECT id, name, data_type, description, options_json, source_kinds, sort_order, created_at::text, updated_at::text
+            SELECT id, name, data_type, description, options_json, source_kinds, timeline_role, sort_order, created_at::text, updated_at::text
             FROM source_attribute_definitions
             ORDER BY sort_order ASC, created_at ASC, id ASC
             ",
@@ -15576,7 +15880,7 @@ async fn load_postgres_experiment_relationship_attribute_definitions_for_client(
     let rows = client
         .query(
             "
-            SELECT d.id, d.relationship_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.sort_order, d.created_at::text, d.updated_at::text
+            SELECT d.id, d.relationship_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.timeline_role, d.sort_order, d.created_at::text, d.updated_at::text
             FROM relationship_attribute_definitions d
             LEFT JOIN relationship_types t ON t.id = d.relationship_type_id
             ORDER BY d.sort_order ASC, d.created_at ASC, d.id ASC
@@ -15855,6 +16159,309 @@ async fn list_postgres_experiment_sources_command(
     let sources = load_postgres_experiment_sources_for_client(&client, &project_id).await?;
     connection_task.abort();
     Ok(sources)
+}
+
+#[tauri::command]
+async fn list_postgres_experiment_source_type_settings_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+) -> Result<Vec<PostgresExperimentSourceTypeSetting>, String> {
+    let project_id = project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let settings =
+        load_postgres_experiment_source_type_settings_for_client(&client, &project_id).await?;
+    connection_task.abort();
+    Ok(settings)
+}
+
+#[tauri::command]
+async fn save_postgres_experiment_source_type_setting_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: SavePostgresExperimentSourceTypeSettingRequest,
+) -> Result<PostgresExperimentSourceTypeSetting, String> {
+    let project_id = request.project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+    let source_kind = normalize_postgres_experiment_source_kind(&request.source_kind)
+        .ok_or_else(|| {
+            "Source type must be text, processed transcript, pdf, image, audio, or video."
+                .to_string()
+        })?
+        .to_string();
+    let name = request.name.trim().to_string();
+    if name.is_empty() {
+        return Err("Enter a source type name.".to_string());
+    }
+    let description = request
+        .description
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+    let shape = request.shape.trim().to_string();
+    if shape.is_empty() {
+        return Err("Choose a source type shape.".to_string());
+    }
+    let color = request.color.trim().to_string();
+    if color.is_empty() {
+        return Err("Choose a source type color.".to_string());
+    }
+    let outline_color = request
+        .outline_color
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+    let fill = request.fill.trim().to_string();
+    if fill.is_empty() {
+        return Err("Choose a source type fill style.".to_string());
+    }
+    let image_storage_path = request
+        .image_storage_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    ensure_postgres_experiment_source_type_settings_table_for_client(&*client).await?;
+    let row = client
+        .query_one(
+            "
+            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (source_kind) DO UPDATE
+            SET name = EXCLUDED.name,
+                description = EXCLUDED.description,
+                shape = EXCLUDED.shape,
+                color = EXCLUDED.color,
+                outline_color = EXCLUDED.outline_color,
+                fill = EXCLUDED.fill,
+                image_storage_path = EXCLUDED.image_storage_path,
+                updated_at = NOW()
+            RETURNING source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            ",
+            &[&source_kind, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
+        )
+        .await
+        .map_err(|e| format!("Could not save PostgreSQL experiment source type setting: {e}"))?;
+    let saved = map_postgres_experiment_source_type_setting_row(&project_id, row);
+    append_postgres_experiment_project_log_for_client(
+        &client,
+        &project_id,
+        &session,
+        "source_type.update",
+        &format!("Updated source type \"{}\"", saved.name),
+        Some(&saved.source_kind),
+        Some(serde_json::json!({
+            "sourceKind": saved.source_kind,
+            "name": saved.name,
+            "shape": saved.shape,
+            "color": saved.color,
+            "outlineColor": saved.outline_color,
+            "fill": saved.fill,
+        })),
+    )
+    .await?;
+    connection_task.abort();
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "source_type",
+        &saved.source_kind,
+        "updated",
+    );
+    Ok(saved)
+}
+
+#[tauri::command]
+async fn import_postgres_experiment_source_type_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: ImportPostgresExperimentSourceTypeImageRequest,
+) -> Result<PostgresExperimentSourceTypeSetting, String> {
+    let project_id = request.project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+    let source_kind = normalize_postgres_experiment_source_kind(&request.source_kind)
+        .ok_or_else(|| {
+            "Source type must be text, processed transcript, pdf, image, audio, or video."
+                .to_string()
+        })?
+        .to_string();
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    ensure_postgres_experiment_source_type_settings_table_for_client(&*client).await?;
+    let current = load_postgres_experiment_source_type_settings_for_client(&client, &project_id)
+        .await?
+        .into_iter()
+        .find(|setting| setting.source_kind == source_kind)
+        .unwrap_or_else(|| default_postgres_experiment_source_type_setting(&project_id, &source_kind));
+    let image_storage_path = write_postgres_experiment_project_image_file(
+        &project,
+        "source-types",
+        &source_kind,
+        &request.original_file_name,
+        &request.file_bytes_base64,
+    )?;
+    let row = client
+        .query_one(
+            "
+            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (source_kind) DO UPDATE
+            SET image_storage_path = EXCLUDED.image_storage_path,
+                updated_at = NOW()
+            RETURNING source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            ",
+            &[
+                &source_kind,
+                &current.name,
+                &current.description,
+                &current.shape,
+                &current.color,
+                &current.outline_color,
+                &current.fill,
+                &image_storage_path,
+            ],
+        )
+        .await
+        .map_err(|e| format!("Could not update PostgreSQL experiment source type image: {e}"))?;
+    remove_postgres_experiment_project_file_if_present(&project, &current.image_storage_path);
+    let saved = map_postgres_experiment_source_type_setting_row(&project_id, row);
+    append_postgres_experiment_project_log_for_client(
+        &client,
+        &project_id,
+        &session,
+        "source_type.update",
+        &format!("Updated source type image \"{}\"", saved.name),
+        Some(&saved.source_kind),
+        Some(serde_json::json!({
+            "sourceKind": saved.source_kind,
+            "imageStoragePath": saved.image_storage_path,
+        })),
+    )
+    .await?;
+    connection_task.abort();
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "source_type",
+        &saved.source_kind,
+        "updated",
+    );
+    Ok(saved)
+}
+
+#[tauri::command]
+async fn remove_postgres_experiment_source_type_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+    source_kind: String,
+) -> Result<PostgresExperimentSourceTypeSetting, String> {
+    let project_id = project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+    let source_kind = normalize_postgres_experiment_source_kind(&source_kind)
+        .ok_or_else(|| {
+            "Source type must be text, processed transcript, pdf, image, audio, or video."
+                .to_string()
+        })?
+        .to_string();
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    ensure_postgres_experiment_source_type_settings_table_for_client(&*client).await?;
+    let current = load_postgres_experiment_source_type_settings_for_client(&client, &project_id)
+        .await?
+        .into_iter()
+        .find(|setting| setting.source_kind == source_kind)
+        .unwrap_or_else(|| default_postgres_experiment_source_type_setting(&project_id, &source_kind));
+    let empty_path = String::new();
+    let row = client
+        .query_one(
+            "
+            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (source_kind) DO UPDATE
+            SET image_storage_path = EXCLUDED.image_storage_path,
+                updated_at = NOW()
+            RETURNING source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            ",
+            &[
+                &source_kind,
+                &current.name,
+                &current.description,
+                &current.shape,
+                &current.color,
+                &current.outline_color,
+                &current.fill,
+                &empty_path,
+            ],
+        )
+        .await
+        .map_err(|e| format!("Could not remove PostgreSQL experiment source type image: {e}"))?;
+    remove_postgres_experiment_project_file_if_present(&project, &current.image_storage_path);
+    let saved = map_postgres_experiment_source_type_setting_row(&project_id, row);
+    append_postgres_experiment_project_log_for_client(
+        &client,
+        &project_id,
+        &session,
+        "source_type.update",
+        &format!("Removed source type image \"{}\"", saved.name),
+        Some(&saved.source_kind),
+        Some(serde_json::json!({
+            "sourceKind": saved.source_kind,
+        })),
+    )
+    .await?;
+    connection_task.abort();
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "source_type",
+        &saved.source_kind,
+        "updated",
+    );
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -16983,6 +17590,14 @@ async fn save_postgres_experiment_source_attribute_command(
         .to_string();
     let description = request.description.trim().to_string();
     let options = normalize_attribute_options(&request.options);
+    let timeline_role =
+        normalize_postgres_experiment_timeline_role(request.timeline_role.as_deref())?;
+    validate_postgres_experiment_timeline_attribute_role(
+        &timeline_role,
+        &data_type,
+        &options,
+        "Source",
+    )?;
     let source_kinds = normalize_postgres_experiment_source_kind_list(request.source_kinds);
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
@@ -17035,10 +17650,10 @@ async fn save_postgres_experiment_source_attribute_command(
             .get::<usize, i32>(0);
         tx.execute(
             "
-            INSERT INTO source_attribute_definitions (id, name, data_type, description, options_json, source_kinds, sort_order)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO source_attribute_definitions (id, name, data_type, description, options_json, source_kinds, timeline_role, sort_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ",
-            &[&attribute_definition_id, &name, &data_type, &description, &options_json, &source_kinds, &next_sort_order],
+            &[&attribute_definition_id, &name, &data_type, &description, &options_json, &source_kinds, &timeline_role, &next_sort_order],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment source attribute: {e}"))?;
@@ -17052,6 +17667,7 @@ async fn save_postgres_experiment_source_attribute_command(
                     description = $4,
                     options_json = $5,
                     source_kinds = $6,
+                    timeline_role = $7,
                     updated_at = NOW()
                 WHERE id = $1
                 ",
@@ -17062,6 +17678,7 @@ async fn save_postgres_experiment_source_attribute_command(
                     &description,
                     &options_json,
                     &source_kinds,
+                    &timeline_role,
                 ],
             )
             .await
@@ -19229,6 +19846,25 @@ async fn upsert_postgres_experiment_processed_document_review_command(
         .map_err(|e| format!("Could not save PostgreSQL processed source review: {e}"))?
         .get::<usize, String>(0);
 
+    if processing_status == "running" && processed_chunk_count == 0 {
+        append_postgres_experiment_project_log_for_client(
+            &client,
+            &project_id,
+            &session,
+            "project.ai_processed_document.process_start",
+            &format!("Started transcript processing for \"{}\"", source_title),
+            Some(&review_id),
+            Some(serde_json::json!({
+                "sourceId": source_id,
+                "sourceTitle": source_title,
+                "model": model,
+                "baseUrl": base_url,
+                "chunkCount": chunk_count,
+            })),
+        )
+        .await?;
+    }
+
     let review = client
         .query_one(
             "
@@ -20864,7 +21500,15 @@ async fn save_postgres_experiment_object_type_command(
         if data_type == "categorical" && options.len() < 2 {
             return Err("Categorical object attributes need at least two options.".to_string());
         }
-        normalized_attributes.push((id, name, data_type, description, options));
+        let timeline_role =
+            normalize_postgres_experiment_timeline_role(attribute.timeline_role.as_deref())?;
+        validate_postgres_experiment_timeline_attribute_role(
+            &timeline_role,
+            &data_type,
+            &options,
+            "Object",
+        )?;
+        normalized_attributes.push((id, name, data_type, description, options, timeline_role));
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
@@ -20925,7 +21569,7 @@ async fn save_postgres_experiment_object_type_command(
     let existing_attribute_rows = tx
         .query(
             "
-            SELECT id, name, data_type, description, options_json, sort_order
+            SELECT id, name, data_type, description, options_json, timeline_role, sort_order
             FROM object_attribute_definitions
             WHERE object_type_id = $1
             ORDER BY sort_order ASC, created_at ASC, id ASC
@@ -20934,13 +21578,14 @@ async fn save_postgres_experiment_object_type_command(
         )
         .await
         .map_err(|e| format!("Could not inspect PostgreSQL experiment object attributes: {e}"))?;
-    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, i32)> =
+    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, String, i32)> =
         HashMap::new();
     let mut next_sort_order = 0;
     for row in existing_attribute_rows {
         let id: String = row.get(0);
         let options_json: String = row.get(4);
-        let sort_order: i32 = row.get(5);
+        let timeline_role: String = row.get(5);
+        let sort_order: i32 = row.get(6);
         next_sort_order = next_sort_order.max(sort_order + 1);
         existing_attribute_by_id.insert(
             id,
@@ -20949,6 +21594,7 @@ async fn save_postgres_experiment_object_type_command(
                 row.get(2),
                 row.get(3),
                 parse_postgres_experiment_attribute_options_json(&options_json),
+                timeline_role,
                 sort_order,
             ),
         );
@@ -20956,7 +21602,7 @@ async fn save_postgres_experiment_object_type_command(
 
     let retained_attribute_ids: HashSet<String> = normalized_attributes
         .iter()
-        .filter_map(|(id, _, _, _, _)| id.clone())
+        .filter_map(|(id, _, _, _, _, _)| id.clone())
         .collect();
     for attribute_id in existing_attribute_by_id.keys() {
         if !retained_attribute_ids.contains(attribute_id) {
@@ -21000,14 +21646,14 @@ async fn save_postgres_experiment_object_type_command(
     .await
     .map_err(|e| format!("Could not synchronize PostgreSQL experiment object records: {e}"))?;
 
-    for (attribute_id, attribute_name, data_type, attribute_description, options) in
+    for (attribute_id, attribute_name, data_type, attribute_description, options, timeline_role) in
         normalized_attributes
     {
         let options_json = serde_json::to_string(&options).map_err(|e| {
             format!("Could not encode PostgreSQL experiment object attribute options: {e}")
         })?;
         if let Some(attribute_id) = attribute_id {
-            let Some((current_name, current_data_type, current_description, current_options, _)) =
+            let Some((current_name, current_data_type, current_description, current_options, current_timeline_role, _)) =
                 existing_attribute_by_id.get(&attribute_id)
             else {
                 return Err("One of the object attributes could not be found.".to_string());
@@ -21016,6 +21662,7 @@ async fn save_postgres_experiment_object_type_command(
                 && current_data_type == &data_type
                 && current_description == &attribute_description
                 && current_options == &options
+                && current_timeline_role == &timeline_role
             {
                 continue;
             }
@@ -21028,6 +21675,7 @@ async fn save_postgres_experiment_object_type_command(
                     data_type = $5,
                     description = $6,
                     options_json = $7,
+                    timeline_role = $8,
                     updated_at = NOW()
                 WHERE id = $1
                 ",
@@ -21039,6 +21687,7 @@ async fn save_postgres_experiment_object_type_command(
                     &data_type,
                     &attribute_description,
                     &options_json,
+                    &timeline_role,
                 ],
             )
             .await
@@ -21047,10 +21696,10 @@ async fn save_postgres_experiment_object_type_command(
             let new_attribute_id = generate_identifier();
             tx.execute(
                 "
-                INSERT INTO object_attribute_definitions (id, object_type_id, object_type, name, data_type, description, options_json, sort_order)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO object_attribute_definitions (id, object_type_id, object_type, name, data_type, description, options_json, timeline_role, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ",
-                &[&new_attribute_id, &resolved_object_type_id, &name, &attribute_name, &data_type, &attribute_description, &options_json, &next_sort_order],
+                &[&new_attribute_id, &resolved_object_type_id, &name, &attribute_name, &data_type, &attribute_description, &options_json, &timeline_role, &next_sort_order],
             )
             .await
             .map_err(|e| format!("Could not create PostgreSQL experiment object attribute: {e}"))?;
@@ -21082,7 +21731,7 @@ async fn save_postgres_experiment_object_type_command(
     let attribute_rows = tx
         .query(
             "
-            SELECT d.id, d.object_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.sort_order, d.created_at::text, d.updated_at::text
+            SELECT d.id, d.object_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.timeline_role, d.sort_order, d.created_at::text, d.updated_at::text
             FROM object_attribute_definitions d
             LEFT JOIN object_types t ON t.id = d.object_type_id
             WHERE d.object_type_id = $1
@@ -21707,7 +22356,15 @@ async fn save_postgres_experiment_relationship_type_command(
                 "Categorical relationship attributes need at least two options.".to_string(),
             );
         }
-        normalized_attributes.push((id, name, data_type, description, options));
+        let timeline_role =
+            normalize_postgres_experiment_timeline_role(attribute.timeline_role.as_deref())?;
+        validate_postgres_experiment_timeline_attribute_role(
+            &timeline_role,
+            &data_type,
+            &options,
+            "Relationship",
+        )?;
+        normalized_attributes.push((id, name, data_type, description, options, timeline_role));
     }
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
@@ -21806,7 +22463,7 @@ async fn save_postgres_experiment_relationship_type_command(
     let existing_attribute_rows = tx
         .query(
             "
-            SELECT id, name, data_type, description, options_json, sort_order
+            SELECT id, name, data_type, description, options_json, timeline_role, sort_order
             FROM relationship_attribute_definitions
             WHERE relationship_type_id = $1
             ORDER BY sort_order ASC, created_at ASC, id ASC
@@ -21817,13 +22474,14 @@ async fn save_postgres_experiment_relationship_type_command(
         .map_err(|e| {
             format!("Could not inspect PostgreSQL experiment relationship attributes: {e}")
         })?;
-    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, i32)> =
+    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, String, i32)> =
         HashMap::new();
     let mut next_sort_order = 0;
     for row in existing_attribute_rows {
         let id: String = row.get(0);
         let options_json: String = row.get(4);
-        let sort_order: i32 = row.get(5);
+        let timeline_role: String = row.get(5);
+        let sort_order: i32 = row.get(6);
         next_sort_order = next_sort_order.max(sort_order + 1);
         existing_attribute_by_id.insert(
             id,
@@ -21832,6 +22490,7 @@ async fn save_postgres_experiment_relationship_type_command(
                 row.get(2),
                 row.get(3),
                 parse_postgres_experiment_attribute_options_json(&options_json),
+                timeline_role,
                 sort_order,
             ),
         );
@@ -21839,7 +22498,7 @@ async fn save_postgres_experiment_relationship_type_command(
 
     let retained_attribute_ids: HashSet<String> = normalized_attributes
         .iter()
-        .filter_map(|(id, _, _, _, _)| id.clone())
+        .filter_map(|(id, _, _, _, _, _)| id.clone())
         .collect();
     for attribute_id in existing_attribute_by_id.keys() {
         if !retained_attribute_ids.contains(attribute_id) {
@@ -21872,13 +22531,13 @@ async fn save_postgres_experiment_relationship_type_command(
         format!("Could not synchronize PostgreSQL experiment relationship attribute names: {e}")
     })?;
 
-    for (attribute_id, attribute_name, data_type, attribute_description, options) in
+    for (attribute_id, attribute_name, data_type, attribute_description, options, timeline_role) in
         normalized_attributes
     {
         let options_json = serde_json::to_string(&options)
             .map_err(|e| format!("Could not encode relationship attribute options: {e}"))?;
         if let Some(attribute_id) = attribute_id {
-            let Some((current_name, current_data_type, current_description, current_options, _)) =
+            let Some((current_name, current_data_type, current_description, current_options, current_timeline_role, _)) =
                 existing_attribute_by_id.get(&attribute_id)
             else {
                 return Err("One of the relationship attributes could not be found.".to_string());
@@ -21887,6 +22546,7 @@ async fn save_postgres_experiment_relationship_type_command(
                 && current_data_type == &data_type
                 && current_description == &attribute_description
                 && current_options == &options
+                && current_timeline_role == &timeline_role
             {
                 continue;
             }
@@ -21899,6 +22559,7 @@ async fn save_postgres_experiment_relationship_type_command(
                     data_type = $5,
                     description = $6,
                     options_json = $7,
+                    timeline_role = $8,
                     updated_at = NOW()
                 WHERE id = $1
                 ",
@@ -21910,6 +22571,7 @@ async fn save_postgres_experiment_relationship_type_command(
                     &data_type,
                     &attribute_description,
                     &options_json,
+                    &timeline_role,
                 ],
             )
             .await
@@ -21920,10 +22582,10 @@ async fn save_postgres_experiment_relationship_type_command(
             let new_attribute_id = generate_identifier();
             tx.execute(
                 "
-                INSERT INTO relationship_attribute_definitions (id, relationship_type_id, relationship_type, name, data_type, description, options_json, sort_order)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO relationship_attribute_definitions (id, relationship_type_id, relationship_type, name, data_type, description, options_json, timeline_role, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ",
-                &[&new_attribute_id, &resolved_relationship_type_id, &name, &attribute_name, &data_type, &attribute_description, &options_json, &next_sort_order],
+                &[&new_attribute_id, &resolved_relationship_type_id, &name, &attribute_name, &data_type, &attribute_description, &options_json, &timeline_role, &next_sort_order],
             )
             .await
             .map_err(|e| format!("Could not create PostgreSQL experiment relationship attribute: {e}"))?;
@@ -21955,7 +22617,7 @@ async fn save_postgres_experiment_relationship_type_command(
     let attribute_rows = tx
         .query(
             "
-            SELECT d.id, d.relationship_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.sort_order, d.created_at::text, d.updated_at::text
+            SELECT d.id, d.relationship_type_id, t.name, d.name, d.data_type, d.description, d.options_json, d.timeline_role, d.sort_order, d.created_at::text, d.updated_at::text
             FROM relationship_attribute_definitions d
             LEFT JOIN relationship_types t ON t.id = d.relationship_type_id
             WHERE d.relationship_type_id = $1
@@ -22113,6 +22775,8 @@ async fn create_postgres_experiment_object_attribute_definition_command(
         .to_string();
     let description = request.description.trim().to_string();
     let options = normalize_attribute_options(&request.options);
+    let timeline_role =
+        normalize_postgres_experiment_timeline_role(request.timeline_role.as_deref())?;
 
     if project_id.is_empty() {
         return Err("Project id is required.".to_string());
@@ -22126,6 +22790,12 @@ async fn create_postgres_experiment_object_attribute_definition_command(
     if data_type == "categorical" && options.len() < 2 {
         return Err("Categorical object attributes need at least two options.".to_string());
     }
+    validate_postgres_experiment_timeline_attribute_role(
+        &timeline_role,
+        &data_type,
+        &options,
+        "Object",
+    )?;
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
     let session =
@@ -22152,11 +22822,11 @@ async fn create_postgres_experiment_object_attribute_definition_command(
     let row = client
         .query_one(
             "
-            INSERT INTO object_attribute_definitions (id, object_type_id, object_type, name, data_type, description, options_json, sort_order)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, object_type_id, object_type, name, data_type, description, options_json, sort_order, created_at::text, updated_at::text
+            INSERT INTO object_attribute_definitions (id, object_type_id, object_type, name, data_type, description, options_json, timeline_role, sort_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id, object_type_id, object_type, name, data_type, description, options_json, timeline_role, sort_order, created_at::text, updated_at::text
             ",
-            &[&attribute_definition_id, &object_type_id, &object_type_name, &name, &data_type, &description, &options_json, &sort_order],
+            &[&attribute_definition_id, &object_type_id, &object_type_name, &name, &data_type, &description, &options_json, &timeline_role, &sort_order],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment object attribute: {e}"))?;
@@ -22206,6 +22876,8 @@ async fn update_postgres_experiment_object_attribute_definition_command(
         .to_string();
     let description = request.description.trim().to_string();
     let options = normalize_attribute_options(&request.options);
+    let timeline_role =
+        normalize_postgres_experiment_timeline_role(request.timeline_role.as_deref())?;
 
     if project_id.is_empty() || attribute_definition_id.is_empty() {
         return Err("Project and attribute identifiers are required.".to_string());
@@ -22219,6 +22891,12 @@ async fn update_postgres_experiment_object_attribute_definition_command(
     if data_type == "categorical" && options.len() < 2 {
         return Err("Categorical object attributes need at least two options.".to_string());
     }
+    validate_postgres_experiment_timeline_attribute_role(
+        &timeline_role,
+        &data_type,
+        &options,
+        "Object",
+    )?;
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
     let _session =
@@ -22241,11 +22919,12 @@ async fn update_postgres_experiment_object_attribute_definition_command(
                 data_type = $5,
                 description = $6,
                 options_json = $7,
+                timeline_role = $8,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, object_type_id, object_type, name, data_type, description, options_json, sort_order, created_at::text, updated_at::text
+            RETURNING id, object_type_id, object_type, name, data_type, description, options_json, timeline_role, sort_order, created_at::text, updated_at::text
             ",
-            &[&attribute_definition_id, &object_type_id, &object_type_name, &name, &data_type, &description, &options_json],
+            &[&attribute_definition_id, &object_type_id, &object_type_name, &name, &data_type, &description, &options_json, &timeline_role],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment object attribute: {e}"))?;
@@ -23102,6 +23781,8 @@ async fn create_postgres_experiment_relationship_attribute_definition_command(
         .ok_or_else(|| "Choose a valid relationship attribute data type.".to_string())?;
     let description = request.description.trim().to_string();
     let options = normalize_attribute_options(&request.options);
+    let timeline_role =
+        normalize_postgres_experiment_timeline_role(request.timeline_role.as_deref())?;
 
     if project_id.is_empty() {
         return Err("Project id is required.".to_string());
@@ -23115,6 +23796,12 @@ async fn create_postgres_experiment_relationship_attribute_definition_command(
     if data_type == "categorical" && options.len() < 2 {
         return Err("Categorical relationship attributes need at least two options.".to_string());
     }
+    validate_postgres_experiment_timeline_attribute_role(
+        &timeline_role,
+        data_type,
+        &options,
+        "Relationship",
+    )?;
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
     let session =
@@ -23145,11 +23832,11 @@ async fn create_postgres_experiment_relationship_attribute_definition_command(
     let row = client
         .query_one(
             "
-            INSERT INTO relationship_attribute_definitions (id, relationship_type_id, relationship_type, name, data_type, description, options_json, sort_order)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, relationship_type_id, relationship_type, name, data_type, description, options_json, sort_order, created_at::text, updated_at::text
+            INSERT INTO relationship_attribute_definitions (id, relationship_type_id, relationship_type, name, data_type, description, options_json, timeline_role, sort_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id, relationship_type_id, relationship_type, name, data_type, description, options_json, timeline_role, sort_order, created_at::text, updated_at::text
             ",
-            &[&id, &relationship_type_id, &relationship_type_name, &name, &data_type, &description, &options_json, &sort_order],
+            &[&id, &relationship_type_id, &relationship_type_name, &name, &data_type, &description, &options_json, &timeline_role, &sort_order],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment relationship attribute: {e}"))?;
@@ -23198,6 +23885,8 @@ async fn update_postgres_experiment_relationship_attribute_definition_command(
         .ok_or_else(|| "Choose a valid relationship attribute data type.".to_string())?;
     let description = request.description.trim().to_string();
     let options = normalize_attribute_options(&request.options);
+    let timeline_role =
+        normalize_postgres_experiment_timeline_role(request.timeline_role.as_deref())?;
 
     if project_id.is_empty() || attribute_definition_id.is_empty() {
         return Err("Project and relationship attribute identifiers are required.".to_string());
@@ -23211,6 +23900,12 @@ async fn update_postgres_experiment_relationship_attribute_definition_command(
     if data_type == "categorical" && options.len() < 2 {
         return Err("Categorical relationship attributes need at least two options.".to_string());
     }
+    validate_postgres_experiment_timeline_attribute_role(
+        &timeline_role,
+        data_type,
+        &options,
+        "Relationship",
+    )?;
 
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
     let _session =
@@ -23233,11 +23928,12 @@ async fn update_postgres_experiment_relationship_attribute_definition_command(
                 data_type = $5,
                 description = $6,
                 options_json = $7,
+                timeline_role = $8,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, relationship_type_id, relationship_type, name, data_type, description, options_json, sort_order, created_at::text, updated_at::text
+            RETURNING id, relationship_type_id, relationship_type, name, data_type, description, options_json, timeline_role, sort_order, created_at::text, updated_at::text
             ",
-            &[&attribute_definition_id, &relationship_type_id, &relationship_type_name, &name, &data_type, &description, &options_json],
+            &[&attribute_definition_id, &relationship_type_id, &relationship_type_name, &name, &data_type, &description, &options_json, &timeline_role],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment relationship attribute: {e}"))?;
@@ -32664,6 +33360,10 @@ pub fn run() {
             get_postgres_experiment_saved_drawing_command,
             delete_postgres_experiment_saved_drawing_command,
             list_postgres_experiment_sources_command,
+            list_postgres_experiment_source_type_settings_command,
+            save_postgres_experiment_source_type_setting_command,
+            import_postgres_experiment_source_type_image_command,
+            remove_postgres_experiment_source_type_image_command,
             create_postgres_experiment_source_command,
             import_postgres_experiment_source_file_command,
             update_postgres_experiment_source_command,

@@ -1,9 +1,17 @@
 import { type CSSProperties, useState } from "react";
 import { useI18n } from "../i18n/provider";
+import { SettingsModal } from "./SettingsModal";
 import type { SharedAttributeDataType, SharedAttributeDraft } from "./AttributeValuesModal";
 
 function normalizeAttributeOptions(options: string[]): string[] {
   return options.map((option) => option.trim()).filter(Boolean);
+}
+
+function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], dataType: SharedAttributeDataType): boolean {
+  if (!role) return true;
+  if (role === "timeline_start" || role === "timeline_end") return dataType === "datetime";
+  if (role === "timeline_item_type") return dataType === "categorical";
+  return dataType === "text" || dataType === "categorical";
 }
 
 export function AttributeDefinitionModal({
@@ -35,25 +43,11 @@ export function AttributeDefinitionModal({
     { value: "datetime", label: t("attributeModal.types.datetime") },
     { value: "categorical", label: t("attributeModal.types.categorical") },
   ];
+  const effectiveTimelineRole = timelineRoleFitsDataType(draft.timelineRole, dataType) ? draft.timelineRole ?? "" : "";
 
   return (
-    <div className="modal-overlay" style={overlayStyle} onClick={onCancel}>
-      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-title-bar">
-          <div>
-            <h2>{title}</h2>
-          </div>
-          <button
-            type="button"
-            className="modal-icon-close"
-            onClick={onCancel}
-            disabled={saving}
-            aria-label={t("common.cancel")}
-            title={t("common.cancel")}
-          >
-            x
-          </button>
-        </div>
+    <SettingsModal title={title} onClose={onCancel} closeDisabled={saving} modalClassName="modal--wide" overlayStyle={overlayStyle}>
+      <div className="app-settings-modal-body">
         <div className="attribute-values-details">
           <label className="form-group">
             <span className="form-label">{t("attributeModal.attributeName")}</span>
@@ -117,7 +111,8 @@ export function AttributeDefinitionModal({
           ) : null}
         </div>
         {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
-        <div className="modal-actions">
+      </div>
+      <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
           <button
             className="btn btn--primary"
             onClick={() =>
@@ -127,14 +122,14 @@ export function AttributeDefinitionModal({
                 dataType,
                 description: description.trim(),
                 options: normalizeAttributeOptions(options),
+                timelineRole: effectiveTimelineRole,
               })
             }
             disabled={saving || !name.trim() || (dataType === "categorical" && normalizeAttributeOptions(options).length < 2)}
           >
             {saving ? t("attributeModal.saving") : t("attributeModal.save")}
           </button>
-        </div>
       </div>
-    </div>
+    </SettingsModal>
   );
 }

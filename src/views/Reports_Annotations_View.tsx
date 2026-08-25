@@ -8,6 +8,7 @@ import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { FilterIcon } from "../components/FilterIcon";
 import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
@@ -392,9 +393,8 @@ function ExportModal({
   ] as const;
 
   return (
-    <div className="modal-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("reportsAnnotations.exportTitle")}</h2>
+    <SettingsModal title={t("reportsAnnotations.exportTitle")} onClose={onClose} closeDisabled={!!exportingFormat} modalClassName="modal--wide">
+      <div className="app-settings-modal-body">
         <div
           style={{
             display: "grid",
@@ -433,11 +433,11 @@ function ExportModal({
             </button>
           ))}
         </div>
-        <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("reportsAnnotations.cancel")}</button>
-        </div>
       </div>
-    </div>
+      <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+        <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("reportsAnnotations.cancel")}</button>
+      </div>
+    </SettingsModal>
   );
 }
 
@@ -4167,12 +4167,8 @@ function ReportPage({
       </div>
 
       {showCaseAttributeFilters && (
-        <div className="modal-overlay" onClick={() => setShowCaseAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>{t("reportsAnnotations.filters.caseTitle")}</h2>
-              <button className="btn" onClick={() => setShowCaseAttributeFilters(false)}>{t("reportsAnnotations.close")}</button>
-            </div>
+        <SettingsModal title={t("reportsAnnotations.filters.caseTitle")} onClose={() => setShowCaseAttributeFilters(false)} modalClassName="modal--wide">
+          <div className="app-settings-modal-body">
             {!isFrozen && !dataLoading && caseTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
@@ -4246,16 +4242,12 @@ function ReportPage({
               updateCaseAttributeFilter,
             )}
           </div>
-        </div>
+        </SettingsModal>
       )}
 
       {showDocumentAttributeFilters && (
-        <div className="modal-overlay" onClick={() => setShowDocumentAttributeFilters(false)} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 820, width: "min(820px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <h2 style={{ margin: 0 }}>{t("reportsAnnotations.filters.documentTitle")}</h2>
-              <button className="btn" onClick={() => setShowDocumentAttributeFilters(false)}>{t("reportsAnnotations.close")}</button>
-            </div>
+        <SettingsModal title={t("reportsAnnotations.filters.documentTitle")} onClose={() => setShowDocumentAttributeFilters(false)} modalClassName="modal--wide">
+          <div className="app-settings-modal-body">
             {!isFrozen && !dataLoading && documentTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
@@ -4329,7 +4321,7 @@ function ReportPage({
               updateDocumentAttributeFilter,
             )}
           </div>
-        </div>
+        </SettingsModal>
       )}
 
       {showExportModal && (
@@ -4583,9 +4575,8 @@ export function CodeReportsView({ initialNewReportOpen = false, postgresProjectI
       </div>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("reportsAnnotations.help.title")}</h2>
+        <SettingsModal title={t("reportsAnnotations.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               {t("reportsAnnotations.help.line1")}
             </p>
@@ -4598,13 +4589,13 @@ export function CodeReportsView({ initialNewReportOpen = false, postgresProjectI
             <p className="users-guide-copy">
               {t("reportsAnnotations.help.line3")}
             </p>
-            <div className="form-actions">
-              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                {t("reportsAnnotations.close")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              {t("reportsAnnotations.close")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {contextMenu && (
@@ -4619,21 +4610,20 @@ export function CodeReportsView({ initialNewReportOpen = false, postgresProjectI
       )}
 
       {confirmDelete && (
-        <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("reportsAnnotations.deleteTitle")}</h2>
+        <SettingsModal title={t("reportsAnnotations.deleteTitle")} onClose={() => setConfirmDelete(null)} closeDisabled={deleteLoading}>
+          <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
               {t("reportsAnnotations.deleteBody", { name: confirmDelete.name })}
             </p>
             <p className="modal-warning-text">{t("reportsAnnotations.deleteWarning")}</p>
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsAnnotations.cancel")}</button>
-              <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? t("reportsAnnotations.deleting") : t("reportsAnnotations.deleteReport")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsAnnotations.cancel")}</button>
+            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+              {deleteLoading ? t("reportsAnnotations.deleting") : t("reportsAnnotations.deleteReport")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
     </div>
   );

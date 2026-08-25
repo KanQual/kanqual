@@ -7,7 +7,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
-const BUNDLED_POSTGRES_VERSION: &str = "17";
+const BUNDLED_POSTGRES_MAJOR_VERSION: &str = "17";
+const BUNDLED_POSTGRES_VERSION: &str = BUNDLED_POSTGRES_MAJOR_VERSION;
 const BUNDLED_POSTGRES_DIR_NAME: &str = "postgresql-17";
 
 #[derive(Debug, Serialize)]
@@ -261,6 +262,25 @@ fn initialized_version(data_dir: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn postgres_major_version(version: &str) -> Option<&str> {
+    version
+        .trim()
+        .split('.')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn initialized_version_matches_bundled(version: &str) -> bool {
+    postgres_major_version(version) == Some(BUNDLED_POSTGRES_MAJOR_VERSION)
+}
+
+fn incompatible_data_directory_message(initialized_version: &str) -> String {
+    format!(
+        "Bundled PostgreSQL data directory major version is {initialized_version}, but this KanQual build includes PostgreSQL {BUNDLED_POSTGRES_MAJOR_VERSION}. KanQual cannot open this data directory until a compatible upgrade or restore path is available."
+    )
 }
 
 fn postmaster_pid_path(paths: &BundledPostgresPaths) -> PathBuf {
@@ -684,7 +704,7 @@ pub async fn status(app: tauri::AppHandle) -> Result<BundledPostgresStatus, Stri
     let initialized = initialized_version.is_some();
     let expected_version_matches = initialized_version
         .as_deref()
-        .map(|value| value == BUNDLED_POSTGRES_VERSION);
+        .map(initialized_version_matches_bundled);
     let probe_host = crate::POSTGRES_DEFAULT_HOST.to_string();
     let probe_port = crate::POSTGRES_DEFAULT_PORT;
     let reachable = can_reach(&probe_host, probe_port).await;
@@ -952,21 +972,23 @@ pub async fn start_runtime(
         });
     }
     if current_status.expected_version_matches == Some(false) {
+        let initialized_version = current_status
+            .initialized_version
+            .as_deref()
+            .unwrap_or("unknown");
+        let message = incompatible_data_directory_message(initialized_version);
         append_runtime_diagnostics_event_best_effort(
             &app,
             "bundled_postgres.start",
             "error",
-            "Bundled PostgreSQL data directory version does not match the bundled runtime.",
+            &message,
             serde_json::json!({
-                "expectedVersion": BUNDLED_POSTGRES_VERSION,
-                "initializedVersion": current_status.initialized_version,
+                "expectedMajorVersion": BUNDLED_POSTGRES_MAJOR_VERSION,
+                "initializedVersion": initialized_version,
                 "dataDir": paths.data_dir,
             }),
         );
-        return Err(format!(
-            "Bundled PostgreSQL data directory version does not match PostgreSQL {}.",
-            BUNDLED_POSTGRES_VERSION
-        ));
+        return Err(message);
     }
     if !Path::new(&paths.postgres_binary).is_file() {
         append_runtime_diagnostics_event_best_effort(
@@ -1306,6 +1328,31 @@ mod tests {
         .into_iter()
         .find(|pid| process_is_running(*pid) == Some(false))
         .expect("find an unused pid for stale marker test")
+    }
+
+    #[test]
+    fn postgres_major_version_accepts_pg_version_file_format() {
+        assert_eq!(postgres_major_version("17"), Some("17"));
+        assert_eq!(postgres_major_version("17\n"), Some("17"));
+        assert_eq!(postgres_major_version("17.10"), Some("17"));
+    }
+
+    #[test]
+    fn initialized_version_match_is_major_version_based() {
+        assert!(initialized_version_matches_bundled("17"));
+        assert!(initialized_version_matches_bundled("17.10"));
+        assert!(!initialized_version_matches_bundled("16"));
+        assert!(!initialized_version_matches_bundled("18"));
+        assert!(!initialized_version_matches_bundled(""));
+    }
+
+    #[test]
+    fn incompatible_data_directory_message_names_versions() {
+        let message = incompatible_data_directory_message("16");
+
+        assert!(message.contains("16"));
+        assert!(message.contains(BUNDLED_POSTGRES_MAJOR_VERSION));
+        assert!(message.contains("cannot open"));
     }
 
     #[test]

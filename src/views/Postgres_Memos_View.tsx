@@ -17,6 +17,7 @@ import {
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { PlusIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { orderedCodesWithDepth } from "./Postgres_Source_Coding_Shared";
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
@@ -978,20 +979,19 @@ export function PostgresMemosView({
       </div>
 
       {deleteMemoId ? (
-        <div className="modal-overlay" onClick={() => !submitting && setDeleteMemoId(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2 style={{ marginTop: 0 }}>Delete Memo</h2>
+        <SettingsModal title="Delete Memo" onClose={() => setDeleteMemoId(null)} closeDisabled={submitting}>
+          <div className="app-settings-modal-body">
             <p>This will permanently remove the memo and its source, annotation, code, and object links.</p>
-            <div className="form-actions">
-              <button type="button" className="btn" onClick={() => setDeleteMemoId(null)} disabled={submitting}>
-                Cancel
-              </button>
-              <button type="button" className="btn btn--danger" onClick={() => void handleDeleteMemo()} disabled={submitting}>
-                {submitting ? "Deleting..." : "Delete memo"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn" onClick={() => setDeleteMemoId(null)} disabled={submitting}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn--danger" onClick={() => void handleDeleteMemo()} disabled={submitting}>
+              {submitting ? "Deleting..." : "Delete memo"}
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
     </div>
   );

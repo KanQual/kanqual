@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HelpIcon, PlusIcon } from "../components/AppIcons";
 import { parseProcessedTranscriptSegments } from "../components/ProcessedTranscriptView";
+import { SettingsModal } from "../components/SettingsModal";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { buildLlmInvokeRequestFields } from "../lib/llmRuntime";
 import {
@@ -1042,45 +1043,21 @@ export function PostgresAIAssistAttributesView({
       </header>
 
       {helpOpen ? (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-title-bar">
-              <div>
-                <h2>Identify Attributes</h2>
-              </div>
-              <button
-                type="button"
-                className="modal-icon-close"
-                onClick={() => setHelpOpen(false)}
-                aria-label="Close"
-                title="Close"
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal title="Identify Attributes" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">Generate suggested values for selected attributes, review the evidence, and accept values back into the project.</p>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {evidenceModal ? (
-        <div className="modal-overlay" onClick={() => setEvidenceModal(null)}>
-          <div className="modal modal--wide ai-attribute-evidence-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="annotate-card-header ai-citation-detail-header">
-              <div>
-                <h2>Suggestion Evidence</h2>
-                <p className="backup-field-hint">{evidenceModal.sourceName}</p>
-              </div>
-              <button
-                type="button"
-                className="modal-icon-close"
-                onClick={() => setEvidenceModal(null)}
-                aria-label="Close"
-                title="Close"
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal
+          title="Suggestion Evidence"
+          subtitle={evidenceModal.sourceName}
+          onClose={() => setEvidenceModal(null)}
+          modalClassName="modal--wide ai-attribute-evidence-modal"
+        >
+          <div className="app-settings-modal-body">
             <div className="ai-attribute-evidence-summary">
               <span>Suggested value</span>
               <strong>{evidenceModal.suggestedValue}</strong>
@@ -1091,27 +1068,17 @@ export function PostgresAIAssistAttributesView({
               {evidenceModal.afterText ? <span>{evidenceModal.afterText}</span> : null}
             </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {editSuggestionModal ? (
-        <div className="modal-overlay" onClick={() => setEditSuggestionModal(null)}>
-          <div className="modal modal--wide ai-attribute-edit-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="annotate-card-header ai-citation-detail-header">
-              <div>
-                <h2>Edit Suggestion</h2>
-                <p className="backup-field-hint">{editSuggestionModal.row.ownerName}</p>
-              </div>
-              <button
-                type="button"
-                className="modal-icon-close"
-                onClick={() => setEditSuggestionModal(null)}
-                aria-label="Close"
-                title="Close"
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal
+          title="Edit Suggestion"
+          subtitle={editSuggestionModal.row.ownerName}
+          onClose={() => setEditSuggestionModal(null)}
+          modalClassName="modal--wide ai-attribute-edit-modal"
+        >
+          <div className="app-settings-modal-body">
             <label className="form-label" htmlFor="edit-attribute-suggestion-value">Suggested value</label>
             <textarea
               id="edit-attribute-suggestion-value"
@@ -1126,13 +1093,13 @@ export function PostgresAIAssistAttributesView({
                 <strong>{editSuggestionModal.row.evidenceText}</strong>
               </div>
             ) : null}
-            <div className="project-export-actions project-export-actions--modal ai-citation-detail-actions">
-              <button type="button" className="btn btn--primary" onClick={handleSaveEditedSuggestion}>
-                Save Edit
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={handleSaveEditedSuggestion}>
+              Save Edit
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {error ? <p className="users-error">{error}</p> : null}

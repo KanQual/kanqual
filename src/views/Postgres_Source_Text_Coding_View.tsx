@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FilterIcon } from "../components/FilterIcon";
+import { SettingsModal } from "../components/SettingsModal";
 import {
   ProcessedTranscriptView,
   parseProcessedTranscriptSegments,
@@ -1118,9 +1119,8 @@ export function PostgresSourceTextCodingView({
       ) : null}
 
       {deletingCodeRow ? (
-        <div className="modal-overlay" onClick={() => !deletingCode && setDeletingCodeId(null)}>
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-code-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="delete-code-title">Delete Code</h2>
+        <SettingsModal title="Delete Code" onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
+          <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
               Delete <strong>{deletingCodeRow.label}</strong>?
             </p>
@@ -1128,16 +1128,16 @@ export function PostgresSourceTextCodingView({
               This removes the code from the codebook and clears it from existing annotations.
             </p>
             {deleteCodeError ? <p className="auth-error">{deleteCodeError}</p> : null}
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
-                Cancel
-              </button>
-              <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
-                {deletingCode ? "Deleting..." : "Delete Code"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
+              {deletingCode ? "Deleting..." : "Delete Code"}
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {editingAnnotation && canEditAnnotations ? (

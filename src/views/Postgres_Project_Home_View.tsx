@@ -1,9 +1,10 @@
-﻿import {
+import {
   type ComponentType,
   type Dispatch,
   type SetStateAction,
   Suspense,
   lazy,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -41,8 +42,12 @@ import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
-import { FilterIcon } from "../components/FilterIcon";
-import { CodeIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon } from "../components/AppIcons";
+import { PlusIcon } from "../components/AppIcons";
+import {
+  EditableAttributesMatrix,
+  type EditableAttributeMatrixValues,
+} from "../components/EditableAttributesMatrix";
+import { SettingsModal } from "../components/SettingsModal";
 import { inferUploadMediaType, SourceEditorModal, SourceImportModal, type SourceRow } from "./Postgres_Sources_View";
 import { NewCodeModal, type CodeRow } from "./Project_Codebook_View";
 import { formatCurrentDateTime } from "../i18n/formatters";
@@ -85,6 +90,7 @@ import {
   listPostgresSourceAttributeDefinitions,
   listPostgresSourceAttributeValues,
   listPostgresSources,
+  listPostgresSourceTypeSettings,
   savePostgresObject,
   savePostgresObjectType,
   savePostgresProjectCanvasState,
@@ -119,6 +125,7 @@ import {
   type PostgresSource,
   type PostgresSourceAttributeDefinition,
   type PostgresSourceAttributeValue,
+  type PostgresSourceTypeSetting,
   POSTGRES_PROJECT_CHANGED_EVENT,
 } from "../lib/postgres";
 import type {
@@ -149,6 +156,9 @@ import type {
   PostgresSidebarNetworkMode,
 } from "./Postgres_Sidebar";
 import type { PostgresMemoDraftTarget } from "./Postgres_Project_Memos_View";
+import { PostgresProjectHomeDetailsView } from "./Postgres_Project_Home_Details_View";
+import { PostgresProjectHomeTimelineView } from "./Postgres_Project_Home_Timeline_View";
+import { PostgresProjectHomeGraphView } from "./Postgres_Project_Home_Graph_View";
 
 function normalizeCanvasSvgTextHtml(html: string): string {
   const trimmed = html.trim();
@@ -160,9 +170,6 @@ const PostgresAppSettingsViewLazy = lazy(
 );
 const PostgresUserSettingsViewLazy = lazy(
   () => import("./Postgres_User_Settings_View").then((m) => ({ default: m.PostgresUserSettingsView })),
-);
-const PostgresProjectSettingsViewLazy = lazy(
-  () => import("./Postgres_Project_Settings_View").then((m) => ({ default: m.PostgresProjectSettingsView })),
 );
 const PostgresProjectSourcesViewLazy = lazy(
   () => import("./Postgres_Project_Sources_View").then((m) => ({ default: m.PostgresProjectSourcesView })),
@@ -278,7 +285,6 @@ type PostgresProjectScreen =
   | "ai-assist-object-attributes"
   | "ai-assist-process-documents"
   | "app-settings"
-  | "project-settings"
   | "user-settings";
 
 function PostgresAiAssistPortPlaceholderView({
@@ -311,6 +317,7 @@ type PostgresObjectTypeSortCol = "objectType" | "count";
 type PostgresUserRoleSortCol = "role" | "count";
 type PostgresRelationshipTypeSortCol = "relationshipType" | "count";
 type PostgresHomeCanvasSection = "sources" | "objects" | "relationships" | "codes" | "annotations";
+type PostgresHomeCanvasSizeSectionKey = "sources" | "objects" | "codes";
 type PostgresHomeCanvasContextKind = "background" | "source" | "object" | "relationship" | "code" | "annotation";
 type PostgresHomeCanvasContextMenuState = {
   kind: PostgresHomeCanvasContextKind;
@@ -560,8 +567,8 @@ function resolvePostgresObjectOutlineColor(
 ): string {
   return normalizePostgresObjectTypeColor(
     object.outlineColorOverride
-      || objectTypeRecord?.outlineColor
       || object.colorOverride
+      || objectTypeRecord?.outlineColor
       || objectTypeRecord?.color
       || "",
   );
@@ -1314,12 +1321,16 @@ function getCanvasNodeDefaultDimensions(shape: PostgresObjectTypeShape): {
 
 function getCanvasNodeRenderedDimensions(
   shape: PostgresObjectTypeShape,
-  _nodeState?: Pick<PostgresCanvasNodeState, "width" | "height"> | null,
+  nodeState?: Pick<PostgresCanvasNodeState, "width" | "height"> | null,
 ): {
   width: number;
   height: number;
 } {
-  return getCanvasNodeDefaultDimensions(shape);
+  const defaultDimensions = getCanvasNodeDefaultDimensions(shape);
+  return {
+    width: nodeState?.width ?? defaultDimensions.width,
+    height: nodeState?.height ?? defaultDimensions.height,
+  };
 }
 
 function escapeSvgText(value: string): string {
@@ -1779,7 +1790,7 @@ function wrapCanvasTextLines(text: string, width: number, fontSize: number): str
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   {[
-                    { label: "â€¢", isActive: editor.isActive("bulletList"), onClick: () => editor.chain().focus().toggleBulletList().run() },
+                    { label: "•", isActive: editor.isActive("bulletList"), onClick: () => editor.chain().focus().toggleBulletList().run() },
                     { label: "1.", isActive: editor.isActive("orderedList"), onClick: () => editor.chain().focus().toggleOrderedList().run() },
                   ].map((item) => (
                     <button
@@ -2278,6 +2289,19 @@ function getSourceCanvasNodeDefaultDimensions(): {
   height: number;
 } {
   return { width: 136, height: 136 };
+}
+
+function getSourceCanvasNodeRenderedDimensions(
+  nodeState?: Pick<PostgresCanvasNodeState, "width" | "height"> | null,
+): {
+  width: number;
+  height: number;
+} {
+  const defaultDimensions = getSourceCanvasNodeDefaultDimensions();
+  return {
+    width: nodeState?.width ?? defaultDimensions.width,
+    height: nodeState?.height ?? defaultDimensions.height,
+  };
 }
 
 function usePostgresStoredImageUrl(projectStoragePath: string, imageStoragePath: string): string {
@@ -2817,9 +2841,14 @@ function PostgresImageCropModal(props: {
   };
 
   return (
-    <div className="modal-overlay" style={{ zIndex: 300 }} onClick={() => !busy && onCancel()}>
-      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <h2>Use image</h2>
+    <SettingsModal
+      title="Use image"
+      onClose={onCancel}
+      closeDisabled={busy}
+      modalClassName="modal--wide"
+      overlayStyle={{ zIndex: 300 }}
+    >
+      <div className="app-settings-modal-body">
         <p className="auth-hint" style={{ marginTop: 0 }}>
           Keep the full image or select a region to use for this object graphic.
         </p>
@@ -3004,7 +3033,8 @@ function PostgresImageCropModal(props: {
             {draft.error ? <p className="modal-warning-text" style={{ margin: 0 }}>{draft.error}</p> : null}
           </div>
         </div>
-        <div className="form-actions" style={{ marginTop: 24 }}>
+      </div>
+        <div className="app-settings-modal-footer">
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
@@ -3018,8 +3048,7 @@ function PostgresImageCropModal(props: {
             </button>
           )}
         </div>
-      </div>
-    </div>
+    </SettingsModal>
   );
 }
 
@@ -3141,6 +3170,84 @@ function areCanvasNodeMapsEqual(
   return true;
 }
 
+function canvasNodeBounds(
+  node: Pick<PostgresCanvasNodeState, "x" | "y" | "width" | "height">,
+  gap = 0,
+): { left: number; top: number; right: number; bottom: number } {
+  return {
+    left: node.x - gap,
+    top: node.y - gap,
+    right: node.x + (node.width || 0) + gap,
+    bottom: node.y + (node.height || 0) + gap,
+  };
+}
+
+function canvasBoundsOverlap(
+  left: { left: number; top: number; right: number; bottom: number },
+  right: { left: number; top: number; right: number; bottom: number },
+): boolean {
+  return left.left < right.right
+    && left.right > right.left
+    && left.top < right.bottom
+    && left.bottom > right.top;
+}
+
+function findAvailableCanvasNodePosition({
+  existingNodes,
+  width,
+  height,
+  preferredPosition,
+  fallbackPosition,
+  gap = 36,
+}: {
+  existingNodes: Iterable<PostgresCanvasNodeState>;
+  width: number;
+  height: number;
+  preferredPosition?: PostgresCanvasPoint | null;
+  fallbackPosition?: PostgresCanvasPoint | null;
+  gap?: number;
+}): PostgresCanvasPoint {
+  const existingBounds = Array.from(existingNodes).map((node) => canvasNodeBounds(node, gap));
+  const fits = (position: PostgresCanvasPoint) => {
+    const candidate = canvasNodeBounds({ x: position.x, y: position.y, width, height });
+    return !existingBounds.some((bounds) => canvasBoundsOverlap(candidate, bounds));
+  };
+  const candidates = [preferredPosition, fallbackPosition].filter((position): position is PostgresCanvasPoint => Boolean(position));
+  for (const candidate of candidates) {
+    if (fits(candidate)) return candidate;
+  }
+
+  const origin = fallbackPosition
+    ?? preferredPosition
+    ?? (
+      existingBounds.length > 0
+        ? {
+            x: Math.round(existingBounds.reduce((sum, bounds) => sum + bounds.left, 0) / existingBounds.length),
+            y: Math.round(existingBounds.reduce((sum, bounds) => sum + bounds.top, 0) / existingBounds.length),
+          }
+        : { x: 0, y: 0 }
+    );
+  const stepX = Math.max(180, width + gap);
+  const stepY = Math.max(140, height + gap);
+  for (let radius = 1; radius <= 80; radius += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      for (let dy = -radius; dy <= radius; dy += 1) {
+        if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+        const candidate = {
+          x: origin.x + dx * stepX,
+          y: origin.y + dy * stepY,
+        };
+        if (fits(candidate)) return candidate;
+      }
+    }
+  }
+
+  return {
+    x: origin.x + (existingBounds.length + 1) * stepX,
+    y: origin.y,
+  };
+}
+
 function formatPostgresDateTime(iso: string): string {
   if (!iso) return "-";
   try {
@@ -3189,6 +3296,14 @@ function selectedSetOrAll(selection: Set<string>, allIds: string[]): Set<string>
   return selection.size === 0 ? new Set(allIds) : selection;
 }
 
+function isHomeCanvasSelectionFiltered(selection: Set<string>, allIds: string[]): boolean {
+  if (allIds.length === 0) return false;
+  if (selection.has("__none")) return true;
+  if (selection.size === 0) return false;
+  if (selection.size !== allIds.length) return true;
+  return allIds.some((id) => !selection.has(id));
+}
+
 type PostgresSavedCanvasSession = {
   id: string;
   name: string;
@@ -3221,11 +3336,37 @@ function createTypeAttributeDraft(draft?: Partial<SharedAttributeDraft> & { id?:
     dataType: draft?.dataType ?? "text",
     description: draft?.description ?? "",
     options: draft?.options ?? [],
+    timelineRole: draft?.timelineRole ?? "",
   };
 }
 
 function normalizeAttributeModalOptions(options: string[]): string[] {
   return options.map((option) => option.trim()).filter(Boolean);
+}
+
+type TimelineFieldRole = Exclude<NonNullable<SharedAttributeDraft["timelineRole"]>, "">;
+
+const TIMELINE_FIELD_OPTIONS: Array<{
+  role: TimelineFieldRole;
+  label: string;
+  dataTypes: SharedAttributeDraft["dataType"][];
+  defaultName: string;
+}> = [
+  { role: "timeline_start", label: "Start", dataTypes: ["datetime"], defaultName: "Timeline start" },
+  { role: "timeline_end", label: "End", dataTypes: ["datetime"], defaultName: "Timeline end" },
+  { role: "timeline_label", label: "Label", dataTypes: ["text", "categorical"], defaultName: "Timeline label" },
+  { role: "timeline_item_type", label: "Item Type", dataTypes: ["categorical"], defaultName: "Timeline item type" },
+  { role: "timeline_group", label: "Group", dataTypes: ["text", "categorical"], defaultName: "Timeline group" },
+];
+
+function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], dataType: SharedAttributeDraft["dataType"]): boolean {
+  if (!role) return true;
+  const option = TIMELINE_FIELD_OPTIONS.find((entry) => entry.role === role);
+  return option ? option.dataTypes.includes(dataType) : false;
+}
+
+function defaultTimelineAttributeOptions(role: TimelineFieldRole): string[] {
+  return role === "timeline_item_type" ? ["Point", "Range"] : [];
 }
 
 function TypeScopedAttributeModal({
@@ -3259,11 +3400,11 @@ function TypeScopedAttributeModal({
     { value: "datetime", label: "Date/time" },
     { value: "categorical", label: "Categorical" },
   ];
+  const effectiveTimelineRole = timelineRoleFitsDataType(draft.timelineRole, dataType) ? draft.timelineRole ?? "" : "";
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <h2>{title}</h2>
+    <SettingsModal title={title} onClose={onCancel} closeDisabled={saving} modalClassName="modal--wide">
+      <div className="app-settings-modal-body">
         <div className="attribute-values-details">
           <label className="form-group">
             <span className="form-label">Attribute name</span>
@@ -3334,7 +3475,8 @@ function TypeScopedAttributeModal({
           )}
         </div>
         {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
-        <div className="form-actions" style={{ marginTop: 20 }}>
+      </div>
+        <div className="app-settings-modal-footer">
           <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
           <button
             className="btn btn--primary"
@@ -3344,6 +3486,7 @@ function TypeScopedAttributeModal({
               dataType,
               description: description.trim(),
               options: normalizedOptions,
+              timelineRole: effectiveTimelineRole,
               typeIds,
             })}
             disabled={saving || !name.trim() || typeIds.length === 0 || (dataType === "categorical" && normalizedOptions.length < 2)}
@@ -3351,120 +3494,60 @@ function TypeScopedAttributeModal({
             {saving ? "Saving..." : "Save"}
           </button>
         </div>
-      </div>
-    </div>
+    </SettingsModal>
   );
 }
 
-function ProjectHomeCanvasSelectorCard({
+function GraphConfirmModal({
   title,
-  count,
-  collapsed,
-  rows,
-  onToggleCollapsed,
-  onSelectAll,
-  onClear,
-  emptyText,
+  children,
+  warning,
+  busy,
+  confirmLabel,
+  busyLabel,
+  danger = true,
+  confirmDisabled = false,
+  onClose,
+  onConfirm,
 }: {
   title: string;
-  count: number;
-  collapsed: boolean;
-  rows: Array<{ id: string; label: string; count: number; selected: boolean; indent?: boolean; onClick?: () => void }>;
-  onToggleCollapsed: () => void;
-  onSelectAll?: () => void;
-  onClear?: () => void;
-  emptyText: string;
+  children?: ReactNode;
+  warning?: ReactNode;
+  busy: boolean;
+  confirmLabel: string;
+  busyLabel?: string;
+  danger?: boolean;
+  confirmDisabled?: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
 }) {
   return (
-    <section className="home-project-card project-home-selector-card">
-      <div className="annotate-card-header project-home-selector-card-header">
-        <button
-          type="button"
-          className="project-home-selector-card-title-btn"
-          onClick={onToggleCollapsed}
-          aria-expanded={!collapsed}
-        >
-          <span className="annotate-card-title">{title}</span>
-          <span className="project-home-selector-count">{count}</span>
-        </button>
-        <div className="project-home-selector-header-actions">
+    <SettingsModal title={title} onClose={onClose} closeDisabled={busy} modalClassName="modal--wide">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!busy) onConfirm();
+        }}
+      >
+        <div className="app-settings-modal-body">
+          {children}
+          {warning ? <p className="modal-warning-text">{warning}</p> : null}
+        </div>
+        <div className="app-settings-modal-footer">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
           <button
-            type="button"
-            className="project-home-selector-collapse-btn"
-            onClick={onToggleCollapsed}
-            aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+            type="submit"
+            autoFocus
+            className={danger ? "btn btn--danger" : "btn btn--primary"}
+            disabled={busy || confirmDisabled}
           >
-            {collapsed ? "▶" : "▼"}
+            {busy && busyLabel ? busyLabel : confirmLabel}
           </button>
         </div>
-      </div>
-      {!collapsed ? (
-        <>
-          {(onSelectAll || onClear) && rows.length > 0 ? (
-            <div className="project-home-selector-actions">
-              {onSelectAll ? <button type="button" className="btn" onClick={onSelectAll}>All</button> : null}
-              {onClear ? <button type="button" className="btn" onClick={onClear}>Clear</button> : null}
-            </div>
-          ) : null}
-          <div className="users-table-wrap project-home-selector-table-wrap">
-            <table className="users-table project-home-selector-table">
-              <thead>
-                <tr>
-                  <th className="users-th" style={{ width: "72%" }}>Name</th>
-                  <th className="users-th" style={{ width: "28%" }}>Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td className="users-td-msg" colSpan={2}>{emptyText}</td>
-                  </tr>
-                ) : rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="users-row"
-                    style={{ background: row.selected ? "rgba(53, 80, 112, 0.10)" : undefined }}
-                    onClick={row.onClick}
-                  >
-                    <td className="users-td users-td--name" style={{ paddingLeft: row.indent ? 28 : undefined }}>
-                      {row.label}
-                    </td>
-                    <td className="users-td users-td--muted">{row.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      ) : null}
-    </section>
-  );
-}
-
-function PostgresStatCard({
-  title,
-  count,
-  stats,
-  onClick,
-}: {
-  title: string;
-  count: string | number | null;
-  stats: { label: string; value: string | number }[];
-  onClick: () => void;
-}) {
-  return (
-    <div className="home-stat-card" onClick={onClick}>
-      <div className="home-stat-title">{title}</div>
-      <div className="home-stat-count">{count ?? "-"}</div>
-      <div className="home-stat-details">
-        {stats.map((stat) => (
-          <div key={`${title}-${stat.label}`} className="home-stat-row">
-            <span className="home-stat-label">{stat.label}</span>
-            <span className="home-stat-value">{stat.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
+      </form>
+    </SettingsModal>
   );
 }
 
@@ -3516,6 +3599,7 @@ export function PostgresProjectHomeView({
   const [objectTypes, setObjectTypes] = useState<PostgresObjectType[]>([]);
   const [objects, setObjects] = useState<PostgresObject[]>([]);
   const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [sourceTypeSettings, setSourceTypeSettings] = useState<PostgresSourceTypeSetting[]>([]);
   const [sourceAttributeDefinitions, setSourceAttributeDefinitions] = useState<PostgresSourceAttributeDefinition[]>([]);
   const [sourceAttributeValues, setSourceAttributeValues] = useState<PostgresSourceAttributeValue[]>([]);
   const [codes, setCodes] = useState<PostgresCode[]>([]);
@@ -3524,6 +3608,7 @@ export function PostgresProjectHomeView({
   const [reportCount, setReportCount] = useState(0);
   const [homeCanvasCreateMenuOpen, setHomeCanvasCreateMenuOpen] = useState(false);
   const [homeCanvasFilterDrawerOpen, setHomeCanvasFilterDrawerOpen] = useState(false);
+  const [homeCanvasSizeMenuOpen, setHomeCanvasSizeMenuOpen] = useState(false);
   const [homeCanvasContextMenu, setHomeCanvasContextMenu] = useState<PostgresHomeCanvasContextMenuState | null>(null);
   const [homeCanvasDeleteTarget, setHomeCanvasDeleteTarget] = useState<PostgresHomeCanvasDeleteTarget | null>(null);
   const [createSourceOpen, setCreateSourceOpen] = useState(false);
@@ -3542,6 +3627,9 @@ export function PostgresProjectHomeView({
   );
   const [homeCanvasCollapsedSections, setHomeCanvasCollapsedSections] = useState<Set<PostgresHomeCanvasSection>>(
     () => new Set(["sources", "objects", "relationships", "codes"]),
+  );
+  const [homeCanvasSizeCollapsedSections, setHomeCanvasSizeCollapsedSections] = useState<Set<PostgresHomeCanvasSizeSectionKey>>(
+    () => new Set(["sources", "objects", "codes"]),
   );
   const [homeCanvasSourceKinds, setHomeCanvasSourceKinds] = useState<Set<string>>(() => new Set());
   const [homeCanvasObjectTypeIds, setHomeCanvasObjectTypeIds] = useState<Set<string>>(() => new Set());
@@ -3627,6 +3715,10 @@ export function PostgresProjectHomeView({
     relationshipId: string;
     attributeDefinitionId: string;
   } | null>(null);
+  const [hoveredObjectAttributeColumnId, setHoveredObjectAttributeColumnId] = useState<string | null>(null);
+  const [hoveredRelationshipAttributeColumnId, setHoveredRelationshipAttributeColumnId] = useState<string | null>(null);
+  const [bulkObjectAttributeDefinition, setBulkObjectAttributeDefinition] = useState<PostgresObjectAttributeDefinition | null>(null);
+  const [bulkRelationshipAttributeDefinition, setBulkRelationshipAttributeDefinition] = useState<PostgresRelationshipAttributeDefinition | null>(null);
   const [showObjectAttributesTable, setShowObjectAttributesTable] = useState(false);
   const [showRelationshipAttributesTable, setShowRelationshipAttributesTable] = useState(false);
   const [objectTypeSortCol, setObjectTypeSortCol] = useState<PostgresObjectTypeSortCol>("objectType");
@@ -3657,12 +3749,13 @@ export function PostgresProjectHomeView({
   const [draftObjectTypeImageStoragePath, setDraftObjectTypeImageStoragePath] = useState("");
   const [draftObjectTypePendingImage, setDraftObjectTypePendingImage] = useState<PostgresImageUploadDraft | null>(null);
   const [draftObjectTypeGraphicMode, setDraftObjectTypeGraphicMode] = useState<PostgresObjectGraphicMode>("select");
-  const [objectTypeModalTab, setObjectTypeModalTab] = useState<"details" | "graphics" | "attributes">("details");
-  const [createObjectModalTab, setCreateObjectModalTab] = useState<"details" | "graphics" | "attributes">("details");
+  const [objectTypeModalTab, setObjectTypeModalTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
+  const [createObjectModalTab, setCreateObjectModalTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
   const [objectTypeAttributeDrafts, setObjectTypeAttributeDrafts] = useState<TypeAttributeDraft[]>([]);
+  const [objectTypeAttributeValuesByDraftId, setObjectTypeAttributeValuesByDraftId] = useState<EditableAttributeMatrixValues>({});
   const [objectTypeAttributeModalDraft, setObjectTypeAttributeModalDraft] = useState<TypeAttributeDraft | null>(null);
   const [editingObjectId, setEditingObjectId] = useState<string | null>(null);
-  const [editObjectModalTab, setEditObjectModalTab] = useState<"details" | "graphics" | "attributes">("details");
+  const [editObjectModalTab, setEditObjectModalTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
   const [editingObjectTypeId, setEditingObjectTypeId] = useState("");
   const [editingObjectTitle, setEditingObjectTitle] = useState("");
   const [editingObjectDescription, setEditingObjectDescription] = useState("");
@@ -3719,7 +3812,8 @@ export function PostgresProjectHomeView({
   const [draftRelationshipToObjectTypeIds, setDraftRelationshipToObjectTypeIds] = useState<string[]>([]);
   const [draftRelationshipFromSourceKinds, setDraftRelationshipFromSourceKinds] = useState<string[]>([]);
   const [draftRelationshipToSourceKinds, setDraftRelationshipToSourceKinds] = useState<string[]>([]);
-  const [relationshipTypeModalTab, setRelationshipTypeModalTab] = useState<"details" | "object1" | "object2" | "attributes">("details");
+  const [relationshipTypeModalTab, setRelationshipTypeModalTab] = useState<"details" | "object1" | "object2" | "attributes" | "timeline">("details");
+  const [relationshipTypeAttributeValuesByDraftId, setRelationshipTypeAttributeValuesByDraftId] = useState<EditableAttributeMatrixValues>({});
   const [relationshipTypeId, setRelationshipTypeId] = useState("");
   const [relationshipDescription, setRelationshipDescription] = useState("");
   const [relationshipLineShapeOverride, setRelationshipLineShapeOverride] = useState("");
@@ -3728,9 +3822,9 @@ export function PostgresProjectHomeView({
   const [relationshipColorOverride, setRelationshipColorOverride] = useState("");
   const [relationshipAttributeValues, setRelationshipAttributeValues] = useState<Record<string, string>>({});
   const [createRelationshipOpen, setCreateRelationshipOpen] = useState(false);
-  const [createRelationshipModalTab, setCreateRelationshipModalTab] = useState<"details" | "graphics" | "attributes">("details");
+  const [createRelationshipModalTab, setCreateRelationshipModalTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
   const [editingRelationshipId, setEditingRelationshipId] = useState<string | null>(null);
-  const [editRelationshipModalTab, setEditRelationshipModalTab] = useState<"details" | "graphics" | "attributes">("details");
+  const [editRelationshipModalTab, setEditRelationshipModalTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
   const [editingRelationshipFromObjectId, setEditingRelationshipFromObjectId] = useState("");
   const [editingRelationshipToObjectId, setEditingRelationshipToObjectId] = useState("");
   const [editingRelationshipTypeId, setEditingRelationshipTypeId] = useState("");
@@ -3761,6 +3855,7 @@ export function PostgresProjectHomeView({
   const imageCropResolverRef = useRef<((upload: PostgresImageUploadDraft | null) => void) | null>(null);
   const homeCanvasCreateControlRef = useRef<HTMLDivElement>(null);
   const homeCanvasFilterControlRef = useRef<HTMLDivElement>(null);
+  const homeCanvasSizeControlRef = useRef<HTMLDivElement>(null);
   const objectById = new Map(objects.map((object) => [object.id, object]));
   const objectTypeById = new Map(objectTypes.map((objectType) => [objectType.id, objectType]));
   const relationshipTypeById = new Map(relationshipTypes.map((relationshipType) => [relationshipType.id, relationshipType]));
@@ -3793,6 +3888,24 @@ export function PostgresProjectHomeView({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [homeCanvasFilterDrawerOpen]);
+  useEffect(() => {
+    if (!homeCanvasSizeMenuOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (homeCanvasSizeControlRef.current?.contains(target)) return;
+      setHomeCanvasSizeMenuOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setHomeCanvasSizeMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [homeCanvasSizeMenuOpen]);
   useEffect(() => {
     if (!homeCanvasContextMenu) return;
     function handlePointerDown(event: PointerEvent) {
@@ -4503,7 +4616,7 @@ export function PostgresProjectHomeView({
     setCreateObjectOpen(true);
   }
 
-  function openEditObjectModal(object: PostgresObject, initialTab: "details" | "graphics" | "attributes" = "details") {
+  function openEditObjectModal(object: PostgresObject, initialTab: "details" | "graphics" | "attributes" | "timeline" = "details") {
     setEditingObjectId(object.id);
     setEditObjectModalTab(initialTab);
     setEditingObjectTypeId(object.objectTypeId);
@@ -4552,7 +4665,7 @@ export function PostgresProjectHomeView({
     setCreateObjectTypeOpen(false);
   }
 
-  function openEditRelationshipModal(relationship: PostgresRelationship, initialTab: "details" | "graphics" | "attributes" = "details") {
+  function openEditRelationshipModal(relationship: PostgresRelationship, initialTab: "details" | "graphics" | "attributes" | "timeline" = "details") {
     setEditRelationshipModalTab(initialTab);
     setEditingRelationshipId(relationship.id);
     setEditingRelationshipFromObjectId(relationshipEndpointKeyForRelationship(relationship, "from"));
@@ -4723,7 +4836,7 @@ export function PostgresProjectHomeView({
 
   function getHomeCanvasDeleteTargetForSelection(selection: { kind: "node" | "edge"; id: string }): PostgresHomeCanvasDeleteTarget | null {
     if (selection.kind === "edge") {
-      if (selection.id.startsWith("source-annotation:") || selection.id.startsWith("code-annotation:")) return null;
+      if (selection.id.startsWith("annotation:")) return null;
       const relationship = relationships.find((entry) => entry.id === selection.id);
       if (!relationship) return null;
       return { kind: "relationship", id: relationship.id, label: relationship.relationshipType || "Relationship" };
@@ -5074,38 +5187,68 @@ export function PostgresProjectHomeView({
   }
 
   function initializeObjectTypeAttributeEditor(objectTypeId: string | null) {
-    setObjectTypeAttributeDrafts(
-      objectTypeId
-        ? objectAttributeDefinitions
-          .filter((definition) => definition.objectTypeId === objectTypeId)
-          .map((definition) =>
-            createTypeAttributeDraft({
-              id: definition.id,
-              name: definition.name,
-              dataType: definition.dataType,
-              description: definition.description,
-              options: definition.options,
-            }))
-        : [],
-    );
+    const definitions = objectTypeId
+      ? objectAttributeDefinitions.filter((definition) => definition.objectTypeId === objectTypeId)
+      : [];
+    const matchingObjects = objectTypeId
+      ? objects.filter((object) => object.objectTypeId === objectTypeId)
+      : [];
+    const drafts = definitions
+      .map((definition) =>
+        createTypeAttributeDraft({
+          id: definition.id,
+          name: definition.name,
+          dataType: definition.dataType,
+          description: definition.description,
+          options: definition.options,
+          timelineRole: definition.timelineRole,
+        }));
+    setObjectTypeAttributeDrafts(drafts);
+    setObjectTypeAttributeValuesByDraftId(Object.fromEntries(
+      drafts.map((draft) => [
+        draft.localId,
+        Object.fromEntries(
+          matchingObjects.map((object) => [
+            object.id,
+            object.attributeValues.find((value) => value.attributeDefinitionId === draft.id)?.value ?? "",
+          ]),
+        ),
+      ]),
+    ));
     setObjectTypeAttributeModalDraft(null);
     setTypeAttributeModalError("");
   }
 
   function initializeRelationshipTypeAttributeEditor(relationshipTypeId: string | null) {
-    setRelationshipTypeAttributeDrafts(
-      relationshipTypeId
-        ? relationshipAttributeDefinitions
-          .filter((definition) => definition.relationshipTypeId === relationshipTypeId)
-          .map((definition) =>
-            createTypeAttributeDraft({
-              id: definition.id,
-              name: definition.name,
-              dataType: definition.dataType,
-              description: definition.description,
-              options: definition.options,
-            }))
-        : [],
+    const definitions = relationshipTypeId
+      ? relationshipAttributeDefinitions.filter((definition) => definition.relationshipTypeId === relationshipTypeId)
+      : [];
+    const matchingRelationships = relationshipTypeId
+      ? relationships.filter((relationship) => relationship.relationshipTypeId === relationshipTypeId)
+      : [];
+    const drafts = definitions
+      .map((definition) =>
+        createTypeAttributeDraft({
+          id: definition.id,
+          name: definition.name,
+          dataType: definition.dataType,
+          description: definition.description,
+          options: definition.options,
+          timelineRole: definition.timelineRole,
+        }));
+    setRelationshipTypeAttributeDrafts(drafts);
+    setRelationshipTypeAttributeValuesByDraftId(
+      Object.fromEntries(
+        drafts.map((draft) => [
+          draft.localId,
+          Object.fromEntries(
+            matchingRelationships.map((relationship) => [
+              relationship.id,
+              relationship.attributeValues.find((value) => value.attributeDefinitionId === draft.id)?.value ?? "",
+            ]),
+          ),
+        ]),
+      ),
     );
     setRelationshipTypeAttributeModalDraft(null);
     setTypeAttributeModalError("");
@@ -5114,21 +5257,32 @@ export function PostgresProjectHomeView({
   function renderRelationshipTypeModal(config: {
     title: string;
     hint?: string;
+    relationshipTypeId?: string | null;
     submitLabel: string;
     ariaLabel: string;
     onClose: () => void;
     onSubmit: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
   }) {
+    const relationshipTypeMatrixRows = (config.relationshipTypeId
+      ? relationships.filter((relationship) => relationship.relationshipTypeId === config.relationshipTypeId)
+      : [])
+      .map((relationship) => ({
+        id: relationship.id,
+        name: relationship.description
+          || `${relationship.fromEntityName || relationship.fromObjectId} -> ${relationship.toEntityName || relationship.toObjectId}`,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+
     return (
-      <div className="modal-overlay" style={{ zIndex: 120 }} onClick={() => !graphSubmitting && config.onClose()}>
-        <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-          <h2>{config.title}</h2>
-          {config.hint ? (
-            <p className="auth-hint" style={{ marginTop: 0 }}>
-              {config.hint}
-            </p>
-          ) : null}
-          <form onSubmit={config.onSubmit} className="form">
+      <SettingsModal
+        title={config.title}
+        subtitle={config.hint}
+        onClose={config.onClose}
+        closeDisabled={graphSubmitting}
+        modalClassName="modal--wide"
+        overlayStyle={{ zIndex: 120 }}
+      >
+          <form onSubmit={config.onSubmit} className="form app-settings-modal-body">
             <div className="segmented-control modal-segmented-control" role="tablist" aria-label={config.ariaLabel}>
               <button
                 type="button"
@@ -5157,6 +5311,13 @@ export function PostgresProjectHomeView({
                 onClick={() => setRelationshipTypeModalTab("attributes")}
               >
                 Attributes
+              </button>
+              <button
+                type="button"
+                className={`segmented-control-option ${relationshipTypeModalTab === "timeline" ? "segmented-control-option--active" : ""}`}
+                onClick={() => setRelationshipTypeModalTab("timeline")}
+              >
+                Timeline
               </button>
             </div>
             {relationshipTypeModalTab === "details" ? (
@@ -5273,53 +5434,43 @@ export function PostgresProjectHomeView({
                   projectStoragePath={project.storagePath}
                 />
               </div>
+            ) : relationshipTypeModalTab === "timeline" ? (
+              renderTimelineFieldMappingRows(
+                relationshipTypeAttributeDrafts,
+                (role, value) => updateTimelineFieldDrafts(
+                  role,
+                  value,
+                  setRelationshipTypeAttributeDrafts,
+                  (draft) => {
+                    setTypeAttributeModalError("");
+                    setRelationshipTypeAttributeModalDraft(draft);
+                  },
+                ),
+              )
             ) : (
-              <>
-                <div className="postgres-attribute-modal-section">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <div className="postgres-attribute-modal-title">Attributes</div>
-                    <button type="button" className="btn btn--small" onClick={openNewRelationshipTypeAttributeModal}>
-                      Add attribute
-                    </button>
-                  </div>
-                  {relationshipTypeAttributeDrafts.length === 0 ? (
-                    <p className="auth-hint" style={{ margin: 0 }}>No attributes for this relationship type yet.</p>
-                  ) : (
-                    <div className="postgres-attribute-multiselect">
-                      {relationshipTypeAttributeDrafts.map((draft) => (
-                        <div key={draft.localId} className="postgres-attribute-option">
-                          <span className="postgres-attribute-option-body">
-                            <strong>{draft.name}</strong>
-                            <span>{draft.dataType}</span>
-                            <span>{draft.description || (draft.options.length > 0 ? draft.options.join(", ") : "No description")}</span>
-                          </span>
-                          <div className="project-card-actions">
-                            <button type="button" className="btn btn--ghost" onClick={() => openEditRelationshipTypeAttributeModal(draft)}>
-                              Edit
-                            </button>
-                            <button type="button" className="btn btn--ghost-danger" onClick={() => deleteRelationshipTypeAttributeDraft(draft.localId)}>
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <p className="auth-hint" style={{ marginTop: 16, marginBottom: 0 }}>
-                  Attribute changes will be saved when you save the relationship type.
-                </p>
-              </>
+              <EditableAttributesMatrix
+                definitions={relationshipTypeAttributeDrafts.map((draft) => ({
+                  id: draft.localId,
+                  name: draft.name || "Untitled attribute",
+                  dataType: draft.dataType,
+                  description: draft.description,
+                  options: draft.options,
+                }))}
+                rows={relationshipTypeMatrixRows}
+                values={relationshipTypeAttributeValuesByDraftId}
+                disabled={graphSubmitting}
+                emptyDefinitionsLabel="No attributes for this relationship type yet."
+                emptyRowsLabel="No relationships of this type yet."
+                onAddAttribute={openNewRelationshipTypeAttributeModal}
+                onEditAttribute={(localId) => {
+                  const draft = relationshipTypeAttributeDrafts.find((entry) => entry.localId === localId);
+                  if (draft) openEditRelationshipTypeAttributeModal(draft);
+                }}
+                onDeleteAttribute={deleteRelationshipTypeAttributeDraft}
+                onChangeValue={updateRelationshipTypeMatrixValue}
+              />
             )}
-            <div className="form-actions">
+            <div className="app-settings-modal-footer">
               <button type="button" className="btn" onClick={config.onClose} disabled={graphSubmitting}>
                 Cancel
               </button>
@@ -5328,6 +5479,68 @@ export function PostgresProjectHomeView({
               </button>
             </div>
           </form>
+      </SettingsModal>
+    );
+  }
+
+  function updateTimelineFieldDrafts(
+    role: TimelineFieldRole,
+    value: string,
+    setDrafts: Dispatch<SetStateAction<TypeAttributeDraft[]>>,
+    openCreateDraft: (draft: TypeAttributeDraft) => void,
+  ) {
+    if (value === "__create__") {
+      const option = TIMELINE_FIELD_OPTIONS.find((entry) => entry.role === role)!;
+      openCreateDraft(createTypeAttributeDraft({
+        name: option.defaultName,
+        dataType: option.dataTypes[0],
+        options: defaultTimelineAttributeOptions(role),
+        timelineRole: role,
+      }));
+      return;
+    }
+    setDrafts((current) => current.map((draft) => ({
+      ...draft,
+      timelineRole: draft.localId === value ? role : draft.timelineRole === role ? "" : draft.timelineRole,
+    })));
+  }
+
+  function renderTimelineFieldMappingRows(
+    drafts: TypeAttributeDraft[],
+    onChange: (role: TimelineFieldRole, value: string) => void,
+  ) {
+    return (
+      <div className="postgres-attribute-modal-section">
+        <div className="postgres-attribute-modal-title">Timeline Fields</div>
+        <div className="case-detail-attributes-table-wrap">
+          <table className="case-detail-attributes-table">
+            <tbody>
+              {TIMELINE_FIELD_OPTIONS.map((field) => {
+                const selectedDraft = drafts.find((draft) => draft.timelineRole === field.role);
+                const eligibleDrafts = drafts
+                  .filter((draft) => field.dataTypes.includes(draft.dataType))
+                  .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+                return (
+                  <tr key={field.role}>
+                    <th className="case-detail-attributes-label" scope="row">{field.label}</th>
+                    <td className="case-detail-attributes-value">
+                      <select
+                        className="form-input"
+                        value={selectedDraft?.localId ?? ""}
+                        onChange={(event) => onChange(field.role, event.target.value)}
+                      >
+                        <option value="">None</option>
+                        {eligibleDrafts.map((draft) => (
+                          <option key={draft.localId} value={draft.localId}>{draft.name || "Untitled attribute"}</option>
+                        ))}
+                        <option value="__create__">Create new attribute...</option>
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     );
@@ -5336,8 +5549,8 @@ export function PostgresProjectHomeView({
   function renderObjectModal(config: {
     title: string;
     ariaLabel: string;
-    tab: "details" | "graphics" | "attributes";
-    setTab: Dispatch<SetStateAction<"details" | "graphics" | "attributes">>;
+    tab: "details" | "graphics" | "attributes" | "timeline";
+    setTab: Dispatch<SetStateAction<"details" | "graphics" | "attributes" | "timeline">>;
     submitLabel: string;
     objectTypeId: string;
     titleValue: string;
@@ -5386,12 +5599,16 @@ export function PostgresProjectHomeView({
     const inheritedFill = resolvePostgresObjectFill({ fillOverride: "" }, config.selectedType);
     const effectiveFill = resolvePostgresObjectFill({ fillOverride: config.fillOverride }, config.selectedType);
     const effectiveImageStoragePath = config.imageStoragePath || config.selectedType?.imageStoragePath || "";
+    const timelineAttributeDefinitions = config.attributeDefinitions.filter((definition) => (definition.timelineRole ?? "").trim());
 
     return (
-      <div className="modal-overlay" onClick={() => !graphSubmitting && config.onClose()}>
-        <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-          <h2>{config.title}</h2>
-          <form onSubmit={config.onSubmit} className="form">
+      <SettingsModal
+        title={config.title}
+        onClose={config.onClose}
+        closeDisabled={graphSubmitting}
+        modalClassName="modal--wide"
+      >
+          <form onSubmit={config.onSubmit} className="form app-settings-modal-body">
             <div className="segmented-control modal-segmented-control" role="tablist" aria-label={config.ariaLabel}>
               <button
                 type="button"
@@ -5413,6 +5630,13 @@ export function PostgresProjectHomeView({
                 onClick={() => config.setTab("attributes")}
               >
                 Attributes
+              </button>
+              <button
+                type="button"
+                className={`segmented-control-option ${config.tab === "timeline" ? "segmented-control-option--active" : ""}`}
+                onClick={() => config.setTab("timeline")}
+              >
+                Timeline
               </button>
             </div>
             {config.tab === "details" ? (
@@ -5634,6 +5858,50 @@ export function PostgresProjectHomeView({
                   </>
                 )}
               </>
+            ) : config.tab === "timeline" ? (
+              timelineAttributeDefinitions.length > 0 ? (
+                <div className="case-detail-attributes-table-wrap">
+                  <table className="case-detail-attributes-table">
+                    <tbody>
+                      {timelineAttributeDefinitions.map((definition) => (
+                        <tr key={definition.id}>
+                          <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                          <td className="case-detail-attributes-value">
+                            {definition.dataType === "categorical" ? (
+                              <select
+                                className="form-input"
+                                value={config.attributeValues[definition.id] ?? ""}
+                                onChange={(event) =>
+                                  config.setAttributeValues((current) => ({ ...current, [definition.id]: event.target.value }))
+                                }
+                              >
+                                <option value="">-</option>
+                                {definition.options.map((option) => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                className="form-input"
+                                type={definition.dataType === "number" ? "number" : definition.dataType === "datetime" ? "datetime-local" : "text"}
+                                step={definition.dataType === "number" ? "any" : undefined}
+                                value={config.attributeValues[definition.id] ?? ""}
+                                onChange={(event) =>
+                                  config.setAttributeValues((current) => ({ ...current, [definition.id]: event.target.value }))
+                                }
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="auth-hint" style={{ marginTop: 0 }}>
+                  No timeline fields have been configured for this object type yet.
+                </p>
+              )
             ) : config.attributeDefinitions.length > 0 ? (
               <div className="case-detail-attributes-table-wrap">
                 <table className="case-detail-attributes-table">
@@ -5677,7 +5945,7 @@ export function PostgresProjectHomeView({
                 No shared attributes for this relationship type yet.
               </p>
             )}
-            <div className="form-actions">
+            <div className="app-settings-modal-footer">
               <button type="button" className="btn" onClick={config.onClose} disabled={graphSubmitting}>
                 Cancel
               </button>
@@ -5686,8 +5954,7 @@ export function PostgresProjectHomeView({
               </button>
             </div>
           </form>
-        </div>
-      </div>
+      </SettingsModal>
     );
   }
 
@@ -5696,15 +5963,16 @@ export function PostgresProjectHomeView({
       normalizeOptionalPostgresObjectTypeColor(draftObjectTypeOutlineColor)
       || normalizePostgresObjectTypeColor(draftObjectTypeColor);
     return (
-      <div className="modal-overlay" onClick={() => !graphSubmitting && setCreateObjectTypeOpen(false)}>
-        <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-          <h2>Add object type</h2>
-          <p className="auth-hint" style={{ marginTop: 0 }}>
-            Create a project-specific object type now, then add objects to it whenever you are ready.
-          </p>
-          <form onSubmit={handleCreateObjectType} className="form">
+      <SettingsModal
+        title="Add object type"
+        subtitle="Create a project-specific object type now, then add objects to it whenever you are ready."
+        onClose={() => setCreateObjectTypeOpen(false)}
+        closeDisabled={graphSubmitting}
+        modalClassName="modal--wide"
+      >
+          <form onSubmit={handleCreateObjectType} className="form app-settings-modal-body">
             <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Add object type tabs">
-              {(["details", "graphics", "attributes"] as const).map((tab) => (
+              {(["details", "graphics", "attributes", "timeline"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -5851,53 +6119,43 @@ export function PostgresProjectHomeView({
                   </>
                 ) : null}
               </>
+            ) : objectTypeModalTab === "timeline" ? (
+              renderTimelineFieldMappingRows(
+                objectTypeAttributeDrafts,
+                (role, value) => updateTimelineFieldDrafts(
+                  role,
+                  value,
+                  setObjectTypeAttributeDrafts,
+                  (draft) => {
+                    setTypeAttributeModalError("");
+                    setObjectTypeAttributeModalDraft(draft);
+                  },
+                ),
+              )
             ) : (
-              <>
-                <div className="postgres-attribute-modal-section">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <div className="postgres-attribute-modal-title">Attributes</div>
-                    <button type="button" className="btn btn--small" onClick={openNewObjectTypeAttributeModal}>
-                      Add attribute
-                    </button>
-                  </div>
-                  {objectTypeAttributeDrafts.length === 0 ? (
-                    <p className="auth-hint" style={{ margin: 0 }}>No attributes for this object type yet.</p>
-                  ) : (
-                    <div className="postgres-attribute-multiselect">
-                      {objectTypeAttributeDrafts.map((draft) => (
-                        <div key={draft.localId} className="postgres-attribute-option">
-                          <span className="postgres-attribute-option-body">
-                            <strong>{draft.name}</strong>
-                            <span>{draft.dataType}</span>
-                            <span>{draft.description || (draft.options.length > 0 ? draft.options.join(", ") : "No description")}</span>
-                          </span>
-                          <div className="project-card-actions">
-                            <button type="button" className="btn btn--ghost" onClick={() => openEditObjectTypeAttributeModal(draft)}>
-                              Edit
-                            </button>
-                            <button type="button" className="btn btn--ghost-danger" onClick={() => deleteObjectTypeAttributeDraft(draft.localId)}>
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <p className="auth-hint" style={{ marginTop: 0 }}>
-                  Attribute drafts will be saved when you create the object type.
-                </p>
-              </>
+              <EditableAttributesMatrix
+                definitions={objectTypeAttributeDrafts.map((draft) => ({
+                  id: draft.localId,
+                  name: draft.name || "Untitled attribute",
+                  dataType: draft.dataType,
+                  description: draft.description,
+                  options: draft.options,
+                }))}
+                rows={[]}
+                values={objectTypeAttributeValuesByDraftId}
+                disabled={graphSubmitting}
+                emptyDefinitionsLabel="No attributes for this object type yet."
+                emptyRowsLabel="Create the object type before assigning values."
+                onAddAttribute={openNewObjectTypeAttributeModal}
+                onEditAttribute={(localId) => {
+                  const draft = objectTypeAttributeDrafts.find((entry) => entry.localId === localId);
+                  if (draft) openEditObjectTypeAttributeModal(draft);
+                }}
+                onDeleteAttribute={deleteObjectTypeAttributeDraft}
+                onChangeValue={updateObjectTypeMatrixValue}
+              />
             )}
-            <div className="form-actions">
+            <div className="app-settings-modal-footer">
               <button type="button" className="btn" onClick={() => setCreateObjectTypeOpen(false)} disabled={graphSubmitting}>
                 Cancel
               </button>
@@ -5906,8 +6164,7 @@ export function PostgresProjectHomeView({
               </button>
             </div>
           </form>
-        </div>
-      </div>
+      </SettingsModal>
     );
   }
 
@@ -5931,20 +6188,31 @@ export function PostgresProjectHomeView({
       setTypeAttributeModalError(`An attribute named "${draft.name}" already exists in this object type.`);
       return;
     }
+    const nextDraft = objectTypeAttributeModalDraft
+      ? { ...objectTypeAttributeModalDraft, ...draft }
+      : createTypeAttributeDraft(draft);
     setObjectTypeAttributeDrafts((current) => {
       if (objectTypeAttributeModalDraft && current.some((entry) => entry.localId === objectTypeAttributeModalDraft.localId)) {
         return current.map((entry) =>
-          entry.localId === objectTypeAttributeModalDraft.localId ? { ...entry, ...draft } : entry,
+          entry.localId === objectTypeAttributeModalDraft.localId ? nextDraft : entry,
         );
       }
-      return [...current, createTypeAttributeDraft(draft)];
+      return [...current, nextDraft];
     });
+    setObjectTypeAttributeValuesByDraftId((values) => (
+      values[nextDraft.localId] ? values : { ...values, [nextDraft.localId]: {} }
+    ));
     setObjectTypeAttributeModalDraft(null);
     setTypeAttributeModalError("");
   }
 
   function deleteObjectTypeAttributeDraft(localId: string) {
     setObjectTypeAttributeDrafts((current) => current.filter((entry) => entry.localId !== localId));
+    setObjectTypeAttributeValuesByDraftId((current) => {
+      const next = { ...current };
+      delete next[localId];
+      return next;
+    });
   }
 
   function openNewRelationshipTypeAttributeModal() {
@@ -5967,20 +6235,51 @@ export function PostgresProjectHomeView({
       setTypeAttributeModalError(`An attribute named "${draft.name}" already exists in this relationship type.`);
       return;
     }
+    const nextDraft = relationshipTypeAttributeModalDraft
+      ? { ...relationshipTypeAttributeModalDraft, ...draft }
+      : createTypeAttributeDraft(draft);
     setRelationshipTypeAttributeDrafts((current) => {
       if (relationshipTypeAttributeModalDraft && current.some((entry) => entry.localId === relationshipTypeAttributeModalDraft.localId)) {
         return current.map((entry) =>
-          entry.localId === relationshipTypeAttributeModalDraft.localId ? { ...entry, ...draft } : entry,
+          entry.localId === relationshipTypeAttributeModalDraft.localId ? nextDraft : entry,
         );
       }
-      return [...current, createTypeAttributeDraft(draft)];
+      return [...current, nextDraft];
     });
+    setRelationshipTypeAttributeValuesByDraftId((values) => (
+      values[nextDraft.localId] ? values : { ...values, [nextDraft.localId]: {} }
+    ));
     setRelationshipTypeAttributeModalDraft(null);
     setTypeAttributeModalError("");
   }
 
   function deleteRelationshipTypeAttributeDraft(localId: string) {
     setRelationshipTypeAttributeDrafts((current) => current.filter((entry) => entry.localId !== localId));
+    setRelationshipTypeAttributeValuesByDraftId((current) => {
+      const next = { ...current };
+      delete next[localId];
+      return next;
+    });
+  }
+
+  function updateObjectTypeMatrixValue(attributeLocalId: string, objectId: string, value: string) {
+    setObjectTypeAttributeValuesByDraftId((current) => ({
+      ...current,
+      [attributeLocalId]: {
+        ...(current[attributeLocalId] ?? {}),
+        [objectId]: value,
+      },
+    }));
+  }
+
+  function updateRelationshipTypeMatrixValue(attributeLocalId: string, relationshipId: string, value: string) {
+    setRelationshipTypeAttributeValuesByDraftId((current) => ({
+      ...current,
+      [attributeLocalId]: {
+        ...(current[attributeLocalId] ?? {}),
+        [relationshipId]: value,
+      },
+    }));
   }
 
   const currentProjectUser = users.find((user) => user.appUserId === authSession.user.id) ?? null;
@@ -6054,6 +6353,24 @@ export function PostgresProjectHomeView({
   const visibleHomeCanvasObjectTypeIds = useMemo(() => selectedSetOrAll(homeCanvasObjectTypeIds, allHomeCanvasObjectTypeIds), [allHomeCanvasObjectTypeIds, homeCanvasObjectTypeIds]);
   const visibleHomeCanvasRelationshipTypeIds = useMemo(() => selectedSetOrAll(homeCanvasRelationshipTypeIds, allHomeCanvasRelationshipTypeIds), [allHomeCanvasRelationshipTypeIds, homeCanvasRelationshipTypeIds]);
   const visibleHomeCanvasCodeIds = useMemo(() => selectedSetOrAll(homeCanvasCodeIds, allHomeCanvasCodeIds), [allHomeCanvasCodeIds, homeCanvasCodeIds]);
+  const homeCanvasFilteringActive = useMemo(() => {
+    const allSections: PostgresHomeCanvasSection[] = ["sources", "objects", "relationships", "codes", "annotations"];
+    return allSections.some((section) => !homeCanvasEnabledSections.has(section))
+      || isHomeCanvasSelectionFiltered(homeCanvasSourceKinds, allHomeCanvasSourceKinds)
+      || isHomeCanvasSelectionFiltered(homeCanvasObjectTypeIds, allHomeCanvasObjectTypeIds)
+      || isHomeCanvasSelectionFiltered(homeCanvasRelationshipTypeIds, allHomeCanvasRelationshipTypeIds)
+      || isHomeCanvasSelectionFiltered(homeCanvasCodeIds, allHomeCanvasCodeIds);
+  }, [
+    allHomeCanvasCodeIds,
+    allHomeCanvasObjectTypeIds,
+    allHomeCanvasRelationshipTypeIds,
+    allHomeCanvasSourceKinds,
+    homeCanvasCodeIds,
+    homeCanvasEnabledSections,
+    homeCanvasObjectTypeIds,
+    homeCanvasRelationshipTypeIds,
+    homeCanvasSourceKinds,
+  ]);
   const homeCanvasVirtualObjectTypes = useMemo<PostgresObjectType[]>(() => [
     ...POSTGRES_SOURCE_KIND_OPTIONS.map((option) => ({
       id: `__home_canvas_source:${option.sourceVisualKey}`,
@@ -6092,20 +6409,6 @@ export function PostgresProjectHomeView({
       shape: "tag",
       color: "#8a5a44",
       outlineColor: "#8a5a44",
-      fill: "outline",
-      imageStoragePath: "",
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    },
-    {
-      id: "__home_canvas_annotation",
-      projectId: project.id,
-      systemKey: "home_canvas_annotation",
-      name: "Annotation",
-      description: "",
-      shape: "rounded",
-      color: "#6d597a",
-      outlineColor: "#6d597a",
       fill: "outline",
       imageStoragePath: "",
       createdAt: project.createdAt,
@@ -6156,7 +6459,7 @@ export function PostgresProjectHomeView({
           description: code.description || "",
           shapeOverride: "",
           colorOverride: code.color || "",
-          outlineColorOverride: "",
+          outlineColorOverride: code.color || "",
           fillOverride: "",
           imageStoragePath: "",
           eventStartAt: null,
@@ -6169,68 +6472,141 @@ export function PostgresProjectHomeView({
           updatedAt: code.updatedAt,
         })));
     }
-    if (homeCanvasSectionEnabled("annotations")) {
-      nextObjects.push(...annotationSummaries
-        .filter((annotation) => (
-          !homeCanvasSectionEnabled("sources") || visibleHomeCanvasSourceKinds.has(annotation.sourceKind || "unknown")
-        ))
-        .filter((annotation) => (
-          !homeCanvasSectionEnabled("codes") || annotation.codeIds.length === 0 || annotation.codeIds.some((codeId) => visibleHomeCanvasCodeIds.has(codeId))
-        ))
-        .map((annotation) => ({
-          id: annotation.id,
-          projectId: annotation.projectId,
-          objectTypeId: "__home_canvas_annotation",
-          objectType: "Annotation",
-          objectTypeSystemKey: "home_canvas_annotation",
-          title: `A${String(annotation.displayId).padStart(2, "0")}`,
-          description: annotation.quote || annotation.note || "",
-          shapeOverride: "",
-          colorOverride: "",
-          outlineColorOverride: "",
-          fillOverride: "",
-          imageStoragePath: "",
-          eventStartAt: null,
-          eventEndAt: null,
-          eventTimePrecision: null,
-          eventTimezone: null,
-          eventIsInstant: null,
-          attributeValues: [],
-          createdAt: annotation.createdAt,
-          updatedAt: annotation.updatedAt,
-        })));
-    }
     return nextObjects;
-  }, [annotationSummaries, codes, homeCanvasSectionEnabled, objects, sources, visibleHomeCanvasCodeIds, visibleHomeCanvasObjectTypeIds, visibleHomeCanvasSourceKinds]);
+  }, [codes, homeCanvasSectionEnabled, objects, sources, visibleHomeCanvasCodeIds, visibleHomeCanvasObjectTypeIds, visibleHomeCanvasSourceKinds]);
+  const resizeHomeCanvasNodeGroup = useCallback((nodeIds: string[], scale: number) => {
+    const targetIds = new Set(nodeIds);
+    if (targetIds.size === 0) return;
+    const homeObjectById = new Map(homeCanvasObjects.map((object) => [object.id, object]));
+    const homeObjectTypeById = new Map([...objectTypes, ...homeCanvasVirtualObjectTypes].map((objectType) => [objectType.id, objectType]));
+    setCanvasNodes((current) => {
+      let changed = false;
+      const next = { ...current };
+      targetIds.forEach((nodeId) => {
+        const object = homeObjectById.get(nodeId);
+        const currentNode = current[nodeId];
+        if (!object || !currentNode) return;
+        const objectTypeRecord = homeObjectTypeById.get(object.objectTypeId) ?? null;
+        const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
+        const defaultDimensions = appearance.sourceImage
+          ? getSourceCanvasNodeDefaultDimensions()
+          : getCanvasNodeDefaultDimensions(appearance.shape);
+        const width = Math.round(defaultDimensions.width * scale);
+        const height = Math.round(defaultDimensions.height * scale);
+        if (currentNode.width === width && currentNode.height === height) return;
+        const centerX = currentNode.x + currentNode.width / 2;
+        const centerY = currentNode.y + currentNode.height / 2;
+        next[nodeId] = {
+          ...currentNode,
+          x: centerX - width / 2,
+          y: centerY - height / 2,
+          width,
+          height,
+        };
+        changed = true;
+      });
+      return changed ? next : current;
+    });
+  }, [homeCanvasObjects, homeCanvasVirtualObjectTypes, objectTypes]);
+  const getHomeCanvasNodeGroupSizePercent = useCallback((nodeIds: string[]) => {
+    if (nodeIds.length === 0) return 100;
+    const homeObjectById = new Map(homeCanvasObjects.map((object) => [object.id, object]));
+    const homeObjectTypeById = new Map([...objectTypes, ...homeCanvasVirtualObjectTypes].map((objectType) => [objectType.id, objectType]));
+    const percents = nodeIds.flatMap((nodeId) => {
+      const object = homeObjectById.get(nodeId);
+      const node = canvasNodes[nodeId];
+      if (!object || !node) return [];
+      const objectTypeRecord = homeObjectTypeById.get(object.objectTypeId) ?? null;
+      const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
+      const defaultDimensions = appearance.sourceImage
+        ? getSourceCanvasNodeDefaultDimensions()
+        : getCanvasNodeDefaultDimensions(appearance.shape);
+      if (defaultDimensions.width <= 0) return [];
+      return Math.round((node.width / defaultDimensions.width) * 100);
+    });
+    if (percents.length === 0) return 100;
+    const average = Math.round(percents.reduce((total, percent) => total + percent, 0) / percents.length);
+    return Math.max(10, Math.min(300, Math.round(average / 5) * 5));
+  }, [canvasNodes, homeCanvasObjects, homeCanvasVirtualObjectTypes, objectTypes]);
+  const homeCanvasRenderedObjectIds = useMemo(
+    () => new Set(homeCanvasObjects.map((object) => object.id)),
+    [homeCanvasObjects],
+  );
+  const homeCanvasSourceSizeRows = useMemo(
+    () => homeCanvasSourceKindSummaries
+      .map((summary) => {
+        const nodeIds = sources
+          .filter((source) => (source.sourceKind || "unknown") === summary.id)
+          .map((source) => source.id)
+          .filter((sourceId) => homeCanvasRenderedObjectIds.has(sourceId));
+        return {
+          id: `source:${summary.id}`,
+          label: summary.label,
+          count: nodeIds.length,
+          nodeIds,
+          sizePercent: getHomeCanvasNodeGroupSizePercent(nodeIds),
+        };
+      })
+      .filter((row) => row.count > 0),
+    [getHomeCanvasNodeGroupSizePercent, homeCanvasRenderedObjectIds, homeCanvasSourceKindSummaries, sources],
+  );
+  const homeCanvasObjectSizeRows = useMemo(
+    () => objectTypeSummaries
+      .map((summary) => {
+        const objectTypeRecord = objectTypes.find((objectType) => objectType.id === summary.objectTypeId);
+        const nodeIds = objects
+          .filter((object) => object.objectTypeId === summary.objectTypeId)
+          .map((object) => object.id)
+          .filter((objectId) => homeCanvasRenderedObjectIds.has(objectId));
+        return {
+          id: `object:${summary.objectTypeId}`,
+          label: objectTypeRecord?.name || summary.objectType || "Objects",
+          count: nodeIds.length,
+          nodeIds,
+          sizePercent: getHomeCanvasNodeGroupSizePercent(nodeIds),
+        };
+      })
+      .filter((row) => row.count > 0),
+    [getHomeCanvasNodeGroupSizePercent, homeCanvasRenderedObjectIds, objectTypeSummaries, objectTypes, objects],
+  );
+  const homeCanvasCodeSizeRows = useMemo(() => {
+    const nodeIds = codes
+      .map((code) => code.id)
+      .filter((codeId) => homeCanvasRenderedObjectIds.has(codeId));
+    return nodeIds.length > 0
+      ? [{ id: "code:all", label: "All codes", count: nodeIds.length, nodeIds, sizePercent: getHomeCanvasNodeGroupSizePercent(nodeIds) }]
+      : [];
+  }, [codes, getHomeCanvasNodeGroupSizePercent, homeCanvasRenderedObjectIds]);
+  const homeCanvasSizeGroupCount = homeCanvasSourceSizeRows.length + homeCanvasObjectSizeRows.length + homeCanvasCodeSizeRows.length;
+  const homeCanvasCustomSizesActive = [...homeCanvasSourceSizeRows, ...homeCanvasObjectSizeRows, ...homeCanvasCodeSizeRows]
+    .some((row) => row.sizePercent !== 100);
+  const resetAllHomeCanvasNodeSizes = useCallback(() => {
+    const nodeIds = [
+      ...homeCanvasSourceSizeRows.flatMap((row) => row.nodeIds),
+      ...homeCanvasObjectSizeRows.flatMap((row) => row.nodeIds),
+      ...homeCanvasCodeSizeRows.flatMap((row) => row.nodeIds),
+    ];
+    resizeHomeCanvasNodeGroup(nodeIds, 1);
+  }, [homeCanvasCodeSizeRows, homeCanvasObjectSizeRows, homeCanvasSourceSizeRows, resizeHomeCanvasNodeGroup]);
+  const toggleHomeCanvasSizeSectionCollapsed = useCallback((section: PostgresHomeCanvasSizeSectionKey) => {
+    setHomeCanvasSizeCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  }, []);
   const homeCanvasRelationshipTypes = useMemo<PostgresRelationshipType[]>(() => [
     ...relationshipTypes,
     {
-      id: "__home_canvas_source_annotation",
+      id: "__home_canvas_annotation",
       projectId: project.id,
-      name: "Contains",
-      description: "",
-      lineShape: "dotted",
-      lineWeight: 1,
-      arrowhead: "one_sided",
-      color: "#2f6f73",
-      fromObjectTypeIds: [],
-      fromObjectTypes: [],
-      toObjectTypeIds: [],
-      toObjectTypes: [],
-      fromSourceKinds: [],
-      toSourceKinds: [],
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    },
-    {
-      id: "__home_canvas_code_annotation",
-      projectId: project.id,
-      name: "Codes",
+      name: "Annotation",
       description: "",
       lineShape: "dashed",
       lineWeight: 1,
       arrowhead: "one_sided",
-      color: "#8a5a44",
+      color: "#6d597a",
       fromObjectTypeIds: [],
       fromObjectTypes: [],
       toObjectTypeIds: [],
@@ -6252,47 +6628,26 @@ export function PostgresProjectHomeView({
           toObjectId: relationship.toEntityType === "source" ? relationship.toEntityId : relationship.toObjectId,
         })));
     }
-    if (homeCanvasSectionEnabled("annotations") && homeCanvasSectionEnabled("sources")) {
-      nextRelationships.push(...annotationSummaries.map((annotation) => ({
-        id: `source-annotation:${annotation.id}`,
-        projectId: annotation.projectId,
-        fromObjectId: annotation.sourceId,
-        toObjectId: annotation.id,
-        fromEntityType: "source" as const,
-        fromEntityId: annotation.sourceId,
-        toEntityType: "object" as const,
-        toEntityId: annotation.id,
-        fromEntityName: "Source",
-        toEntityName: `A${String(annotation.displayId).padStart(2, "0")}`,
-        relationshipTypeId: "__home_canvas_source_annotation",
-        relationshipType: "Contains",
-        description: "",
-        lineShapeOverride: "",
-        lineWeightOverride: null,
-        arrowheadOverride: "",
-        colorOverride: "",
-        attributeValues: [],
-        createdAt: annotation.createdAt,
-        updatedAt: annotation.updatedAt,
-      })));
-    }
-    if (homeCanvasSectionEnabled("annotations") && homeCanvasSectionEnabled("codes")) {
+    if (homeCanvasSectionEnabled("annotations") && homeCanvasSectionEnabled("sources") && homeCanvasSectionEnabled("codes")) {
       annotationSummaries.forEach((annotation) => {
+        if (!visibleHomeCanvasSourceKinds.has(annotation.sourceKind || "unknown")) return;
+        const source = sources.find((entry) => entry.id === annotation.sourceId);
         annotation.codeIds.filter((codeId) => visibleHomeCanvasCodeIds.has(codeId)).forEach((codeId) => {
+          const code = codes.find((entry) => entry.id === codeId);
           nextRelationships.push({
-            id: `code-annotation:${codeId}:${annotation.id}`,
+            id: `annotation:${annotation.id}:${codeId}`,
             projectId: annotation.projectId,
-            fromObjectId: codeId,
-            toObjectId: annotation.id,
-            fromEntityType: "object",
-            fromEntityId: codeId,
+            fromObjectId: annotation.sourceId,
+            toObjectId: codeId,
+            fromEntityType: "source",
+            fromEntityId: annotation.sourceId,
             toEntityType: "object",
-            toEntityId: annotation.id,
-            fromEntityName: codes.find((code) => code.id === codeId)?.label ?? "Code",
-            toEntityName: `A${String(annotation.displayId).padStart(2, "0")}`,
-            relationshipTypeId: "__home_canvas_code_annotation",
-            relationshipType: "Codes",
-            description: "",
+            toEntityId: codeId,
+            fromEntityName: source?.title || source?.originalFileName || "Source",
+            toEntityName: code?.label ?? "Code",
+            relationshipTypeId: "__home_canvas_annotation",
+            relationshipType: `A${String(annotation.displayId).padStart(2, "0")}`,
+            description: annotation.quote || annotation.note || "",
             lineShapeOverride: "",
             lineWeightOverride: null,
             arrowheadOverride: "",
@@ -6305,7 +6660,7 @@ export function PostgresProjectHomeView({
       });
     }
     return nextRelationships;
-  }, [annotationSummaries, codes, homeCanvasSectionEnabled, relationships, visibleHomeCanvasCodeIds, visibleHomeCanvasRelationshipTypeIds]);
+  }, [annotationSummaries, codes, homeCanvasSectionEnabled, relationships, sources, visibleHomeCanvasCodeIds, visibleHomeCanvasRelationshipTypeIds, visibleHomeCanvasSourceKinds]);
   const handleHomeCanvasContextMenu = useCallback((context: {
     kind: "background" | "node" | "edge";
     id: string | null;
@@ -6330,9 +6685,9 @@ export function PostgresProjectHomeView({
     const rawId = context.id ?? "";
     if (!rawId) return;
     if (context.kind === "edge") {
-      if (rawId.startsWith("source-annotation:") || rawId.startsWith("code-annotation:")) {
+      if (rawId.startsWith("annotation:")) {
         const idParts = rawId.split(":");
-        const annotationId = idParts[idParts.length - 1] ?? "";
+        const annotationId = idParts[1] ?? "";
         setHomeCanvasContextMenu({
           kind: "annotation",
           id: annotationId,
@@ -6392,6 +6747,21 @@ export function PostgresProjectHomeView({
       canvasPosition: context.canvasPosition,
     });
   }, [homeCanvasObjects]);
+  const handleHomeTimelineItemContextMenu = useCallback((context: {
+    kind: "source" | "object" | "relationship";
+    id: string;
+    clientX: number;
+    clientY: number;
+  }) => {
+    setHomeCanvasContextMenu({
+      kind: context.kind,
+      id: context.id,
+      x: Math.min(context.clientX, window.innerWidth - 190),
+      y: Math.min(context.clientY, window.innerHeight - 170),
+      canvasPosition: null,
+    });
+    setHomeCanvasCreateMenuOpen(false);
+  }, []);
   const toggleHomeCanvasSelection = useCallback((
     section: PostgresHomeCanvasSection,
     setSelection: Dispatch<SetStateAction<Set<string>>>,
@@ -6456,7 +6826,7 @@ export function PostgresProjectHomeView({
 
   useEffect(() => {
     function handleOpenProjectSettingsModal() {
-      setActiveScreen("project-settings");
+      setActiveScreen("app-settings");
     }
 
     window.addEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
@@ -6646,6 +7016,7 @@ export function PostgresProjectHomeView({
           nextRelationshipTypes,
           nextObjects,
           nextSources,
+          nextSourceTypeSettings,
           nextRelationships,
           nextCodes,
           nextAnnotationSummaries,
@@ -6660,6 +7031,7 @@ export function PostgresProjectHomeView({
           listPostgresRelationshipTypes(project.id),
           listPostgresObjects(project.id),
           listPostgresSources(project.id),
+          listPostgresSourceTypeSettings(project.id),
           listPostgresRelationships(project.id),
           listPostgresCodes(project.id),
           listPostgresAnnotationSummaries(project.id),
@@ -6675,6 +7047,7 @@ export function PostgresProjectHomeView({
           setRelationshipTypes(nextRelationshipTypes);
           setObjects(nextObjects);
           setSources(nextSources);
+          setSourceTypeSettings(nextSourceTypeSettings);
           setRelationships(nextRelationships);
           setCodes(nextCodes);
           setAnnotationSummaries(nextAnnotationSummaries);
@@ -6705,6 +7078,7 @@ export function PostgresProjectHomeView({
           setRelationshipTypes([]);
           setObjects([]);
           setSources([]);
+          setSourceTypeSettings([]);
           setRelationships([]);
           setCodes([]);
           setAnnotationSummaries([]);
@@ -7104,6 +7478,7 @@ export function PostgresProjectHomeView({
         nextRelationshipTypes,
         nextObjects,
         nextSources,
+        nextSourceTypeSettings,
         nextRelationships,
         nextCodes,
         nextAnnotationSummaries,
@@ -7120,6 +7495,7 @@ export function PostgresProjectHomeView({
         listPostgresRelationshipTypes(project.id),
         listPostgresObjects(project.id),
         listPostgresSources(project.id),
+        listPostgresSourceTypeSettings(project.id),
         listPostgresRelationships(project.id),
         listPostgresCodes(project.id),
         listPostgresAnnotationSummaries(project.id),
@@ -7136,6 +7512,7 @@ export function PostgresProjectHomeView({
       setRelationshipTypes(nextRelationshipTypes);
       setObjects(nextObjects);
       setSources(nextSources);
+      setSourceTypeSettings(nextSourceTypeSettings);
       setRelationships(nextRelationships);
       setCodes(nextCodes);
       setAnnotationSummaries(nextAnnotationSummaries);
@@ -7166,6 +7543,7 @@ export function PostgresProjectHomeView({
       setRelationshipTypes([]);
       setObjects([]);
       setSources([]);
+      setSourceTypeSettings([]);
       setRelationships([]);
       setCodes([]);
       setAnnotationSummaries([]);
@@ -7326,19 +7704,20 @@ export function PostgresProjectHomeView({
         const column = index % 4;
         const row = Math.floor(index / 4);
         if (existing) {
-          next[object.id] = appearance.sourceImage
-            ? {
-                ...existing,
-                width: defaultDimensions.width,
-                height: defaultDimensions.height,
-              }
-            : existing;
+          next[object.id] = existing;
           return;
         }
+        const fallbackPosition = { x: column * 260, y: row * 180 };
+        const position = findAvailableCanvasNodePosition({
+          existingNodes: Object.values(next),
+          width: defaultDimensions.width,
+          height: defaultDimensions.height,
+          fallbackPosition,
+        });
         next[object.id] = {
           id: object.id,
-          x: column * 260,
-          y: row * 180,
+          x: position.x,
+          y: position.y,
           width: defaultDimensions.width,
           height: defaultDimensions.height,
         };
@@ -7496,6 +7875,105 @@ export function PostgresProjectHomeView({
     }
   }
 
+  async function handleSaveBulkObjectAttributeValues(
+    definition: PostgresObjectAttributeDefinition,
+    valuesByObjectId: Record<string, string>,
+  ) {
+    setGraphSubmitting(true);
+    setGraphError("");
+    setGraphNotice("");
+    try {
+      const definitionsForType = objectAttributeDefinitions.filter((entry) => entry.objectTypeId === definition.objectTypeId);
+      const updatedObjects = await Promise.all(
+        objects
+          .filter((object) => object.objectTypeId === definition.objectTypeId)
+          .map((object) => {
+            const existingValues = valuesForObject(object);
+            return savePostgresObject({
+              projectId: project.id,
+              objectId: object.id,
+              objectTypeId: object.objectTypeId,
+              title: object.title,
+              description: object.description,
+              shapeOverride: object.shapeOverride || null,
+              colorOverride: object.colorOverride || null,
+              outlineColorOverride: object.outlineColorOverride || null,
+              fillOverride: object.fillOverride || null,
+              imageStoragePath: object.imageStoragePath || null,
+              eventStartAt: object.eventStartAt,
+              eventEndAt: object.eventEndAt,
+              eventTimePrecision: object.eventTimePrecision,
+              eventTimezone: object.eventTimezone,
+              eventIsInstant: object.eventIsInstant,
+              attributeValues: definitionsForType.map((entry) => ({
+                attributeDefinitionId: entry.id,
+                value: entry.id === definition.id
+                  ? valuesByObjectId[object.id] ?? ""
+                  : existingValues[entry.id] ?? "",
+              })),
+            });
+          }),
+      );
+      setObjects((current) => current.map((object) => (
+        updatedObjects.find((updated) => updated.id === object.id) ?? object
+      )));
+      setBulkObjectAttributeDefinition(null);
+      setGraphNotice(`Updated ${definition.name}.`);
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGraphSubmitting(false);
+    }
+  }
+
+  async function handleSaveBulkRelationshipAttributeValues(
+    definition: PostgresRelationshipAttributeDefinition,
+    valuesByRelationshipId: Record<string, string>,
+  ) {
+    setGraphSubmitting(true);
+    setGraphError("");
+    setGraphNotice("");
+    try {
+      const definitionsForType = relationshipAttributeDefinitions.filter((entry) => entry.relationshipTypeId === definition.relationshipTypeId);
+      const updatedRelationships = await Promise.all(
+        relationships
+          .filter((relationship) => relationship.relationshipTypeId === definition.relationshipTypeId)
+          .map((relationship) => {
+            const existingValues = valuesForRelationship(relationship);
+            return savePostgresRelationship({
+              projectId: project.id,
+              relationshipId: relationship.id,
+              fromEntityType: relationship.fromEntityType,
+              fromEntityId: relationship.fromEntityId,
+              toEntityType: relationship.toEntityType,
+              toEntityId: relationship.toEntityId,
+              relationshipTypeId: relationship.relationshipTypeId,
+              description: relationship.description,
+              lineShapeOverride: relationship.lineShapeOverride || null,
+              lineWeightOverride: relationship.lineWeightOverride,
+              arrowheadOverride: relationship.arrowheadOverride || null,
+              colorOverride: relationship.colorOverride || null,
+              attributeValues: definitionsForType.map((entry) => ({
+                attributeDefinitionId: entry.id,
+                value: entry.id === definition.id
+                  ? valuesByRelationshipId[relationship.id] ?? ""
+                  : existingValues[entry.id] ?? "",
+              })),
+            });
+          }),
+      );
+      setRelationships((current) => current.map((relationship) => (
+        updatedRelationships.find((updated) => updated.id === relationship.id) ?? relationship
+      )));
+      setBulkRelationshipAttributeDefinition(null);
+      setGraphNotice(`Updated ${definition.name}.`);
+    } catch (error) {
+      setGraphError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGraphSubmitting(false);
+    }
+  }
+
   async function handleCreateObjectWorkspaceAttribute(draft: TypeScopedAttributeDraft) {
     setGraphSubmitting(true);
     setGraphError("");
@@ -7511,6 +7989,7 @@ export function PostgresProjectHomeView({
             dataType: draft.dataType,
             description: draft.description,
             options: draft.options,
+            timelineRole: draft.timelineRole ?? "",
           }),
         ),
       );
@@ -7545,6 +8024,7 @@ export function PostgresProjectHomeView({
             dataType: draft.dataType,
             description: draft.description,
             options: draft.options,
+            timelineRole: draft.timelineRole ?? "",
           }),
         ),
       );
@@ -7618,16 +8098,26 @@ export function PostgresProjectHomeView({
         const objectTypeRecord = objectTypeById.get(created.objectTypeId) ?? null;
         const shape = getPostgresObjectAppearance(created, objectTypeRecord).shape;
         const defaultDimensions = getCanvasNodeDefaultDimensions(shape);
-        setCanvasNodes((current) => ({
-          ...current,
-          [created.id]: {
+        setCanvasNodes((current) => {
+          const width = current[created.id]?.width ?? defaultDimensions.width;
+          const height = current[created.id]?.height ?? defaultDimensions.height;
+          const position = findAvailableCanvasNodePosition({
+            existingNodes: Object.values(current).filter((node) => node.id !== created.id),
+            width,
+            height,
+            preferredPosition: pendingCanvasNodePosition,
+          });
+          return {
+            ...current,
+            [created.id]: {
             id: created.id,
-            x: pendingCanvasNodePosition.x,
-            y: pendingCanvasNodePosition.y,
-            width: current[created.id]?.width ?? defaultDimensions.width,
-            height: current[created.id]?.height ?? defaultDimensions.height,
+            x: position.x,
+            y: position.y,
+            width,
+            height,
           },
-        }));
+          };
+        });
         setPendingCanvasNodePosition(null);
       }
       setFromObjectId((current) => current || created.id);
@@ -7697,6 +8187,7 @@ export function PostgresProjectHomeView({
           dataType: draft.dataType,
           description: draft.description,
           options: draft.options,
+          timelineRole: draft.timelineRole ?? "",
         })),
       });
       let savedObjectType = saved.objectType;
@@ -8042,9 +8533,58 @@ export function PostgresProjectHomeView({
           dataType: draft.dataType,
           description: draft.description,
           options: draft.options,
+          timelineRole: draft.timelineRole ?? "",
         })),
       });
       applySavedObjectTypeState(saved.objectType, saved.attributeDefinitions);
+      const savedDefinitionByDraftLocalId = new Map(
+        objectTypeAttributeDrafts
+          .map((draft) => {
+            const savedDefinition = draft.id
+              ? saved.attributeDefinitions.find((definition) => definition.id === draft.id)
+              : saved.attributeDefinitions.find((definition) => definition.name.trim().toLowerCase() === draft.name.trim().toLowerCase());
+            return savedDefinition ? [draft.localId, savedDefinition] as const : null;
+          })
+          .filter((entry): entry is readonly [string, PostgresObjectAttributeDefinition] => Boolean(entry)),
+      );
+      const updatedObjects = await Promise.all(
+        objects
+          .filter((object) => object.objectTypeId === saved.objectType.id)
+          .map((object) => {
+            const existingValues = valuesForObject(object);
+            return savePostgresObject({
+              projectId: project.id,
+              objectId: object.id,
+              objectTypeId: object.objectTypeId,
+              title: object.title,
+              description: object.description,
+              shapeOverride: object.shapeOverride || null,
+              colorOverride: object.colorOverride || null,
+              outlineColorOverride: object.outlineColorOverride || null,
+              fillOverride: object.fillOverride || null,
+              imageStoragePath: object.imageStoragePath || null,
+              eventStartAt: object.eventStartAt,
+              eventEndAt: object.eventEndAt,
+              eventTimePrecision: object.eventTimePrecision,
+              eventTimezone: object.eventTimezone,
+              eventIsInstant: object.eventIsInstant,
+              attributeValues: saved.attributeDefinitions.map((definition) => {
+                const draftEntry = Array.from(savedDefinitionByDraftLocalId.entries())
+                  .find(([, savedDefinition]) => savedDefinition.id === definition.id);
+                const draftLocalId = draftEntry?.[0] ?? definition.id;
+                return {
+                  attributeDefinitionId: definition.id,
+                  value: objectTypeAttributeValuesByDraftId[draftLocalId]?.[object.id] ?? existingValues[definition.id] ?? "",
+                };
+              }),
+            });
+          }),
+      );
+      if (updatedObjects.length > 0) {
+        setObjects((current) => current.map((object) => (
+          updatedObjects.find((updated) => updated.id === object.id) ?? object
+        )));
+      }
       setEditingObjectTypeModalId(null);
       setDraftObjectTypeName("");
       setDraftObjectTypeDescription("");
@@ -8179,6 +8719,7 @@ export function PostgresProjectHomeView({
           dataType: definition.dataType,
           description: definition.description,
           options: definition.options,
+          timelineRole: definition.timelineRole,
         })),
     );
     setObjectTypeAttributeModalDraft(null);
@@ -8234,6 +8775,7 @@ export function PostgresProjectHomeView({
           dataType: definition.dataType,
           description: definition.description,
           options: definition.options,
+          timelineRole: definition.timelineRole,
         })),
     );
     setRelationshipTypeAttributeModalDraft(null);
@@ -8290,6 +8832,7 @@ export function PostgresProjectHomeView({
           dataType: draft.dataType,
           description: draft.description,
           options: draft.options,
+          timelineRole: draft.timelineRole ?? "",
         })),
       });
       applySavedRelationshipTypeState(saved.relationshipType, saved.attributeDefinitions);
@@ -8348,9 +8891,55 @@ export function PostgresProjectHomeView({
           dataType: draft.dataType,
           description: draft.description,
           options: draft.options,
+          timelineRole: draft.timelineRole ?? "",
         })),
       });
       applySavedRelationshipTypeState(saved.relationshipType, saved.attributeDefinitions);
+      const savedDefinitionByDraftLocalId = new Map(
+        relationshipTypeAttributeDrafts
+          .map((draft) => {
+            const savedDefinition = draft.id
+              ? saved.attributeDefinitions.find((definition) => definition.id === draft.id)
+              : saved.attributeDefinitions.find((definition) => definition.name.trim().toLowerCase() === draft.name.trim().toLowerCase());
+            return savedDefinition ? [draft.localId, savedDefinition] as const : null;
+          })
+          .filter((entry): entry is readonly [string, PostgresRelationshipAttributeDefinition] => Boolean(entry)),
+      );
+      const updatedRelationships = await Promise.all(
+        relationships
+          .filter((relationship) => relationship.relationshipTypeId === saved.relationshipType.id)
+          .map((relationship) => {
+            const existingValues = valuesForRelationship(relationship);
+            return savePostgresRelationship({
+              projectId: project.id,
+              relationshipId: relationship.id,
+              fromEntityType: relationship.fromEntityType,
+              fromEntityId: relationship.fromEntityId,
+              toEntityType: relationship.toEntityType,
+              toEntityId: relationship.toEntityId,
+              relationshipTypeId: relationship.relationshipTypeId,
+              description: relationship.description,
+              lineShapeOverride: relationship.lineShapeOverride || null,
+              lineWeightOverride: relationship.lineWeightOverride,
+              arrowheadOverride: relationship.arrowheadOverride || null,
+              colorOverride: relationship.colorOverride || null,
+              attributeValues: saved.attributeDefinitions.map((definition) => {
+                const draftEntry = Array.from(savedDefinitionByDraftLocalId.entries())
+                  .find(([, savedDefinition]) => savedDefinition.id === definition.id);
+                const draftLocalId = draftEntry?.[0] ?? definition.id;
+                return {
+                  attributeDefinitionId: definition.id,
+                  value: relationshipTypeAttributeValuesByDraftId[draftLocalId]?.[relationship.id] ?? existingValues[definition.id] ?? "",
+                };
+              }),
+            });
+          }),
+      );
+      if (updatedRelationships.length > 0) {
+        setRelationships((current) => current.map((relationship) => (
+          updatedRelationships.find((updated) => updated.id === relationship.id) ?? relationship
+        )));
+      }
       setEditingRelationshipTypeModalId(null);
       setDraftRelationshipTypeName("");
       setDraftRelationshipLineShape("solid");
@@ -8585,404 +9174,199 @@ export function PostgresProjectHomeView({
                 </div>
               </div>
               {projectHomeTab === "details" ? (
-                <div className="home-dashboard postgres-experiment-home-dashboard postgres-experiment-home-details-dashboard">
-                  <div
-                    className="home-primary-column postgres-experiment-home-primary-column"
-                    style={
-                      projectHomeDetailsStatsHeight > 0
-                        ? {
-                          height: projectHomeDetailsStatsHeight,
-                          maxHeight: projectHomeDetailsStatsHeight,
-                        }
-                        : undefined
-                    }
-                  >
-                    <section className="home-project-card" aria-label="Project title">
-                      <div className="home-project-card-header">
-                        <h2>Project Title</h2>
-                      </div>
-                      <p className="home-project-title-value">{project.name || "Untitled project"}</p>
-                    </section>
-
-                    <section className="home-project-card postgres-experiment-home-description-card" aria-label="Project description">
-                      <div className="home-project-card-header">
-                        <h2>Project Description</h2>
-                      </div>
-                      {project.description.trim() ? (
-                        <p className="home-project-description">{project.description}</p>
-                      ) : (
-                        <p className="home-project-description home-project-description--empty">
-                          No project description has been added yet.
-                        </p>
-                      )}
-                    </section>
-
-                    <section className="home-project-card" aria-label="Project information">
-                      <div className="home-project-card-header">
-                        <h2>Project Information</h2>
-                      </div>
-                      <div className="home-restricted-list">
-                        <div className="home-restricted-item">
-                          <span className="home-restricted-label">Your access</span>
-                          <span className="home-restricted-value">
-                            {isProjectAdmin ? "administrator" : (currentProjectUser?.role ?? "member")}
-                          </span>
-                        </div>
-                        <div className="home-restricted-item">
-                          <span className="home-restricted-label">Created</span>
-                          <span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span>
-                        </div>
-                        <div className="home-restricted-item">
-                          <span className="home-restricted-label">Last updated</span>
-                          <span className="home-restricted-value">{formatPostgresDateTime(lastProjectActivityAt)}</span>
-                        </div>
-                      </div>
-                    </section>
-                  </div>
-
-                  <div className="home-stats-grid postgres-experiment-home-stats-grid" ref={projectHomeDetailsStatsRef}>
-                    <PostgresStatCard
-                      title="Users"
-                      count={users.length}
-                      stats={([
-                        { label: "Owners", value: users.filter((user) => user.role === "owner").length },
-                        { label: "Editors", value: users.filter((user) => user.role === "editor").length },
-                        { label: "Coders", value: users.filter((user) => user.role === "coder").length },
-                        { label: "Viewers", value: users.filter((user) => user.role === "viewer").length },
-                      ]).filter((stat) => stat.value > 0)}
-                      onClick={() => setActiveScreen("users")}
-                    />
-
-                    <PostgresStatCard
-                      title="Sources"
-                      count={sources.length}
-                      stats={homeCanvasSourceKindSummaries.map((summary) => ({
-                        label: summary.label,
-                        value: summary.count,
-                      }))}
-                      onClick={() => setActiveScreen("sources")}
-                    />
-
-                    <PostgresStatCard
-                      title="Objects"
-                      count={objects.length}
-                      stats={[
-                        { label: "Types", value: objectTypeSummaries.length },
-                      ]}
-                      onClick={() => setActiveScreen("objects")}
-                    />
-
-                    <PostgresStatCard
-                      title="Relationships"
-                      count={relationships.length}
-                      stats={[
-                        { label: "Types", value: new Set(relationships.map((relationship) => relationship.relationshipType.trim()).filter(Boolean)).size },
-                      ]}
-                      onClick={() => setActiveScreen("relationships")}
-                    />
-
-                    <PostgresStatCard
-                      title="Codes"
-                      count={codes.length}
-                      stats={[]}
-                      onClick={() => setActiveScreen("codebook")}
-                    />
-
-                    <PostgresStatCard
-                      title="Annotations"
-                      count={annotationSummaries.length}
-                      stats={[]}
-                      onClick={() => setActiveScreen("annotations")}
-                    />
-
-                    <PostgresStatCard
-                      title="Memos"
-                      count={memoCount}
-                      stats={[]}
-                      onClick={() => setActiveScreen("memos")}
-                    />
-
-                    <PostgresStatCard
-                      title="Reports"
-                      count={reportCount}
-                      stats={[]}
-                      onClick={() => setActiveScreen("reports")}
-                    />
-                  </div>
-                </div>
+                <PostgresProjectHomeDetailsView
+                  project={project}
+                  users={users}
+                  currentProjectUser={currentProjectUser}
+                  isProjectAdmin={isProjectAdmin}
+                  lastProjectActivityAt={lastProjectActivityAt}
+                  sourceCount={sources.length}
+                  sourceStats={homeCanvasSourceKindSummaries.map((summary) => ({
+                    label: summary.label,
+                    value: summary.count,
+                  }))}
+                  objectCount={objects.length}
+                  objectTypeCount={objectTypeSummaries.length}
+                  relationshipCount={relationships.length}
+                  relationshipTypeCount={new Set(relationships.map((relationship) => relationship.relationshipType.trim()).filter(Boolean)).size}
+                  codeCount={codes.length}
+                  annotationCount={annotationSummaries.length}
+                  memoCount={memoCount}
+                  reportCount={reportCount}
+                  statsRef={projectHomeDetailsStatsRef}
+                  statsHeight={projectHomeDetailsStatsHeight}
+                  formatDateTime={formatPostgresDateTime}
+                  onShowUsers={() => setActiveScreen("users")}
+                  onShowSources={() => setActiveScreen("sources")}
+                  onShowObjects={() => setActiveScreen("objects")}
+                  onShowRelationships={() => setActiveScreen("relationships")}
+                  onShowCodebook={() => setActiveScreen("codebook")}
+                  onShowAnnotations={() => setActiveScreen("annotations")}
+                  onShowMemos={() => setActiveScreen("memos")}
+                  onShowReports={() => setActiveScreen("reports")}
+                />
               ) : projectHomeTab === "timeline" ? (
-                <section className="home-project-card" style={{ minHeight: 420, display: "grid", placeItems: "center" }}>
-                  <div className="empty-state postgres-users-empty-state" style={{ height: "auto" }}>
-                    <p>Timeline coming soon.</p>
-                  </div>
-                </section>
+                <PostgresProjectHomeTimelineView
+                  sources={sources}
+                  sourceTypeSettings={sourceTypeSettings}
+                  sourceAttributeDefinitions={sourceAttributeDefinitions}
+                  sourceAttributeValues={sourceAttributeValues}
+                  objects={objects}
+                  objectTypes={objectTypes}
+                  objectAttributeDefinitions={objectAttributeDefinitions}
+                  relationships={relationships}
+                  relationshipTypes={relationshipTypes}
+                  relationshipAttributeDefinitions={relationshipAttributeDefinitions}
+                  canManageSources={canManageSources}
+                  canManageAnnotations={canManageAnnotations}
+                  onCreateSource={openCreateSourceModal}
+                  onCreateObject={openCreateObjectModal}
+                  onCreateRelationship={() => openCreateRelationshipModal()}
+                  onCreateCode={openCreateCodeModal}
+                  onTimelineItemContextMenu={handleHomeTimelineItemContextMenu}
+                />
               ) : (
-                <div className="home-dashboard postgres-experiment-home-dashboard">
-                <div className="postgres-experiment-home-canvas-column">
-                  <div className="project-home-canvas-create-control" ref={homeCanvasCreateControlRef}>
-                    <button
-                      type="button"
-                      className="btn btn--primary project-home-canvas-create-main"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setHomeCanvasCreateMenuOpen((current) => !current);
-                      }}
-                      aria-expanded={homeCanvasCreateMenuOpen}
-                      aria-label={homeCanvasCreateMenuOpen ? "Close create menu" : "Create project item"}
-                    >
-                      <PlusIcon className="project-home-canvas-create-icon" />
-                    </button>
-                    {homeCanvasCreateMenuOpen ? (
-                      <div className="project-home-canvas-create-menu">
-                        <button
-                          type="button"
-                          className="btn project-home-canvas-create-action"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            openCreateSourceModal();
-                          }}
-                          disabled={!canManageSources}
-                          aria-label="Add source"
-                          title="Source"
-                        >
-                          <SourceIcon className="project-home-canvas-create-action-icon" />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn project-home-canvas-create-action"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            openCreateObjectModal();
-                          }}
-                          disabled={!canManageSources}
-                          aria-label="Add object"
-                          title="Object"
-                        >
-                          <ObjectIcon className="project-home-canvas-create-action-icon" />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn project-home-canvas-create-action"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            openCreateRelationshipModal();
-                          }}
-                          disabled={!canManageSources}
-                          aria-label="Add relationship"
-                          title="Relationship"
-                        >
-                          <RelationshipIcon className="project-home-canvas-create-action-icon" />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn project-home-canvas-create-action"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            openCreateCodeModal();
-                          }}
-                          disabled={!canManageAnnotations}
-                          aria-label="Add code"
-                          title="Code"
-                        >
-                          <CodeIcon className="project-home-canvas-create-action-icon" />
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  {graphLoading && !canvasStateLoaded ? (
-                    <ViewLoadingFallback />
-                  ) : (
-                    <Suspense fallback={<ViewLoadingFallback />}>
-                      <PostgresExploreCanvasViewLazy
-                        objectTypes={[...objectTypes, ...homeCanvasVirtualObjectTypes]}
-                        objects={homeCanvasObjects}
-                        relationships={homeCanvasRelationships}
-                        relationshipTypes={homeCanvasRelationshipTypes}
-                        canvasNodes={canvasNodes}
-                        setCanvasNodes={setCanvasNodes}
-                        hiddenCanvasRelationshipIds={hiddenCanvasRelationshipIds}
-                        getObjectAppearance={getPostgresObjectAppearance}
-                        getObjectSurfaceStyle={getPostgresObjectSurfaceStyle}
-                        getRelationshipAppearance={getPostgresRelationshipAppearance}
-                        getRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
-                        getNodeDefaultDimensions={(object, objectTypeRecord) => {
-                          const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
-                          return appearance.sourceImage
-                            ? getSourceCanvasNodeDefaultDimensions()
-                            : getCanvasNodeDefaultDimensions(appearance.shape);
-                        }}
-                        getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
-                          const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
-                          return appearance.sourceImage
-                            ? getSourceCanvasNodeDefaultDimensions()
-                            : getCanvasNodeRenderedDimensions(appearance.shape, nodeState);
-                        }}
-                        getInspectorDetails={(selection) => {
-                          if (selection.kind === "relationship") {
-                            return {
-                              title: selection.relationship.relationshipType.trim() || "Relationship",
-                              itemType: "Relationship",
-                              typeDetail: selection.relationship.relationshipType.trim() || selection.relationshipTypeRecord?.name || "",
-                              attributes: selection.relationship.attributeValues
-                                .filter((value) => value.value.trim())
-                                .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
-                                .map((value) => ({ name: value.attributeName, value: value.value })),
-                            };
-                          }
+                <PostgresProjectHomeGraphView
+                  createControlRef={homeCanvasCreateControlRef}
+                  filterControlRef={homeCanvasFilterControlRef}
+                  sizeControlRef={homeCanvasSizeControlRef}
+                  createMenuOpen={homeCanvasCreateMenuOpen}
+                  setCreateMenuOpen={setHomeCanvasCreateMenuOpen}
+                  filterDrawerOpen={homeCanvasFilterDrawerOpen}
+                  setFilterDrawerOpen={setHomeCanvasFilterDrawerOpen}
+                  sizeMenuOpen={homeCanvasSizeMenuOpen}
+                  setSizeMenuOpen={setHomeCanvasSizeMenuOpen}
+                  graphLoading={graphLoading}
+                  canvasStateLoaded={canvasStateLoaded}
+                  loadingFallback={<ViewLoadingFallback />}
+                  canManageSources={canManageSources}
+                  canManageAnnotations={canManageAnnotations}
+                  onCreateSource={openCreateSourceModal}
+                  onCreateObject={openCreateObjectModal}
+                  onCreateRelationship={() => openCreateRelationshipModal()}
+                  onCreateCode={openCreateCodeModal}
+                  objectTypes={objectTypes}
+                  homeCanvasVirtualObjectTypes={homeCanvasVirtualObjectTypes}
+                  homeCanvasObjects={homeCanvasObjects}
+                  homeCanvasRelationships={homeCanvasRelationships}
+                  homeCanvasRelationshipTypes={homeCanvasRelationshipTypes}
+                  canvasNodes={canvasNodes}
+                  setCanvasNodes={setCanvasNodes}
+                  hiddenCanvasRelationshipIds={hiddenCanvasRelationshipIds}
+                  getObjectAppearance={getPostgresObjectAppearance}
+                  getObjectSurfaceStyle={getPostgresObjectSurfaceStyle}
+                  getRelationshipAppearance={getPostgresRelationshipAppearance}
+                  getRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
+                  getNodeDefaultDimensions={(object, objectTypeRecord) => {
+                    const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
+                    return appearance.sourceImage
+                      ? getSourceCanvasNodeDefaultDimensions()
+                      : getCanvasNodeDefaultDimensions(appearance.shape);
+                  }}
+                  getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
+                    const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
+                    return appearance.sourceImage
+                      ? getSourceCanvasNodeRenderedDimensions(nodeState)
+                      : getCanvasNodeRenderedDimensions(appearance.shape, nodeState);
+                  }}
+                  getInspectorDetails={(selection) => {
+                    if (selection.kind === "relationship") {
+                      return {
+                        title: selection.relationship.relationshipType.trim() || "Relationship",
+                        itemType: "Relationship",
+                        typeDetail: selection.relationship.relationshipType.trim() || selection.relationshipTypeRecord?.name || "",
+                        attributes: selection.relationship.attributeValues
+                          .filter((value) => value.value.trim())
+                          .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
+                          .map((value) => ({ name: value.attributeName, value: value.value })),
+                      };
+                    }
 
-                          const systemKey = selection.object.objectTypeSystemKey ?? selection.objectTypeRecord?.systemKey ?? "";
-                          const sourceVisualKey = getPostgresSourceObjectVisualKey(systemKey);
-                          if (sourceVisualKey || systemKey === "home_canvas_source") {
-                            return {
-                              title: selection.object.title.trim() || "Untitled source",
-                              itemType: "Source",
-                              typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
-                              attributes: sourceAttributeValues
-                                .filter((value) => value.sourceId === selection.object.id && value.value.trim())
-                                .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
-                                .map((value) => ({ name: value.attributeName, value: value.value })),
-                            };
-                          }
+                    const systemKey = selection.object.objectTypeSystemKey ?? selection.objectTypeRecord?.systemKey ?? "";
+                    const sourceVisualKey = getPostgresSourceObjectVisualKey(systemKey);
+                    if (sourceVisualKey || systemKey === "home_canvas_source") {
+                      return {
+                        title: selection.object.title.trim() || "Untitled source",
+                        itemType: "Source",
+                        typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
+                        attributes: sourceAttributeValues
+                          .filter((value) => value.sourceId === selection.object.id && value.value.trim())
+                          .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
+                          .map((value) => ({ name: value.attributeName, value: value.value })),
+                      };
+                    }
 
-                          if (systemKey === "home_canvas_code") {
-                            const parentLabels: string[] = [];
-                            let parentCodeId = codes.find((code) => code.id === selection.object.id)?.parentCodeId ?? "";
-                            const visitedParentCodeIds = new Set<string>();
-                            while (parentCodeId && !visitedParentCodeIds.has(parentCodeId)) {
-                              visitedParentCodeIds.add(parentCodeId);
-                              const parentCode = codes.find((code) => code.id === parentCodeId);
-                              if (!parentCode) break;
-                              parentLabels.unshift(parentCode.label || "Untitled code");
-                              parentCodeId = parentCode.parentCodeId;
-                            }
-                            return {
-                              title: selection.object.title.trim() || "Untitled code",
-                              itemType: "Code",
-                              typeDetail: parentLabels.length > 0 ? parentLabels.join(" > ") : "Top-level code",
-                              attributes: [],
-                            };
-                          }
+                    if (systemKey === "home_canvas_code") {
+                      const parentLabels: string[] = [];
+                      let parentCodeId = codes.find((code) => code.id === selection.object.id)?.parentCodeId ?? "";
+                      const visitedParentCodeIds = new Set<string>();
+                      while (parentCodeId && !visitedParentCodeIds.has(parentCodeId)) {
+                        visitedParentCodeIds.add(parentCodeId);
+                        const parentCode = codes.find((code) => code.id === parentCodeId);
+                        if (!parentCode) break;
+                        parentLabels.unshift(parentCode.label || "Untitled code");
+                        parentCodeId = parentCode.parentCodeId;
+                      }
+                      return {
+                        title: selection.object.title.trim() || "Untitled code",
+                        itemType: "Code",
+                        typeDetail: parentLabels.length > 0 ? parentLabels.join(" > ") : "Top-level code",
+                        attributes: [],
+                      };
+                    }
 
-                          return {
-                            title: selection.object.title.trim() || "Untitled object",
-                            itemType: "Object",
-                            typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
-                            attributes: selection.object.attributeValues
-                              .filter((value) => value.value.trim())
-                              .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
-                              .map((value) => ({ name: value.attributeName, value: value.value })),
-                          };
-                        }}
-                        onCanvasContextMenu={handleHomeCanvasContextMenu}
-                        onCanvasSelectionDelete={canDeleteHomeCanvasItems ? startHomeCanvasSelectionDelete : undefined}
-                        getRelationshipEndpointKey={({ object, objectTypeRecord }) => {
-                          if (!canManageSources) return null;
-                          const systemKey = object.objectTypeSystemKey ?? objectTypeRecord?.systemKey ?? "";
-                          if (systemKey === "home_canvas_code" || systemKey === "home_canvas_annotation") return null;
-                          if (systemKey === "home_canvas_source" || getPostgresSourceObjectVisualKey(systemKey)) {
-                            return `source:${object.id}`;
-                          }
-                          return `object:${object.id}`;
-                        }}
-                        onCanvasRelationshipDraftComplete={({ fromEndpointKey, toEndpointKey }) => {
-                          openCreateRelationshipModal({ fromEndpointKey, toEndpointKey });
-                        }}
-                        fitOnVisibleKey={projectHomeGraphFitKey}
-                        controlStart={(
-                          <div className="project-home-canvas-filter-control" ref={homeCanvasFilterControlRef}>
-                            <button
-                              type="button"
-                              className="btn btn--ghost"
-                              onClick={() => setHomeCanvasFilterDrawerOpen((current) => !current)}
-                              aria-expanded={homeCanvasFilterDrawerOpen}
-                              aria-label={homeCanvasFilterDrawerOpen ? "Hide canvas filters" : "Show canvas filters"}
-                              title="Canvas filters"
-                            >
-                              <FilterIcon className="postgres-explore-canvas-control-icon" />
-                            </button>
-                            {homeCanvasFilterDrawerOpen ? (
-                              <div className="project-home-filter-drawer">
-                                <div className="home-primary-column postgres-experiment-home-primary-column project-home-selector-column project-home-selector-column--drawer">
-                                  <ProjectHomeCanvasSelectorCard
-                                    title="Sources"
-                                    count={sources.length}
-                                    collapsed={homeCanvasCollapsedSections.has("sources")}
-                                    rows={homeCanvasSourceRows}
-                                    onToggleCollapsed={() => toggleHomeCanvasSectionCollapsed("sources")}
-                                    onSelectAll={() => {
-                                      showHomeCanvasSection("sources");
-                                      setHomeCanvasSourceKinds(new Set());
-                                    }}
-                                    onClear={() => {
-                                      clearHomeCanvasSection("sources");
-                                      setHomeCanvasSourceKinds(new Set(["__none"]));
-                                    }}
-                                    emptyText="No sources yet."
-                                  />
-                                  <ProjectHomeCanvasSelectorCard
-                                    title="Objects"
-                                    count={objects.length}
-                                    collapsed={homeCanvasCollapsedSections.has("objects")}
-                                    rows={homeCanvasObjectRows}
-                                    onToggleCollapsed={() => toggleHomeCanvasSectionCollapsed("objects")}
-                                    onSelectAll={() => {
-                                      showHomeCanvasSection("objects");
-                                      setHomeCanvasObjectTypeIds(new Set());
-                                    }}
-                                    onClear={() => {
-                                      clearHomeCanvasSection("objects");
-                                      setHomeCanvasObjectTypeIds(new Set(["__none"]));
-                                    }}
-                                    emptyText="No objects yet."
-                                  />
-                                  <ProjectHomeCanvasSelectorCard
-                                    title="Relationships"
-                                    count={relationships.length}
-                                    collapsed={homeCanvasCollapsedSections.has("relationships")}
-                                    rows={homeCanvasRelationshipRows}
-                                    onToggleCollapsed={() => toggleHomeCanvasSectionCollapsed("relationships")}
-                                    onSelectAll={() => {
-                                      showHomeCanvasSection("relationships");
-                                      setHomeCanvasRelationshipTypeIds(new Set());
-                                    }}
-                                    onClear={() => {
-                                      clearHomeCanvasSection("relationships");
-                                      setHomeCanvasRelationshipTypeIds(new Set(["__none"]));
-                                    }}
-                                    emptyText="No relationships yet."
-                                  />
-                                  <ProjectHomeCanvasSelectorCard
-                                    title="Codes"
-                                    count={codes.length}
-                                    collapsed={homeCanvasCollapsedSections.has("codes")}
-                                    rows={homeCanvasCodeRows}
-                                    onToggleCollapsed={() => toggleHomeCanvasSectionCollapsed("codes")}
-                                    onSelectAll={() => {
-                                      showHomeCanvasSection("codes");
-                                      setHomeCanvasCodeIds(new Set());
-                                    }}
-                                    onClear={() => {
-                                      clearHomeCanvasSection("codes");
-                                      setHomeCanvasCodeIds(new Set(["__none"]));
-                                    }}
-                                    emptyText="No codes yet."
-                                  />
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        )}
-                        embedded
-                      />
-                    </Suspense>
-                  )}
-                </div>
-              </div>
+                    return {
+                      title: selection.object.title.trim() || "Untitled object",
+                      itemType: "Object",
+                      typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
+                      attributes: selection.object.attributeValues
+                        .filter((value) => value.value.trim())
+                        .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
+                        .map((value) => ({ name: value.attributeName, value: value.value })),
+                    };
+                  }}
+                  onCanvasContextMenu={handleHomeCanvasContextMenu}
+                  onCanvasSelectionDelete={canDeleteHomeCanvasItems ? startHomeCanvasSelectionDelete : undefined}
+                  getRelationshipEndpointKey={({ object, objectTypeRecord }) => {
+                    if (!canManageSources) return null;
+                    const systemKey = object.objectTypeSystemKey ?? objectTypeRecord?.systemKey ?? "";
+                    if (systemKey === "home_canvas_code" || systemKey === "home_canvas_annotation") return null;
+                    if (systemKey === "home_canvas_source" || getPostgresSourceObjectVisualKey(systemKey)) {
+                      return `source:${object.id}`;
+                    }
+                    return `object:${object.id}`;
+                  }}
+                  onCanvasRelationshipDraftComplete={({ fromEndpointKey, toEndpointKey }) => {
+                    openCreateRelationshipModal({ fromEndpointKey, toEndpointKey });
+                  }}
+                  fitOnVisibleKey={projectHomeGraphFitKey}
+                  filteringActive={homeCanvasFilteringActive}
+                  collapsedSections={homeCanvasCollapsedSections}
+                  sourceRows={homeCanvasSourceRows}
+                  objectRows={homeCanvasObjectRows}
+                  relationshipRows={homeCanvasRelationshipRows}
+                  codeRows={homeCanvasCodeRows}
+                  sourceCount={sources.length}
+                  objectCount={objects.length}
+                  relationshipCount={relationships.length}
+                  codeCount={codes.length}
+                  onToggleCollapsedSection={toggleHomeCanvasSectionCollapsed}
+                  showSection={showHomeCanvasSection}
+                  clearSection={clearHomeCanvasSection}
+                  setSourceKinds={setHomeCanvasSourceKinds}
+                  setObjectTypeIds={setHomeCanvasObjectTypeIds}
+                  setRelationshipTypeIds={setHomeCanvasRelationshipTypeIds}
+                  setCodeIds={setHomeCanvasCodeIds}
+                  customSizesActive={homeCanvasCustomSizesActive}
+                  resetAllNodeSizes={resetAllHomeCanvasNodeSizes}
+                  sizeGroupCount={homeCanvasSizeGroupCount}
+                  sizeCollapsedSections={homeCanvasSizeCollapsedSections}
+                  sourceSizeRows={homeCanvasSourceSizeRows}
+                  objectSizeRows={homeCanvasObjectSizeRows}
+                  codeSizeRows={homeCanvasCodeSizeRows}
+                  onToggleSizeSectionCollapsed={toggleHomeCanvasSizeSectionCollapsed}
+                  onResizeNodeGroup={resizeHomeCanvasNodeGroup}
+                />
               )}
             </div>
           ) : activeScreen === "users" ? (
@@ -9046,7 +9430,7 @@ export function PostgresProjectHomeView({
                                 >
                                   Role
                                   <span className="users-sort-icon">
-                                    {userRoleSortCol === "role" ? (userRoleSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                    {userRoleSortCol === "role" ? (userRoleSortDir === "asc" ? " ?" : " ?") : " ?"}
                                   </span>
                                 </th>
                                 <th
@@ -9056,7 +9440,7 @@ export function PostgresProjectHomeView({
                                 >
                                   Count
                                   <span className="users-sort-icon">
-                                    {userRoleSortCol === "count" ? (userRoleSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                    {userRoleSortCol === "count" ? (userRoleSortDir === "asc" ? " ?" : " ?") : " ?"}
                                   </span>
                                 </th>
                               </tr>
@@ -9640,37 +10024,19 @@ export function PostgresProjectHomeView({
                     const object = objects.find((entry) => entry.id === removingObjectId);
                     if (!object) return null;
                     return (
-                      <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingObjectId(null)}>
-                        <form
-                          className="modal modal--wide"
-                          onClick={(event) => event.stopPropagation()}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            if (!graphSubmitting) void handleDeleteObject(object.id);
-                          }}
-                        >
-                          <h2>Delete object</h2>
-                          <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                            Delete <strong>{object.title}</strong>?
-                          </p>
-                          <p className="modal-warning-text">
-                            This permanently removes the object and any relationships connected to it.
-                          </p>
-                          <div className="form-actions" style={{ marginTop: 24 }}>
-                            <button type="button" className="btn" onClick={() => setRemovingObjectId(null)} disabled={graphSubmitting}>
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              autoFocus
-                              className="btn btn--danger"
-                              disabled={graphSubmitting}
-                            >
-                              {graphSubmitting ? "Deleting..." : "Delete object"}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
+                      <GraphConfirmModal
+                        title="Delete object"
+                        warning="This permanently removes the object and any relationships connected to it."
+                        busy={graphSubmitting}
+                        confirmLabel="Delete object"
+                        busyLabel="Deleting..."
+                        onClose={() => setRemovingObjectId(null)}
+                        onConfirm={() => void handleDeleteObject(object.id)}
+                      >
+                        <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                          Delete <strong>{object.title}</strong>?
+                        </p>
+                      </GraphConfirmModal>
                     );
                   })()
                 ) : null}
@@ -9768,7 +10134,7 @@ export function PostgresProjectHomeView({
                               >
                                 Type
                                 <span className="users-sort-icon">
-                                  {objectTypeSortCol === "objectType" ? (objectTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  {objectTypeSortCol === "objectType" ? (objectTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
                               </th>
                               <th
@@ -9778,7 +10144,7 @@ export function PostgresProjectHomeView({
                               >
                                 Count
                                 <span className="users-sort-icon">
-                                  {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
                               </th>
                             </tr>
@@ -10013,18 +10379,26 @@ export function PostgresProjectHomeView({
                                   >
                                     Object
                                     <span className="users-sort-icon">
-                                      {objectAttributeSortCol === "name" ? (objectAttributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                      {objectAttributeSortCol === "name" ? (objectAttributeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                     </span>
                                   </th>
                                   {objectAttributeDefinitionsForWorkspace.map((definition) => (
                                     <th
                                       key={definition.id}
-                                      className={`users-th case-attributes-value-col${objectAttributeSortCol === definition.id ? " users-th--sorted" : ""}`}
-                                      onClick={() => handleObjectAttributeSort(definition.id)}
+                                      className={`users-th case-attributes-value-col case-attributes-value-col--editable${objectAttributeSortCol === definition.id ? " users-th--sorted" : ""}${hoveredObjectAttributeColumnId === definition.id ? " case-attributes-col--hovered" : ""}`}
+                                      onMouseEnter={() => setHoveredObjectAttributeColumnId(definition.id)}
+                                      onMouseLeave={() => setHoveredObjectAttributeColumnId(null)}
+                                      onClick={() => {
+                                        if (!canManageSources) return;
+                                        setBulkObjectAttributeDefinition(definition);
+                                        setGraphError("");
+                                        setGraphNotice("");
+                                      }}
+                                      title={canManageSources ? "Edit values for this attribute" : "Only project owners, administrators, or editors can edit object attributes."}
                                     >
                                       {definition.name}
                                       <span className="users-sort-icon">
-                                        {objectAttributeSortCol === definition.id ? (objectAttributeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                        {objectAttributeSortCol === definition.id ? (objectAttributeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                       </span>
                                       <span className="case-attribute-type-label">{definition.dataType}</span>
                                     </th>
@@ -10063,7 +10437,7 @@ export function PostgresProjectHomeView({
                                         return (
                                           <td
                                             key={definition.id}
-                                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}`}
+                                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}${hoveredObjectAttributeColumnId === definition.id ? " case-attributes-col--hovered" : ""}`}
                                             role="button"
                                             tabIndex={0}
                                             title="View attribute value history"
@@ -10170,51 +10544,33 @@ export function PostgresProjectHomeView({
                     if (!objectTypeRecord) return null;
                     const affectedObjectCount = customObjects.filter((object) => object.objectTypeId === objectTypeRecord.id).length;
                     return (
-                      <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingObjectTypeId(null)}>
-                        <form
-                          className="modal modal--wide"
-                          onClick={(event) => event.stopPropagation()}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            if (!graphSubmitting) void handleDeleteObjectType(objectTypeRecord.id);
-                          }}
-                        >
-                          <h2>Delete object type</h2>
+                      <GraphConfirmModal
+                        title="Delete object type"
+                        warning={`This will delete the object type and all ${affectedObjectCount} objects of this type. This cannot be undone.`}
+                        busy={graphSubmitting}
+                        confirmLabel="Delete object type"
+                        busyLabel="Deleting..."
+                        onClose={() => setRemovingObjectTypeId(null)}
+                        onConfirm={() => void handleDeleteObjectType(objectTypeRecord.id)}
+                      >
                           <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                             Delete <strong>{objectTypeRecord.name}</strong>?
-                          </p>
-                          <p className="modal-warning-text">
-                            This will delete the object type and all {affectedObjectCount} objects of this type. This cannot be undone.
                           </p>
                           <p className="users-guide-copy" style={{ marginTop: 10, marginBottom: 0 }}>
                             Confirm that you want to permanently delete this object type and its objects.
                           </p>
-                          <div className="form-actions" style={{ marginTop: 24 }}>
-                            <button type="button" className="btn" onClick={() => setRemovingObjectTypeId(null)} disabled={graphSubmitting}>
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              autoFocus
-                              className="btn btn--danger"
-                              disabled={graphSubmitting}
-                            >
-                              {graphSubmitting ? "Deleting..." : "Delete object type"}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
+                      </GraphConfirmModal>
                     );
                   })()
                 ) : null}
                 {editingObjectTypeModalId ? (
-                  <div className="modal-overlay" onClick={() => !graphSubmitting && setEditingObjectTypeModalId(null)}>
-                    <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-                      <h2>Edit object type</h2>
-                      <p className="auth-hint" style={{ marginTop: 0 }}>
-                        Update the default node appearance for this object type. Existing objects will inherit the change unless they override it.
-                      </p>
-                      <form onSubmit={handleSaveObjectType} className="form">
+                  <SettingsModal
+                    title="Edit object type"
+                    onClose={() => setEditingObjectTypeModalId(null)}
+                    closeDisabled={graphSubmitting}
+                    modalClassName="modal--wide"
+                  >
+                      <form onSubmit={handleSaveObjectType} className="form app-settings-modal-body">
                         <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Edit object type tabs">
                           <button
                             type="button"
@@ -10236,6 +10592,13 @@ export function PostgresProjectHomeView({
                             onClick={() => setObjectTypeModalTab("attributes")}
                           >
                             Attributes
+                          </button>
+                          <button
+                            type="button"
+                            className={`segmented-control-option ${objectTypeModalTab === "timeline" ? "segmented-control-option--active" : ""}`}
+                            onClick={() => setObjectTypeModalTab("timeline")}
+                          >
+                            Timeline
                           </button>
                         </div>
                         {objectTypeModalTab === "details" ? (
@@ -10373,53 +10736,46 @@ export function PostgresProjectHomeView({
                               </>
                             ) : null}
                           </>
+                        ) : objectTypeModalTab === "timeline" ? (
+                          renderTimelineFieldMappingRows(
+                            objectTypeAttributeDrafts,
+                            (role, value) => updateTimelineFieldDrafts(
+                              role,
+                              value,
+                              setObjectTypeAttributeDrafts,
+                              (draft) => {
+                                setTypeAttributeModalError("");
+                                setObjectTypeAttributeModalDraft(draft);
+                              },
+                            ),
+                          )
                         ) : (
-                          <>
-                            <div className="postgres-attribute-modal-section">
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  gap: 12,
-                                  marginBottom: 12,
-                                }}
-                              >
-                                <div className="postgres-attribute-modal-title">Attributes</div>
-                                <button type="button" className="btn btn--small" onClick={openNewObjectTypeAttributeModal}>
-                                  Add attribute
-                                </button>
-                              </div>
-                              {objectTypeAttributeDrafts.length === 0 ? (
-                                <p className="auth-hint" style={{ margin: 0 }}>No attributes for this object type yet.</p>
-                              ) : (
-                                <div className="postgres-attribute-multiselect">
-                                  {objectTypeAttributeDrafts.map((draft) => (
-                                    <div key={draft.localId} className="postgres-attribute-option">
-                                      <span className="postgres-attribute-option-body">
-                                        <strong>{draft.name}</strong>
-                                        <span>{draft.dataType}</span>
-                                        <span>{draft.description || (draft.options.length > 0 ? draft.options.join(", ") : "No description")}</span>
-                                      </span>
-                                      <div className="project-card-actions">
-                                        <button type="button" className="btn btn--ghost" onClick={() => openEditObjectTypeAttributeModal(draft)}>
-                                          Edit
-                                        </button>
-                                        <button type="button" className="btn btn--ghost-danger" onClick={() => deleteObjectTypeAttributeDraft(draft.localId)}>
-                                          Delete
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <p className="auth-hint" style={{ marginTop: 16, marginBottom: 0 }}>
-                              Attribute changes will be saved when you save the object type.
-                            </p>
-                          </>
+                          <EditableAttributesMatrix
+                            definitions={objectTypeAttributeDrafts.map((draft) => ({
+                              id: draft.localId,
+                              name: draft.name || "Untitled attribute",
+                              dataType: draft.dataType,
+                              description: draft.description,
+                              options: draft.options,
+                            }))}
+                            rows={objects
+                              .filter((object) => object.objectTypeId === editingObjectTypeModalId)
+                              .map((object) => ({ id: object.id, name: object.title || "Untitled object" }))
+                              .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))}
+                            values={objectTypeAttributeValuesByDraftId}
+                            disabled={graphSubmitting}
+                            emptyDefinitionsLabel="No attributes for this object type yet."
+                            emptyRowsLabel="No objects of this type yet."
+                            onAddAttribute={openNewObjectTypeAttributeModal}
+                            onEditAttribute={(localId) => {
+                              const draft = objectTypeAttributeDrafts.find((entry) => entry.localId === localId);
+                              if (draft) openEditObjectTypeAttributeModal(draft);
+                            }}
+                            onDeleteAttribute={deleteObjectTypeAttributeDraft}
+                            onChangeValue={updateObjectTypeMatrixValue}
+                          />
                         )}
-                        <div className="form-actions">
+                        <div className="app-settings-modal-footer">
                           <button type="button" className="btn" onClick={() => setEditingObjectTypeModalId(null)} disabled={graphSubmitting}>
                             Cancel
                           </button>
@@ -10428,8 +10784,7 @@ export function PostgresProjectHomeView({
                           </button>
                         </div>
                       </form>
-                    </div>
-                  </div>
+                  </SettingsModal>
                 ) : null}
                 {objectWorkspaceAttributeDraft ? (
                   <TypeScopedAttributeModal
@@ -10449,42 +10804,47 @@ export function PostgresProjectHomeView({
                     }}
                   />
                 ) : null}
+                {bulkObjectAttributeDefinition ? (
+                  <AttributeValuesModal
+                    draft={bulkObjectAttributeDefinition}
+                    rows={sortedObjectAttributeRows.map((row) => ({ id: row.id, name: row.name }))}
+                    initialValuesByOwner={Object.fromEntries(
+                      sortedObjectAttributeRows.map((row) => [
+                        row.id,
+                        row.valuesByDefinitionId[bulkObjectAttributeDefinition.id] ?? "",
+                      ]),
+                    )}
+                    saving={graphSubmitting}
+                    error={graphError}
+                    onCancel={() => {
+                      if (graphSubmitting) return;
+                      setBulkObjectAttributeDefinition(null);
+                      setGraphError("");
+                    }}
+                    onSave={(_, valuesByOwner) => {
+                      void handleSaveBulkObjectAttributeValues(bulkObjectAttributeDefinition, valuesByOwner);
+                    }}
+                    emptyStateLabel="Create an object first to start assigning attribute values."
+                  />
+                ) : null}
                 {removingObjectId ? (
                   (() => {
                     const object = objects.find((entry) => entry.id === removingObjectId);
                     if (!object) return null;
                     return (
-                      <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingObjectId(null)}>
-                        <form
-                          className="modal modal--wide"
-                          onClick={(event) => event.stopPropagation()}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            if (!graphSubmitting) void handleDeleteObject(object.id);
-                          }}
-                        >
-                          <h2>Delete object</h2>
-                          <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                            Delete <strong>{object.title}</strong>?
-                          </p>
-                          <p className="modal-warning-text">
-                            This permanently removes the object and any relationships connected to it.
-                          </p>
-                          <div className="form-actions" style={{ marginTop: 24 }}>
-                            <button type="button" className="btn" onClick={() => setRemovingObjectId(null)} disabled={graphSubmitting}>
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              autoFocus
-                              className="btn btn--danger"
-                              disabled={graphSubmitting}
-                            >
-                              {graphSubmitting ? "Deleting..." : "Delete object"}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
+                      <GraphConfirmModal
+                        title="Delete object"
+                        warning="This permanently removes the object and any relationships connected to it."
+                        busy={graphSubmitting}
+                        confirmLabel="Delete object"
+                        busyLabel="Deleting..."
+                        onClose={() => setRemovingObjectId(null)}
+                        onConfirm={() => void handleDeleteObject(object.id)}
+                      >
+                        <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                          Delete <strong>{object.title}</strong>?
+                        </p>
+                      </GraphConfirmModal>
                     );
                   })()
                 ) : null}
@@ -10743,7 +11103,7 @@ export function PostgresProjectHomeView({
                               >
                                 Type
                                 <span className="users-sort-icon">
-                                  {relationshipTypeSortCol === "relationshipType" ? (relationshipTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  {relationshipTypeSortCol === "relationshipType" ? (relationshipTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
                               </th>
                               <th
@@ -10753,7 +11113,7 @@ export function PostgresProjectHomeView({
                               >
                                 Count
                                 <span className="users-sort-icon">
-                                  {relationshipTypeSortCol === "count" ? (relationshipTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                                  {relationshipTypeSortCol === "count" ? (relationshipTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
                               </th>
                             </tr>
@@ -11026,8 +11386,16 @@ export function PostgresProjectHomeView({
                                   {relationshipAttributeDefinitionsForWorkspace.map((definition) => (
                                     <th
                                       key={definition.id}
-                                      className={`users-th case-attributes-value-col${relationshipAttributeSortCol === definition.id ? " users-th--sorted" : ""}`}
-                                      onClick={() => handleRelationshipAttributeSort(definition.id)}
+                                      className={`users-th case-attributes-value-col case-attributes-value-col--editable${relationshipAttributeSortCol === definition.id ? " users-th--sorted" : ""}${hoveredRelationshipAttributeColumnId === definition.id ? " case-attributes-col--hovered" : ""}`}
+                                      onMouseEnter={() => setHoveredRelationshipAttributeColumnId(definition.id)}
+                                      onMouseLeave={() => setHoveredRelationshipAttributeColumnId(null)}
+                                      onClick={() => {
+                                        if (!canManageSources) return;
+                                        setBulkRelationshipAttributeDefinition(definition);
+                                        setGraphError("");
+                                        setGraphNotice("");
+                                      }}
+                                      title={canManageSources ? "Edit values for this attribute" : "Only project owners, administrators, or editors can edit relationship attributes."}
                                     >
                                       {definition.name}
                                       <span className="users-sort-icon">
@@ -11070,7 +11438,7 @@ export function PostgresProjectHomeView({
                                         return (
                                           <td
                                             key={definition.id}
-                                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}`}
+                                            className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}${hoveredRelationshipAttributeColumnId === definition.id ? " case-attributes-col--hovered" : ""}`}
                                             role="button"
                                             tabIndex={0}
                                             title="View attribute value history"
@@ -11247,7 +11615,7 @@ export function PostgresProjectHomeView({
               {editingRelationshipTypeModalId ? (
                 renderRelationshipTypeModal({
                   title: "Edit relationship type",
-                  hint: "Update the default line appearance and object type constraints for this relationship type.",
+                  relationshipTypeId: editingRelationshipTypeModalId,
                   submitLabel: "Save changes",
                   ariaLabel: "Edit relationship type tabs",
                   onClose: () => setEditingRelationshipTypeModalId(null),
@@ -11262,37 +11630,19 @@ export function PostgresProjectHomeView({
                     (relationship) => relationship.relationshipTypeId === relationshipTypeRecord.id,
                   ).length;
                   return (
-                    <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingRelationshipTypeId(null)}>
-                      <form
-                        className="modal modal--wide"
-                        onClick={(event) => event.stopPropagation()}
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          if (!graphSubmitting) void handleDeleteRelationshipType(relationshipTypeRecord.id);
-                        }}
-                      >
-                        <h2>Delete relationship type</h2>
+                    <GraphConfirmModal
+                      title="Delete relationship type"
+                      warning={`This will delete the relationship type, its shared attribute definitions, and all ${affectedRelationshipCount} relationships of this type. This cannot be undone.`}
+                      busy={graphSubmitting}
+                      confirmLabel="Delete relationship type"
+                      busyLabel="Deleting..."
+                      onClose={() => setRemovingRelationshipTypeId(null)}
+                      onConfirm={() => void handleDeleteRelationshipType(relationshipTypeRecord.id)}
+                    >
                         <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                           Delete <strong>{relationshipTypeRecord.name}</strong>?
                         </p>
-                        <p className="modal-warning-text">
-                          This will delete the relationship type, its shared attribute definitions, and all {affectedRelationshipCount} relationships of this type. This cannot be undone.
-                        </p>
-                        <div className="form-actions" style={{ marginTop: 24 }}>
-                          <button type="button" className="btn" onClick={() => setRemovingRelationshipTypeId(null)} disabled={graphSubmitting}>
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            autoFocus
-                            className="btn btn--danger"
-                            disabled={graphSubmitting}
-                          >
-                            {graphSubmitting ? "Deleting..." : "Delete relationship type"}
-                          </button>
-                        </div>
-                      </form>
-                    </div>
+                    </GraphConfirmModal>
                   );
                 })()
               ) : null}
@@ -11301,42 +11651,19 @@ export function PostgresProjectHomeView({
                   const relationship = relationships.find((entry) => entry.id === removingRelationshipId);
                   if (!relationship) return null;
                   return (
-                    <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingRelationshipId(null)}>
-                      <form
-                        className="modal modal--wide"
-                        onClick={(event) => event.stopPropagation()}
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          if (!graphSubmitting) void handleDeleteRelationship(relationship.id);
-                        }}
-                      >
-                        <h2>Delete relationship</h2>
+                    <GraphConfirmModal
+                      title="Delete relationship"
+                      warning="This permanently removes the link between the connected objects."
+                      busy={graphSubmitting}
+                      confirmLabel="Delete relationship"
+                      busyLabel="Deleting..."
+                      onClose={() => setRemovingRelationshipId(null)}
+                      onConfirm={() => void handleDeleteRelationship(relationship.id)}
+                    >
                         <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                           Delete <strong>{relationship.relationshipType}</strong>?
                         </p>
-                        <p className="modal-warning-text">
-                          This permanently removes the link between the connected objects.
-                        </p>
-                        <div className="form-actions" style={{ marginTop: 24 }}>
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={() => setRemovingRelationshipId(null)}
-                            disabled={graphSubmitting}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            autoFocus
-                            className="btn btn--danger"
-                            disabled={graphSubmitting}
-                          >
-                            {graphSubmitting ? "Deleting..." : "Delete relationship"}
-                          </button>
-                        </div>
-                      </form>
-                    </div>
+                    </GraphConfirmModal>
                   );
                 })()
               ) : null}
@@ -11382,6 +11709,29 @@ export function PostgresProjectHomeView({
                   onSave={(draft) => {
                     void handleCreateRelationshipWorkspaceAttribute(draft);
                   }}
+                />
+              ) : null}
+              {bulkRelationshipAttributeDefinition ? (
+                <AttributeValuesModal
+                  draft={bulkRelationshipAttributeDefinition}
+                  rows={sortedRelationshipAttributeRows.map((row) => ({ id: row.id, name: row.name }))}
+                  initialValuesByOwner={Object.fromEntries(
+                    sortedRelationshipAttributeRows.map((row) => [
+                      row.id,
+                      row.valuesByDefinitionId[bulkRelationshipAttributeDefinition.id] ?? "",
+                    ]),
+                  )}
+                  saving={graphSubmitting}
+                  error={graphError}
+                  onCancel={() => {
+                    if (graphSubmitting) return;
+                    setBulkRelationshipAttributeDefinition(null);
+                    setGraphError("");
+                  }}
+                  onSave={(_, valuesByOwner) => {
+                    void handleSaveBulkRelationshipAttributeValues(bulkRelationshipAttributeDefinition, valuesByOwner);
+                  }}
+                  emptyStateLabel="Create a relationship first to start assigning attribute values."
                 />
               ) : null}
               {attributeHistoryTarget ? (
@@ -11493,7 +11843,7 @@ export function PostgresProjectHomeView({
                 getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
                   const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
                   return appearance.sourceImage
-                    ? getSourceCanvasNodeDefaultDimensions()
+                    ? getSourceCanvasNodeRenderedDimensions(nodeState)
                     : getCanvasNodeRenderedDimensions(appearance.shape, nodeState);
                 }}
               />
@@ -11809,21 +12159,6 @@ export function PostgresProjectHomeView({
                 onAuthSessionInvalidated={onAuthSessionInvalidated}
               />
             </Suspense>
-          ) : activeScreen === "project-settings" ? (
-            <Suspense fallback={<ViewLoadingFallback />}>
-              <PostgresProjectSettingsViewLazy
-                project={project}
-                canManageProject={canManageProjectSettings}
-                canEditProjectMetadata={canEditProjectMetadata}
-                memberCount={users.length}
-                ownerCount={ownerCount}
-                objectCount={objects.length}
-                relationshipCount={relationships.length}
-                onProjectUpdated={onProjectUpdated}
-                onProjectDeleted={onProjectDeleted}
-                onProjectOpened={onProjectOpened}
-              />
-            </Suspense>
           ) : (
             <Suspense fallback={<ViewLoadingFallback />}>
               <PostgresUserSettingsViewLazy
@@ -11937,6 +12272,7 @@ export function PostgresProjectHomeView({
           {createRelationshipTypeOpen ? (
             renderRelationshipTypeModal({
               title: "Add relationship type",
+              relationshipTypeId: null,
               submitLabel: "Add relationship type",
               ariaLabel: "Add relationship type tabs",
               onClose: () => setCreateRelationshipTypeOpen(false),
@@ -11974,31 +12310,35 @@ export function PostgresProjectHomeView({
             />
           ) : null}
           {saveFreeDrawModalOpen ? (
-            <div className="modal-overlay" onClick={() => !freeDrawSaving && setSaveFreeDrawModalOpen(false)}>
-              <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-                <h2>Save canvas</h2>
-                <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  Choose a name for this saved canvas.
-                </p>
+            <SettingsModal
+              title="Save canvas"
+              onClose={() => setSaveFreeDrawModalOpen(false)}
+              closeDisabled={freeDrawSaving}
+              modalClassName="modal--wide"
+            >
                 <form
-                  className="form"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void handleSaveFreeDrawCanvas();
                   }}
                 >
-                  <label className="form-field">
-                    <span>Canvas name</span>
-                    <input
-                      className="form-input"
-                      value={saveFreeDrawName}
-                      onChange={(event) => setSaveFreeDrawName(event.target.value)}
-                      placeholder="Enter canvas name"
-                      autoFocus
-                      disabled={freeDrawSaving}
-                    />
-                  </label>
-                  <div className="form-actions" style={{ marginTop: 24 }}>
+                  <div className="app-settings-modal-body">
+                    <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                      Choose a name for this saved canvas.
+                    </p>
+                    <label className="form-field">
+                      <span>Canvas name</span>
+                      <input
+                        className="form-input"
+                        value={saveFreeDrawName}
+                        onChange={(event) => setSaveFreeDrawName(event.target.value)}
+                        placeholder="Enter canvas name"
+                        autoFocus
+                        disabled={freeDrawSaving}
+                      />
+                    </label>
+                  </div>
+                  <div className="app-settings-modal-footer">
                     <button
                       type="button"
                       className="btn"
@@ -12016,17 +12356,20 @@ export function PostgresProjectHomeView({
                     </button>
                   </div>
                 </form>
-              </div>
-            </div>
+            </SettingsModal>
           ) : null}
           {exportingSavedDrawingId ? (
             (() => {
               const drawing = savedDrawings.find((entry) => entry.id === exportingSavedDrawingId);
               if (!drawing) return null;
               return (
-                <div className="modal-overlay" onClick={() => !savedDrawingExportBusyFormat && setExportingSavedDrawingId(null)}>
-                  <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-                    <h2>Export saved canvas</h2>
+                <SettingsModal
+                  title="Export saved canvas"
+                  onClose={() => setExportingSavedDrawingId(null)}
+                  closeDisabled={savedDrawingExportBusyFormat !== null}
+                  modalClassName="modal--wide"
+                >
+                  <div className="app-settings-modal-body">
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                       Export <strong>{drawing.name}</strong>.
                     </p>
@@ -12048,7 +12391,8 @@ export function PostgresProjectHomeView({
                         {savedDrawingExportBusyFormat === "pdf" ? "Exporting PDF..." : "Export as PDF"}
                       </button>
                     </div>
-                    <div className="form-actions" style={{ marginTop: 24 }}>
+                  </div>
+                    <div className="app-settings-modal-footer">
                       <button
                         type="button"
                         className="btn"
@@ -12058,8 +12402,7 @@ export function PostgresProjectHomeView({
                         Cancel
                       </button>
                     </div>
-                  </div>
-                </div>
+                </SettingsModal>
               );
             })()
           ) : null}
@@ -12068,37 +12411,19 @@ export function PostgresProjectHomeView({
               const drawing = savedDrawings.find((entry) => entry.id === removingSavedDrawingId);
               if (!drawing) return null;
               return (
-                <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingSavedDrawingId(null)}>
-                  <form
-                    className="modal modal--wide"
-                    onClick={(event) => event.stopPropagation()}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (!graphSubmitting) void handleDeleteSavedDrawing(drawing.id);
-                    }}
-                  >
-                    <h2>Delete saved canvas</h2>
+                <GraphConfirmModal
+                  title="Delete saved canvas"
+                  warning="This permanently removes the saved canvas from this project."
+                  busy={graphSubmitting}
+                  confirmLabel="Delete saved canvas"
+                  busyLabel="Deleting..."
+                  onClose={() => setRemovingSavedDrawingId(null)}
+                  onConfirm={() => void handleDeleteSavedDrawing(drawing.id)}
+                >
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                       Delete <strong>{drawing.name}</strong>?
                     </p>
-                    <p className="modal-warning-text">
-                      This permanently removes the saved canvas from this project.
-                    </p>
-                    <div className="form-actions" style={{ marginTop: 24 }}>
-                      <button type="button" className="btn" onClick={() => setRemovingSavedDrawingId(null)} disabled={graphSubmitting}>
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        autoFocus
-                        className="btn btn--danger"
-                        disabled={graphSubmitting}
-                      >
-                        {graphSubmitting ? "Deleting..." : "Delete saved canvas"}
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                </GraphConfirmModal>
               );
             })()
           ) : null}
@@ -12290,37 +12615,19 @@ export function PostgresProjectHomeView({
               const object = objects.find((entry) => entry.id === removingObjectId);
               if (!object) return null;
               return (
-                <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingObjectId(null)}>
-                  <form
-                    className="modal modal--wide"
-                    onClick={(event) => event.stopPropagation()}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (!graphSubmitting) void handleDeleteObject(object.id);
-                    }}
-                  >
-                    <h2>Delete object</h2>
+                <GraphConfirmModal
+                  title="Delete object"
+                  warning="This permanently removes the object and any relationships connected to it."
+                  busy={graphSubmitting}
+                  confirmLabel="Delete object"
+                  busyLabel="Deleting..."
+                  onClose={() => setRemovingObjectId(null)}
+                  onConfirm={() => void handleDeleteObject(object.id)}
+                >
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                       Delete <strong>{object.title}</strong>?
                     </p>
-                    <p className="modal-warning-text">
-                      This permanently removes the object and any relationships connected to it.
-                    </p>
-                    <div className="form-actions" style={{ marginTop: 24 }}>
-                      <button type="button" className="btn" onClick={() => setRemovingObjectId(null)} disabled={graphSubmitting}>
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        autoFocus
-                        className="btn btn--danger"
-                        disabled={graphSubmitting}
-                      >
-                        {graphSubmitting ? "Deleting..." : "Delete object"}
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                </GraphConfirmModal>
               );
             })()
           ) : null}
@@ -12369,60 +12676,27 @@ export function PostgresProjectHomeView({
               const relationship = relationships.find((entry) => entry.id === removingRelationshipId);
               if (!relationship) return null;
               return (
-                <div className="modal-overlay" onClick={() => !graphSubmitting && setRemovingRelationshipId(null)}>
-                  <form
-                    className="modal modal--wide"
-                    onClick={(event) => event.stopPropagation()}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (!graphSubmitting) void handleDeleteRelationship(relationship.id);
-                    }}
-                  >
-                    <h2>Delete relationship</h2>
+                <GraphConfirmModal
+                  title="Delete relationship"
+                  warning="This permanently removes the link between the connected objects."
+                  busy={graphSubmitting}
+                  confirmLabel="Delete relationship"
+                  busyLabel="Deleting..."
+                  onClose={() => setRemovingRelationshipId(null)}
+                  onConfirm={() => void handleDeleteRelationship(relationship.id)}
+                >
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                       Delete <strong>{relationship.relationshipType}</strong>?
                     </p>
-                    <p className="modal-warning-text">
-                      This permanently removes the link between the connected objects.
-                    </p>
-                    <div className="form-actions" style={{ marginTop: 24 }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => setRemovingRelationshipId(null)}
-                        disabled={graphSubmitting}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        autoFocus
-                        className="btn btn--danger"
-                        disabled={graphSubmitting}
-                      >
-                        {graphSubmitting ? "Deleting..." : "Delete relationship"}
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                </GraphConfirmModal>
               );
             })()
           ) : null}
           {homeCanvasDeleteTarget ? (
-            <div className="modal-overlay" onClick={() => !graphSubmitting && setHomeCanvasDeleteTarget(null)}>
-              <form
-                className="modal modal--wide"
-                onClick={(event) => event.stopPropagation()}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!graphSubmitting && canDeleteHomeCanvasItems) void handleConfirmHomeCanvasDelete();
-                }}
-              >
-                <h2>Delete {homeCanvasDeleteTarget.kind}</h2>
-                <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  Delete <strong>{homeCanvasDeleteTarget.label}</strong>?
-                </p>
-                <p className="modal-warning-text">
+            <GraphConfirmModal
+              title={`Delete ${homeCanvasDeleteTarget.kind}`}
+              warning={(
+                <>
                   This permanently removes the {homeCanvasDeleteTarget.kind}
                   {homeCanvasDeleteTarget.kind === "object"
                     ? " and any relationships connected to it."
@@ -12431,27 +12705,21 @@ export function PostgresProjectHomeView({
                       : homeCanvasDeleteTarget.kind === "code"
                         ? " and its coding assignments."
                         : "."}
+                </>
+              )}
+              busy={graphSubmitting}
+              confirmLabel="Delete"
+              busyLabel="Deleting..."
+              confirmDisabled={!canDeleteHomeCanvasItems}
+              onClose={() => setHomeCanvasDeleteTarget(null)}
+              onConfirm={() => {
+                if (canDeleteHomeCanvasItems) void handleConfirmHomeCanvasDelete();
+              }}
+            >
+                <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                  Delete <strong>{homeCanvasDeleteTarget.label}</strong>?
                 </p>
-                <div className="form-actions" style={{ marginTop: 24 }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setHomeCanvasDeleteTarget(null)}
-                    disabled={graphSubmitting}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    autoFocus
-                    className="btn btn--danger"
-                    disabled={graphSubmitting || !canDeleteHomeCanvasItems}
-                  >
-                    {graphSubmitting ? "Deleting..." : "Delete"}
-                  </button>
-                </div>
-              </form>
-            </div>
+            </GraphConfirmModal>
           ) : null}
         </div>
       </main>

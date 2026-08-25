@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { HelpIcon, ProcessTranscriptIcon } from "../components/AppIcons";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
+import { SettingsModal } from "../components/SettingsModal";
 import {
   collectSpeakerSummaries,
   DEFAULT_PROCESSED_DOCUMENT_REVIEW_LENSES,
@@ -1304,43 +1305,24 @@ export function PostgresAiAssistProcessSourcesView({
         </div>
 
         {helpOpen ? (
-          <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-            <div className="modal modal--help modal--wide" onClick={(event) => event.stopPropagation()}>
-              <div className="modal-title-bar">
-                <div>
-                  <h2>Processed Source Review</h2>
-                </div>
-                <button type="button" className="modal-icon-close" onClick={() => setHelpOpen(false)} aria-label="Close" title="Close">
-                  x
-                </button>
-              </div>
+          <SettingsModal title="Processed Source Review" onClose={() => setHelpOpen(false)} modalClassName="modal--help modal--wide">
+            <div className="app-settings-modal-body">
               <p className="users-guide-copy">
                 Choose a processed source, inspect extracted entities and segments, edit Tags, Speakers, and Text, then save the reviewed output.
               </p>
             </div>
-          </div>
+          </SettingsModal>
         ) : null}
 
         {editingSpeakerLabel ? (
-          <div className="modal-overlay" onClick={() => setEditingSpeakerLabel("")}>
-            <div className="modal" onClick={(event) => event.stopPropagation()}>
-              <div className="modal-title-bar">
-                <div>
-                  <h2>Edit Speaker Label</h2>
-                </div>
-                <button
-                  type="button"
-                  className="modal-icon-close"
-                  onClick={() => {
-                    setEditingSpeakerLabel("");
-                    setEditingSpeakerLabelValue("");
-                  }}
-                  aria-label="Close"
-                  title="Close"
-                >
-                  x
-                </button>
-              </div>
+          <SettingsModal
+            title="Edit Speaker Label"
+            onClose={() => {
+              setEditingSpeakerLabel("");
+              setEditingSpeakerLabelValue("");
+            }}
+          >
+            <div className="app-settings-modal-body">
               <p className="surface-card-description">
                 Rename "{editingSpeakerLabel}" across all matching segments in this processed source.
               </p>
@@ -1353,38 +1335,23 @@ export function PostgresAiAssistProcessSourcesView({
                   autoFocus
                 />
               </label>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  disabled={!editingSpeakerLabelValue.trim() || !canReviewProcessedDocuments}
-                  onClick={applySpeakerLabelEdit}
-                >
-                  Apply
-                </button>
-              </div>
             </div>
-          </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!editingSpeakerLabelValue.trim() || !canReviewProcessedDocuments}
+                onClick={applySpeakerLabelEdit}
+              >
+                Apply
+              </button>
+            </div>
+          </SettingsModal>
         ) : null}
 
         {exportModalOpen && selectedReviewRecord ? (
-          <div className="modal-overlay" onClick={() => !exportBusy && setExportModalOpen(false)}>
-            <div className="modal" onClick={(event) => event.stopPropagation()}>
-              <div className="modal-title-bar">
-                <div>
-                  <h2>Export Processed Source</h2>
-                </div>
-                <button
-                  type="button"
-                  className="modal-icon-close"
-                  onClick={() => setExportModalOpen(false)}
-                  disabled={exportBusy}
-                  aria-label="Close"
-                  title="Close"
-                >
-                  x
-                </button>
-              </div>
+          <SettingsModal title="Export Processed Source" onClose={() => setExportModalOpen(false)} closeDisabled={exportBusy}>
+            <div className="app-settings-modal-body">
               <div className="form">
                 <label className="form-label">
                   Name
@@ -1404,29 +1371,41 @@ export function PostgresAiAssistProcessSourcesView({
                     onChange={(event) => setExportDescription(event.target.value)}
                   />
                 </label>
-                <label className="ai-process-doc-lens">
-                  <input
-                    type="checkbox"
-                    checked={copySourceAttributesOnExport}
-                    disabled={exportBusy}
-                    onChange={(event) => setCopySourceAttributesOnExport(event.target.checked)}
-                  />
+                <div className="ai-process-doc-lens ai-process-doc-lens--export-option">
                   <span>Copy source attributes from the raw text source</span>
-                </label>
-                {exportError ? <div className="form-error project-settings-error">{exportError}</div> : null}
-                <div className="modal-actions">
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={() => void handleExportToProject()}
-                    disabled={exportBusy || !exportName.trim() || !canReviewProcessedDocuments}
-                  >
-                    {exportBusy ? "Exporting" : "Export"}
-                  </button>
+                  <div className="segmented-control" role="tablist" aria-label="Copy source attributes">
+                    {([
+                      { label: "Disabled", value: false },
+                      { label: "Enabled", value: true },
+                    ] as const).map((option) => (
+                      <button
+                        key={option.label}
+                        type="button"
+                        role="tab"
+                        aria-selected={copySourceAttributesOnExport === option.value}
+                        className={copySourceAttributesOnExport === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                        disabled={exportBusy}
+                        onClick={() => setCopySourceAttributesOnExport(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                {exportError ? <div className="form-error project-settings-error">{exportError}</div> : null}
               </div>
             </div>
-          </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => void handleExportToProject()}
+                disabled={exportBusy || !exportName.trim() || !canReviewProcessedDocuments}
+              >
+                {exportBusy ? "Exporting" : "Export"}
+              </button>
+            </div>
+          </SettingsModal>
         ) : null}
       </div>
     );
@@ -1695,41 +1674,23 @@ export function PostgresAiAssistProcessSourcesView({
       </div>
 
       {helpOpen ? (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help modal--wide" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-title-bar">
-              <div>
-                <h2>Process into Transcript</h2>
-              </div>
-              <button type="button" className="modal-icon-close" onClick={() => setHelpOpen(false)} aria-label="Close" title="Close">
-                x
-              </button>
-            </div>
+        <SettingsModal title="Process into Transcript" onClose={() => setHelpOpen(false)} modalClassName="modal--help modal--wide">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               Choose text sources, process them with AI Assist, then review extracted transcript structure and names before using those outputs elsewhere in the project.
             </p>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {processModalOpen ? (
-        <div className="modal-overlay" onClick={() => !busy && setProcessModalOpen(false)}>
-          <div className="modal modal--wide ai-process-doc-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-title-bar">
-              <div>
-                <h2>Process into Transcript</h2>
-              </div>
-              <button
-                type="button"
-                className="modal-icon-close"
-                disabled={busy}
-                onClick={() => setProcessModalOpen(false)}
-                aria-label="Close"
-                title="Close"
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal
+          title="Process into Transcript"
+          onClose={() => setProcessModalOpen(false)}
+          closeDisabled={busy}
+          modalClassName="modal--wide ai-process-doc-modal"
+        >
+          <div className="app-settings-modal-body">
             <div className="ai-process-doc-modal-layout">
               <div>
                 <div className="surface-card">
@@ -1772,8 +1733,8 @@ export function PostgresAiAssistProcessSourcesView({
                 {error ? <div className="form-error project-settings-error">{error}</div> : null}
               </div>
             </div>
-
-            <div className="modal-actions">
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
               <button
                 type="button"
                 className="btn btn--primary"
@@ -1782,9 +1743,8 @@ export function PostgresAiAssistProcessSourcesView({
               >
                 {busy ? "Processing" : "Process"}
               </button>
-            </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
     </div>
   );

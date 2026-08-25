@@ -16,6 +16,7 @@ import {
 } from "../lib/projectBackupBanner";
 
 const BACKUP_DEBOUNCE_MS = 60 * 1000;
+const BACKUP_INTERRUPTION_GRACE_MS = 5 * 60 * 1000;
 
 const BACKUP_REQUIRED_ACTIONS = new Set([
   "project.open",
@@ -23,29 +24,48 @@ const BACKUP_REQUIRED_ACTIONS = new Set([
   "project.update",
   "member.add",
   "member.update",
+  "member.remove",
   "member.reassociate",
   "source.create",
   "source.update",
+  "source.delete",
   "source.associations",
   "source_attribute.create",
   "source_attribute.update",
+  "source_attribute.delete",
+  "object_type.create",
+  "object_type.update",
+  "object_type.delete",
   "object.create",
   "object.update",
+  "object.delete",
   "object.associations",
   "object_attribute.create",
   "object_attribute.update",
+  "object_attribute.delete",
+  "relationship_type.create",
+  "relationship_type.update",
+  "relationship_type.delete",
   "relationship.create",
   "relationship.update",
+  "relationship.delete",
   "relationship_attribute.create",
   "relationship_attribute.update",
+  "relationship_attribute.delete",
   "code.create",
   "code.update",
+  "code.delete",
   "annotation.create",
   "annotation.update",
+  "annotation.delete",
   "memo.create",
   "memo.update",
+  "memo.delete",
   "report.create",
   "report.update",
+  "report.delete",
+  "project.ai_assist.update",
+  "project.ai_processed_document.process_start",
   "codebook.import",
 ]);
 
@@ -87,6 +107,8 @@ export function usePostgresAutomaticProjectSnapshots(
         clearPendingProjectBackupAttempt(project.id);
         clearProjectBackupBannerIssue(project.id);
         notifyProjectBackupsChanged(project.id);
+      } else {
+        clearPendingProjectBackupAttempt(project.id);
       }
       return true;
     } catch (error) {
@@ -109,6 +131,13 @@ export function usePostgresAutomaticProjectSnapshots(
     initialSnapshotProjectIds.current.delete(activeProject.id);
     const pendingAttempt = readPendingProjectBackupAttempt(activeProject.id);
     if (!pendingAttempt) return;
+    const startedAt = Date.parse(pendingAttempt.startedAt);
+    if (
+      Number.isFinite(startedAt)
+      && Date.now() - startedAt < BACKUP_INTERRUPTION_GRACE_MS
+    ) {
+      return;
+    }
     clearPendingProjectBackupAttempt(activeProject.id);
     writeProjectBackupBannerIssue(
       activeProject.id,

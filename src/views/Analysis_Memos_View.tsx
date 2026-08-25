@@ -13,6 +13,7 @@ import {
 } from "docx";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 
@@ -872,17 +873,13 @@ function ExportMemoModal({
   ] as const;
 
   return (
-    <div
-      className="modal-overlay"
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+    <SettingsModal
+      title={t("analysisMemos.export.title")}
+      onClose={onClose}
+      closeDisabled={!!exportingFormat}
+      modalClassName="modal--wide"
     >
-      <div
-        className="modal-content"
-        onClick={(e) => e.stopPropagation()}
-        style={{ backgroundColor: "var(--color-bg)", padding: 24, borderRadius: 8, minWidth: 320, maxWidth: 960, width: "min(960px, calc(100vw - 32px))" }}
-      >
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>{t("analysisMemos.export.title")}</h2>
+      <div className="app-settings-modal-body">
         <div
           style={{
             display: "grid",
@@ -921,11 +918,11 @@ function ExportMemoModal({
             </button>
           ))}
         </div>
-        <div style={{ marginTop: 16, textAlign: "right" }}>
-          <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("common.cancel")}</button>
-        </div>
       </div>
-    </div>
+      <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+        <button className="btn" onClick={onClose} disabled={!!exportingFormat}>{t("common.cancel")}</button>
+      </div>
+    </SettingsModal>
   );
 }
 
@@ -1647,9 +1644,8 @@ export function MemosView() {
       </div>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("analysisMemos.help.title")}</h2>
+        <SettingsModal title={t("analysisMemos.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               {t("analysisMemos.help.line1")}
             </p>
@@ -1659,13 +1655,13 @@ export function MemosView() {
             <p className="users-guide-copy">
               {t("analysisMemos.help.line3")}
             </p>
-            <div className="form-actions">
-              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                {t("common.close")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              {t("common.close")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {/* Context menu */}
@@ -1696,28 +1692,28 @@ export function MemosView() {
 
       {/* Delete confirmation */}
       {confirmDelete && (
-        <div
-          className="modal-overlay"
-          onClick={() => !deleteLoading && setConfirmDelete(null)}
+        <SettingsModal
+          title={t("analysisMemos.deleteModal.title")}
+          onClose={() => setConfirmDelete(null)}
+          closeDisabled={deleteLoading}
         >
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("analysisMemos.deleteModal.title")}</h2>
+          <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
               {t("analysisMemos.deleteModal.body", { title: confirmDelete.title })}
             </p>
             <p className="modal-warning-text">
               {t("analysisMemos.deleteModal.warning")}
             </p>
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-                {t("common.cancel")}
-              </button>
-              <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? t("analysisMemos.statuses.deleting") : t("analysisMemos.actions.deleteMemo")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
+              {t("common.cancel")}
+            </button>
+            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+              {deleteLoading ? t("analysisMemos.statuses.deleting") : t("analysisMemos.actions.deleteMemo")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
     </div>
   );

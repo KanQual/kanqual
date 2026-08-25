@@ -9,6 +9,7 @@ import {
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { LoadingCard } from "../components/LoadingCard";
 import { PlusIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import type { CodeReportKind } from "./Reports_Codes_View";
 import type { CoderReportKind } from "./Reports_Users_View";
 
@@ -538,13 +539,8 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       </div>
 
       {showNewReportModal ? (
-        <div className="modal-overlay" onClick={() => setShowNewReportModal(false)}>
-          <div
-            className="modal"
-            style={{ width: "min(680px, calc(100vw - 32px))", maxWidth: 680 }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2>New report</h2>
+        <SettingsModal title="New Report" onClose={() => setShowNewReportModal(false)}>
+          <div className="app-settings-modal-body">
             <div
               style={{
                 display: "grid",
@@ -568,13 +564,13 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                 </button>
               ))}
             </div>
-            <div className="form-actions" style={{ marginTop: 20 }}>
-              <button type="button" className="btn" onClick={() => setShowNewReportModal(false)}>
-                Cancel
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn" onClick={() => setShowNewReportModal(false)}>
+              Cancel
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
     </div>
   );

@@ -9,6 +9,7 @@ import {
   MediaSeekForwardButton,
   MediaVolumeRange,
 } from "media-chrome/react";
+import { SettingsModal } from "../components/SettingsModal";
 import type { PostgresCode } from "../lib/postgres";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import {
@@ -2256,9 +2257,8 @@ export function PostgresSourceVideoCodingView({
       ) : null}
 
       {deletingCodeRow ? (
-        <div className="modal-overlay" onClick={() => !deletingCode && setDeletingCodeId(null)}>
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-code-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="delete-code-title">Delete Code</h2>
+        <SettingsModal title="Delete Code" onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
+          <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
               Delete <strong>{deletingCodeRow.label}</strong>?
             </p>
@@ -2266,16 +2266,16 @@ export function PostgresSourceVideoCodingView({
               This removes the code from the codebook and clears it from existing annotations.
             </p>
             {deleteCodeError ? <p className="auth-error">{deleteCodeError}</p> : null}
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
-                Cancel
-              </button>
-              <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
-                {deletingCode ? "Deleting..." : "Delete Code"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
+              {deletingCode ? "Deleting..." : "Delete Code"}
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       <PostgresSourceAnnotationContextMenu
@@ -2292,9 +2292,13 @@ export function PostgresSourceVideoCodingView({
       />
 
       {frameSourceDraft ? (
-        <div className="modal-overlay" onClick={cancelFrameSourceDraft}>
-          <div className="modal modal--wide media-player-frame-source-modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Approve Frame Source</h2>
+        <SettingsModal
+          title="Approve Frame Source"
+          onClose={cancelFrameSourceDraft}
+          closeDisabled={frameExtracting || saving}
+          modalClassName="modal--wide media-player-frame-source-modal"
+        >
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy" style={{ marginTop: 0, marginBottom: 16 }}>
               Review this extracted frame before adding it as an image source.
             </p>
@@ -2317,20 +2321,20 @@ export function PostgresSourceVideoCodingView({
               />
             </label>
             {frameExtractError ? <p className="auth-error">{frameExtractError}</p> : null}
-            <div className="form-actions">
-              <button className="btn" onClick={cancelFrameSourceDraft} disabled={frameExtracting || saving}>
-                Cancel
-              </button>
-              <button
-                className="btn btn--primary"
-                onClick={() => void approveFrameSourceDraft()}
-                disabled={frameExtracting || saving || !frameSourceDraft.title.trim()}
-              >
-                {frameExtracting || saving ? "Creating..." : "Approve and Create"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={cancelFrameSourceDraft} disabled={frameExtracting || saving}>
+              Cancel
+            </button>
+            <button
+              className="btn btn--primary"
+              onClick={() => void approveFrameSourceDraft()}
+              disabled={frameExtracting || saving || !frameSourceDraft.title.trim()}
+            >
+              {frameExtracting || saving ? "Creating..." : "Approve and Create"}
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {editingAnnotation && canEditAnnotations ? (
@@ -2376,22 +2380,25 @@ export function PostgresSourceVideoCodingView({
       ) : null}
 
       {clipDeleteConfirmation && canEditAnnotations ? (
-        <div className="modal-overlay" onClick={() => !saving && setClipDeleteConfirmation(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete clip annotation?</h2>
+        <SettingsModal
+          title="Delete clip annotation?"
+          onClose={() => setClipDeleteConfirmation(null)}
+          closeDisabled={saving}
+        >
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               This will remove the selected coded clip from this source.
             </p>
-            <div className="form-actions">
-              <button className="btn" onClick={() => setClipDeleteConfirmation(null)} disabled={saving}>
-                Cancel
-              </button>
-              <button className="btn btn--danger" onClick={() => void confirmClipAnnotationDelete()} disabled={saving}>
-                {saving ? "Deleting..." : "Delete"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setClipDeleteConfirmation(null)} disabled={saving}>
+              Cancel
+            </button>
+            <button className="btn btn--danger" onClick={() => void confirmClipAnnotationDelete()} disabled={saving}>
+              {saving ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
     </div>
   );

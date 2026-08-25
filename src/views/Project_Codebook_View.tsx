@@ -3,6 +3,7 @@ import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { HelpIcon, PlusIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
@@ -560,10 +561,9 @@ export function NewCodeModal({
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>{resolvedTitle}</h2>
-        <form className="form" onSubmit={handleSubmit}>
+    <SettingsModal title={resolvedTitle} onClose={onClose} closeDisabled={loading}>
+      <form className="form" onSubmit={handleSubmit}>
+        <div className="app-settings-modal-body">
 
           <label className="form-label">
             {t("projectCodebook.modal.codeName")}
@@ -628,17 +628,15 @@ export function NewCodeModal({
           </label>
 
           {error && <p className="auth-error">{error}</p>}
-
-          <div className="form-actions">
-            <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
-            <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
-              {loading ? t("projectCodebook.statuses.saving") : resolvedSubmitLabel}
-            </button>
-          </div>
-
-        </form>
-      </div>
-    </div>
+        </div>
+        <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+          <button type="button" className="btn" onClick={onClose} disabled={loading}>{t("common.cancel")}</button>
+          <button type="submit" className="btn btn--primary" disabled={loading || !label.trim()}>
+            {loading ? t("projectCodebook.statuses.saving") : resolvedSubmitLabel}
+          </button>
+        </div>
+      </form>
+    </SettingsModal>
   );
 }
 
@@ -911,25 +909,28 @@ export function CodebookView({
           onSave={handlePostgresCodeSave}
         />
         {confirmDelete && (
-          <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
-            <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <h2>{t("projectCodebook.deleteModal.title")}</h2>
+          <SettingsModal
+            title={t("projectCodebook.deleteModal.title")}
+            onClose={() => setConfirmDelete(null)}
+            closeDisabled={deleteLoading}
+          >
+            <div className="app-settings-modal-body">
               <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
                 {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
               </p>
               <p className="modal-warning-text">
                 {t("projectCodebook.deleteModal.warning")}
               </p>
-              <div className="form-actions" style={{ marginTop: 24 }}>
-                <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-                  {t("common.cancel")}
-                </button>
-                <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                  {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
-                </button>
-              </div>
             </div>
-          </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
+                {t("common.cancel")}
+              </button>
+              <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+                {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
+              </button>
+            </div>
+          </SettingsModal>
         )}
       </>
     );
@@ -1054,9 +1055,12 @@ export function CodebookView({
       </div>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("projectCodebook.help.title")}</h2>
+        <SettingsModal
+          title={t("projectCodebook.help.title")}
+          onClose={() => setHelpOpen(false)}
+          modalClassName="modal--help"
+        >
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">
               {t("projectCodebook.help.line1")}
             </p>
@@ -1066,13 +1070,13 @@ export function CodebookView({
             <p className="users-guide-copy">
               {t("projectCodebook.help.line3")}
             </p>
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                {t("common.close")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              {t("common.close")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {/* Context menu */}
@@ -1148,25 +1152,28 @@ export function CodebookView({
 
       {/* Delete confirmation */}
       {confirmDelete && (
-        <div className="modal-overlay" onClick={() => !deleteLoading && setConfirmDelete(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{t("projectCodebook.deleteModal.title")}</h2>
+        <SettingsModal
+          title={t("projectCodebook.deleteModal.title")}
+          onClose={() => setConfirmDelete(null)}
+          closeDisabled={deleteLoading}
+        >
+          <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
               {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
             </p>
             <p className="modal-warning-text">
               {t("projectCodebook.deleteModal.warning")}
             </p>
-            <div className="form-actions" style={{ marginTop: 24 }}>
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-                {t("common.cancel")}
-              </button>
-              <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
+              {t("common.cancel")}
+            </button>
+            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
+              {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
 
       {/* New Code modal */}

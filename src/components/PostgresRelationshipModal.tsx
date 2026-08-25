@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import type { PostgresRelationshipAttributeDefinition, PostgresRelationshipType } from "../lib/postgres";
+import { SettingsModal } from "./SettingsModal";
 
 export type PostgresRelationshipEndpointOption = {
   key: string;
@@ -9,7 +10,7 @@ export type PostgresRelationshipEndpointOption = {
   type: string;
 };
 
-type RelationshipTab = "details" | "graphics" | "attributes";
+type RelationshipTab = "details" | "graphics" | "attributes" | "timeline";
 type RelationshipGraphicMode = "inherit" | "select";
 
 const DEFAULT_RELATIONSHIP_COLOR = "#355070";
@@ -265,6 +266,7 @@ export function PostgresRelationshipModal({
       ? "select"
       : "inherit",
   );
+  const timelineAttributeDefinitions = attributeDefinitions.filter((definition) => (definition.timelineRole ?? "").trim());
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     const fromIsValid = availableFromEndpoints.some((option) => option.key === fromEndpointKey);
@@ -298,26 +300,11 @@ export function PostgresRelationshipModal({
   }
 
   return (
-    <div className="modal-overlay" onClick={() => !submitting && onClose()}>
-      <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-title-bar">
-          <div>
-            <h2>{title}</h2>
-          </div>
-          <button
-            type="button"
-            className="modal-icon-close"
-            onClick={onClose}
-            disabled={submitting}
-            aria-label="Close"
-            title="Close"
-          >
-            x
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="form">
+    <SettingsModal title={title} onClose={onClose} closeDisabled={submitting} modalClassName="modal--wide">
+      <form onSubmit={handleSubmit} className="form">
+        <div className="app-settings-modal-body">
           <div className="segmented-control modal-segmented-control" role="tablist" aria-label={ariaLabel}>
-            {(["details", "graphics", "attributes"] as const).map((nextTab) => (
+            {(["details", "graphics", "attributes", "timeline"] as const).map((nextTab) => (
               <button
                 key={nextTab}
                 type="button"
@@ -485,6 +472,32 @@ export function PostgresRelationshipModal({
                 </>
               )}
             </>
+          ) : tab === "timeline" ? (
+            timelineAttributeDefinitions.length > 0 ? (
+              <div className="case-detail-attributes-table-wrap">
+                <table className="case-detail-attributes-table">
+                  <tbody>
+                    {timelineAttributeDefinitions.map((definition) => (
+                      <tr key={definition.id}>
+                        <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                        <td className="case-detail-attributes-value">
+                          {definition.dataType === "categorical" ? (
+                            <select className="form-input" value={attributeValues[definition.id] ?? ""} onChange={(event) => setAttributeValues((current) => ({ ...current, [definition.id]: event.target.value }))}>
+                              <option value="">-</option>
+                              {definition.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                          ) : (
+                            <input className="form-input" type={definition.dataType === "number" ? "number" : definition.dataType === "datetime" ? "datetime-local" : "text"} step={definition.dataType === "number" ? "any" : undefined} value={attributeValues[definition.id] ?? ""} onChange={(event) => setAttributeValues((current) => ({ ...current, [definition.id]: event.target.value }))} />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="auth-hint" style={{ marginTop: 0 }}>No timeline fields have been configured for this relationship type yet.</p>
+            )
           ) : attributeDefinitions.length > 0 ? (
             <div className="case-detail-attributes-table-wrap">
               <table className="case-detail-attributes-table">
@@ -511,13 +524,13 @@ export function PostgresRelationshipModal({
             <p className="auth-hint" style={{ marginTop: 0 }}>No shared attributes for this relationship type yet.</p>
           )}
           {validationWarning ? <p className="auth-error">{validationWarning}</p> : error ? <p className="auth-error">{error}</p> : null}
-          <div className="modal-actions">
+        </div>
+        <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="submit" className="btn btn--primary" disabled={submitting || submitDisabled}>
               {submitting ? "Saving..." : submitLabel}
             </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      </form>
+    </SettingsModal>
   );
 }

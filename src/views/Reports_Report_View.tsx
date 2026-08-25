@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 
 export function ReportView() {
@@ -187,26 +188,27 @@ export function ReportView() {
       </section>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(e) => e.stopPropagation()}>
-            <h2>Report Help</h2>
-            <div className="app-settings-modal-body">
-                <p className="settings-section-desc">
-                  Review summary cards, inspect code-count comparisons, inspect document-level quotation breakdowns, and export the report as markdown.
-                </p>
-                <ul className="settings-help-list">
-                  <li>Use this page as a lightweight project-wide summary report. Read the overall counts first, then move into the code and document breakdowns for detail.</li>
-                  <li>This is a synthesized readout of existing project content, not a separate editable report-configuration page.</li>
-                  <li>Current project content such as codes, annotations, documents, and memos, plus export-as-markdown behavior, affect what appears here.</li>
-                </ul>
-              <div className="form-actions">
-                <button type="button" className="btn" onClick={() => setHelpOpen(false)}>
-                  Close
-                </button>
-              </div>
-            </div>
+        <SettingsModal
+          title="Report Help"
+          onClose={() => setHelpOpen(false)}
+          modalClassName="modal--help"
+        >
+          <div className="app-settings-modal-body">
+            <p className="settings-section-desc">
+              Review summary cards, inspect code-count comparisons, inspect document-level quotation breakdowns, and export the report as markdown.
+            </p>
+            <ul className="settings-help-list">
+              <li>Use this page as a lightweight project-wide summary report. Read the overall counts first, then move into the code and document breakdowns for detail.</li>
+              <li>This is a synthesized readout of existing project content, not a separate editable report-configuration page.</li>
+              <li>Current project content such as codes, annotations, documents, and memos, plus export-as-markdown behavior, affect what appears here.</li>
+            </ul>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
       )}
     </div>
   );

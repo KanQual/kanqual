@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { readAppSettings } from "../lib/appSettings";
@@ -77,7 +78,7 @@ export type PostgresAiAssistChatViewProps = {
   currentProjectUser: PostgresProjectUser | null;
   isProjectAdmin: boolean;
   onNavigate: (
-    screen: "sources" | "code-text" | "annotations" | "codebook" | "memos" | "objects" | "relationships" | "project-settings",
+    screen: "sources" | "code-text" | "annotations" | "codebook" | "memos" | "objects" | "relationships" | "app-settings",
     target?: {
       sourceId?: string | null;
       annotationId?: string | null;
@@ -908,7 +909,7 @@ export function PostgresAiAssistChatView({
       return;
     }
     if (kind === "project-description") {
-      onNavigate("project-settings");
+      onNavigate("app-settings");
       setChatError("");
       return;
     }
@@ -1306,22 +1307,8 @@ export function PostgresAiAssistChatView({
       </header>
 
       {helpOpen && (
-        <div className="modal-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="modal modal--help" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-title-bar">
-              <div>
-                <h2>{t("aiAssist.chat.help.title")}</h2>
-              </div>
-              <button
-                type="button"
-                className="modal-icon-close"
-                onClick={() => setHelpOpen(false)}
-                aria-label={t("common.close")}
-                title={t("common.close")}
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal title={t("aiAssist.chat.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">{t("aiAssist.chat.help.line1")}</p>
             <p className="users-guide-copy">{t("aiAssist.chat.help.line2")}</p>
             <p className="users-guide-copy">{t("aiAssist.chat.help.line3")}</p>
@@ -1329,7 +1316,7 @@ export function PostgresAiAssistChatView({
               Owners, editors, and administrators can view all project chats; coders and viewers only see their own.
             </p>
           </div>
-        </div>
+        </SettingsModal>
       )}
 
       <section className="ai-chat-layout">
@@ -1591,27 +1578,16 @@ export function PostgresAiAssistChatView({
       </section>
 
       {citationModal ? (
-        <div className="modal-overlay" onClick={() => setCitationModal(null)}>
-          <div className="modal modal--wide ai-citation-detail-modal" onClick={(event) => event.stopPropagation()}>
-            <div className={`annotate-card-header ai-citation-detail-header${["text-segment", "annotation", "object", "relationship"].includes(getCitationKind(citationModal.citation)) ? " ai-citation-detail-header--plain" : ""}`}>
-              <div>
-                <h2>Citation [{citationModal.index + 1}]</h2>
-                {!["text-segment", "annotation", "object", "relationship"].includes(getCitationKind(citationModal.citation)) ? (
-                  <p className="backup-field-hint">
-                    {formatCitationKindLabel(getCitationKind(citationModal.citation), t)}
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="ai-citation-detail-close"
-                onClick={() => setCitationModal(null)}
-                aria-label="Close citation"
-                title="Close"
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal
+          title={`Citation [${citationModal.index + 1}]`}
+          subtitle={
+            !["text-segment", "annotation", "object", "relationship"].includes(getCitationKind(citationModal.citation))
+              ? formatCitationKindLabel(getCitationKind(citationModal.citation), t)
+              : undefined
+          }
+          onClose={() => setCitationModal(null)}
+          modalClassName="modal--wide ai-citation-detail-modal"
+        >
             <div className="ai-citation-detail-body">
               {getCitationKind(citationModal.citation) === "text-segment" ? (
                 <>
@@ -1720,27 +1696,12 @@ export function PostgresAiAssistChatView({
                 Open
               </button>
             </div>
-          </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {contextPickerOpen && (
-        <div className="modal-overlay" onClick={() => setContextPickerOpen(false)}>
-          <div className="modal modal--wide" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-title-bar">
-              <div>
-                <h2>{t("aiAssist.chat.addContextTitle")}</h2>
-              </div>
-              <button
-                type="button"
-                className="modal-icon-close"
-                onClick={() => setContextPickerOpen(false)}
-                aria-label={t("common.close")}
-                title={t("common.close")}
-              >
-                x
-              </button>
-            </div>
+        <SettingsModal title={t("aiAssist.chat.addContextTitle")} onClose={() => setContextPickerOpen(false)} modalClassName="modal--wide">
+          <div className="app-settings-modal-body">
             <p className="users-guide-copy">{t("aiAssist.chat.addContextBody")}</p>
             <div className="form-label" style={{ marginBottom: 16 }}>
               <span style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>Context Mode</span>
@@ -1921,13 +1882,13 @@ export function PostgresAiAssistChatView({
                 </div>
               </>
             )}
-            <div className="modal-actions">
-              <button type="button" className="btn btn--primary" onClick={() => setContextPickerOpen(false)}>
-                {t("aiAssist.chat.done")}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setContextPickerOpen(false)}>
+              {t("aiAssist.chat.done")}
+            </button>
+          </div>
+        </SettingsModal>
       )}
     </div>
   );
