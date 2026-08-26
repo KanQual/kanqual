@@ -639,6 +639,38 @@ export type PostgresSourceAttributeValue = {
   sortOrder: number;
 };
 
+export type PostgresTimelineGroup = {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  outlineColor: string;
+  backgroundColor: string;
+  shape: string;
+  itemFill: string;
+  itemFillTransparency: number;
+  backgroundFill: string;
+  textSize: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PostgresTimelineItemGroupAssignment = {
+  itemKind: "source" | "object" | "relationship";
+  itemId: string;
+  groupId: string;
+  updatedAt: string;
+};
+
+export type PostgresTimelineGroupRowOrder = {
+  groupKey: string;
+  sortOrder: number;
+  updatedAt: string;
+};
+
 export type SavePostgresSourceAttributeResult = {
   attributeDefinition: PostgresSourceAttributeDefinition;
   values: PostgresSourceAttributeValue[];
@@ -1709,6 +1741,86 @@ export async function listPostgresAttributeValueHistory(data: {
   attributeDefinitionId: string;
 }): Promise<PostgresAttributeValueHistoryEntry[]> {
   return invoke<PostgresAttributeValueHistoryEntry[]>("list_postgres_experiment_attribute_value_history_command", {
+    request: data,
+  });
+}
+
+export async function listPostgresTimelineGroups(projectId: string): Promise<PostgresTimelineGroup[]> {
+  return invoke<PostgresTimelineGroup[]>("list_postgres_experiment_timeline_groups_command", {
+    projectId,
+  });
+}
+
+export async function listPostgresTimelineItemGroupAssignments(
+  projectId: string,
+): Promise<PostgresTimelineItemGroupAssignment[]> {
+  return invoke<PostgresTimelineItemGroupAssignment[]>("list_postgres_experiment_timeline_item_group_assignments_command", {
+    projectId,
+  });
+}
+
+export async function listPostgresTimelineGroupRowOrders(
+  projectId: string,
+): Promise<PostgresTimelineGroupRowOrder[]> {
+  return invoke<PostgresTimelineGroupRowOrder[]>("list_postgres_experiment_timeline_group_row_orders_command", {
+    projectId,
+  });
+}
+
+export async function savePostgresTimelineGroup(data: {
+  projectId: string;
+  groupId?: string | null;
+  name: string;
+  description?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  outlineColor?: string | null;
+  backgroundColor?: string | null;
+  itemFill?: string | null;
+  itemFillTransparency?: number | null;
+  backgroundFill?: string | null;
+  textSize?: string | null;
+}): Promise<PostgresTimelineGroup> {
+  return invoke<PostgresTimelineGroup>("save_postgres_experiment_timeline_group_command", {
+    request: data,
+  });
+}
+
+export async function deletePostgresTimelineGroup(projectId: string, groupId: string): Promise<void> {
+  await invoke("delete_postgres_experiment_timeline_group_command", {
+    projectId,
+    groupId,
+  });
+}
+
+export async function reorderPostgresTimelineGroups(projectId: string, groupIds: string[]): Promise<PostgresTimelineGroup[]> {
+  return invoke<PostgresTimelineGroup[]>("reorder_postgres_experiment_timeline_groups_command", {
+    request: {
+      projectId,
+      groupIds,
+    },
+  });
+}
+
+export async function reorderPostgresTimelineGroupRows(
+  projectId: string,
+  groupKeys: string[],
+): Promise<PostgresTimelineGroupRowOrder[]> {
+  return invoke<PostgresTimelineGroupRowOrder[]>("reorder_postgres_experiment_timeline_group_rows_command", {
+    request: {
+      projectId,
+      groupKeys,
+    },
+  });
+}
+
+export async function setPostgresTimelineItemGroup(data: {
+  projectId: string;
+  itemKind: "source" | "object" | "relationship";
+  itemId: string;
+  groupId?: string | null;
+}): Promise<void> {
+  await invoke("set_postgres_experiment_timeline_item_group_command", {
     request: data,
   });
 }

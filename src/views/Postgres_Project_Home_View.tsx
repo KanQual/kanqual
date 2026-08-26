@@ -87,10 +87,15 @@ import {
   listPostgresRelationshipTypes,
   listPostgresReports,
   listPostgresSavedDrawingSummaries,
+  listPostgresTimelineGroups,
+  listPostgresTimelineGroupRowOrders,
+  listPostgresTimelineItemGroupAssignments,
   listPostgresSourceAttributeDefinitions,
   listPostgresSourceAttributeValues,
   listPostgresSources,
   listPostgresSourceTypeSettings,
+  reorderPostgresTimelineGroups,
+  reorderPostgresTimelineGroupRows,
   savePostgresObject,
   savePostgresObjectType,
   savePostgresProjectCanvasState,
@@ -98,6 +103,9 @@ import {
   savePostgresRelationshipType,
   savePostgresSavedDrawing,
   savePostgresSourceAttribute,
+  savePostgresTimelineGroup,
+  setPostgresTimelineItemGroup,
+  deletePostgresTimelineGroup,
   removePostgresObjectImage,
   removePostgresObjectTypeImage,
   updatePostgresCode,
@@ -126,6 +134,9 @@ import {
   type PostgresSourceAttributeDefinition,
   type PostgresSourceAttributeValue,
   type PostgresSourceTypeSetting,
+  type PostgresTimelineGroup,
+  type PostgresTimelineGroupRowOrder,
+  type PostgresTimelineItemGroupAssignment,
   POSTGRES_PROJECT_CHANGED_EVENT,
 } from "../lib/postgres";
 import type {
@@ -325,6 +336,7 @@ type PostgresHomeCanvasContextMenuState = {
   x: number;
   y: number;
   canvasPosition: PostgresCanvasPoint | null;
+  timelineGroupId?: string;
 };
 type PostgresProjectHomeTab = "details" | "graph" | "timeline";
 type PostgresHomeCanvasDeleteTarget = {
@@ -3356,7 +3368,6 @@ const TIMELINE_FIELD_OPTIONS: Array<{
   { role: "timeline_end", label: "End", dataTypes: ["datetime"], defaultName: "Timeline end" },
   { role: "timeline_label", label: "Label", dataTypes: ["text", "categorical"], defaultName: "Timeline label" },
   { role: "timeline_item_type", label: "Item Type", dataTypes: ["categorical"], defaultName: "Timeline item type" },
-  { role: "timeline_group", label: "Group", dataTypes: ["text", "categorical"], defaultName: "Timeline group" },
 ];
 
 function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], dataType: SharedAttributeDraft["dataType"]): boolean {
@@ -3367,6 +3378,14 @@ function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], da
 
 function defaultTimelineAttributeOptions(role: TimelineFieldRole): string[] {
   return role === "timeline_item_type" ? ["Point", "Range"] : [];
+}
+
+function formatTimelineModalDateTime(value: string | Date | null | undefined): string {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+  return local.toISOString().slice(0, 16);
 }
 
 function TypeScopedAttributeModal({
@@ -3602,6 +3621,9 @@ export function PostgresProjectHomeView({
   const [sourceTypeSettings, setSourceTypeSettings] = useState<PostgresSourceTypeSetting[]>([]);
   const [sourceAttributeDefinitions, setSourceAttributeDefinitions] = useState<PostgresSourceAttributeDefinition[]>([]);
   const [sourceAttributeValues, setSourceAttributeValues] = useState<PostgresSourceAttributeValue[]>([]);
+  const [timelineGroups, setTimelineGroups] = useState<PostgresTimelineGroup[]>([]);
+  const [timelineGroupRowOrders, setTimelineGroupRowOrders] = useState<PostgresTimelineGroupRowOrder[]>([]);
+  const [timelineItemGroupAssignments, setTimelineItemGroupAssignments] = useState<PostgresTimelineItemGroupAssignment[]>([]);
   const [codes, setCodes] = useState<PostgresCode[]>([]);
   const [annotationSummaries, setAnnotationSummaries] = useState<PostgresAnnotationSummary[]>([]);
   const [memoCount, setMemoCount] = useState(0);
@@ -3612,6 +3634,7 @@ export function PostgresProjectHomeView({
   const [homeCanvasContextMenu, setHomeCanvasContextMenu] = useState<PostgresHomeCanvasContextMenuState | null>(null);
   const [homeCanvasDeleteTarget, setHomeCanvasDeleteTarget] = useState<PostgresHomeCanvasDeleteTarget | null>(null);
   const [createSourceOpen, setCreateSourceOpen] = useState(false);
+  const [pendingTimelineCreateStart, setPendingTimelineCreateStart] = useState("");
   const [editingHomeCanvasSourceId, setEditingHomeCanvasSourceId] = useState<string | null>(null);
   const [sourceImportSettings, setSourceImportSettings] = useState({
     defaultMode: readAppSettings().documentImport.defaultMode,
@@ -3949,6 +3972,34 @@ export function PostgresProjectHomeView({
     () => POSTGRES_SOURCE_KIND_OPTIONS.map((sourceKind) => sourceKind.id),
     [],
   );
+  const sourceTimelineStartDefinitionForKind = useCallback((sourceKind: string) => {
+    const normalizedSourceKind = normalizePostgresSourceKind(sourceKind);
+    return sourceAttributeDefinitions.find((definition) =>
+      definition.timelineRole === "timeline_start"
+      && definition.dataType === "datetime"
+      && definition.sourceKinds.some((kind) => normalizePostgresSourceKind(kind) === normalizedSourceKind)
+    ) ?? null;
+  }, [sourceAttributeDefinitions]);
+  const objectTimelineStartValuesForType = useCallback((objectTypeIdValue: string, timelineStart?: string) => {
+    const formatted = formatTimelineModalDateTime(timelineStart);
+    if (!formatted) return {};
+    const startDefinition = objectAttributeDefinitions.find((definition) =>
+      definition.objectTypeId === objectTypeIdValue
+      && definition.timelineRole === "timeline_start"
+      && definition.dataType === "datetime"
+    );
+    return startDefinition ? { [startDefinition.id]: formatted } : {};
+  }, [objectAttributeDefinitions]);
+  const relationshipTimelineStartValuesForType = useCallback((relationshipTypeIdValue: string, timelineStart?: string) => {
+    const formatted = formatTimelineModalDateTime(timelineStart);
+    if (!formatted) return {};
+    const startDefinition = relationshipAttributeDefinitions.find((definition) =>
+      definition.relationshipTypeId === relationshipTypeIdValue
+      && definition.timelineRole === "timeline_start"
+      && definition.dataType === "datetime"
+    );
+    return startDefinition ? { [startDefinition.id]: formatted } : {};
+  }, [relationshipAttributeDefinitions]);
   const selectedCreateObjectType = objectTypeById.get(objectTypeId) ?? null;
   const selectedEditObjectType = objectTypeById.get(editingObjectTypeId) ?? null;
   useEffect(() => {
@@ -4565,9 +4616,10 @@ export function PostgresProjectHomeView({
     ? codes.find((code) => code.id === editingHomeCanvasCodeId) ?? null
     : null;
 
-  function openCreateSourceModal() {
+  function openCreateSourceModal(timelineStart?: string) {
     setGraphError("");
     setHomeCanvasCreateMenuOpen(false);
+    setPendingTimelineCreateStart(formatTimelineModalDateTime(timelineStart));
     setCreateSourceOpen(true);
   }
 
@@ -4594,7 +4646,8 @@ export function PostgresProjectHomeView({
     setCreateObjectTypeOpen(true);
   }
 
-  function openCreateObjectModal(prefilledTypeId?: string, preferredPosition?: PostgresCanvasPoint) {
+  function openCreateObjectModal(prefilledTypeId?: string, preferredPosition?: PostgresCanvasPoint, timelineStart?: string) {
+    const formattedTimelineStart = formatTimelineModalDateTime(timelineStart);
     const nextTypeId = prefilledTypeId
       ?? (selectedObjectTypeFilter !== "all" ? selectedObjectTypeFilter : objectTypeId)
       ?? "";
@@ -4609,9 +4662,10 @@ export function PostgresProjectHomeView({
     setObjectImageStoragePath("");
     setDraftObjectPendingImage(null);
     setObjectGraphicMode("inherit");
-    setObjectAttributeValues({});
+    setObjectAttributeValues(objectTimelineStartValuesForType(nextTypeId || objectTypes[0]?.id || "", formattedTimelineStart));
     setCreateObjectModalTab("details");
     setGraphError("");
+    setPendingTimelineCreateStart(formattedTimelineStart);
     setPendingCanvasNodePosition(preferredPosition ?? null);
     setCreateObjectOpen(true);
   }
@@ -4701,7 +4755,8 @@ export function PostgresProjectHomeView({
     )?.id ?? relationshipTypeId;
   }
 
-  function openCreateRelationshipModal(prefill?: { fromEndpointKey?: string; toEndpointKey?: string }) {
+  function openCreateRelationshipModal(prefill?: { fromEndpointKey?: string; toEndpointKey?: string; timelineStart?: string }) {
+    const formattedTimelineStart = formatTimelineModalDateTime(prefill?.timelineStart);
     setHomeCanvasCreateMenuOpen(false);
     setCreateRelationshipModalTab("details");
     const nextRelationshipTypeId =
@@ -4716,9 +4771,78 @@ export function PostgresProjectHomeView({
     setRelationshipLineWeightOverride(null);
     setRelationshipArrowheadOverride("");
     setRelationshipColorOverride("");
-    setRelationshipAttributeValues({});
+    setRelationshipAttributeValues(relationshipTimelineStartValuesForType(nextRelationshipTypeId, formattedTimelineStart));
     setGraphError("");
+    setPendingTimelineCreateStart(formattedTimelineStart);
     setCreateRelationshipOpen(true);
+  }
+
+  function setCreateObjectTypeId(nextValue: SetStateAction<string>) {
+    const nextTypeId = typeof nextValue === "function" ? nextValue(objectTypeId) : nextValue;
+    setObjectTypeId(nextValue);
+    if (!pendingTimelineCreateStart) return;
+    setObjectAttributeValues((current) => ({
+      ...current,
+      ...objectTimelineStartValuesForType(nextTypeId, pendingTimelineCreateStart),
+    }));
+  }
+
+  function setCreateRelationshipTypeId(nextValue: SetStateAction<string>) {
+    const nextTypeId = typeof nextValue === "function" ? nextValue(relationshipTypeId) : nextValue;
+    setRelationshipTypeId(nextValue);
+    if (!pendingTimelineCreateStart) return;
+    setRelationshipAttributeValues((current) => ({
+      ...current,
+      ...relationshipTimelineStartValuesForType(nextTypeId, pendingTimelineCreateStart),
+    }));
+  }
+
+  async function applyTimelineStartToCreatedSources(createdSources: PostgresSource[], timelineStart: string) {
+    if (!timelineStart || createdSources.length === 0) return;
+    const createdByDefinitionId = new Map<string, PostgresSource[]>();
+    for (const source of createdSources) {
+      const definition = sourceTimelineStartDefinitionForKind(source.sourceKind);
+      if (!definition) continue;
+      const current = createdByDefinitionId.get(definition.id) ?? [];
+      current.push(source);
+      createdByDefinitionId.set(definition.id, current);
+    }
+    for (const [definitionId, matchingSources] of createdByDefinitionId) {
+      const definition = sourceAttributeDefinitions.find((entry) => entry.id === definitionId);
+      if (!definition) continue;
+      await savePostgresSourceAttribute({
+        projectId: project.id,
+        attributeDefinitionId: definition.id,
+        name: definition.name,
+        dataType: definition.dataType,
+        description: definition.description,
+        options: definition.options,
+        timelineRole: definition.timelineRole ?? "",
+        sourceKinds: definition.sourceKinds,
+        values: sources
+          .map((source) => ({
+            sourceId: source.id,
+            value: sourceAttributeValues.find((value) =>
+              value.sourceId === source.id && value.attributeDefinitionId === definition.id
+            )?.value ?? "",
+          }))
+          .concat(matchingSources.map((source) => ({ sourceId: source.id, value: timelineStart }))),
+      });
+      setSourceAttributeValues((current) => {
+        const matchingSourceIds = new Set(matchingSources.map((source) => source.id));
+        return current
+          .filter((value) => !(matchingSourceIds.has(value.sourceId) && value.attributeDefinitionId === definition.id))
+          .concat(matchingSources.map((source) => ({
+            id: `${source.id}:${definition.id}`,
+            sourceId: source.id,
+            attributeDefinitionId: definition.id,
+            attributeName: definition.name,
+            dataType: definition.dataType,
+            value: timelineStart,
+            sortOrder: definition.sortOrder,
+          })));
+      });
+    }
   }
 
   function openCreateRelationshipTypeModal() {
@@ -5011,7 +5135,11 @@ export function PostgresProjectHomeView({
       if (createdSources.length > 0) {
         setSources((current) => [...current, ...createdSources]);
       }
+      if (pendingTimelineCreateStart) {
+        await applyTimelineStartToCreatedSources(createdSources, pendingTimelineCreateStart);
+      }
       setCreateSourceOpen(false);
+      setPendingTimelineCreateStart("");
     } catch (saveError) {
       setGraphError(saveError instanceof Error ? saveError.message : "Failed to save source.");
     } finally {
@@ -5177,10 +5305,12 @@ export function PostgresProjectHomeView({
 
   function closeCreateRelationshipModal() {
     setCreateRelationshipOpen(false);
+    setPendingTimelineCreateStart("");
   }
 
   function closeCreateObjectModal() {
     setPendingCanvasNodePosition(null);
+    setPendingTimelineCreateStart("");
     setDraftObjectPendingImage(null);
     setObjectImageStoragePath("");
     setCreateObjectOpen(false);
@@ -6750,6 +6880,7 @@ export function PostgresProjectHomeView({
   const handleHomeTimelineItemContextMenu = useCallback((context: {
     kind: "source" | "object" | "relationship";
     id: string;
+    groupId: string;
     clientX: number;
     clientY: number;
   }) => {
@@ -6759,9 +6890,110 @@ export function PostgresProjectHomeView({
       x: Math.min(context.clientX, window.innerWidth - 190),
       y: Math.min(context.clientY, window.innerHeight - 170),
       canvasPosition: null,
+      timelineGroupId: context.groupId,
     });
     setHomeCanvasCreateMenuOpen(false);
   }, []);
+  const handleSaveTimelineGroup = useCallback(async (draft: {
+    groupId?: string | null;
+    name: string;
+    description: string;
+    icon: string;
+    color: string;
+    outlineColor: string;
+    backgroundColor: string;
+    itemFill: string;
+    itemFillTransparency: number;
+    backgroundFill: string;
+    textSize: string;
+  }) => {
+    const savedGroup = await savePostgresTimelineGroup({
+      projectId: project.id,
+      groupId: draft.groupId,
+      name: draft.name,
+      description: draft.description,
+      icon: draft.icon,
+      color: draft.color,
+      outlineColor: draft.outlineColor,
+      backgroundColor: draft.backgroundColor,
+      itemFill: draft.itemFill,
+      itemFillTransparency: draft.itemFillTransparency,
+      backgroundFill: draft.backgroundFill,
+      textSize: draft.textSize,
+    });
+    setTimelineGroups((current) => {
+      const withoutGroup = current.filter((group) => group.id !== savedGroup.id);
+      return [...withoutGroup, savedGroup].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+    });
+    return savedGroup;
+  }, [project.id]);
+  const handleDeleteTimelineGroup = useCallback(async (groupId: string) => {
+    await deletePostgresTimelineGroup(project.id, groupId);
+    setTimelineGroups((current) => current.filter((group) => group.id !== groupId));
+    setTimelineItemGroupAssignments((current) => current.filter((assignment) => assignment.groupId !== groupId));
+  }, [project.id]);
+  const handleReorderTimelineGroups = useCallback(async (groupIds: string[]) => {
+    if (groupIds.length === 0) return;
+    setTimelineGroups((current) => {
+      const orderById = new Map(groupIds.map((groupId, index) => [groupId, index]));
+      return current
+        .map((group) => orderById.has(group.id) ? { ...group, sortOrder: orderById.get(group.id) ?? group.sortOrder } : group)
+        .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+    });
+    const savedGroups = await reorderPostgresTimelineGroups(project.id, groupIds);
+    setTimelineGroups(savedGroups);
+  }, [project.id]);
+  const handleReorderTimelineGroupRows = useCallback(async (groupKeys: string[]) => {
+    if (groupKeys.length === 0) return;
+    setTimelineGroupRowOrders(groupKeys.map((groupKey, index) => ({
+      groupKey,
+      sortOrder: index,
+      updatedAt: new Date().toISOString(),
+    })));
+    const savedRowOrders = await reorderPostgresTimelineGroupRows(project.id, groupKeys);
+    setTimelineGroupRowOrders(savedRowOrders);
+  }, [project.id]);
+  const handleSetTimelineItemGroup = useCallback(async (request: {
+    itemKind: "source" | "object" | "relationship";
+    itemId: string;
+    groupId: string | null;
+  }) => {
+    await setPostgresTimelineItemGroup({
+      projectId: project.id,
+      itemKind: request.itemKind,
+      itemId: request.itemId,
+      groupId: request.groupId,
+    });
+    setTimelineItemGroupAssignments((current) => {
+      const withoutItem = current.filter((assignment) => !(assignment.itemKind === request.itemKind && assignment.itemId === request.itemId));
+      if (!request.groupId) return withoutItem;
+      return [
+        ...withoutItem,
+        {
+          itemKind: request.itemKind,
+          itemId: request.itemId,
+          groupId: request.groupId,
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+    });
+  }, [project.id]);
+  const handleRemoveHomeTimelineItemFromGroup = useCallback(async (menu: PostgresHomeCanvasContextMenuState) => {
+    if (
+      !canManageSources
+      || !menu.id
+      || !menu.timelineGroupId?.startsWith("group:")
+      || (menu.kind !== "source" && menu.kind !== "object" && menu.kind !== "relationship")
+    ) {
+      return;
+    }
+    closeHomeCanvasContextMenu();
+    await handleSetTimelineItemGroup({
+      itemKind: menu.kind,
+      itemId: menu.id,
+      groupId: null,
+    });
+  }, [canManageSources, closeHomeCanvasContextMenu, handleSetTimelineItemGroup]);
   const toggleHomeCanvasSelection = useCallback((
     section: PostgresHomeCanvasSection,
     setSelection: Dispatch<SetStateAction<Set<string>>>,
@@ -7022,6 +7254,9 @@ export function PostgresProjectHomeView({
           nextAnnotationSummaries,
           nextObjectAttributeDefinitions,
           nextRelationshipAttributeDefinitions,
+          nextTimelineGroups,
+          nextTimelineGroupRowOrders,
+          nextTimelineItemGroupAssignments,
           nextSavedDrawings,
           nextCanvasState,
           nextMemos,
@@ -7037,6 +7272,9 @@ export function PostgresProjectHomeView({
           listPostgresAnnotationSummaries(project.id),
           listPostgresObjectAttributeDefinitions(project.id),
           listPostgresRelationshipAttributeDefinitions(project.id),
+          listPostgresTimelineGroups(project.id),
+          listPostgresTimelineGroupRowOrders(project.id),
+          listPostgresTimelineItemGroupAssignments(project.id),
           listPostgresSavedDrawingSummaries(project.id),
           getPostgresProjectCanvasState(project.id),
           listPostgresMemos(project.id),
@@ -7053,6 +7291,9 @@ export function PostgresProjectHomeView({
           setAnnotationSummaries(nextAnnotationSummaries);
           setObjectAttributeDefinitions(nextObjectAttributeDefinitions);
           setRelationshipAttributeDefinitions(nextRelationshipAttributeDefinitions);
+          setTimelineGroups(nextTimelineGroups);
+          setTimelineGroupRowOrders(nextTimelineGroupRowOrders);
+          setTimelineItemGroupAssignments(nextTimelineItemGroupAssignments);
           setSavedDrawings(nextSavedDrawings);
           setMemoCount(nextMemos.length);
           setReportCount(nextReports.length);
@@ -7084,6 +7325,9 @@ export function PostgresProjectHomeView({
           setAnnotationSummaries([]);
           setObjectAttributeDefinitions([]);
           setRelationshipAttributeDefinitions([]);
+          setTimelineGroups([]);
+          setTimelineGroupRowOrders([]);
+          setTimelineItemGroupAssignments([]);
           setSavedDrawings([]);
           setMemoCount(0);
           setReportCount(0);
@@ -7486,6 +7730,9 @@ export function PostgresProjectHomeView({
         nextRelationshipAttributeDefinitions,
         nextSourceAttributeDefinitions,
         nextSourceAttributeValues,
+        nextTimelineGroups,
+        nextTimelineGroupRowOrders,
+        nextTimelineItemGroupAssignments,
         nextSavedDrawings,
         nextCanvasState,
         nextMemos,
@@ -7503,6 +7750,9 @@ export function PostgresProjectHomeView({
         listPostgresRelationshipAttributeDefinitions(project.id),
         listPostgresSourceAttributeDefinitions(project.id),
         listPostgresSourceAttributeValues(project.id),
+        listPostgresTimelineGroups(project.id),
+        listPostgresTimelineGroupRowOrders(project.id),
+        listPostgresTimelineItemGroupAssignments(project.id),
         listPostgresSavedDrawingSummaries(project.id),
         getPostgresProjectCanvasState(project.id),
         listPostgresMemos(project.id),
@@ -7520,6 +7770,9 @@ export function PostgresProjectHomeView({
       setRelationshipAttributeDefinitions(nextRelationshipAttributeDefinitions);
       setSourceAttributeDefinitions(nextSourceAttributeDefinitions);
       setSourceAttributeValues(nextSourceAttributeValues);
+      setTimelineGroups(nextTimelineGroups);
+      setTimelineGroupRowOrders(nextTimelineGroupRowOrders);
+      setTimelineItemGroupAssignments(nextTimelineItemGroupAssignments);
       setSavedDrawings(nextSavedDrawings);
       setMemoCount(nextMemos.length);
       setReportCount(nextReports.length);
@@ -7551,6 +7804,9 @@ export function PostgresProjectHomeView({
       setRelationshipAttributeDefinitions([]);
       setSourceAttributeDefinitions([]);
       setSourceAttributeValues([]);
+      setTimelineGroups([]);
+      setTimelineGroupRowOrders([]);
+      setTimelineItemGroupAssignments([]);
       setSavedDrawings([]);
       setMemoCount(0);
       setReportCount(0);
@@ -8218,7 +8474,14 @@ export function PostgresProjectHomeView({
       setCreateObjectTypeOpen(false);
       setSelectedObjectTypeFilter(savedObjectType.id);
       setObjectTypeId(savedObjectType.id);
-      if (!createObjectOpen) {
+      if (createObjectOpen && pendingTimelineCreateStart) {
+        const timelineStartDefinition = saved.attributeDefinitions.find((definition) =>
+          definition.timelineRole === "timeline_start" && definition.dataType === "datetime"
+        );
+        if (timelineStartDefinition) {
+          setObjectAttributeValues((current) => ({ ...current, [timelineStartDefinition.id]: pendingTimelineCreateStart }));
+        }
+      } else if (!createObjectOpen) {
         setObjectTitle("");
         setObjectDescription("");
         setObjectAttributeValues({});
@@ -8848,7 +9111,14 @@ export function PostgresProjectHomeView({
       initializeRelationshipTypeAttributeEditor(null);
       setCreateRelationshipTypeOpen(false);
       setRelationshipTypeId(saved.relationshipType.id);
-      setRelationshipAttributeValues({});
+      if (createRelationshipOpen && pendingTimelineCreateStart) {
+        const timelineStartDefinition = saved.attributeDefinitions.find((definition) =>
+          definition.timelineRole === "timeline_start" && definition.dataType === "datetime"
+        );
+        setRelationshipAttributeValues(timelineStartDefinition ? { [timelineStartDefinition.id]: pendingTimelineCreateStart } : {});
+      } else {
+        setRelationshipAttributeValues({});
+      }
       setGraphNotice(`Created relationship type "${saved.relationshipType.name}".`);
     } catch (error) {
       pendingLocalGraphRefreshSkipsRef.current = 0;
@@ -9206,25 +9476,35 @@ export function PostgresProjectHomeView({
                   onShowReports={() => setActiveScreen("reports")}
                 />
               ) : projectHomeTab === "timeline" ? (
-                <PostgresProjectHomeTimelineView
-                  sources={sources}
-                  sourceTypeSettings={sourceTypeSettings}
-                  sourceAttributeDefinitions={sourceAttributeDefinitions}
-                  sourceAttributeValues={sourceAttributeValues}
-                  objects={objects}
-                  objectTypes={objectTypes}
-                  objectAttributeDefinitions={objectAttributeDefinitions}
-                  relationships={relationships}
-                  relationshipTypes={relationshipTypes}
-                  relationshipAttributeDefinitions={relationshipAttributeDefinitions}
-                  canManageSources={canManageSources}
-                  canManageAnnotations={canManageAnnotations}
-                  onCreateSource={openCreateSourceModal}
-                  onCreateObject={openCreateObjectModal}
-                  onCreateRelationship={() => openCreateRelationshipModal()}
-                  onCreateCode={openCreateCodeModal}
-                  onTimelineItemContextMenu={handleHomeTimelineItemContextMenu}
-                />
+                <div className="project-home-timeline-tab">
+                  <PostgresProjectHomeTimelineView
+                    sources={sources}
+                    sourceTypeSettings={sourceTypeSettings}
+                    sourceAttributeDefinitions={sourceAttributeDefinitions}
+                    sourceAttributeValues={sourceAttributeValues}
+                    objects={objects}
+                    objectTypes={objectTypes}
+                    objectAttributeDefinitions={objectAttributeDefinitions}
+                    relationships={relationships}
+                    relationshipTypes={relationshipTypes}
+                    relationshipAttributeDefinitions={relationshipAttributeDefinitions}
+                    timelineGroups={timelineGroups}
+                    timelineGroupRowOrders={timelineGroupRowOrders}
+                    timelineItemGroupAssignments={timelineItemGroupAssignments}
+                    canManageSources={canManageSources}
+                    canManageAnnotations={canManageAnnotations}
+                    onCreateSource={(timelineStart) => openCreateSourceModal(timelineStart)}
+                    onCreateObject={(timelineStart) => openCreateObjectModal(undefined, undefined, timelineStart)}
+                    onCreateRelationship={(timelineStart) => openCreateRelationshipModal({ timelineStart })}
+                    onCreateCode={openCreateCodeModal}
+                    onTimelineItemContextMenu={handleHomeTimelineItemContextMenu}
+                    onSaveTimelineGroup={handleSaveTimelineGroup}
+                    onDeleteTimelineGroup={handleDeleteTimelineGroup}
+                    onReorderTimelineGroups={handleReorderTimelineGroups}
+                    onReorderTimelineGroupRows={handleReorderTimelineGroupRows}
+                    onSetTimelineItemGroup={handleSetTimelineItemGroup}
+                  />
+                </div>
               ) : (
                 <PostgresProjectHomeGraphView
                   createControlRef={homeCanvasCreateControlRef}
@@ -12252,6 +12532,22 @@ export function PostgresProjectHomeView({
                       Edit
                     </button>
                   )}
+                  {homeCanvasContextMenu.timelineGroupId !== undefined ? (
+                    <button
+                      type="button"
+                      className={
+                        canManageSources && homeCanvasContextMenu.timelineGroupId.startsWith("group:")
+                          ? "context-menu-item"
+                          : "context-menu-item context-menu-item--disabled"
+                      }
+                      disabled={!canManageSources || !homeCanvasContextMenu.timelineGroupId.startsWith("group:")}
+                      onClick={() => {
+                        void handleRemoveHomeTimelineItemFromGroup(homeCanvasContextMenu);
+                      }}
+                    >
+                      Remove from group
+                    </button>
+                  ) : null}
                   {getHomeCanvasDeleteTarget(homeCanvasContextMenu) ? (
                     <button
                       type="button"
@@ -12445,6 +12741,7 @@ export function PostgresProjectHomeView({
               onCancel={() => {
                 if (graphSubmitting) return;
                 setCreateSourceOpen(false);
+                setPendingTimelineCreateStart("");
                 setGraphError("");
               }}
               onSave={handleCreateSource}
@@ -12521,7 +12818,7 @@ export function PostgresProjectHomeView({
               attributeValues: objectAttributeValues,
               onClose: closeCreateObjectModal,
               onSubmit: handleCreateObject,
-              setObjectTypeId,
+              setObjectTypeId: setCreateObjectTypeId,
               setTitleValue: setObjectTitle,
               setDescriptionValue: setObjectDescription,
               setColorOverride: setObjectColorOverride,
@@ -12582,7 +12879,7 @@ export function PostgresProjectHomeView({
               submitLabel="Add relationship"
               relationshipTypes={relationshipTypes}
               relationshipTypeId={relationshipTypeId}
-              setRelationshipTypeId={setRelationshipTypeId}
+              setRelationshipTypeId={setCreateRelationshipTypeId}
               selectedType={selectedRelationshipType}
               fromEndpointKey={fromObjectId}
               setFromEndpointKey={setFromObjectId}

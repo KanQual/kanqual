@@ -138,10 +138,7 @@ fn prune_postgres_connection_cache(
         !clients.is_empty()
     });
 
-    let mut total_idle = cached_connections
-        .values()
-        .map(Vec::len)
-        .sum::<usize>();
+    let mut total_idle = cached_connections.values().map(Vec::len).sum::<usize>();
     if total_idle <= POSTGRES_IDLE_CONNECTION_CACHE_MAX_TOTAL {
         return;
     }
@@ -190,7 +187,9 @@ impl Drop for CachedPostgresClient {
                 return;
             }
             let mut cached_connections = self.cache.lock().unwrap();
-            let clients = cached_connections.entry(self.cache_key.clone()).or_default();
+            let clients = cached_connections
+                .entry(self.cache_key.clone())
+                .or_default();
             if clients.len() < POSTGRES_IDLE_CONNECTION_CACHE_MAX_PER_KEY {
                 clients.push(client);
             }
@@ -3385,6 +3384,37 @@ async fn ensure_postgres_experiment_project_schema(
                     CONSTRAINT event_objects_end_after_start
                         CHECK (end_at IS NULL OR end_at >= start_at)
                 );
+                CREATE TABLE IF NOT EXISTS timeline_groups (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    icon TEXT NOT NULL DEFAULT 'group',
+                    color TEXT NOT NULL DEFAULT '#355070',
+                    outline_color TEXT NOT NULL DEFAULT '',
+                    background_color TEXT NOT NULL DEFAULT '#e8edf3',
+                    shape TEXT NOT NULL DEFAULT 'rounded',
+                    item_fill TEXT NOT NULL DEFAULT 'filled',
+                    item_fill_transparency INTEGER NOT NULL DEFAULT 86,
+                    background_fill TEXT NOT NULL DEFAULT 'tint',
+                    text_size TEXT NOT NULL DEFAULT 'regular',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS timeline_item_group_assignments (
+                    item_kind TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    group_id TEXT NOT NULL REFERENCES timeline_groups(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (item_kind, item_id)
+                );
+                CREATE TABLE IF NOT EXISTS timeline_group_row_orders (
+                    group_key TEXT PRIMARY KEY,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
                 ",
             )
             .await
@@ -3396,6 +3426,12 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE project_users ADD COLUMN IF NOT EXISTS app_user_id TEXT;
                 ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS project_name TEXT NOT NULL DEFAULT '';
                 ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS project_description TEXT NOT NULL DEFAULT '';
+                ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'rounded';
+                ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS outline_color TEXT NOT NULL DEFAULT '';
+                ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS item_fill TEXT NOT NULL DEFAULT 'filled';
+                ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS item_fill_transparency INTEGER NOT NULL DEFAULT 86;
+                ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS background_fill TEXT NOT NULL DEFAULT 'tint';
+                ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS text_size TEXT NOT NULL DEFAULT 'regular';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS system_key TEXT;
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'rounded';
@@ -6546,6 +6582,44 @@ struct PostgresExperimentSourceAttributeValue {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PostgresExperimentTimelineGroup {
+    id: String,
+    project_id: String,
+    name: String,
+    description: String,
+    icon: String,
+    color: String,
+    outline_color: String,
+    background_color: String,
+    shape: String,
+    item_fill: String,
+    item_fill_transparency: i32,
+    background_fill: String,
+    text_size: String,
+    sort_order: i32,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresExperimentTimelineItemGroupAssignment {
+    item_kind: String,
+    item_id: String,
+    group_id: String,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresExperimentTimelineGroupRowOrder {
+    group_key: String,
+    sort_order: i32,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PostgresExperimentCode {
     id: String,
     project_id: String,
@@ -7162,6 +7236,57 @@ struct PostgresExperimentAttributeValueHistoryEntry {
     changed_by_name: String,
     metadata_json: String,
     changed_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavePostgresExperimentTimelineGroupRequest {
+    project_id: String,
+    #[serde(default)]
+    group_id: Option<String>,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    color: Option<String>,
+    #[serde(default)]
+    outline_color: Option<String>,
+    #[serde(default)]
+    background_color: Option<String>,
+    #[serde(default)]
+    item_fill: Option<String>,
+    #[serde(default)]
+    item_fill_transparency: Option<i32>,
+    #[serde(default)]
+    background_fill: Option<String>,
+    #[serde(default)]
+    text_size: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetPostgresExperimentTimelineItemGroupRequest {
+    project_id: String,
+    item_kind: String,
+    item_id: String,
+    #[serde(default)]
+    group_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReorderPostgresExperimentTimelineGroupsRequest {
+    project_id: String,
+    group_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReorderPostgresExperimentTimelineGroupRowsRequest {
+    project_id: String,
+    group_keys: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -8990,9 +9115,7 @@ fn normalize_postgres_experiment_timeline_role(value: Option<&str>) -> Result<St
             Ok("timeline_label".to_string())
         }
         "item_type" | "type" | "timeline_item_type" => Ok("timeline_item_type".to_string()),
-        "group" | "lane" | "timeline_group" | "timeline_lane" => {
-            Ok("timeline_group".to_string())
-        }
+        "group" | "lane" | "timeline_group" | "timeline_lane" => Ok("timeline_group".to_string()),
         _ => Err("Choose a valid timeline attribute role.".to_string()),
     }
 }
@@ -14344,7 +14467,9 @@ async fn ensure_postgres_experiment_source_type_settings_table_for_client(
             ",
         )
         .await
-        .map_err(|e| format!("Could not create PostgreSQL experiment source type settings table: {e}"))?;
+        .map_err(|e| {
+            format!("Could not create PostgreSQL experiment source type settings table: {e}")
+        })?;
     Ok(())
 }
 
@@ -14383,9 +14508,9 @@ async fn load_postgres_experiment_source_type_settings_for_client(
     Ok(source_kinds
         .iter()
         .map(|source_kind| {
-            by_kind
-                .remove(*source_kind)
-                .unwrap_or_else(|| default_postgres_experiment_source_type_setting(project_id, source_kind))
+            by_kind.remove(*source_kind).unwrap_or_else(|| {
+                default_postgres_experiment_source_type_setting(project_id, source_kind)
+            })
         })
         .collect())
 }
@@ -16325,7 +16450,9 @@ async fn import_postgres_experiment_source_type_image_command(
         .await?
         .into_iter()
         .find(|setting| setting.source_kind == source_kind)
-        .unwrap_or_else(|| default_postgres_experiment_source_type_setting(&project_id, &source_kind));
+        .unwrap_or_else(|| {
+            default_postgres_experiment_source_type_setting(&project_id, &source_kind)
+        });
     let image_storage_path = write_postgres_experiment_project_image_file(
         &project,
         "source-types",
@@ -16414,7 +16541,9 @@ async fn remove_postgres_experiment_source_type_image_command(
         .await?
         .into_iter()
         .find(|setting| setting.source_kind == source_kind)
-        .unwrap_or_else(|| default_postgres_experiment_source_type_setting(&project_id, &source_kind));
+        .unwrap_or_else(|| {
+            default_postgres_experiment_source_type_setting(&project_id, &source_kind)
+        });
     let empty_path = String::new();
     let row = client
         .query_one(
@@ -17567,6 +17696,605 @@ async fn list_postgres_experiment_attribute_value_history_command(
 
     connection_task.abort();
     Ok(history)
+}
+
+#[tauri::command]
+async fn list_postgres_experiment_timeline_groups_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+) -> Result<Vec<PostgresExperimentTimelineGroup>, String> {
+    let project_id = project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let rows = client
+        .query(
+            "
+            SELECT id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+            FROM timeline_groups
+            WHERE project_id = $1
+            ORDER BY sort_order ASC, LOWER(name) ASC
+            ",
+            &[&project_id],
+        )
+        .await
+        .map_err(|e| format!("Could not load PostgreSQL experiment timeline groups: {e}"))?;
+    connection_task.abort();
+    Ok(rows
+        .into_iter()
+        .map(|row| PostgresExperimentTimelineGroup {
+            id: row.get(0),
+            project_id: row.get(1),
+            name: row.get(2),
+            description: row.get(3),
+            icon: row.get(4),
+            color: row.get(5),
+            outline_color: row.get(6),
+            background_color: row.get(7),
+            shape: row.get(8),
+            item_fill: row.get(9),
+            item_fill_transparency: row.get(10),
+            background_fill: row.get(11),
+            text_size: row.get(12),
+            sort_order: row.get(13),
+            created_at: row.get(14),
+            updated_at: row.get(15),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn list_postgres_experiment_timeline_item_group_assignments_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+) -> Result<Vec<PostgresExperimentTimelineItemGroupAssignment>, String> {
+    let project_id = project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let rows = client
+        .query(
+            "
+            SELECT a.item_kind, a.item_id, a.group_id, a.updated_at::text
+            FROM timeline_item_group_assignments a
+            INNER JOIN timeline_groups g ON g.id = a.group_id
+            WHERE g.project_id = $1
+            ORDER BY a.updated_at DESC
+            ",
+            &[&project_id],
+        )
+        .await
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment timeline group assignments: {e}")
+        })?;
+    connection_task.abort();
+    Ok(rows
+        .into_iter()
+        .map(|row| PostgresExperimentTimelineItemGroupAssignment {
+            item_kind: row.get(0),
+            item_id: row.get(1),
+            group_id: row.get(2),
+            updated_at: row.get(3),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn list_postgres_experiment_timeline_group_row_orders_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+) -> Result<Vec<PostgresExperimentTimelineGroupRowOrder>, String> {
+    let project_id = project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let rows = client
+        .query(
+            "
+            SELECT group_key, sort_order, updated_at::text
+            FROM timeline_group_row_orders
+            ORDER BY sort_order ASC, group_key ASC
+            ",
+            &[],
+        )
+        .await
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment timeline group row order: {e}")
+        })?;
+    connection_task.abort();
+    Ok(rows
+        .into_iter()
+        .map(|row| PostgresExperimentTimelineGroupRowOrder {
+            group_key: row.get(0),
+            sort_order: row.get(1),
+            updated_at: row.get(2),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn save_postgres_experiment_timeline_group_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: SavePostgresExperimentTimelineGroupRequest,
+) -> Result<PostgresExperimentTimelineGroup, String> {
+    let project_id = request.project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+    let name = request.name.trim().to_string();
+    if name.is_empty() {
+        return Err("Timeline group name is required.".to_string());
+    }
+    let description = request.description.unwrap_or_default().trim().to_string();
+    let icon = request
+        .icon
+        .unwrap_or_else(|| "group".to_string())
+        .trim()
+        .to_lowercase();
+    let color = request
+        .color
+        .unwrap_or_else(|| "#355070".to_string())
+        .trim()
+        .to_string();
+    let outline_color = request
+        .outline_color
+        .unwrap_or_else(|| color.clone())
+        .trim()
+        .to_string();
+    let background_color = request
+        .background_color
+        .unwrap_or_else(|| "#e8edf3".to_string())
+        .trim()
+        .to_string();
+    let shape = "rounded".to_string();
+    let item_fill = match request
+        .item_fill
+        .unwrap_or_else(|| "filled".to_string())
+        .trim()
+        .to_lowercase()
+        .as_str()
+    {
+        "outline" => "outline".to_string(),
+        _ => "filled".to_string(),
+    };
+    let item_fill_transparency = request
+        .item_fill_transparency
+        .unwrap_or(86)
+        .clamp(0, 100);
+    let background_fill_raw = request
+        .background_fill
+        .unwrap_or_else(|| "tint".to_string())
+        .trim()
+        .to_lowercase();
+    let background_fill = if let Some(raw_percent) = background_fill_raw.strip_prefix("transparency:") {
+        match raw_percent.trim().parse::<u8>() {
+            Ok(percent) if percent <= 100 => format!("transparency:{}", percent),
+            _ => "tint".to_string(),
+        }
+    } else if let Some(raw_percent) = background_fill_raw.strip_prefix("opacity:") {
+        match raw_percent.trim().parse::<u8>() {
+            Ok(percent) if percent <= 100 => format!("opacity:{}", percent),
+            _ => "tint".to_string(),
+        }
+    } else {
+        match background_fill_raw.as_str() {
+            "solid" => "solid".to_string(),
+            "none" | "transparent" => "none".to_string(),
+            _ => "tint".to_string(),
+        }
+    };
+    let text_size = match request
+        .text_size
+        .unwrap_or_else(|| "regular".to_string())
+        .trim()
+        .to_lowercase()
+        .as_str()
+    {
+        "small" => "small".to_string(),
+        "large" => "large".to_string(),
+        _ => "regular".to_string(),
+    };
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let group_id = request
+        .group_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(generate_identifier);
+    let exists = client
+        .query_opt(
+            "SELECT id FROM timeline_groups WHERE id = $1 AND project_id = $2",
+            &[&group_id, &project_id],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment timeline group: {e}"))?
+        .is_some();
+    let row = if exists {
+        client
+            .query_one(
+                "
+                UPDATE timeline_groups
+                SET name = $3, description = $4, icon = $5, color = $6, outline_color = $7, background_color = $8, shape = $9, item_fill = $10, item_fill_transparency = $11, background_fill = $12, text_size = $13, updated_at = NOW()
+                WHERE id = $1 AND project_id = $2
+                RETURNING id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+                ",
+                &[&group_id, &project_id, &name, &description, &icon, &color, &outline_color, &background_color, &shape, &item_fill, &item_fill_transparency, &background_fill, &text_size],
+            )
+            .await
+            .map_err(|e| format!("Could not update PostgreSQL experiment timeline group: {e}"))?
+    } else {
+        let sort_order: i32 = client
+            .query_one(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM timeline_groups WHERE project_id = $1",
+                &[&project_id],
+            )
+            .await
+            .map_err(|e| format!("Could not prepare PostgreSQL experiment timeline group order: {e}"))?
+            .get(0);
+        client
+            .query_one(
+                "
+                INSERT INTO timeline_groups (id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                RETURNING id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+                ",
+                &[&group_id, &project_id, &name, &description, &icon, &color, &outline_color, &background_color, &shape, &item_fill, &item_fill_transparency, &background_fill, &text_size, &sort_order],
+            )
+            .await
+            .map_err(|e| format!("Could not create PostgreSQL experiment timeline group: {e}"))?
+    };
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "timeline_group",
+        &group_id,
+        if exists { "updated" } else { "created" },
+    );
+    connection_task.abort();
+    Ok(PostgresExperimentTimelineGroup {
+        id: row.get(0),
+        project_id: row.get(1),
+        name: row.get(2),
+        description: row.get(3),
+        icon: row.get(4),
+        color: row.get(5),
+        outline_color: row.get(6),
+        background_color: row.get(7),
+        shape: row.get(8),
+        item_fill: row.get(9),
+        item_fill_transparency: row.get(10),
+        background_fill: row.get(11),
+        text_size: row.get(12),
+        sort_order: row.get(13),
+        created_at: row.get(14),
+        updated_at: row.get(15),
+    })
+}
+
+#[tauri::command]
+async fn delete_postgres_experiment_timeline_group_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+    group_id: String,
+) -> Result<(), String> {
+    let project_id = project_id.trim().to_string();
+    let group_id = group_id.trim().to_string();
+    if project_id.is_empty() || group_id.is_empty() {
+        return Err("Project id and timeline group id are required.".to_string());
+    }
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    client
+        .execute(
+            "DELETE FROM timeline_groups WHERE id = $1 AND project_id = $2",
+            &[&group_id, &project_id],
+        )
+        .await
+        .map_err(|e| format!("Could not delete PostgreSQL experiment timeline group: {e}"))?;
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "timeline_group",
+        &group_id,
+        "deleted",
+    );
+    connection_task.abort();
+    Ok(())
+}
+
+#[tauri::command]
+async fn reorder_postgres_experiment_timeline_groups_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: ReorderPostgresExperimentTimelineGroupsRequest,
+) -> Result<Vec<PostgresExperimentTimelineGroup>, String> {
+    let project_id = request.project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+    let group_ids = request
+        .group_ids
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if group_ids.is_empty() {
+        return Err("At least one timeline group is required.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
+    let tx = client.transaction().await.map_err(|e| {
+        format!("Could not prepare PostgreSQL experiment timeline group order: {e}")
+    })?;
+    for (index, group_id) in group_ids.iter().enumerate() {
+        tx.execute(
+            "
+            UPDATE timeline_groups
+            SET sort_order = $3, updated_at = NOW()
+            WHERE project_id = $1 AND id = $2
+            ",
+            &[&project_id, group_id, &(index as i32)],
+        )
+        .await
+        .map_err(|e| format!("Could not update PostgreSQL experiment timeline group order: {e}"))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|e| format!("Could not save PostgreSQL experiment timeline group order: {e}"))?;
+
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "timeline_group",
+        &project_id,
+        "reordered",
+    );
+
+    let rows = client
+        .query(
+            "
+            SELECT id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+            FROM timeline_groups
+            WHERE project_id = $1
+            ORDER BY sort_order ASC, LOWER(name) ASC
+            ",
+            &[&project_id],
+        )
+        .await
+        .map_err(|e| format!("Could not load PostgreSQL experiment timeline groups: {e}"))?;
+    connection_task.abort();
+    Ok(rows
+        .into_iter()
+        .map(|row| PostgresExperimentTimelineGroup {
+            id: row.get(0),
+            project_id: row.get(1),
+            name: row.get(2),
+            description: row.get(3),
+            icon: row.get(4),
+            color: row.get(5),
+            outline_color: row.get(6),
+            background_color: row.get(7),
+            shape: row.get(8),
+            item_fill: row.get(9),
+            item_fill_transparency: row.get(10),
+            background_fill: row.get(11),
+            text_size: row.get(12),
+            sort_order: row.get(13),
+            created_at: row.get(14),
+            updated_at: row.get(15),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn reorder_postgres_experiment_timeline_group_rows_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: ReorderPostgresExperimentTimelineGroupRowsRequest,
+) -> Result<Vec<PostgresExperimentTimelineGroupRowOrder>, String> {
+    let project_id = request.project_id.trim().to_string();
+    if project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+    let group_keys = request
+        .group_keys
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if group_keys.is_empty() {
+        return Err("At least one timeline row is required.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (mut client, connection_task) =
+        connect_postgres_database(&app, &project.database_name).await?;
+    let tx = client.transaction().await.map_err(|e| {
+        format!("Could not prepare PostgreSQL experiment timeline row order: {e}")
+    })?;
+    for (index, group_key) in group_keys.iter().enumerate() {
+        tx.execute(
+            "
+            INSERT INTO timeline_group_row_orders (group_key, sort_order, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (group_key)
+            DO UPDATE SET sort_order = EXCLUDED.sort_order, updated_at = NOW()
+            ",
+            &[group_key, &(index as i32)],
+        )
+        .await
+        .map_err(|e| format!("Could not update PostgreSQL experiment timeline row order: {e}"))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|e| format!("Could not save PostgreSQL experiment timeline row order: {e}"))?;
+
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "timeline_group",
+        &project_id,
+        "reordered",
+    );
+
+    let rows = client
+        .query(
+            "
+            SELECT group_key, sort_order, updated_at::text
+            FROM timeline_group_row_orders
+            ORDER BY sort_order ASC, group_key ASC
+            ",
+            &[],
+        )
+        .await
+        .map_err(|e| {
+            format!("Could not load PostgreSQL experiment timeline group row order: {e}")
+        })?;
+    connection_task.abort();
+    Ok(rows
+        .into_iter()
+        .map(|row| PostgresExperimentTimelineGroupRowOrder {
+            group_key: row.get(0),
+            sort_order: row.get(1),
+            updated_at: row.get(2),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn set_postgres_experiment_timeline_item_group_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: SetPostgresExperimentTimelineItemGroupRequest,
+) -> Result<(), String> {
+    let project_id = request.project_id.trim().to_string();
+    let item_kind = request.item_kind.trim().to_lowercase();
+    let item_id = request.item_id.trim().to_string();
+    let group_id = request.group_id.unwrap_or_default().trim().to_string();
+    if project_id.is_empty() || item_id.is_empty() {
+        return Err("Project id and item id are required.".to_string());
+    }
+    if !matches!(item_kind.as_str(), "source" | "object" | "relationship") {
+        return Err("Choose a valid timeline item kind.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let _session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    if group_id.is_empty() {
+        client
+            .execute(
+                "DELETE FROM timeline_item_group_assignments WHERE item_kind = $1 AND item_id = $2",
+                &[&item_kind, &item_id],
+            )
+            .await
+            .map_err(|e| {
+                format!("Could not clear PostgreSQL experiment timeline group assignment: {e}")
+            })?;
+    } else {
+        let group_exists = client
+            .query_opt(
+                "SELECT id FROM timeline_groups WHERE id = $1 AND project_id = $2",
+                &[&group_id, &project_id],
+            )
+            .await
+            .map_err(|e| {
+                format!("Could not inspect PostgreSQL experiment timeline group assignment: {e}")
+            })?
+            .is_some();
+        if !group_exists {
+            connection_task.abort();
+            return Err("Timeline group was not found.".to_string());
+        }
+        client
+            .execute(
+                "
+                INSERT INTO timeline_item_group_assignments (item_kind, item_id, group_id)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (item_kind, item_id)
+                DO UPDATE SET group_id = EXCLUDED.group_id, updated_at = NOW()
+                ",
+                &[&item_kind, &item_id, &group_id],
+            )
+            .await
+            .map_err(|e| {
+                format!("Could not save PostgreSQL experiment timeline group assignment: {e}")
+            })?;
+    }
+    emit_postgres_experiment_project_change(
+        &app,
+        &project_id,
+        "timeline_item_group",
+        &item_id,
+        "updated",
+    );
+    connection_task.abort();
+    Ok(())
 }
 
 #[tauri::command]
@@ -21578,8 +22306,10 @@ async fn save_postgres_experiment_object_type_command(
         )
         .await
         .map_err(|e| format!("Could not inspect PostgreSQL experiment object attributes: {e}"))?;
-    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, String, i32)> =
-        HashMap::new();
+    let mut existing_attribute_by_id: HashMap<
+        String,
+        (String, String, String, Vec<String>, String, i32),
+    > = HashMap::new();
     let mut next_sort_order = 0;
     for row in existing_attribute_rows {
         let id: String = row.get(0);
@@ -21653,8 +22383,14 @@ async fn save_postgres_experiment_object_type_command(
             format!("Could not encode PostgreSQL experiment object attribute options: {e}")
         })?;
         if let Some(attribute_id) = attribute_id {
-            let Some((current_name, current_data_type, current_description, current_options, current_timeline_role, _)) =
-                existing_attribute_by_id.get(&attribute_id)
+            let Some((
+                current_name,
+                current_data_type,
+                current_description,
+                current_options,
+                current_timeline_role,
+                _,
+            )) = existing_attribute_by_id.get(&attribute_id)
             else {
                 return Err("One of the object attributes could not be found.".to_string());
             };
@@ -22474,8 +23210,10 @@ async fn save_postgres_experiment_relationship_type_command(
         .map_err(|e| {
             format!("Could not inspect PostgreSQL experiment relationship attributes: {e}")
         })?;
-    let mut existing_attribute_by_id: HashMap<String, (String, String, String, Vec<String>, String, i32)> =
-        HashMap::new();
+    let mut existing_attribute_by_id: HashMap<
+        String,
+        (String, String, String, Vec<String>, String, i32),
+    > = HashMap::new();
     let mut next_sort_order = 0;
     for row in existing_attribute_rows {
         let id: String = row.get(0);
@@ -22537,8 +23275,14 @@ async fn save_postgres_experiment_relationship_type_command(
         let options_json = serde_json::to_string(&options)
             .map_err(|e| format!("Could not encode relationship attribute options: {e}"))?;
         if let Some(attribute_id) = attribute_id {
-            let Some((current_name, current_data_type, current_description, current_options, current_timeline_role, _)) =
-                existing_attribute_by_id.get(&attribute_id)
+            let Some((
+                current_name,
+                current_data_type,
+                current_description,
+                current_options,
+                current_timeline_role,
+                _,
+            )) = existing_attribute_by_id.get(&attribute_id)
             else {
                 return Err("One of the relationship attributes could not be found.".to_string());
             };
@@ -33377,6 +34121,14 @@ pub fn run() {
             list_postgres_experiment_source_attribute_definitions_command,
             list_postgres_experiment_source_attribute_values_command,
             list_postgres_experiment_attribute_value_history_command,
+            list_postgres_experiment_timeline_groups_command,
+            list_postgres_experiment_timeline_item_group_assignments_command,
+            list_postgres_experiment_timeline_group_row_orders_command,
+            save_postgres_experiment_timeline_group_command,
+            delete_postgres_experiment_timeline_group_command,
+            reorder_postgres_experiment_timeline_groups_command,
+            reorder_postgres_experiment_timeline_group_rows_command,
+            set_postgres_experiment_timeline_item_group_command,
             save_postgres_experiment_source_attribute_command,
             delete_postgres_experiment_source_attribute_definition_command,
             list_postgres_experiment_codes_command,

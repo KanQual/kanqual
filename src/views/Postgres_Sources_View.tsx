@@ -1404,7 +1404,6 @@ const TIMELINE_FIELD_OPTIONS: Array<{
   { role: "timeline_end", label: "End", dataTypes: ["datetime"], defaultName: "Timeline end" },
   { role: "timeline_label", label: "Label", dataTypes: ["text", "categorical"], defaultName: "Timeline label" },
   { role: "timeline_item_type", label: "Item Type", dataTypes: ["categorical"], defaultName: "Timeline item type" },
-  { role: "timeline_group", label: "Group", dataTypes: ["text", "categorical"], defaultName: "Timeline group" },
 ];
 
 function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], dataType: SharedAttributeDataType): boolean {

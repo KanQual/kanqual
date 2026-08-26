@@ -97,6 +97,19 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferenc
   initTheme();
 }
 
+function useDisableNativeContextMenu(): void {
+  useEffect(() => {
+    function handleContextMenu(event: MouseEvent) {
+      event.preventDefault();
+    }
+
+    window.addEventListener("contextmenu", handleContextMenu);
+    return () => {
+      window.removeEventListener("contextmenu", handleContextMenu);
+    };
+  }, []);
+}
+
 function PasswordVisibilityIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
@@ -923,6 +936,8 @@ function AuthGate() {
 }
 
 export default function App() {
+  useDisableNativeContextMenu();
+
   return (
     <AuthProvider>
       <I18nProvider>
