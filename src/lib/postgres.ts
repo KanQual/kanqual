@@ -566,6 +566,13 @@ export type PostgresSource = {
   extractedFromVideoSourceId: string;
   extractedFromVideoTimeMs: number | null;
   notes: string;
+  shapeOverride: string;
+  colorOverride: string;
+  outlineColorOverride: string;
+  fillOverride: string;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
+  imageStoragePath: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -579,6 +586,8 @@ export type PostgresSourceTypeSetting = {
   color: string;
   outlineColor: string;
   fill: string;
+  fillTransparency: number;
+  outlineWidth: number;
   imageStoragePath: string;
   createdAt: string;
   updatedAt: string;
@@ -652,6 +661,7 @@ export type PostgresTimelineGroup = {
   itemFill: string;
   itemFillTransparency: number;
   backgroundFill: string;
+  itemTextColor: string;
   textSize: string;
   sortOrder: number;
   createdAt: string;
@@ -860,6 +870,8 @@ export type PostgresObjectType = {
   color: string;
   outlineColor: string;
   fill: string;
+  fillTransparency: number;
+  outlineWidth: number;
   imageStoragePath: string;
   createdAt: string;
   updatedAt: string;
@@ -877,6 +889,8 @@ export type PostgresObject = {
   colorOverride: string;
   outlineColorOverride: string;
   fillOverride: string;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
   imageStoragePath: string;
   eventStartAt: string | null;
   eventEndAt: string | null;
@@ -1575,6 +1589,13 @@ export async function createPostgresSource(data: {
   extractedFromVideoSourceId?: string | null;
   extractedFromVideoTimeMs?: number | null;
   notes?: string | null;
+  shapeOverride?: string | null;
+  colorOverride?: string | null;
+  outlineColorOverride?: string | null;
+  fillOverride?: string | null;
+  fillTransparencyOverride?: number | null;
+  outlineWidthOverride?: number | null;
+  imageStoragePath?: string | null;
 }): Promise<PostgresSource> {
   return invoke<PostgresSource>("create_postgres_experiment_source_command", {
     request: data,
@@ -1595,6 +1616,13 @@ export async function importPostgresSourceFile(data: {
   extractedFromVideoSourceId?: string | null;
   extractedFromVideoTimeMs?: number | null;
   notes?: string | null;
+  shapeOverride?: string | null;
+  colorOverride?: string | null;
+  outlineColorOverride?: string | null;
+  fillOverride?: string | null;
+  fillTransparencyOverride?: number | null;
+  outlineWidthOverride?: number | null;
+  imageStoragePath?: string | null;
 }): Promise<PostgresSource> {
   return invoke<PostgresSource>("import_postgres_experiment_source_file_command", {
     request: data,
@@ -1615,6 +1643,13 @@ export async function updatePostgresSource(data: {
   extractedFromVideoSourceId?: string | null;
   extractedFromVideoTimeMs?: number | null;
   notes?: string | null;
+  shapeOverride?: string | null;
+  colorOverride?: string | null;
+  outlineColorOverride?: string | null;
+  fillOverride?: string | null;
+  fillTransparencyOverride?: number | null;
+  outlineWidthOverride?: number | null;
+  imageStoragePath?: string | null;
 }): Promise<PostgresSource> {
   return invoke<PostgresSource>("update_postgres_experiment_source_command", {
     request: data,
@@ -1645,6 +1680,8 @@ export async function savePostgresSourceTypeSetting(data: {
   color: string;
   outlineColor?: string | null;
   fill: string;
+  fillTransparency?: number | null;
+  outlineWidth?: number | null;
   imageStoragePath?: string | null;
 }): Promise<PostgresSourceTypeSetting> {
   return invoke<PostgresSourceTypeSetting>("save_postgres_experiment_source_type_setting_command", {
@@ -1779,6 +1816,7 @@ export async function savePostgresTimelineGroup(data: {
   itemFill?: string | null;
   itemFillTransparency?: number | null;
   backgroundFill?: string | null;
+  itemTextColor?: string | null;
   textSize?: string | null;
 }): Promise<PostgresTimelineGroup> {
   return invoke<PostgresTimelineGroup>("save_postgres_experiment_timeline_group_command", {
@@ -2309,6 +2347,8 @@ export async function createPostgresObjectType(data: {
   color: string;
   outlineColor?: string | null;
   fill: string;
+  fillTransparency?: number | null;
+  outlineWidth?: number | null;
   imageStoragePath?: string | null;
 }): Promise<PostgresObjectType> {
   return invoke<PostgresObjectType>("create_postgres_experiment_object_type_command", {
@@ -2325,6 +2365,8 @@ export async function updatePostgresObjectType(data: {
   color: string;
   outlineColor?: string | null;
   fill: string;
+  fillTransparency?: number | null;
+  outlineWidth?: number | null;
   imageStoragePath?: string | null;
 }): Promise<PostgresObjectType> {
   return invoke<PostgresObjectType>("update_postgres_experiment_object_type_command", {
@@ -2341,6 +2383,8 @@ export async function savePostgresObjectType(data: {
   color: string;
   outlineColor?: string | null;
   fill: string;
+  fillTransparency?: number | null;
+  outlineWidth?: number | null;
   imageStoragePath?: string | null;
   attributes: Array<{
     id?: string | null;
@@ -2528,6 +2572,8 @@ export async function createPostgresObject(data: {
   colorOverride?: string | null;
   outlineColorOverride?: string | null;
   fillOverride?: string | null;
+  fillTransparencyOverride?: number | null;
+  outlineWidthOverride?: number | null;
   imageStoragePath?: string | null;
   eventStartAt?: string | null;
   eventEndAt?: string | null;
@@ -2555,6 +2601,8 @@ export async function updatePostgresObject(data: {
   colorOverride?: string | null;
   outlineColorOverride?: string | null;
   fillOverride?: string | null;
+  fillTransparencyOverride?: number | null;
+  outlineWidthOverride?: number | null;
   imageStoragePath?: string | null;
   eventStartAt?: string | null;
   eventEndAt?: string | null;
@@ -2582,6 +2630,8 @@ export async function savePostgresObject(data: {
   colorOverride?: string | null;
   outlineColorOverride?: string | null;
   fillOverride?: string | null;
+  fillTransparencyOverride?: number | null;
+  outlineWidthOverride?: number | null;
   imageStoragePath?: string | null;
   eventStartAt?: string | null;
   eventEndAt?: string | null;
@@ -2624,6 +2674,27 @@ export async function removePostgresObjectImage(
   return invoke<PostgresObject>("remove_postgres_experiment_object_image_command", {
     projectId,
     objectId,
+  });
+}
+
+export async function importPostgresSourceImage(data: {
+  projectId: string;
+  sourceId: string;
+  originalFileName: string;
+  fileBytesBase64: string;
+}): Promise<PostgresSource> {
+  return invoke<PostgresSource>("import_postgres_experiment_source_image_command", {
+    request: data,
+  });
+}
+
+export async function removePostgresSourceImage(
+  projectId: string,
+  sourceId: string,
+): Promise<PostgresSource> {
+  return invoke<PostgresSource>("remove_postgres_experiment_source_image_command", {
+    projectId,
+    sourceId,
   });
 }
 

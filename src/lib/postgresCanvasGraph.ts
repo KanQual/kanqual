@@ -148,6 +148,7 @@ export function buildPostgresCanvasCytoscapeElements(args: {
     color: string;
     outlineColor?: string;
     fill: CanvasObjectFill;
+    outlineWidth: number;
     sourceImage?: string;
     sourceImageWidth?: number;
     sourceImageHeight?: number;
@@ -210,7 +211,7 @@ export function buildPostgresCanvasCytoscapeElements(args: {
         outlineColor,
         backgroundColor: appearance.color,
         backgroundOpacity: isFilled ? 1 : 0,
-        borderWidth: isFilled ? 2 : 3,
+        borderWidth: appearance.outlineWidth,
         shadowColor: outlineColor,
         shadowOpacity: isFilled ? 0.18 : 0.1,
         fill: appearance.fill,

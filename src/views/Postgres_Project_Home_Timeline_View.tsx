@@ -1,4 +1,6 @@
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import "vis-timeline/styles/vis-timeline-graph2d.min.css";
 import type { TimelineGroup, TimelineItem } from "vis-timeline";
 import sourceTextOutlineShapeSvg from "../assets/object-shapes/source-text-outline.svg?raw";
@@ -7,8 +9,10 @@ import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
-import { CollaborationIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon } from "../components/AppIcons";
+import { CollaborationIcon, DownloadIcon, FitCornersIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon, ZoomIcon } from "../components/AppIcons";
+import { FilterIcon } from "../components/FilterIcon";
 import { SettingsModal } from "../components/SettingsModal";
+import { getAppDefaults, getStoredOverrides, getStoredTheme } from "../theme";
 import type {
   PostgresObject,
   PostgresObjectAttributeDefinition,
@@ -27,6 +31,30 @@ import type {
 } from "../lib/postgres";
 
 type PostgresProjectTimelineItemKind = "source" | "object" | "relationship";
+type ProjectHomeTimelineSectionKey = "sources" | "objects" | "relationships";
+type ProjectHomeTimelineRow = {
+  id: string;
+  label: string;
+  count: number;
+  selected: boolean;
+  indent?: boolean;
+  onClick?: () => void;
+};
+type TimelineController = {
+  destroy: () => void;
+  fit: (options?: { animation?: boolean }) => void;
+  getEventProperties?: (event: Event) => { time?: Date };
+  getWindow?: () => { start: Date; end: Date };
+  setSelection?: (ids: Array<string | number>) => void;
+  setOptions?: (options: Record<string, unknown>) => void;
+  setWindow?: (start: Date, end: Date, options?: { animation?: boolean }) => void;
+  on?: (eventName: string, callback: (properties: {
+    event?: Event;
+    item?: string | number | null;
+    items?: Array<string | number>;
+    groupId?: string | number | null;
+  }) => void) => void;
+};
 
 type PostgresProjectTimelineEntry = {
   id: string;
@@ -39,6 +67,7 @@ type PostgresProjectTimelineEntry = {
   groupId: string;
   groupLabel: string;
   groupKind: PostgresProjectTimelineItemKind | "custom";
+  typeFilterKey: string;
   start: Date;
   end: Date | null;
   fillColor: string;
@@ -62,6 +91,10 @@ const TIMELINE_RELATIONSHIP_DEFAULT_FILL = "#ede9fe";
 const TIMELINE_RELATIONSHIP_DEFAULT_OUTLINE = "#7c3aed";
 const TIMELINE_DEFAULT_GROUP_COLOR = "#355070";
 const TIMELINE_DEFAULT_GROUP_BACKGROUND = "#e8edf3";
+const TIMELINE_DEFAULT_ITEM_TEXT_COLOR = "#2C3E50";
+const TIMELINE_UNASSIGNED_FILL = "#e5e7eb";
+const TIMELINE_UNASSIGNED_OUTLINE = "#6b7280";
+const TIMELINE_UNASSIGNED_BACKGROUND = "#f3f4f6";
 const TIMELINE_UNASSIGNED_GROUP_ID = "default:unassigned";
 const TIMELINE_UNASSIGNED_GROUP_LABEL = "Unassigned";
 const TIMELINE_APPEARANCE_STORAGE_KEY = "kanqual_project_home_timeline_appearance";
@@ -279,22 +312,40 @@ function normalizeTimelineGroupOption(value: string | null | undefined, allowed:
   return allowed.includes(normalized) ? normalized : fallback;
 }
 
-function loadTimelineAppearanceSettings(): TimelineAppearanceSettings {
+function getDefaultTimelineAppearanceSettings(): TimelineAppearanceSettings {
   if (typeof window === "undefined") return DEFAULT_TIMELINE_APPEARANCE;
+  const theme = getStoredTheme();
+  const themeColors = { ...getAppDefaults(theme), ...getStoredOverrides(theme) };
+  return {
+    ...DEFAULT_TIMELINE_APPEARANCE,
+    backgroundColor: normalizeTimelineColor(
+      themeColors["--timeline-background-color"],
+      DEFAULT_TIMELINE_APPEARANCE.backgroundColor,
+    ),
+    lineColor: normalizeTimelineColor(
+      themeColors["--timeline-line-color"],
+      DEFAULT_TIMELINE_APPEARANCE.lineColor,
+    ),
+  };
+}
+
+function loadTimelineAppearanceSettings(): TimelineAppearanceSettings {
+  const defaults = getDefaultTimelineAppearanceSettings();
+  if (typeof window === "undefined") return defaults;
   try {
     const parsed = JSON.parse(window.localStorage.getItem(TIMELINE_APPEARANCE_STORAGE_KEY) ?? "{}") as Partial<TimelineAppearanceSettings>;
     return {
-      backgroundColor: normalizeTimelineColor(parsed.backgroundColor, DEFAULT_TIMELINE_APPEARANCE.backgroundColor),
-      lineColor: normalizeTimelineColor(parsed.lineColor, DEFAULT_TIMELINE_APPEARANCE.lineColor),
+      backgroundColor: normalizeTimelineColor(parsed.backgroundColor, defaults.backgroundColor),
+      lineColor: normalizeTimelineColor(parsed.lineColor, defaults.lineColor),
       fontSize: normalizeTimelineGroupOption(
         parsed.fontSize,
         TIMELINE_GROUP_TEXT_SIZE_OPTIONS.map((option) => option.value),
-        DEFAULT_TIMELINE_APPEARANCE.fontSize,
+        defaults.fontSize,
       ) as TimelineAppearanceSettings["fontSize"],
-      rowHeight: Math.max(40, Math.min(86, Number(parsed.rowHeight) || DEFAULT_TIMELINE_APPEARANCE.rowHeight)),
+      rowHeight: Math.max(40, Math.min(86, Number(parsed.rowHeight) || defaults.rowHeight)),
     };
   } catch {
-    return DEFAULT_TIMELINE_APPEARANCE;
+    return defaults;
   }
 }
 
@@ -305,15 +356,16 @@ function saveTimelineAppearanceSettings(settings: TimelineAppearanceSettings): v
 
 function timelineItemStyle(fillColor: string, outlineColor: string, group: PostgresTimelineGroup | null = null): string {
   if (!group) {
-    return `--timeline-event-fill: ${fillColor}; --timeline-event-outline: ${outlineColor}; background-color: ${fillColor}; border-color: ${outlineColor};`;
+    return `--timeline-event-fill: ${TIMELINE_UNASSIGNED_FILL}; --timeline-event-outline: ${TIMELINE_UNASSIGNED_OUTLINE}; background-color: ${TIMELINE_UNASSIGNED_FILL}; border-color: ${TIMELINE_UNASSIGNED_OUTLINE}; color: ${TIMELINE_DEFAULT_ITEM_TEXT_COLOR};`;
   }
   const groupColor = normalizeTimelineColor(group.color, fillColor);
   const groupOutlineColor = normalizeTimelineColor(group.outlineColor || group.color, outlineColor);
+  const itemTextColor = normalizeTimelineColor(group.itemTextColor, TIMELINE_DEFAULT_ITEM_TEXT_COLOR);
   const fillMode = normalizeTimelineGroupOption(group.itemFill, ["filled", "outline"], "filled");
   const fillTransparency = normalizeTimelinePercent(group.itemFillTransparency, 86);
   const fillOpacity = 100 - fillTransparency;
   const itemFillColor = fillMode === "outline" || fillOpacity <= 0 ? "transparent" : translucentTimelineFill(groupColor, timelineAlphaHexFromPercent(fillOpacity));
-  return `--timeline-event-fill: ${itemFillColor}; --timeline-event-outline: ${groupOutlineColor}; background-color: ${itemFillColor}; border-color: ${groupOutlineColor};`;
+  return `--timeline-event-fill: ${itemFillColor}; --timeline-event-outline: ${groupOutlineColor}; background-color: ${itemFillColor}; border-color: ${groupOutlineColor}; color: ${itemTextColor};`;
 }
 
 function timelineItemClassName(entry: PostgresProjectTimelineEntry): string {
@@ -324,7 +376,9 @@ function timelineItemClassName(entry: PostgresProjectTimelineEntry): string {
 }
 
 function timelineGroupStyle(group: PostgresTimelineGroup | null): string {
-  if (!group) return "";
+  if (!group) {
+    return `--timeline-row-background: ${TIMELINE_UNASSIGNED_BACKGROUND}; --timeline-group-background: ${TIMELINE_UNASSIGNED_BACKGROUND}; --timeline-group-color: ${TIMELINE_UNASSIGNED_OUTLINE};`;
+  }
   const background = normalizeTimelineColor(group.backgroundColor, TIMELINE_DEFAULT_GROUP_BACKGROUND);
   const transparency = timelineBackgroundTransparencyFromFill(group.backgroundFill);
   const opacity = 100 - transparency;
@@ -423,6 +477,7 @@ function appendTimelineObjectVisualSvg(
 function timelineItemContentElement(entry: PostgresProjectTimelineEntry): HTMLElement {
   const root = document.createElement("span");
   root.className = `project-timeline-item-content${entry.end ? "" : " project-timeline-item-content--point"}`;
+  root.dataset.timelineItemId = entry.id;
 
   if (!entry.end) {
     const pointLine = document.createElement("span");
@@ -431,9 +486,11 @@ function timelineItemContentElement(entry: PostgresProjectTimelineEntry): HTMLEl
   }
 
   const visual = document.createElement("span");
+  const itemVisualFillColor = entry.visualFillColor ?? entry.fillColor;
+  const itemVisualOutlineColor = entry.visualOutlineColor ?? entry.outlineColor;
   visual.className = `project-timeline-item-visual project-timeline-item-visual--${entry.kind}`;
-  visual.style.setProperty("--timeline-item-fill", entry.visualFillColor ?? entry.fillColor);
-  visual.style.setProperty("--timeline-item-outline", entry.visualOutlineColor ?? entry.outlineColor);
+  visual.style.setProperty("--timeline-item-fill", itemVisualFillColor);
+  visual.style.setProperty("--timeline-item-outline", itemVisualOutlineColor);
 
   if (entry.kind === "source") {
     const sourceVisualKey = entry.sourceVisualKey ?? "source_text";
@@ -447,8 +504,8 @@ function timelineItemContentElement(entry: PostgresProjectTimelineEntry): HTMLEl
       visual,
       shape,
       fill,
-      entry.visualFillColor ?? entry.fillColor,
-      entry.visualOutlineColor ?? entry.outlineColor,
+      itemVisualFillColor,
+      itemVisualOutlineColor,
     );
   } else {
     const line = document.createElement("span");
@@ -489,6 +546,509 @@ function parseTimelineDate(value: string | null | undefined): Date | null {
 function formatTimelineInputDateTime(date: Date): string {
   const local = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
   return local.toISOString().slice(0, 16);
+}
+
+function selectedTimelineSetOrAll(selection: Set<string>, allIds: string[]): Set<string> {
+  if (selection.has("__none")) return new Set();
+  return selection.size === 0 ? new Set(allIds) : selection;
+}
+
+function isTimelineSelectionFiltered(selection: Set<string>, allIds: string[]): boolean {
+  if (allIds.length === 0) return false;
+  if (selection.has("__none")) return true;
+  if (selection.size === 0) return false;
+  if (selection.size !== allIds.length) return true;
+  return allIds.some((id) => !selection.has(id));
+}
+
+function timelineExportRelativeRect(element: Element, rootRect: DOMRect): DOMRect {
+  const rect = element.getBoundingClientRect();
+  return new DOMRect(rect.left - rootRect.left, rect.top - rootRect.top, rect.width, rect.height);
+}
+
+function timelineExportElementIsVisible(element: HTMLElement): boolean {
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || "1") > 0;
+}
+
+function timelineExportColor(value: string | null | undefined, fallback: string): string {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed || trimmed === "transparent") return fallback;
+
+  const colorFunctionMatch = trimmed.match(/^color\(\s*[\w-]+\s+([^)]+)\)$/i);
+  if (colorFunctionMatch) {
+    const [componentText, alphaText = "1"] = colorFunctionMatch[1].split(/\s*\/\s*/);
+    const components = componentText.trim().split(/\s+/).slice(0, 3).map((component) => {
+      if (component.endsWith("%")) return Math.round((Number(component.slice(0, -1)) / 100) * 255);
+      const valueNumber = Number(component);
+      return valueNumber <= 1 ? Math.round(valueNumber * 255) : Math.round(valueNumber);
+    });
+    if (components.length === 3 && components.every(Number.isFinite)) {
+      const alpha = Math.max(0, Math.min(1, Number(alphaText) || 1));
+      const [red, green, blue] = components.map((component) => Math.max(0, Math.min(255, component)));
+      return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+    }
+  }
+
+  return trimmed;
+}
+
+function timelineExportMaybeColor(value: string | null | undefined, fallback: string): string {
+  return (value ?? "").trim() === "transparent" ? "transparent" : timelineExportColor(value, fallback);
+}
+
+function drawTimelineRoundRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const nextRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+  context.beginPath();
+  context.moveTo(x + nextRadius, y);
+  context.lineTo(x + width - nextRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + nextRadius);
+  context.lineTo(x + width, y + height - nextRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - nextRadius, y + height);
+  context.lineTo(x + nextRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - nextRadius);
+  context.lineTo(x, y + nextRadius);
+  context.quadraticCurveTo(x, y, x + nextRadius, y);
+  context.closePath();
+}
+
+function drawTimelineClippedText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+) {
+  if (maxWidth <= 0) return;
+  if (context.measureText(text).width <= maxWidth) {
+    context.fillText(text, x, y);
+    return;
+  }
+  if (context.measureText("...").width > maxWidth) return;
+  let nextText = text;
+  while (nextText.length > 0 && context.measureText(`${nextText}...`).width > maxWidth) {
+    nextText = nextText.slice(0, -1);
+  }
+  context.fillText(`${nextText}...`, x, y);
+}
+
+function drawTimelineExportElementText(
+  context: CanvasRenderingContext2D,
+  element: HTMLElement,
+  rootRect: DOMRect,
+  fallbackColor: string,
+) {
+  const rect = timelineExportRelativeRect(element, rootRect);
+  const style = window.getComputedStyle(element);
+  const fontSize = Number.parseFloat(style.fontSize) || 12;
+  const fontWeight = style.fontWeight || "400";
+  const fontFamily = style.fontFamily || "Inter, system-ui, sans-serif";
+  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+  context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  context.fillStyle = timelineExportColor(style.color, fallbackColor);
+  context.textBaseline = "middle";
+  drawTimelineClippedText(
+    context,
+    element.textContent?.trim() ?? "",
+    rect.x + paddingLeft,
+    rect.y + rect.height / 2,
+    rect.width - paddingLeft - paddingRight,
+  );
+}
+
+function withTimelineExportClip(
+  context: CanvasRenderingContext2D,
+  clipRect: DOMRect,
+  draw: () => void,
+) {
+  context.save();
+  context.beginPath();
+  context.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+  context.clip();
+  draw();
+  context.restore();
+}
+
+function drawTimelineExportElementBox(
+  context: CanvasRenderingContext2D,
+  element: HTMLElement,
+  rootRect: DOMRect,
+  fallbackFill: string,
+  fallbackStroke?: string,
+) {
+  const rect = timelineExportRelativeRect(element, rootRect);
+  if (rect.width <= 0 || rect.height <= 0) return;
+  const style = window.getComputedStyle(element);
+  const fill = timelineExportMaybeColor(style.backgroundColor, fallbackFill);
+  const borderColor = timelineExportColor(style.borderColor, fallbackStroke ?? fill);
+  const borderWidth = Number.parseFloat(style.borderTopWidth) || 0;
+  const radius = Number.parseFloat(style.borderTopLeftRadius) || 0;
+
+  drawTimelineRoundRect(context, rect.x, rect.y, rect.width, rect.height, radius);
+  if (fill !== "transparent") {
+    context.fillStyle = fill;
+    context.fill();
+  }
+  if (borderWidth > 0) {
+    context.strokeStyle = borderColor;
+    context.lineWidth = borderWidth;
+    context.stroke();
+  }
+}
+
+function drawTimelineObjectCanvasShape(
+  context: CanvasRenderingContext2D,
+  shape: TimelineObjectShape,
+  x: number,
+  y: number,
+  size: number,
+  fill: string,
+  stroke: string,
+) {
+  const point = (px: number, py: number): [number, number] => [x + (px / 24) * size, y + (py / 24) * size];
+  const points = shape === "rounded"
+    ? []
+    : timelineObjectShapePoints(shape).split(" ").map((pair) => pair.split(",").map(Number) as [number, number]);
+
+  context.beginPath();
+  if (shape === "rounded") {
+    context.arc(x + size / 2, y + size / 2, size * 0.34, 0, Math.PI * 2);
+  } else {
+    points.forEach(([px, py], index) => {
+      const [nextX, nextY] = point(px, py);
+      if (index === 0) context.moveTo(nextX, nextY);
+      else context.lineTo(nextX, nextY);
+    });
+    context.closePath();
+  }
+  if (fill !== "transparent") {
+    context.fillStyle = fill;
+    context.fill();
+  }
+  context.strokeStyle = stroke;
+  context.lineWidth = 2;
+  context.lineJoin = "round";
+  context.stroke();
+}
+
+function drawTimelinePointShape(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fill: string,
+  stroke: string,
+) {
+  const notch = Math.min(12, width / 4);
+  context.beginPath();
+  context.moveTo(x + notch, y);
+  context.lineTo(x + width - notch, y);
+  context.lineTo(x + width, y + height / 2);
+  context.lineTo(x + width - notch, y + height);
+  context.lineTo(x + notch, y + height);
+  context.lineTo(x, y + height / 2);
+  context.closePath();
+  context.fillStyle = stroke;
+  context.fill();
+  context.beginPath();
+  context.moveTo(x + notch, y + 1.5);
+  context.lineTo(x + width - notch, y + 1.5);
+  context.lineTo(x + width - 1.5, y + height / 2);
+  context.lineTo(x + width - notch, y + height - 1.5);
+  context.lineTo(x + notch, y + height - 1.5);
+  context.lineTo(x + 1.5, y + height / 2);
+  context.closePath();
+  if (fill !== "transparent") {
+    context.fillStyle = fill;
+    context.fill();
+  }
+}
+
+function drawTimelineExportVisual(
+  context: CanvasRenderingContext2D,
+  visual: HTMLElement,
+  entry: PostgresProjectTimelineEntry,
+  rootRect: DOMRect,
+) {
+  const rect = timelineExportRelativeRect(visual, rootRect);
+  const style = window.getComputedStyle(visual);
+  const fill = timelineExportMaybeColor(style.getPropertyValue("--timeline-item-fill"), entry.fillColor);
+  const stroke = timelineExportColor(style.getPropertyValue("--timeline-item-outline"), entry.outlineColor);
+
+  if (entry.kind === "relationship") {
+    const middleY = rect.y + rect.height / 2;
+    context.strokeStyle = stroke;
+    context.lineWidth = Math.max(2, normalizeTimelineRelationshipLineWeight(entry.lineWeight) + 1);
+    const lineShape = entry.lineShape ?? "solid";
+    context.setLineDash(lineShape === "dotted" || lineShape === "loose_dotted" ? [1, 5] : lineShape === "solid" ? [] : [8, 5]);
+    context.beginPath();
+    context.moveTo(rect.x + 2, middleY);
+    context.lineTo(rect.x + rect.width - 7, middleY);
+    context.stroke();
+    context.setLineDash([]);
+    if ((entry.arrowhead ?? "one_sided") !== "none") {
+      context.fillStyle = stroke;
+      context.beginPath();
+      context.moveTo(rect.x + rect.width, middleY);
+      context.lineTo(rect.x + rect.width - 7, middleY - 5);
+      context.lineTo(rect.x + rect.width - 7, middleY + 5);
+      context.closePath();
+      context.fill();
+      if ((entry.arrowhead ?? "one_sided") === "double_sided") {
+        context.beginPath();
+        context.moveTo(rect.x, middleY);
+        context.lineTo(rect.x + 7, middleY - 5);
+        context.lineTo(rect.x + 7, middleY + 5);
+        context.closePath();
+        context.fill();
+      }
+    }
+    return;
+  }
+
+  if (entry.kind === "object") {
+    drawTimelineObjectCanvasShape(context, entry.visualShape ?? "rounded", rect.x, rect.y, Math.min(rect.width, rect.height), fill, stroke);
+    return;
+  }
+
+  const iconWidth = Math.min(14, rect.width - 4);
+  const iconHeight = Math.min(16, rect.height - 3);
+  const iconX = rect.x + (rect.width - iconWidth) / 2;
+  const iconY = rect.y + (rect.height - iconHeight) / 2;
+  context.strokeStyle = stroke;
+  context.fillStyle = "transparent";
+  context.lineWidth = 1.8;
+  drawTimelineRoundRect(context, iconX, iconY, iconWidth, iconHeight, 2);
+  context.stroke();
+  context.beginPath();
+  context.moveTo(iconX + 3, iconY + 5);
+  context.lineTo(iconX + iconWidth - 3, iconY + 5);
+  context.moveTo(iconX + 3, iconY + 9);
+  context.lineTo(iconX + iconWidth - 4, iconY + 9);
+  context.stroke();
+}
+
+function ProjectHomeTimelineSelectorCard({
+  title,
+  count,
+  collapsed,
+  rows,
+  onToggleCollapsed,
+  onSelectAll,
+  onClear,
+  emptyText,
+}: {
+  title: string;
+  count: number;
+  collapsed: boolean;
+  rows: ProjectHomeTimelineRow[];
+  onToggleCollapsed: () => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+  emptyText: string;
+}) {
+  return (
+    <section className="home-project-card project-home-selector-card">
+      <div
+        className="annotate-card-header project-home-selector-card-header"
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        onClick={onToggleCollapsed}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggleCollapsed();
+          }
+        }}
+      >
+        <button
+          type="button"
+          className="project-home-selector-card-title-btn"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleCollapsed();
+          }}
+          aria-expanded={!collapsed}
+        >
+          <span className="annotate-card-title">{title}</span>
+          <span className="project-home-selector-count">{count}</span>
+        </button>
+        <div className="project-home-selector-header-actions">
+          <button
+            type="button"
+            className="project-home-selector-collapse-btn"
+            aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+          >
+            {collapsed ? "▶" : "▼"}
+          </button>
+        </div>
+      </div>
+      {!collapsed ? (
+        <>
+          {rows.length > 0 ? (
+            <div className="project-home-selector-actions">
+              <button type="button" className="btn" onClick={onSelectAll}>All</button>
+              <button type="button" className="btn" onClick={onClear}>Clear</button>
+            </div>
+          ) : null}
+          <div className="users-table-wrap project-home-selector-table-wrap">
+            <table className="users-table project-home-selector-table">
+              <thead>
+                <tr>
+                  <th className="users-th" style={{ width: "72%" }}>Name</th>
+                  <th className="users-th" style={{ width: "28%" }}>Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td className="users-td-msg" colSpan={2}>{emptyText}</td>
+                  </tr>
+                ) : rows.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="users-row"
+                    style={{ background: row.selected ? "rgba(53, 80, 112, 0.10)" : undefined }}
+                    onClick={row.onClick}
+                  >
+                    <td className="users-td users-td--name" style={{ paddingLeft: row.indent ? 28 : undefined }}>
+                      {row.label}
+                    </td>
+                    <td className="users-td users-td--muted">{row.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+async function renderTimelineExportPng(
+  element: HTMLElement,
+  entries: PostgresProjectTimelineEntry[],
+  appearance: TimelineAppearanceSettings,
+): Promise<Uint8Array> {
+  const rect = element.getBoundingClientRect();
+  const width = Math.max(1, Math.ceil(rect.width));
+  const height = Math.max(1, Math.ceil(rect.height));
+  const scale = Math.min(2, window.devicePixelRatio || 1);
+  await document.fonts?.ready;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas export is not available.");
+
+  context.scale(scale, scale);
+  context.fillStyle = timelineExportColor(appearance.backgroundColor, "#ffffff");
+  context.fillRect(0, 0, width, height);
+  const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+  const centerPanel = element.querySelector<HTMLElement>(".vis-panel.vis-center");
+  const centerPanelRect = centerPanel
+    ? timelineExportRelativeRect(centerPanel, rect)
+    : new DOMRect(0, 0, width, height);
+  const timelineTimeAreaClipRect = new DOMRect(centerPanelRect.x, 0, centerPanelRect.width, height);
+
+  element.querySelectorAll<HTMLElement>(".vis-panel, .vis-labelset .vis-label, .vis-foreground .vis-group").forEach((node) => {
+    drawTimelineExportElementBox(context, node, rect, "transparent");
+  });
+
+  context.strokeStyle = timelineExportColor(appearance.lineColor, "#dce6ef");
+  context.lineWidth = 1;
+  element.querySelectorAll<HTMLElement>(".vis-labelset .vis-label").forEach((node) => {
+    const nodeRect = timelineExportRelativeRect(node, rect);
+    context.beginPath();
+    context.moveTo(nodeRect.x, nodeRect.y + nodeRect.height);
+    context.lineTo(nodeRect.x + nodeRect.width, nodeRect.y + nodeRect.height);
+    context.stroke();
+  });
+  withTimelineExportClip(context, timelineTimeAreaClipRect, () => {
+    element.querySelectorAll<HTMLElement>(".vis-grid").forEach((node) => {
+      const nodeRect = timelineExportRelativeRect(node, rect);
+      const left = nodeRect.x;
+      context.beginPath();
+      context.moveTo(left, nodeRect.y);
+      context.lineTo(left, nodeRect.y + nodeRect.height);
+      context.stroke();
+    });
+  });
+
+  withTimelineExportClip(context, timelineTimeAreaClipRect, () => {
+    element.querySelectorAll<HTMLElement>(".vis-time-axis .vis-text").forEach((node) => {
+      if (node.classList.contains("vis-measure") || !timelineExportElementIsVisible(node)) return;
+      const nodeRect = timelineExportRelativeRect(node, rect);
+      if (nodeRect.x < timelineTimeAreaClipRect.x) return;
+      drawTimelineExportElementText(context, node, rect, "#5b6776");
+    });
+  });
+
+  element.querySelectorAll<HTMLElement>(".project-timeline-group-name, .project-timeline-group-count").forEach((node) => {
+    if (node.classList.contains("project-timeline-group-count")) {
+      drawTimelineExportElementBox(context, node, rect, "#ffffff", "#d8e0e8");
+    }
+    drawTimelineExportElementText(context, node, rect, "#355070");
+  });
+
+  element.querySelectorAll<HTMLElement>(".vis-item.project-timeline-item").forEach((itemNode) => {
+    const content = itemNode.querySelector<HTMLElement>("[data-timeline-item-id]");
+    const entry = content?.dataset.timelineItemId ? entryById.get(content.dataset.timelineItemId) : null;
+    if (!entry) return;
+    const itemRect = timelineExportRelativeRect(itemNode, rect);
+    const style = window.getComputedStyle(itemNode);
+    const fill = timelineExportMaybeColor(style.backgroundColor, entry.fillColor);
+    const stroke = timelineExportColor(style.borderColor, entry.outlineColor);
+
+    if (entry.end) {
+      drawTimelineExportElementBox(context, itemNode, rect, fill, stroke);
+    } else {
+      const line = itemNode.querySelector<HTMLElement>(".project-timeline-point-line");
+      if (line) {
+        const lineRect = timelineExportRelativeRect(line, rect);
+        context.strokeStyle = stroke;
+        context.globalAlpha = 0.65;
+        context.lineWidth = Math.max(1, lineRect.width || 1.5);
+        context.beginPath();
+        context.moveTo(lineRect.x + lineRect.width / 2, lineRect.y);
+        context.lineTo(lineRect.x + lineRect.width / 2, lineRect.y + lineRect.height);
+        context.stroke();
+        context.globalAlpha = 1;
+      }
+      drawTimelinePointShape(context, itemRect.x, itemRect.y, itemRect.width, itemRect.height, fill, stroke);
+    }
+
+    const visual = itemNode.querySelector<HTMLElement>(".project-timeline-item-visual");
+    if (visual) {
+      drawTimelineExportVisual(context, visual, entry, rect);
+    }
+    const title = itemNode.querySelector<HTMLElement>(".project-timeline-item-title");
+    if (title) {
+      drawTimelineExportElementText(context, title, rect, timelineExportColor(style.color, TIMELINE_DEFAULT_ITEM_TEXT_COLOR));
+    }
+  });
+
+  return await new Promise<Uint8Array>((resolve, reject) => {
+    canvas.toBlob(async (nextBlob) => {
+      if (!nextBlob) {
+        reject(new Error("Timeline PNG could not be encoded."));
+        return;
+      }
+      resolve(new Uint8Array(await nextBlob.arrayBuffer()));
+    }, "image/png");
+  });
 }
 
 function timelineRoleDefinition<T extends { timelineRole: string; dataType: string }>(
@@ -565,6 +1125,7 @@ export function PostgresProjectHomeTimelineView({
     itemFill: string;
     itemFillTransparency: number;
     backgroundFill: string;
+    itemTextColor: string;
     textSize: string;
   }) => Promise<PostgresTimelineGroup>;
   onDeleteTimelineGroup: (groupId: string) => Promise<void>;
@@ -577,10 +1138,25 @@ export function PostgresProjectHomeTimelineView({
   }) => Promise<void>;
 }) {
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
+  const timelineRef = useRef<TimelineController | null>(null);
   const createControlRef = useRef<HTMLDivElement | null>(null);
+  const timelineFilterControlRef = useRef<HTMLDivElement | null>(null);
+  const timelineZoomControlRef = useRef<HTMLDivElement | null>(null);
+  const defaultTimelineWindowSpanRef = useRef<number | null>(null);
   const rowOrderSaveTimerRef = useRef<number | null>(null);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [createItemMenuOpen, setCreateItemMenuOpen] = useState(false);
+  const [timelineFilterMenuOpen, setTimelineFilterMenuOpen] = useState(false);
+  const [timelineZoomMenuOpen, setTimelineZoomMenuOpen] = useState(false);
+  const [timelineZoomPercent, setTimelineZoomPercent] = useState(100);
+  const [timelineSourceKinds, setTimelineSourceKinds] = useState<Set<string>>(() => new Set());
+  const [timelineObjectTypeIds, setTimelineObjectTypeIds] = useState<Set<string>>(() => new Set());
+  const [timelineRelationshipTypeIds, setTimelineRelationshipTypeIds] = useState<Set<string>>(() => new Set());
+  const [timelineFilterCollapsedSections, setTimelineFilterCollapsedSections] = useState<Set<ProjectHomeTimelineSectionKey>>(
+    () => new Set(["sources", "objects", "relationships"]),
+  );
+  const [timelineExportBusy, setTimelineExportBusy] = useState(false);
+  const [timelineExportError, setTimelineExportError] = useState("");
   const [groupModalDraft, setGroupModalDraft] = useState<PostgresTimelineGroup | null | "new">(null);
   const [groupModalTab, setGroupModalTab] = useState<"details" | "appearance" | "items">("details");
   const [groupModalName, setGroupModalName] = useState("");
@@ -588,6 +1164,7 @@ export function PostgresProjectHomeTimelineView({
   const [groupModalColor, setGroupModalColor] = useState(TIMELINE_DEFAULT_GROUP_COLOR);
   const [groupModalOutlineColor, setGroupModalOutlineColor] = useState(TIMELINE_DEFAULT_GROUP_COLOR);
   const [groupModalBackgroundColor, setGroupModalBackgroundColor] = useState(TIMELINE_DEFAULT_GROUP_BACKGROUND);
+  const [groupModalItemTextColor, setGroupModalItemTextColor] = useState(TIMELINE_DEFAULT_ITEM_TEXT_COLOR);
   const [groupModalItemFill, setGroupModalItemFill] = useState("filled");
   const [groupModalItemFillTransparency, setGroupModalItemFillTransparency] = useState(86);
   const [groupModalBackgroundTransparency, setGroupModalBackgroundTransparency] = useState(87);
@@ -635,6 +1212,7 @@ export function PostgresProjectHomeTimelineView({
     setGroupModalColor(group?.color || TIMELINE_DEFAULT_GROUP_COLOR);
     setGroupModalOutlineColor(group?.outlineColor || group?.color || TIMELINE_DEFAULT_GROUP_COLOR);
     setGroupModalBackgroundColor(group?.backgroundColor || TIMELINE_DEFAULT_GROUP_BACKGROUND);
+    setGroupModalItemTextColor(group?.itemTextColor || TIMELINE_DEFAULT_ITEM_TEXT_COLOR);
     setGroupModalItemFill(group?.itemFill || "filled");
     setGroupModalItemFillTransparency(normalizeTimelinePercent(group?.itemFillTransparency, 86));
     setGroupModalBackgroundTransparency(timelineBackgroundTransparencyFromFill(group?.backgroundFill));
@@ -664,6 +1242,7 @@ export function PostgresProjectHomeTimelineView({
         itemFill: groupModalItemFill,
         itemFillTransparency: groupModalItemFillTransparency,
         backgroundFill: `transparency:${Math.max(0, Math.min(100, Math.round(groupModalBackgroundTransparency)))}`,
+        itemTextColor: groupModalItemTextColor,
         textSize: groupModalTextSize,
       });
       if (isNewGroup) {
@@ -726,6 +1305,7 @@ export function PostgresProjectHomeTimelineView({
         groupId: assignedGroup ? `group:${assignedGroup.id}` : TIMELINE_UNASSIGNED_GROUP_ID,
         groupLabel: assignedGroup?.name || TIMELINE_UNASSIGNED_GROUP_LABEL,
         groupKind: "custom",
+        typeFilterKey: source.sourceKind || "unknown",
         start,
         end: end && end >= start ? end : null,
         group: assignedGroup,
@@ -761,6 +1341,7 @@ export function PostgresProjectHomeTimelineView({
         groupId: assignedGroup ? `group:${assignedGroup.id}` : TIMELINE_UNASSIGNED_GROUP_ID,
         groupLabel: assignedGroup?.name || TIMELINE_UNASSIGNED_GROUP_LABEL,
         groupKind: "custom",
+        typeFilterKey: object.objectTypeId,
         start,
         end: end && end >= start ? end : null,
         group: assignedGroup,
@@ -801,6 +1382,7 @@ export function PostgresProjectHomeTimelineView({
         groupId: assignedGroup ? `group:${assignedGroup.id}` : TIMELINE_UNASSIGNED_GROUP_ID,
         groupLabel: assignedGroup?.name || TIMELINE_UNASSIGNED_GROUP_LABEL,
         groupKind: "custom",
+        typeFilterKey: relationship.relationshipTypeId,
         start,
         end: end && end >= start ? end : null,
         group: assignedGroup,
@@ -813,9 +1395,110 @@ export function PostgresProjectHomeTimelineView({
 
     return entries.sort((left, right) => left.start.getTime() - right.start.getTime() || left.title.localeCompare(right.title, undefined, { sensitivity: "base" }));
   }, [assignmentByItemKey, objects, objectAttributeDefinitions, objectTypes, relationshipAttributeDefinitions, relationships, relationshipTypes, sourceAttributeDefinitions, sourceAttributeValues, sourceTypeSettings, sources, timelineGroupById]);
+  const timelineSourceKindSummaries = useMemo(() => {
+    const counts = new Map<string, number>();
+    timelineEntries
+      .filter((entry) => entry.kind === "source")
+      .forEach((entry) => counts.set(entry.typeFilterKey, (counts.get(entry.typeFilterKey) ?? 0) + 1));
+    return Array.from(counts.entries())
+      .map(([id, count]) => ({ id, label: formatPostgresSourceKindLabel(id), count }))
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+  }, [timelineEntries]);
+  const timelineObjectTypeSummaries = useMemo(() => {
+    const labels = new Map(objectTypes.map((objectType) => [objectType.id, objectType.name || "Objects"]));
+    const counts = new Map<string, number>();
+    timelineEntries
+      .filter((entry) => entry.kind === "object")
+      .forEach((entry) => counts.set(entry.typeFilterKey, (counts.get(entry.typeFilterKey) ?? 0) + 1));
+    return Array.from(counts.entries())
+      .map(([id, count]) => ({ id, label: labels.get(id) ?? "Objects", count }))
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+  }, [objectTypes, timelineEntries]);
+  const timelineRelationshipTypeSummaries = useMemo(() => {
+    const labels = new Map(relationshipTypes.map((relationshipType) => [relationshipType.id, relationshipType.name || "Relationships"]));
+    const counts = new Map<string, number>();
+    timelineEntries
+      .filter((entry) => entry.kind === "relationship")
+      .forEach((entry) => counts.set(entry.typeFilterKey, (counts.get(entry.typeFilterKey) ?? 0) + 1));
+    return Array.from(counts.entries())
+      .map(([id, count]) => ({ id, label: labels.get(id) ?? "Relationships", count }))
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+  }, [relationshipTypes, timelineEntries]);
+  const allTimelineSourceKinds = useMemo(() => timelineSourceKindSummaries.map((summary) => summary.id), [timelineSourceKindSummaries]);
+  const allTimelineObjectTypeIds = useMemo(() => timelineObjectTypeSummaries.map((summary) => summary.id), [timelineObjectTypeSummaries]);
+  const allTimelineRelationshipTypeIds = useMemo(() => timelineRelationshipTypeSummaries.map((summary) => summary.id), [timelineRelationshipTypeSummaries]);
+  const visibleTimelineSourceKinds = useMemo(() => selectedTimelineSetOrAll(timelineSourceKinds, allTimelineSourceKinds), [allTimelineSourceKinds, timelineSourceKinds]);
+  const visibleTimelineObjectTypeIds = useMemo(() => selectedTimelineSetOrAll(timelineObjectTypeIds, allTimelineObjectTypeIds), [allTimelineObjectTypeIds, timelineObjectTypeIds]);
+  const visibleTimelineRelationshipTypeIds = useMemo(() => selectedTimelineSetOrAll(timelineRelationshipTypeIds, allTimelineRelationshipTypeIds), [allTimelineRelationshipTypeIds, timelineRelationshipTypeIds]);
+  const visibleTimelineEntries = useMemo(
+    () => timelineEntries.filter((entry) => {
+      if (entry.kind === "source") return visibleTimelineSourceKinds.has(entry.typeFilterKey);
+      if (entry.kind === "object") return visibleTimelineObjectTypeIds.has(entry.typeFilterKey);
+      return visibleTimelineRelationshipTypeIds.has(entry.typeFilterKey);
+    }),
+    [timelineEntries, visibleTimelineObjectTypeIds, visibleTimelineRelationshipTypeIds, visibleTimelineSourceKinds],
+  );
   const selectedTimelineEntry = useMemo(
-    () => timelineEntries.find((entry) => entry.id === selectedTimelineEntryId) ?? null,
-    [selectedTimelineEntryId, timelineEntries],
+    () => visibleTimelineEntries.find((entry) => entry.id === selectedTimelineEntryId) ?? null,
+    [selectedTimelineEntryId, visibleTimelineEntries],
+  );
+  const timelineFilteringActive =
+    isTimelineSelectionFiltered(timelineSourceKinds, allTimelineSourceKinds)
+    || isTimelineSelectionFiltered(timelineObjectTypeIds, allTimelineObjectTypeIds)
+    || isTimelineSelectionFiltered(timelineRelationshipTypeIds, allTimelineRelationshipTypeIds);
+  const timelineZoomIsCustomized = Math.abs(timelineZoomPercent - 100) >= 1;
+  const toggleTimelineFilterSectionCollapsed = (section: ProjectHomeTimelineSectionKey) => {
+    setTimelineFilterCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  };
+  const toggleTimelineSelection = (
+    setSelection: Dispatch<SetStateAction<Set<string>>>,
+    id: string,
+    allIds: string[],
+  ) => {
+    setSelection((current) => {
+      const base = current.size === 0
+        ? new Set(allIds)
+        : current.has("__none")
+          ? new Set<string>()
+          : new Set(current);
+      if (base.has(id)) base.delete(id);
+      else base.add(id);
+      if (base.size === allIds.length && allIds.every((value) => base.has(value))) return new Set();
+      if (base.size === 0) return new Set(["__none"]);
+      return base;
+    });
+  };
+  const timelineSourceRows = useMemo<ProjectHomeTimelineRow[]>(
+    () => timelineSourceKindSummaries.map((summary) => ({
+      ...summary,
+      selected: visibleTimelineSourceKinds.has(summary.id),
+      indent: true,
+      onClick: () => toggleTimelineSelection(setTimelineSourceKinds, summary.id, allTimelineSourceKinds),
+    })),
+    [allTimelineSourceKinds, timelineSourceKindSummaries, visibleTimelineSourceKinds],
+  );
+  const timelineObjectRows = useMemo<ProjectHomeTimelineRow[]>(
+    () => timelineObjectTypeSummaries.map((summary) => ({
+      ...summary,
+      selected: visibleTimelineObjectTypeIds.has(summary.id),
+      indent: true,
+      onClick: () => toggleTimelineSelection(setTimelineObjectTypeIds, summary.id, allTimelineObjectTypeIds),
+    })),
+    [allTimelineObjectTypeIds, timelineObjectTypeSummaries, visibleTimelineObjectTypeIds],
+  );
+  const timelineRelationshipRows = useMemo<ProjectHomeTimelineRow[]>(
+    () => timelineRelationshipTypeSummaries.map((summary) => ({
+      ...summary,
+      selected: visibleTimelineRelationshipTypeIds.has(summary.id),
+      indent: true,
+      onClick: () => toggleTimelineSelection(setTimelineRelationshipTypeIds, summary.id, allTimelineRelationshipTypeIds),
+    })),
+    [allTimelineRelationshipTypeIds, timelineRelationshipTypeSummaries, visibleTimelineRelationshipTypeIds],
   );
   const selectedTimelineInspectorAttributes = useMemo(() => {
     if (!selectedTimelineEntry) return [];
@@ -831,7 +1514,7 @@ export function PostgresProjectHomeTimelineView({
     }
   }, [selectedTimelineEntry, selectedTimelineEntryId]);
   const currentTimelineGroupOrderKeys = useMemo(() => {
-    const defaultGroupIds = Array.from(new Set(timelineEntries.map((entry) => entry.groupId).filter((id) => id.startsWith("default:"))));
+    const defaultGroupIds = Array.from(new Set(visibleTimelineEntries.map((entry) => entry.groupId).filter((id) => id.startsWith("default:"))));
     const defaultGroups = defaultGroupIds.map((id, index) => ({
       id,
       sortOrder: timelineRowOrderByKey.get(id) ?? (1000 + index),
@@ -843,37 +1526,26 @@ export function PostgresProjectHomeTimelineView({
     return [...explicitGroups, ...defaultGroups]
       .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id))
       .map((group) => group.id);
-  }, [timelineEntries, timelineGroups, timelineRowOrderByKey]);
+  }, [timelineGroups, timelineRowOrderByKey, visibleTimelineEntries]);
 
   useEffect(() => {
     const container = timelineContainerRef.current;
-    if (!container || timelineEntries.length === 0) return;
+    if (!container || visibleTimelineEntries.length === 0) return;
     let cancelled = false;
-    let timeline: {
-      destroy: () => void;
-      fit: (options?: { animation?: boolean }) => void;
-      getEventProperties?: (event: Event) => { time?: Date };
-      setOptions?: (options: Record<string, unknown>) => void;
-      on?: (eventName: string, callback: (properties: {
-        event?: Event;
-        item?: string | number | null;
-        items?: Array<string | number>;
-        groupId?: string | number | null;
-      }) => void) => void;
-    } | null = null;
+    let timeline: TimelineController | null = null;
     void Promise.all([
       import("vis-data"),
       import("vis-timeline/standalone"),
     ]).then(([visData, visTimeline]) => {
       if (cancelled) return;
-      const entryById = new Map(timelineEntries.map((entry) => [entry.id, entry]));
-      const defaultGroupIds = Array.from(new Set(timelineEntries.map((entry) => entry.groupId).filter((id) => id.startsWith("default:"))));
-      const groupCounts = timelineEntries.reduce((counts, entry) => {
+      const entryById = new Map(visibleTimelineEntries.map((entry) => [entry.id, entry]));
+      const defaultGroupIds = Array.from(new Set(visibleTimelineEntries.map((entry) => entry.groupId).filter((id) => id.startsWith("default:"))));
+      const groupCounts = visibleTimelineEntries.reduce((counts, entry) => {
         counts.set(entry.groupId, (counts.get(entry.groupId) ?? 0) + 1);
         return counts;
       }, new Map<string, number>());
       const defaultGroups = defaultGroupIds.map((id, index) => {
-        const entry = timelineEntries.find((candidate) => candidate.groupId === id);
+        const entry = visibleTimelineEntries.find((candidate) => candidate.groupId === id);
         return {
           id,
           label: entry?.groupLabel ?? "Timeline",
@@ -951,7 +1623,7 @@ export function PostgresProjectHomeTimelineView({
           persistTimelineGroupOrder();
         }, 0);
       };
-      const items = new visData.DataSet(timelineEntries.map((entry) => {
+      const items = new visData.DataSet(visibleTimelineEntries.map((entry) => {
         return {
           id: entry.id,
           group: entry.groupId,
@@ -1032,6 +1704,7 @@ export function PostgresProjectHomeTimelineView({
         },
         tooltip: { followMouse: true },
       });
+      timelineRef.current = timeline;
       container.appendChild(timelineRowStyle);
       timeline.on?.("contextmenu", (properties) => {
         const rawItemId = properties.item == null ? "" : String(properties.item);
@@ -1086,6 +1759,8 @@ export function PostgresProjectHomeTimelineView({
         ) {
           return;
         }
+        setSelectedTimelineEntryId(null);
+        timelineRef.current?.setSelection?.([]);
         onTimelineItemContextMenu?.({
           kind,
           id,
@@ -1102,6 +1777,18 @@ export function PostgresProjectHomeTimelineView({
         schedulePersistTimelineGroupOrder();
       });
       timeline.fit({ animation: false });
+      const fittedWindow = timeline.getWindow?.();
+      defaultTimelineWindowSpanRef.current = fittedWindow
+        ? Math.max(1, fittedWindow.end.getTime() - fittedWindow.start.getTime())
+        : null;
+      setTimelineZoomPercent(100);
+      timeline.on?.("rangechanged", () => {
+        const currentWindow = timeline?.getWindow?.();
+        const defaultSpan = defaultTimelineWindowSpanRef.current;
+        if (!currentWindow || !defaultSpan) return;
+        const currentSpan = Math.max(1, currentWindow.end.getTime() - currentWindow.start.getTime());
+        setTimelineZoomPercent(Math.max(10, Math.min(300, Math.round((defaultSpan / currentSpan) * 100))));
+      });
       const cursorGuide = document.createElement("div");
       cursorGuide.className = "project-home-timeline-cursor-guide";
       cursorGuide.setAttribute("aria-hidden", "true");
@@ -1208,6 +1895,7 @@ export function PostgresProjectHomeTimelineView({
     });
     return () => {
       cancelled = true;
+      if (timelineRef.current === timeline) timelineRef.current = null;
       if (rowOrderSaveTimerRef.current != null) {
         window.clearTimeout(rowOrderSaveTimerRef.current);
         rowOrderSaveTimerRef.current = null;
@@ -1215,7 +1903,7 @@ export function PostgresProjectHomeTimelineView({
       (timeline as typeof timeline & { removeTimelineRowHoverListeners?: () => void })?.removeTimelineRowHoverListeners?.();
       timeline?.destroy();
     };
-  }, [canManageSources, onReorderTimelineGroupRows, onReorderTimelineGroups, onSetTimelineItemGroup, onTimelineItemContextMenu, timelineEntries, timelineGroupById, timelineGroups, timelineRowOrderByKey]);
+  }, [canManageSources, onReorderTimelineGroupRows, onReorderTimelineGroups, onSetTimelineItemGroup, onTimelineItemContextMenu, timelineGroupById, timelineGroups, timelineRowOrderByKey, visibleTimelineEntries]);
 
   useEffect(() => {
     if (!createMenuOpen) return;
@@ -1228,6 +1916,61 @@ export function PostgresProjectHomeTimelineView({
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [createMenuOpen]);
+
+  useEffect(() => {
+    if (!timelineFilterMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (timelineFilterControlRef.current?.contains(target)) return;
+      setTimelineFilterMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTimelineFilterMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [timelineFilterMenuOpen]);
+
+  useEffect(() => {
+    if (!timelineZoomMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (timelineZoomControlRef.current?.contains(target)) return;
+      setTimelineZoomMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTimelineZoomMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [timelineZoomMenuOpen]);
+
+  useEffect(() => {
+    if (!selectedTimelineEntryId) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".modal-overlay, .context-menu")) return;
+      if (target.closest(".project-home-timeline-inspector-overlay")) return;
+      if (target.closest(".project-home-timeline-controls, .project-home-timeline-group-actions")) return;
+      if (target.closest(".vis-item.project-timeline-item")) return;
+      setSelectedTimelineEntryId(null);
+      timelineRef.current?.setSelection?.([]);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [selectedTimelineEntryId]);
 
   useEffect(() => {
     if (!timelineGroupContextMenu) return;
@@ -1289,6 +2032,58 @@ export function PostgresProjectHomeTimelineView({
     setTimelineBackgroundContextMenu(null);
     onCreateRelationship(timelineStart);
   };
+
+  const fitTimeline = () => {
+    const timeline = timelineRef.current;
+    if (!timeline || visibleTimelineEntries.length === 0) return;
+    timeline.fit({ animation: true });
+    const fittedWindow = timeline.getWindow?.();
+    defaultTimelineWindowSpanRef.current = fittedWindow
+      ? Math.max(1, fittedWindow.end.getTime() - fittedWindow.start.getTime())
+      : null;
+    setTimelineZoomPercent(100);
+  };
+
+  const setTimelineZoomFromPercent = (nextPercent: number) => {
+    const timeline = timelineRef.current;
+    const currentWindow = timeline?.getWindow?.();
+    const defaultSpan = defaultTimelineWindowSpanRef.current;
+    const normalizedPercent = Math.max(10, Math.min(300, Math.round(nextPercent)));
+    setTimelineZoomPercent(normalizedPercent);
+    if (!timeline?.setWindow || !currentWindow || !defaultSpan) return;
+    const center = (currentWindow.start.getTime() + currentWindow.end.getTime()) / 2;
+    const nextSpan = defaultSpan * (100 / normalizedPercent);
+    timeline.setWindow(
+      new Date(center - (nextSpan / 2)),
+      new Date(center + (nextSpan / 2)),
+      { animation: false },
+    );
+  };
+
+  async function exportTimelinePng() {
+    if (visibleTimelineEntries.length === 0 || timelineExportBusy) return;
+    const timelineElement = timelineContainerRef.current;
+    if (!timelineElement) return;
+    setTimelineExportBusy(true);
+    setTimelineExportError("");
+    try {
+      const path = await save({
+        defaultPath: "kanqual-timeline.png",
+        filters: [{ name: "PNG", extensions: ["png"] }],
+      });
+      if (!path) return;
+      const pngBytes = await renderTimelineExportPng(
+        timelineElement,
+        visibleTimelineEntries,
+        timelineAppearance,
+      );
+      await writeFile(path, pngBytes);
+    } catch (error) {
+      setTimelineExportError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTimelineExportBusy(false);
+    }
+  }
 
   const renderTimelineCreateControl = (empty = false) => (
     <div
@@ -1392,6 +2187,121 @@ export function PostgresProjectHomeTimelineView({
     </div>
   );
 
+  const renderTimelineControlCluster = (embedded = false) => (
+    <div
+      className={`${embedded ? "" : "postgres-explore-canvas-controls "}project-home-timeline-controls`}
+      aria-label="Timeline controls"
+    >
+      <div className="project-home-timeline-filter-control" ref={timelineFilterControlRef}>
+        <button
+          type="button"
+          className={`btn ${timelineFilteringActive ? "btn--primary" : "btn--ghost"}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setTimelineFilterMenuOpen((current) => !current);
+          }}
+          aria-expanded={timelineFilterMenuOpen}
+          aria-label={timelineFilterMenuOpen ? "Hide timeline filters" : "Show timeline filters"}
+          title="Filter"
+        >
+          <FilterIcon className="postgres-explore-canvas-control-icon" />
+        </button>
+        {timelineFilterMenuOpen ? (
+          <div className="project-home-filter-drawer project-home-timeline-filter-menu">
+            <div className="home-primary-column postgres-experiment-home-primary-column project-home-selector-column project-home-selector-column--drawer">
+              <ProjectHomeTimelineSelectorCard
+                title="Sources"
+                count={timelineSourceKindSummaries.reduce((total, summary) => total + summary.count, 0)}
+                collapsed={timelineFilterCollapsedSections.has("sources")}
+                rows={timelineSourceRows}
+                onToggleCollapsed={() => toggleTimelineFilterSectionCollapsed("sources")}
+                onSelectAll={() => setTimelineSourceKinds(new Set())}
+                onClear={() => setTimelineSourceKinds(new Set(["__none"]))}
+                emptyText="No timeline sources yet."
+              />
+              <ProjectHomeTimelineSelectorCard
+                title="Objects"
+                count={timelineObjectTypeSummaries.reduce((total, summary) => total + summary.count, 0)}
+                collapsed={timelineFilterCollapsedSections.has("objects")}
+                rows={timelineObjectRows}
+                onToggleCollapsed={() => toggleTimelineFilterSectionCollapsed("objects")}
+                onSelectAll={() => setTimelineObjectTypeIds(new Set())}
+                onClear={() => setTimelineObjectTypeIds(new Set(["__none"]))}
+                emptyText="No timeline objects yet."
+              />
+              <ProjectHomeTimelineSelectorCard
+                title="Relationships"
+                count={timelineRelationshipTypeSummaries.reduce((total, summary) => total + summary.count, 0)}
+                collapsed={timelineFilterCollapsedSections.has("relationships")}
+                rows={timelineRelationshipRows}
+                onToggleCollapsed={() => toggleTimelineFilterSectionCollapsed("relationships")}
+                onSelectAll={() => setTimelineRelationshipTypeIds(new Set())}
+                onClear={() => setTimelineRelationshipTypeIds(new Set(["__none"]))}
+                emptyText="No timeline relationships yet."
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <div className="postgres-explore-zoom-control" ref={timelineZoomControlRef}>
+        <button
+          type="button"
+          className={`btn ${timelineZoomIsCustomized ? "btn--primary" : "btn--ghost"}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setTimelineZoomMenuOpen((current) => !current);
+          }}
+          aria-expanded={timelineZoomMenuOpen}
+          aria-label={timelineZoomMenuOpen ? "Hide zoom control" : "Show zoom control"}
+          title="Zoom"
+        >
+          <ZoomIcon className="postgres-explore-canvas-control-icon" />
+        </button>
+        {timelineZoomMenuOpen ? (
+          <div className="postgres-explore-zoom-menu">
+            <label className="postgres-explore-zoom-slider-label" htmlFor="project-home-timeline-zoom-slider">
+              <span>Zoom</span>
+              <strong>{timelineZoomPercent}%</strong>
+            </label>
+            <input
+              id="project-home-timeline-zoom-slider"
+              className="postgres-explore-zoom-slider"
+              type="range"
+              min={10}
+              max={300}
+              step={5}
+              value={timelineZoomPercent}
+              onChange={(event) => setTimelineZoomFromPercent(Number(event.target.value))}
+              disabled={visibleTimelineEntries.length === 0}
+            />
+            <button
+              type="button"
+              className="btn btn--ghost postgres-explore-zoom-fit-btn"
+              onClick={fitTimeline}
+              disabled={visibleTimelineEntries.length === 0}
+              aria-label="Fit timeline"
+              title="Fit timeline"
+            >
+              <FitCornersIcon className="postgres-explore-canvas-control-icon" />
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        className="btn btn--ghost"
+        onClick={() => void exportTimelinePng()}
+        disabled={timelineExportBusy || visibleTimelineEntries.length === 0}
+        aria-label="Export timeline"
+        title="Export"
+      >
+        <DownloadIcon className="postgres-explore-canvas-control-icon" />
+      </button>
+    </div>
+  );
+
   const mappedDefinitionsCount = sourceAttributeDefinitions.filter((definition) => definition.timelineRole).length
     + objectAttributeDefinitions.filter((definition) => definition.timelineRole).length
     + relationshipAttributeDefinitions.filter((definition) => definition.timelineRole).length;
@@ -1449,7 +2359,15 @@ export function PostgresProjectHomeTimelineView({
             {canManageSources ? (
               <div className="project-home-timeline-group-actions">
                 {renderTimelineCreateControl()}
+                {renderTimelineControlCluster(true)}
               </div>
+            ) : null}
+            {!canManageSources ? renderTimelineControlCluster() : null}
+            {visibleTimelineEntries.length === 0 ? (
+              <p className="project-home-timeline-filter-empty">No timeline items match the current filters.</p>
+            ) : null}
+            {timelineExportError ? (
+              <p className="project-home-timeline-export-error">{timelineExportError}</p>
             ) : null}
           </div>
         </>
@@ -1621,6 +2539,22 @@ export function PostgresProjectHomeTimelineView({
                           </button>
                         </div>
                       </div>
+                      <label className="form-label">
+                        Item Text Color
+                        <div className="timeline-group-color-control">
+                          <input
+                            className="form-input form-input--color"
+                            type="color"
+                            value={normalizeTimelineColor(groupModalItemTextColor, TIMELINE_DEFAULT_ITEM_TEXT_COLOR)}
+                            onChange={(event) => setGroupModalItemTextColor(event.target.value)}
+                          />
+                          <input
+                            className="form-input timeline-group-color-text"
+                            value={groupModalItemTextColor}
+                            onChange={(event) => setGroupModalItemTextColor(event.target.value)}
+                          />
+                        </div>
+                      </label>
                       <div className="timeline-group-setting-row">
                         <span className="form-label">Item Fill</span>
                         <div className="segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two timeline-group-setting-control timeline-group-fill-selector" role="tablist" aria-label="Timeline group item fill">
@@ -1701,6 +2635,7 @@ export function PostgresProjectHomeTimelineView({
                                       timelineAlphaHexFromPercent(100 - groupModalItemFillTransparency),
                                     ),
                               borderColor: normalizeTimelineColor(groupModalOutlineColor, TIMELINE_DEFAULT_GROUP_COLOR),
+                              color: normalizeTimelineColor(groupModalItemTextColor, TIMELINE_DEFAULT_ITEM_TEXT_COLOR),
                             }}
                           >
                             Timeline Item
@@ -1888,8 +2823,9 @@ export function PostgresProjectHomeTimelineView({
               type="button"
               className="btn"
               onClick={() => {
-                setTimelineAppearance(DEFAULT_TIMELINE_APPEARANCE);
-                saveTimelineAppearanceSettings(DEFAULT_TIMELINE_APPEARANCE);
+                const defaults = getDefaultTimelineAppearanceSettings();
+                setTimelineAppearance(defaults);
+                saveTimelineAppearanceSettings(defaults);
               }}
             >
               Reset

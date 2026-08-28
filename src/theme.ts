@@ -63,6 +63,8 @@ export const COLOR_VARS: ColorVar[] = [
   { key: "--color-sidebar-active", label: "Active",        group: "Sidebar" },
   { key: "--canvas-background",    label: "Background",    group: "Canvas" },
   { key: "--canvas-grid-color",    label: "Gridlines",     group: "Canvas" },
+  { key: "--timeline-background-color", label: "Background", group: "Timeline" },
+  { key: "--timeline-line-color",       label: "Lines",      group: "Timeline" },
   { key: "--color-heatmap-low",    label: "Heatmap Low",   group: "Reports" },
   { key: "--color-heatmap-high",   label: "Heatmap High",  group: "Reports" },
 ];
@@ -84,6 +86,8 @@ export const LIGHT_DEFAULTS: Record<string, string> = {
   "--color-sidebar-active": "#1A252F",
   "--canvas-background":    "#F8FBFF",
   "--canvas-grid-color":    "#DCE6EF",
+  "--timeline-background-color": "#FFFFFF",
+  "--timeline-line-color":       "#DCE6EF",
   "--color-heatmap-low":    "#F1DDD7",
   "--color-heatmap-high":   "#B04A33",
 };
@@ -105,6 +109,8 @@ export const DARK_DEFAULTS: Record<string, string> = {
   "--color-sidebar-active": "#34495E",
   "--canvas-background":    "#1F2D3A",
   "--canvas-grid-color":    "#334756",
+  "--timeline-background-color": "#2C3E50",
+  "--timeline-line-color":       "#455A64",
   "--color-heatmap-low":    "#5A403A",
   "--color-heatmap-high":   "#E29A86",
 };

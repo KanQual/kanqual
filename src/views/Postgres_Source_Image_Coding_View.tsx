@@ -15,7 +15,7 @@ import {
   PostgresSourceAnnotationPanel,
   visibleCodeNodes,
 } from "./Postgres_Source_Coding_Shared";
-import { NewCodeModal, type CodeRow } from "./Project_Codebook_View";
+import { NewCodeModal, type CodeRow } from "../components/NewCodeModal";
 
 const SOURCE_IMPORT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 

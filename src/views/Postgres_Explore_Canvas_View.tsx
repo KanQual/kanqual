@@ -23,6 +23,7 @@ type PostgresExploreInspectorDetails = {
   title: string;
   itemType: "Source" | "Object" | "Relationship" | "Code" | string;
   typeDetail?: string;
+  preview?: ReactNode;
   attributes: Array<{
     name: string;
     value: string;
@@ -48,17 +49,22 @@ type PostgresExploreConnectorHandle = {
 
 type PostgresExploreResizeHandle = {
   id: string;
-  x: number;
-  y: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
   lockAspectRatio: boolean;
 };
 
+type PostgresExploreResizeCorner = "nw" | "ne" | "sw" | "se";
+
 type PostgresExploreResizeDrag = {
   nodeId: string;
+  corner: PostgresExploreResizeCorner;
   startClientX: number;
   startClientY: number;
   startState: PostgresCanvasNodeState;
-  center: { x: number; y: number };
+  anchor: { x: number; y: number };
   zoom: number;
   lockAspectRatio: boolean;
 };
@@ -303,6 +309,7 @@ export function PostgresExploreCanvasView({
     color: string;
     outlineColor?: string;
     fill: "filled" | "outline";
+    outlineWidth: number;
     sourceImage?: string;
     sourceImageWidth?: number;
     sourceImageHeight?: number;
@@ -476,10 +483,13 @@ export function PostgresExploreCanvasView({
       return;
     }
     const box = node.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+    const padding = 8;
     const nextHandle = {
       id: selectedNodeId,
-      x: box.x2 + 8,
-      y: box.y2 + 8,
+      x1: box.x1 - padding,
+      y1: box.y1 - padding,
+      x2: box.x2 + padding,
+      y2: box.y2 + padding,
       lockAspectRatio: true,
     };
     setResizeHandle((current) => {
@@ -487,8 +497,10 @@ export function PostgresExploreCanvasView({
         current
         && current.id === nextHandle.id
         && current.lockAspectRatio === nextHandle.lockAspectRatio
-        && Math.abs(current.x - nextHandle.x) < 0.5
-        && Math.abs(current.y - nextHandle.y) < 0.5
+        && Math.abs(current.x1 - nextHandle.x1) < 0.5
+        && Math.abs(current.y1 - nextHandle.y1) < 0.5
+        && Math.abs(current.x2 - nextHandle.x2) < 0.5
+        && Math.abs(current.y2 - nextHandle.y2) < 0.5
       ) {
         return current;
       }
@@ -547,7 +559,7 @@ export function PostgresExploreCanvasView({
     setConnectorHandle(null);
   }, [connectorHandle, onCanvasRelationshipDraftComplete]);
 
-  const handleResizePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+  const handleResizePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>, corner: PostgresExploreResizeCorner) => {
     if (!resizeHandle) return;
     const nodeState = latestExploreStateRef.current.canvasNodes[resizeHandle.id];
     if (!nodeState) return;
@@ -556,16 +568,17 @@ export function PostgresExploreCanvasView({
     event.stopPropagation();
     event.nativeEvent.stopImmediatePropagation?.();
     cy?.nodes().ungrabify();
-    const center = {
-      x: nodeState.x + nodeState.width / 2,
-      y: nodeState.y + nodeState.height / 2,
+    const anchor = {
+      x: corner.includes("w") ? nodeState.x + nodeState.width : nodeState.x,
+      y: corner.includes("n") ? nodeState.y + nodeState.height : nodeState.y,
     };
     resizeDragRef.current = {
       nodeId: resizeHandle.id,
+      corner,
       startClientX: event.clientX,
       startClientY: event.clientY,
       startState: nodeState,
-      center,
+      anchor,
       zoom: cy?.zoom() || 1,
       lockAspectRatio: resizeHandle.lockAspectRatio,
     };
@@ -799,6 +812,7 @@ export function PostgresExploreCanvasView({
           {inspectorDetails.typeDetail?.trim() ? (
             <div className="postgres-explore-inspector-type-detail">{inspectorDetails.typeDetail}</div>
           ) : null}
+          {inspectorDetails.preview ? inspectorDetails.preview : null}
           {inspectorDetails.attributes.length > 0 ? (
             <dl className="postgres-explore-inspector-attributes">
               {inspectorDetails.attributes.map((attribute) => (
@@ -1197,12 +1211,14 @@ export function PostgresExploreCanvasView({
       const renderedDeltaY = event.clientY - drag.startClientY;
       const modelDeltaX = renderedDeltaX / Math.max(0.01, drag.zoom);
       const modelDeltaY = renderedDeltaY / Math.max(0.01, drag.zoom);
+      const xDirection = drag.corner.includes("e") ? 1 : -1;
+      const yDirection = drag.corner.includes("s") ? 1 : -1;
       const minWidth = 48;
       const minHeight = 36;
       const maxWidth = 520;
       const maxHeight = 420;
-      let width = clampPostgresExploreNodeSize(drag.startState.width + modelDeltaX * 2, minWidth, maxWidth);
-      let height = clampPostgresExploreNodeSize(drag.startState.height + modelDeltaY * 2, minHeight, maxHeight);
+      let width = clampPostgresExploreNodeSize(drag.startState.width + modelDeltaX * xDirection, minWidth, maxWidth);
+      let height = clampPostgresExploreNodeSize(drag.startState.height + modelDeltaY * yDirection, minHeight, maxHeight);
 
       if (drag.lockAspectRatio) {
         const startWidth = Math.max(1, drag.startState.width);
@@ -1227,8 +1243,8 @@ export function PostgresExploreCanvasView({
           ...current,
           [drag.nodeId]: {
             ...currentNode,
-            x: drag.center.x - width / 2,
-            y: drag.center.y - height / 2,
+            x: drag.corner.includes("w") ? drag.anchor.x - width : drag.anchor.x,
+            y: drag.corner.includes("n") ? drag.anchor.y - height : drag.anchor.y,
             width,
             height,
           },
@@ -1338,16 +1354,33 @@ export function PostgresExploreCanvasView({
             </button>
           ) : null}
           {resizeHandle ? (
-            <button
-              type="button"
-              className="postgres-explore-resize-handle"
-              style={{ left: resizeHandle.x, top: resizeHandle.y }}
-              onPointerDown={handleResizePointerDown}
-              onMouseDown={stopResizeHandleMouseEvent}
-              onClick={stopResizeHandleMouseEvent}
-              aria-label="Resize selected item"
-              title="Resize"
-            />
+            <div
+              className="postgres-explore-resize-box"
+              style={{
+                left: resizeHandle.x1,
+                top: resizeHandle.y1,
+                width: resizeHandle.x2 - resizeHandle.x1,
+                height: resizeHandle.y2 - resizeHandle.y1,
+              }}
+            >
+              {([
+                ["nw", "top left"],
+                ["ne", "top right"],
+                ["sw", "bottom left"],
+                ["se", "bottom right"],
+              ] as Array<[PostgresExploreResizeCorner, string]>).map(([corner, label]) => (
+                <button
+                  key={corner}
+                  type="button"
+                  className={`postgres-explore-resize-point postgres-explore-resize-point--${corner}`}
+                  onPointerDown={(event) => handleResizePointerDown(event, corner)}
+                  onMouseDown={stopResizeHandleMouseEvent}
+                  onClick={stopResizeHandleMouseEvent}
+                  aria-label={`Resize selected item from ${label}`}
+                  title="Resize"
+                />
+              ))}
+            </div>
           ) : null}
           {embedded && (selectedObject || selectedRelationship) ? (
             <div className="postgres-explore-inspector-overlay">

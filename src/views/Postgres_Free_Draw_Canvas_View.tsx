@@ -245,6 +245,7 @@ export function PostgresCanvasView({
     color: string;
     outlineColor: string;
     fill: PostgresObjectFill;
+    outlineWidth: number;
     sourceVisualKey?: PostgresSourceObjectVisualKey | null;
     hasShapeOverride?: boolean;
     hasColorOverride?: boolean;

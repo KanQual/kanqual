@@ -53,6 +53,7 @@ type PostgresExploreInspectorDetails = {
   title: string;
   itemType: "Source" | "Object" | "Relationship" | "Code" | string;
   typeDetail?: string;
+  preview?: ReactNode;
   attributes: Array<{
     name: string;
     value: string;
@@ -368,6 +369,7 @@ export function PostgresProjectHomeGraphView({
     color: string;
     outlineColor?: string;
     fill: "filled" | "outline";
+    outlineWidth: number;
     sourceImage?: string;
     sourceImageWidth?: number;
     sourceImageHeight?: number;

@@ -2941,6 +2941,8 @@ async fn ensure_postgres_experiment_project_schema(
                     color_override TEXT,
                     outline_color_override TEXT,
                     fill_override TEXT,
+                    fill_transparency_override INTEGER,
+                    outline_width_override INTEGER,
                     image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -2954,6 +2956,8 @@ async fn ensure_postgres_experiment_project_schema(
                     color TEXT NOT NULL DEFAULT '#355070',
                     outline_color TEXT NOT NULL DEFAULT '',
                     fill TEXT NOT NULL DEFAULT 'filled',
+                    fill_transparency INTEGER NOT NULL DEFAULT 0,
+                    outline_width INTEGER NOT NULL DEFAULT 2,
                     image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -3088,6 +3092,13 @@ async fn ensure_postgres_experiment_project_schema(
                     extracted_from_video_source_id TEXT NOT NULL DEFAULT '',
                     extracted_from_video_time_ms BIGINT,
                     notes TEXT NOT NULL DEFAULT '',
+                    shape_override TEXT,
+                    color_override TEXT,
+                    outline_color_override TEXT,
+                    fill_override TEXT,
+                    fill_transparency_override INTEGER,
+                    outline_width_override INTEGER,
+                    image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
@@ -3095,6 +3106,13 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE sources ADD COLUMN IF NOT EXISTS video_frame_index_json TEXT NOT NULL DEFAULT '';
                 ALTER TABLE sources ADD COLUMN IF NOT EXISTS extracted_from_video_source_id TEXT NOT NULL DEFAULT '';
                 ALTER TABLE sources ADD COLUMN IF NOT EXISTS extracted_from_video_time_ms BIGINT;
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS shape_override TEXT;
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS color_override TEXT;
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS outline_color_override TEXT;
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS fill_override TEXT;
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS fill_transparency_override INTEGER;
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS outline_width_override INTEGER;
+                ALTER TABLE sources ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 CREATE TABLE IF NOT EXISTS source_type_settings (
                     source_kind TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -3103,6 +3121,8 @@ async fn ensure_postgres_experiment_project_schema(
                     color TEXT NOT NULL DEFAULT '#355070',
                     outline_color TEXT NOT NULL DEFAULT '',
                     fill TEXT NOT NULL DEFAULT 'outline',
+                    fill_transparency INTEGER NOT NULL DEFAULT 0,
+                    outline_width INTEGER NOT NULL DEFAULT 2,
                     image_storage_path TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -3397,6 +3417,7 @@ async fn ensure_postgres_experiment_project_schema(
                     item_fill TEXT NOT NULL DEFAULT 'filled',
                     item_fill_transparency INTEGER NOT NULL DEFAULT 86,
                     background_fill TEXT NOT NULL DEFAULT 'tint',
+                    item_text_color TEXT NOT NULL DEFAULT '',
                     text_size TEXT NOT NULL DEFAULT 'regular',
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -3431,6 +3452,7 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS item_fill TEXT NOT NULL DEFAULT 'filled';
                 ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS item_fill_transparency INTEGER NOT NULL DEFAULT 86;
                 ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS background_fill TEXT NOT NULL DEFAULT 'tint';
+                ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS item_text_color TEXT NOT NULL DEFAULT '';
                 ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS text_size TEXT NOT NULL DEFAULT 'regular';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS system_key TEXT;
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
@@ -3438,12 +3460,16 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#355070';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS outline_color TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS fill TEXT NOT NULL DEFAULT 'filled';
+                ALTER TABLE object_types ADD COLUMN IF NOT EXISTS fill_transparency INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE object_types ADD COLUMN IF NOT EXISTS outline_width INTEGER NOT NULL DEFAULT 2;
                 ALTER TABLE object_types ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS object_type_id TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS shape_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS color_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS outline_color_override TEXT;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS fill_override TEXT;
+                ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS fill_transparency_override INTEGER;
+                ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS outline_width_override INTEGER;
                 ALTER TABLE research_objects ADD COLUMN IF NOT EXISTS image_storage_path TEXT NOT NULL DEFAULT '';
                 ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS object_type_id TEXT;
                 ALTER TABLE object_attribute_definitions ADD COLUMN IF NOT EXISTS object_type TEXT NOT NULL DEFAULT '';
@@ -4309,9 +4335,11 @@ fn map_postgres_experiment_object_type_row(
         color: row.get(5),
         outline_color: row.get(6),
         fill: row.get(7),
-        image_storage_path: row.get(8),
-        created_at: row.get(9),
-        updated_at: row.get(10),
+        fill_transparency: row.get(8),
+        outline_width: row.get(9),
+        image_storage_path: row.get(10),
+        created_at: row.get(11),
+        updated_at: row.get(12),
     }
 }
 
@@ -4333,8 +4361,15 @@ fn map_postgres_experiment_source_row(
         extracted_from_video_source_id: row.get(9),
         extracted_from_video_time_ms: row.get(10),
         notes: row.get(11),
-        created_at: row.get(12),
-        updated_at: row.get(13),
+        shape_override: row.get::<usize, Option<String>>(12).unwrap_or_default(),
+        color_override: row.get::<usize, Option<String>>(13).unwrap_or_default(),
+        outline_color_override: row.get::<usize, Option<String>>(14).unwrap_or_default(),
+        fill_override: row.get::<usize, Option<String>>(15).unwrap_or_default(),
+        fill_transparency_override: row.get(16),
+        outline_width_override: row.get(17),
+        image_storage_path: row.get::<usize, Option<String>>(18).unwrap_or_default(),
+        created_at: row.get(19),
+        updated_at: row.get(20),
     }
 }
 
@@ -4363,6 +4398,8 @@ fn default_postgres_experiment_source_type_setting(
         color: color.clone(),
         outline_color: color,
         fill: "outline".to_string(),
+        fill_transparency: 0,
+        outline_width: 2,
         image_storage_path: String::new(),
         created_at: String::new(),
         updated_at: String::new(),
@@ -4382,9 +4419,11 @@ fn map_postgres_experiment_source_type_setting_row(
         color: row.get(4),
         outline_color: row.get(5),
         fill: row.get(6),
-        image_storage_path: row.get(7),
-        created_at: row.get(8),
-        updated_at: row.get(9),
+        fill_transparency: row.get(7),
+        outline_width: row.get(8),
+        image_storage_path: row.get(9),
+        created_at: row.get(10),
+        updated_at: row.get(11),
     }
 }
 
@@ -4456,18 +4495,20 @@ fn map_postgres_experiment_object_row(
         color_override: row.get::<usize, Option<String>>(7).unwrap_or_default(),
         outline_color_override: row.get::<usize, Option<String>>(8).unwrap_or_default(),
         fill_override: row.get::<usize, Option<String>>(9).unwrap_or_default(),
-        image_storage_path: row.get::<usize, Option<String>>(10).unwrap_or_default(),
-        event_start_at: row.get(11),
-        event_end_at: row.get(12),
-        event_time_precision: row.get(13),
-        event_timezone: row.get(14),
-        event_is_instant: row.get(15),
+        fill_transparency_override: row.get(10),
+        outline_width_override: row.get(11),
+        image_storage_path: row.get::<usize, Option<String>>(12).unwrap_or_default(),
+        event_start_at: row.get(13),
+        event_end_at: row.get(14),
+        event_time_precision: row.get(15),
+        event_timezone: row.get(16),
+        event_is_instant: row.get(17),
         attribute_values: attribute_values_by_object_id
             .get(&object_id)
             .cloned()
             .unwrap_or_default(),
-        created_at: row.get(16),
-        updated_at: row.get(17),
+        created_at: row.get(18),
+        updated_at: row.get(19),
     }
 }
 
@@ -6467,6 +6508,8 @@ struct PostgresExperimentObject {
     color_override: String,
     outline_color_override: String,
     fill_override: String,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
     image_storage_path: String,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
@@ -6490,6 +6533,8 @@ struct PostgresExperimentObjectType {
     color: String,
     outline_color: String,
     fill: String,
+    fill_transparency: i32,
+    outline_width: i32,
     image_storage_path: String,
     created_at: String,
     updated_at: String,
@@ -6511,6 +6556,13 @@ struct PostgresExperimentSource {
     extracted_from_video_source_id: String,
     extracted_from_video_time_ms: Option<i64>,
     notes: String,
+    shape_override: String,
+    color_override: String,
+    outline_color_override: String,
+    fill_override: String,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
+    image_storage_path: String,
     created_at: String,
     updated_at: String,
 }
@@ -6526,6 +6578,8 @@ struct PostgresExperimentSourceTypeSetting {
     color: String,
     outline_color: String,
     fill: String,
+    fill_transparency: i32,
+    outline_width: i32,
     image_storage_path: String,
     created_at: String,
     updated_at: String,
@@ -6595,6 +6649,7 @@ struct PostgresExperimentTimelineGroup {
     item_fill: String,
     item_fill_transparency: i32,
     background_fill: String,
+    item_text_color: String,
     text_size: String,
     sort_order: i32,
     created_at: String,
@@ -7108,6 +7163,13 @@ struct CreatePostgresExperimentSourceRequest {
     extracted_from_video_source_id: Option<String>,
     extracted_from_video_time_ms: Option<i64>,
     notes: Option<String>,
+    shape_override: Option<String>,
+    color_override: Option<String>,
+    outline_color_override: Option<String>,
+    fill_override: Option<String>,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
+    image_storage_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7126,6 +7188,13 @@ struct UpdatePostgresExperimentSourceRequest {
     extracted_from_video_source_id: Option<String>,
     extracted_from_video_time_ms: Option<i64>,
     notes: Option<String>,
+    shape_override: Option<String>,
+    color_override: Option<String>,
+    outline_color_override: Option<String>,
+    fill_override: Option<String>,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
+    image_storage_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7139,6 +7208,8 @@ struct SavePostgresExperimentSourceTypeSettingRequest {
     color: String,
     outline_color: Option<String>,
     fill: String,
+    fill_transparency: Option<i32>,
+    outline_width: Option<i32>,
     image_storage_path: Option<String>,
 }
 
@@ -7158,6 +7229,13 @@ struct ImportPostgresExperimentSourceFileRequest {
     extracted_from_video_source_id: Option<String>,
     extracted_from_video_time_ms: Option<i64>,
     notes: Option<String>,
+    shape_override: Option<String>,
+    color_override: Option<String>,
+    outline_color_override: Option<String>,
+    fill_override: Option<String>,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
+    image_storage_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7261,6 +7339,8 @@ struct SavePostgresExperimentTimelineGroupRequest {
     item_fill_transparency: Option<i32>,
     #[serde(default)]
     background_fill: Option<String>,
+    #[serde(default)]
+    item_text_color: Option<String>,
     #[serde(default)]
     text_size: Option<String>,
 }
@@ -7650,6 +7730,8 @@ struct CreatePostgresExperimentObjectRequest {
     color_override: Option<String>,
     outline_color_override: Option<String>,
     fill_override: Option<String>,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
     image_storage_path: Option<String>,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
@@ -7674,6 +7756,8 @@ struct UpdatePostgresExperimentObjectRequest {
     color_override: Option<String>,
     outline_color_override: Option<String>,
     fill_override: Option<String>,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
     image_storage_path: Option<String>,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
@@ -7698,6 +7782,8 @@ struct SavePostgresExperimentObjectRequest {
     color_override: Option<String>,
     outline_color_override: Option<String>,
     fill_override: Option<String>,
+    fill_transparency_override: Option<i32>,
+    outline_width_override: Option<i32>,
     image_storage_path: Option<String>,
     event_start_at: Option<String>,
     event_end_at: Option<String>,
@@ -7727,6 +7813,8 @@ struct CreatePostgresExperimentObjectTypeRequest {
     color: String,
     outline_color: Option<String>,
     fill: String,
+    fill_transparency: Option<i32>,
+    outline_width: Option<i32>,
     image_storage_path: Option<String>,
 }
 
@@ -7741,6 +7829,8 @@ struct UpdatePostgresExperimentObjectTypeRequest {
     color: String,
     outline_color: Option<String>,
     fill: String,
+    fill_transparency: Option<i32>,
+    outline_width: Option<i32>,
     image_storage_path: Option<String>,
 }
 
@@ -7768,6 +7858,8 @@ struct SavePostgresExperimentObjectTypeRequest {
     color: String,
     outline_color: Option<String>,
     fill: String,
+    fill_transparency: Option<i32>,
+    outline_width: Option<i32>,
     image_storage_path: Option<String>,
     #[serde(default)]
     attributes: Vec<SavePostgresExperimentObjectTypeAttributeDefinitionInput>,
@@ -7778,6 +7870,15 @@ struct SavePostgresExperimentObjectTypeRequest {
 struct ImportPostgresExperimentObjectImageRequest {
     project_id: String,
     object_id: String,
+    original_file_name: String,
+    file_bytes_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportPostgresExperimentSourceImageRequest {
+    project_id: String,
+    source_id: String,
     original_file_name: String,
     file_bytes_base64: String,
 }
@@ -14411,7 +14512,7 @@ async fn load_postgres_experiment_object_types_for_client(
     let rows = client
         .query(
             "
-            SELECT id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            SELECT id, system_key, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             FROM object_types
             ORDER BY lower(name) ASC, created_at ASC, id ASC
             ",
@@ -14432,7 +14533,7 @@ async fn load_postgres_experiment_sources_for_client(
     let rows = client
         .query(
             "
-            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, video_frame_index_json, extracted_from_video_source_id, extracted_from_video_time_ms, notes, created_at::text, updated_at::text
+            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, video_frame_index_json, extracted_from_video_source_id, extracted_from_video_time_ms, notes, shape_override, color_override, outline_color_override, fill_override, fill_transparency_override, outline_width_override, image_storage_path, created_at::text, updated_at::text
             FROM sources
             ORDER BY created_at ASC, id ASC
             ",
@@ -14460,10 +14561,14 @@ async fn ensure_postgres_experiment_source_type_settings_table_for_client(
                 color TEXT NOT NULL DEFAULT '#355070',
                 outline_color TEXT NOT NULL DEFAULT '',
                 fill TEXT NOT NULL DEFAULT 'outline',
+                fill_transparency INTEGER NOT NULL DEFAULT 0,
+                outline_width INTEGER NOT NULL DEFAULT 2,
                 image_storage_path TEXT NOT NULL DEFAULT '',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+            ALTER TABLE source_type_settings ADD COLUMN IF NOT EXISTS fill_transparency INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE source_type_settings ADD COLUMN IF NOT EXISTS outline_width INTEGER NOT NULL DEFAULT 2;
             ",
         )
         .await
@@ -14481,7 +14586,7 @@ async fn load_postgres_experiment_source_type_settings_for_client(
     let rows = client
         .query(
             "
-            SELECT source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            SELECT source_kind, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             FROM source_type_settings
             ORDER BY CASE source_kind
                 WHEN 'Text' THEN 1
@@ -14583,7 +14688,7 @@ async fn load_postgres_experiment_source_for_client(
     let row = client
         .query_opt(
             "
-            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, video_frame_index_json, extracted_from_video_source_id, extracted_from_video_time_ms, notes, created_at::text, updated_at::text
+            SELECT id, source_kind, title, original_file_name, storage_path, text_content, structured_content_json, waveform_peaks_json, video_frame_index_json, extracted_from_video_source_id, extracted_from_video_time_ms, notes, shape_override, color_override, outline_color_override, fill_override, fill_transparency_override, outline_width_override, image_storage_path, created_at::text, updated_at::text
             FROM sources
             WHERE id = $1
             ",
@@ -15974,6 +16079,8 @@ async fn load_postgres_experiment_object_for_client(
                 o.color_override,
                 o.outline_color_override,
                 o.fill_override,
+                o.fill_transparency_override,
+                o.outline_width_override,
                 o.image_storage_path,
                 e.start_at::text,
                 e.end_at::text,
@@ -16353,6 +16460,8 @@ async fn save_postgres_experiment_source_type_setting_command(
     if fill.is_empty() {
         return Err("Choose a source type fill style.".to_string());
     }
+    let fill_transparency = request.fill_transparency.unwrap_or(0).clamp(0, 100);
+    let outline_width = request.outline_width.unwrap_or(2).clamp(1, 10);
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -16373,8 +16482,8 @@ async fn save_postgres_experiment_source_type_setting_command(
     let row = client
         .query_one(
             "
-            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (source_kind) DO UPDATE
             SET name = EXCLUDED.name,
                 description = EXCLUDED.description,
@@ -16382,11 +16491,13 @@ async fn save_postgres_experiment_source_type_setting_command(
                 color = EXCLUDED.color,
                 outline_color = EXCLUDED.outline_color,
                 fill = EXCLUDED.fill,
+                fill_transparency = EXCLUDED.fill_transparency,
+                outline_width = EXCLUDED.outline_width,
                 image_storage_path = EXCLUDED.image_storage_path,
                 updated_at = NOW()
-            RETURNING source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING source_kind, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&source_kind, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
+            &[&source_kind, &name, &description, &shape, &color, &outline_color, &fill, &fill_transparency, &outline_width, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not save PostgreSQL experiment source type setting: {e}"))?;
@@ -16463,12 +16574,12 @@ async fn import_postgres_experiment_source_type_image_command(
     let row = client
         .query_one(
             "
-            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (source_kind) DO UPDATE
             SET image_storage_path = EXCLUDED.image_storage_path,
                 updated_at = NOW()
-            RETURNING source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING source_kind, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
             &[
                 &source_kind,
@@ -16478,6 +16589,8 @@ async fn import_postgres_experiment_source_type_image_command(
                 &current.color,
                 &current.outline_color,
                 &current.fill,
+                &current.fill_transparency,
+                &current.outline_width,
                 &image_storage_path,
             ],
         )
@@ -16548,12 +16661,12 @@ async fn remove_postgres_experiment_source_type_image_command(
     let row = client
         .query_one(
             "
-            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO source_type_settings (source_kind, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (source_kind) DO UPDATE
             SET image_storage_path = EXCLUDED.image_storage_path,
                 updated_at = NOW()
-            RETURNING source_kind, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING source_kind, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
             &[
                 &source_kind,
@@ -16563,6 +16676,8 @@ async fn remove_postgres_experiment_source_type_image_command(
                 &current.color,
                 &current.outline_color,
                 &current.fill,
+                &current.fill_transparency,
+                &current.outline_width,
                 &empty_path,
             ],
         )
@@ -16643,6 +16758,13 @@ async fn create_postgres_experiment_source_command(
         .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
+    let shape_override = request.shape_override.unwrap_or_default().trim().to_string();
+    let color_override = request.color_override.unwrap_or_default().trim().to_string();
+    let outline_color_override = request.outline_color_override.unwrap_or_default().trim().to_string();
+    let fill_override = request.fill_override.unwrap_or_default().trim().to_string();
+    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
+    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
+    let image_storage_path = request.image_storage_path.unwrap_or_default().trim().to_string();
     client
         .execute(
             "
@@ -16658,9 +16780,16 @@ async fn create_postgres_experiment_source_command(
                 video_frame_index_json,
                 extracted_from_video_source_id,
                 extracted_from_video_time_ms,
-                notes
+                notes,
+                shape_override,
+                color_override,
+                outline_color_override,
+                fill_override,
+                fill_transparency_override,
+                outline_width_override,
+                image_storage_path
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             ",
             &[
                 &source_id,
@@ -16675,6 +16804,13 @@ async fn create_postgres_experiment_source_command(
                 &extracted_from_video_source_id,
                 &extracted_from_video_time_ms,
                 &notes,
+                &shape_override,
+                &color_override,
+                &outline_color_override,
+                &fill_override,
+                &fill_transparency_override,
+                &outline_width_override,
+                &image_storage_path,
             ],
         )
         .await
@@ -16756,6 +16892,13 @@ async fn import_postgres_experiment_source_file_command(
         .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
+    let shape_override = request.shape_override.unwrap_or_default().trim().to_string();
+    let color_override = request.color_override.unwrap_or_default().trim().to_string();
+    let outline_color_override = request.outline_color_override.unwrap_or_default().trim().to_string();
+    let fill_override = request.fill_override.unwrap_or_default().trim().to_string();
+    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
+    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
+    let image_storage_path = request.image_storage_path.unwrap_or_default().trim().to_string();
     let sanitized_file_name = sanitize_postgres_experiment_file_name(&original_file_name);
     let relative_storage_path = format!("sources/{source_id}/{sanitized_file_name}");
     let absolute_storage_path = Path::new(&project.storage_path).join(&relative_storage_path);
@@ -16782,9 +16925,16 @@ async fn import_postgres_experiment_source_file_command(
                 video_frame_index_json,
                 extracted_from_video_source_id,
                 extracted_from_video_time_ms,
-                notes
+                notes,
+                shape_override,
+                color_override,
+                outline_color_override,
+                fill_override,
+                fill_transparency_override,
+                outline_width_override,
+                image_storage_path
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             ",
             &[
                 &source_id,
@@ -16799,6 +16949,13 @@ async fn import_postgres_experiment_source_file_command(
                 &extracted_from_video_source_id,
                 &extracted_from_video_time_ms,
                 &notes,
+                &shape_override,
+                &color_override,
+                &outline_color_override,
+                &fill_override,
+                &fill_transparency_override,
+                &outline_width_override,
+                &image_storage_path,
             ],
         )
         .await
@@ -16908,6 +17065,13 @@ async fn update_postgres_experiment_source_command(
         .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
+    let shape_override = request.shape_override.unwrap_or_default().trim().to_string();
+    let color_override = request.color_override.unwrap_or_default().trim().to_string();
+    let outline_color_override = request.outline_color_override.unwrap_or_default().trim().to_string();
+    let fill_override = request.fill_override.unwrap_or_default().trim().to_string();
+    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
+    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
+    let image_storage_path = request.image_storage_path.unwrap_or_default().trim().to_string();
     let updated_count = client
         .execute(
             "
@@ -16923,6 +17087,13 @@ async fn update_postgres_experiment_source_command(
                 extracted_from_video_source_id = $10,
                 extracted_from_video_time_ms = $11,
                 notes = $12,
+                shape_override = $13,
+                color_override = $14,
+                outline_color_override = $15,
+                fill_override = $16,
+                fill_transparency_override = $17,
+                outline_width_override = $18,
+                image_storage_path = $19,
                 updated_at = NOW()
             WHERE id = $1
             ",
@@ -16939,6 +17110,13 @@ async fn update_postgres_experiment_source_command(
                 &extracted_from_video_source_id,
                 &extracted_from_video_time_ms,
                 &notes,
+                &shape_override,
+                &color_override,
+                &outline_color_override,
+                &fill_override,
+                &fill_transparency_override,
+                &outline_width_override,
+                &image_storage_path,
             ],
         )
         .await
@@ -17718,7 +17896,7 @@ async fn list_postgres_experiment_timeline_groups_command(
     let rows = client
         .query(
             "
-            SELECT id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+            SELECT id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, item_text_color, text_size, sort_order, created_at::text, updated_at::text
             FROM timeline_groups
             WHERE project_id = $1
             ORDER BY sort_order ASC, LOWER(name) ASC
@@ -17743,10 +17921,11 @@ async fn list_postgres_experiment_timeline_groups_command(
             item_fill: row.get(9),
             item_fill_transparency: row.get(10),
             background_fill: row.get(11),
-            text_size: row.get(12),
-            sort_order: row.get(13),
-            created_at: row.get(14),
-            updated_at: row.get(15),
+            item_text_color: row.get(12),
+            text_size: row.get(13),
+            sort_order: row.get(14),
+            created_at: row.get(15),
+            updated_at: row.get(16),
         })
         .collect())
 }
@@ -17908,6 +18087,11 @@ async fn save_postgres_experiment_timeline_group_command(
             _ => "tint".to_string(),
         }
     };
+    let item_text_color = request
+        .item_text_color
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let text_size = match request
         .text_size
         .unwrap_or_else(|| "regular".to_string())
@@ -17949,11 +18133,11 @@ async fn save_postgres_experiment_timeline_group_command(
             .query_one(
                 "
                 UPDATE timeline_groups
-                SET name = $3, description = $4, icon = $5, color = $6, outline_color = $7, background_color = $8, shape = $9, item_fill = $10, item_fill_transparency = $11, background_fill = $12, text_size = $13, updated_at = NOW()
+                SET name = $3, description = $4, icon = $5, color = $6, outline_color = $7, background_color = $8, shape = $9, item_fill = $10, item_fill_transparency = $11, background_fill = $12, item_text_color = $13, text_size = $14, updated_at = NOW()
                 WHERE id = $1 AND project_id = $2
-                RETURNING id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+                RETURNING id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, item_text_color, text_size, sort_order, created_at::text, updated_at::text
                 ",
-                &[&group_id, &project_id, &name, &description, &icon, &color, &outline_color, &background_color, &shape, &item_fill, &item_fill_transparency, &background_fill, &text_size],
+                &[&group_id, &project_id, &name, &description, &icon, &color, &outline_color, &background_color, &shape, &item_fill, &item_fill_transparency, &background_fill, &item_text_color, &text_size],
             )
             .await
             .map_err(|e| format!("Could not update PostgreSQL experiment timeline group: {e}"))?
@@ -17969,11 +18153,11 @@ async fn save_postgres_experiment_timeline_group_command(
         client
             .query_one(
                 "
-                INSERT INTO timeline_groups (id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                RETURNING id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+                INSERT INTO timeline_groups (id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, item_text_color, text_size, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                RETURNING id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, item_text_color, text_size, sort_order, created_at::text, updated_at::text
                 ",
-                &[&group_id, &project_id, &name, &description, &icon, &color, &outline_color, &background_color, &shape, &item_fill, &item_fill_transparency, &background_fill, &text_size, &sort_order],
+                &[&group_id, &project_id, &name, &description, &icon, &color, &outline_color, &background_color, &shape, &item_fill, &item_fill_transparency, &background_fill, &item_text_color, &text_size, &sort_order],
             )
             .await
             .map_err(|e| format!("Could not create PostgreSQL experiment timeline group: {e}"))?
@@ -17999,10 +18183,11 @@ async fn save_postgres_experiment_timeline_group_command(
         item_fill: row.get(9),
         item_fill_transparency: row.get(10),
         background_fill: row.get(11),
-        text_size: row.get(12),
-        sort_order: row.get(13),
-        created_at: row.get(14),
-        updated_at: row.get(15),
+        item_text_color: row.get(12),
+        text_size: row.get(13),
+        sort_order: row.get(14),
+        created_at: row.get(15),
+        updated_at: row.get(16),
     })
 }
 
@@ -18105,7 +18290,7 @@ async fn reorder_postgres_experiment_timeline_groups_command(
     let rows = client
         .query(
             "
-            SELECT id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, text_size, sort_order, created_at::text, updated_at::text
+            SELECT id, project_id, name, description, icon, color, outline_color, background_color, shape, item_fill, item_fill_transparency, background_fill, item_text_color, text_size, sort_order, created_at::text, updated_at::text
             FROM timeline_groups
             WHERE project_id = $1
             ORDER BY sort_order ASC, LOWER(name) ASC
@@ -18130,10 +18315,11 @@ async fn reorder_postgres_experiment_timeline_groups_command(
             item_fill: row.get(9),
             item_fill_transparency: row.get(10),
             background_fill: row.get(11),
-            text_size: row.get(12),
-            sort_order: row.get(13),
-            created_at: row.get(14),
-            updated_at: row.get(15),
+            item_text_color: row.get(12),
+            text_size: row.get(13),
+            sort_order: row.get(14),
+            created_at: row.get(15),
+            updated_at: row.get(16),
         })
         .collect())
 }
@@ -21867,6 +22053,8 @@ async fn create_postgres_experiment_object_type_command(
         .unwrap_or("")
         .to_string();
     let fill = request.fill.trim().to_string();
+    let fill_transparency = request.fill_transparency.unwrap_or(0).clamp(0, 100);
+    let outline_width = request.outline_width.unwrap_or(2).clamp(1, 10);
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -21907,11 +22095,11 @@ async fn create_postgres_experiment_object_type_command(
     let row = client
         .query_one(
             "
-            INSERT INTO object_types (id, name, description, shape, color, outline_color, fill, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            INSERT INTO object_types (id, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
+            &[&object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &fill_transparency, &outline_width, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment object type: {e}"))?;
@@ -21963,6 +22151,8 @@ async fn update_postgres_experiment_object_type_command(
         .unwrap_or("")
         .to_string();
     let fill = request.fill.trim().to_string();
+    let fill_transparency = request.fill_transparency.unwrap_or(0).clamp(0, 100);
+    let outline_width = request.outline_width.unwrap_or(2).clamp(1, 10);
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -22012,12 +22202,14 @@ async fn update_postgres_experiment_object_type_command(
                 color = $5,
                 outline_color = $6,
                 fill = $7,
-                image_storage_path = $8,
+                fill_transparency = $8,
+                outline_width = $9,
+                image_storage_path = $10,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
+            &[&object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &fill_transparency, &outline_width, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment object type: {e}"))?;
@@ -22089,7 +22281,7 @@ async fn import_postgres_experiment_object_type_image_command(
             SET image_storage_path = $2,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
             &[&object_type_id, &image_storage_path],
         )
@@ -22142,7 +22334,7 @@ async fn remove_postgres_experiment_object_type_image_command(
             SET image_storage_path = $2,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
             &[&object_type_id, &empty_path],
         )
@@ -22185,6 +22377,8 @@ async fn save_postgres_experiment_object_type_command(
         .unwrap_or("")
         .to_string();
     let fill = request.fill.trim().to_string();
+    let fill_transparency = request.fill_transparency.unwrap_or(0).clamp(0, 100);
+    let outline_width = request.outline_width.unwrap_or(2).clamp(1, 10);
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -22268,11 +22462,11 @@ async fn save_postgres_experiment_object_type_command(
     let object_type_row = if created {
         tx.query_one(
             "
-            INSERT INTO object_types (id, name, description, shape, color, outline_color, fill, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            INSERT INTO object_types (id, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&resolved_object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
+            &[&resolved_object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &fill_transparency, &outline_width, &image_storage_path],
         ).await
     } else {
         tx.query_one(
@@ -22284,12 +22478,14 @@ async fn save_postgres_experiment_object_type_command(
                 color = $5,
                 outline_color = $6,
                 fill = $7,
-                image_storage_path = $8,
+                fill_transparency = $8,
+                outline_width = $9,
+                image_storage_path = $10,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, system_key, name, description, shape, color, outline_color, fill, image_storage_path, created_at::text, updated_at::text
+            RETURNING id, system_key, name, description, shape, color, outline_color, fill, fill_transparency, outline_width, image_storage_path, created_at::text, updated_at::text
             ",
-            &[&resolved_object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &image_storage_path],
+            &[&resolved_object_type_id, &name, &description, &shape, &color, &outline_color, &fill, &fill_transparency, &outline_width, &image_storage_path],
         ).await
     }
     .map_err(|e| format!("Could not save PostgreSQL experiment object type: {e}"))?;
@@ -22799,7 +22995,7 @@ async fn create_postgres_experiment_relationship_type_command(
     if line_shape.is_empty() {
         return Err("Choose a relationship line shape.".to_string());
     }
-    if !(1..=4).contains(&line_weight) {
+    if !(1..=16).contains(&line_weight) {
         return Err("Choose a valid relationship line weight.".to_string());
     }
     if arrowhead.is_empty() {
@@ -22921,7 +23117,7 @@ async fn update_postgres_experiment_relationship_type_command(
     if line_shape.is_empty() {
         return Err("Choose a relationship line shape.".to_string());
     }
-    if !(1..=4).contains(&line_weight) {
+    if !(1..=16).contains(&line_weight) {
         return Err("Choose a valid relationship line weight.".to_string());
     }
     if arrowhead.is_empty() {
@@ -23060,7 +23256,7 @@ async fn save_postgres_experiment_relationship_type_command(
     if line_shape.is_empty() {
         return Err("Choose a relationship line shape.".to_string());
     }
-    if !(1..=4).contains(&line_weight) {
+    if !(1..=16).contains(&line_weight) {
         return Err("Choose a valid relationship line weight.".to_string());
     }
     if arrowhead.is_empty() {
@@ -23455,6 +23651,8 @@ async fn list_postgres_experiment_objects_command(
                 o.color_override,
                 o.outline_color_override,
                 o.fill_override,
+                o.fill_transparency_override,
+                o.outline_width_override,
                 o.image_storage_path,
                 e.start_at::text,
                 e.end_at::text,
@@ -23758,6 +23956,8 @@ async fn create_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
+    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -23797,10 +23997,10 @@ async fn create_postgres_experiment_object_command(
     client
         .execute(
             "
-            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, outline_color_override, fill_override, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, outline_color_override, fill_override, fill_transparency_override, outline_width_override, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ",
-            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &image_storage_path],
+            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &fill_transparency_override, &outline_width_override, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment object: {e}"))?;
@@ -23886,6 +24086,8 @@ async fn update_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
+    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -23933,22 +24135,13 @@ async fn update_postgres_experiment_object_command(
                 color_override = $7,
                 outline_color_override = $8,
                 fill_override = $9,
-                image_storage_path = $10,
+                fill_transparency_override = $10,
+                outline_width_override = $11,
+                image_storage_path = $12,
                 updated_at = NOW()
             WHERE id = $1
             ",
-            &[
-                &object_id,
-                &object_type.id,
-                &object_type.name,
-                &title,
-                &description,
-                &shape_override,
-                &color_override,
-                &outline_color_override,
-                &fill_override,
-                &image_storage_path,
-            ],
+            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &fill_transparency_override, &outline_width_override, &image_storage_path],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment object: {e}"))?;
@@ -23991,7 +24184,7 @@ async fn update_postgres_experiment_object_command(
             "title": updated.title,
             "objectType": updated.object_type,
             "attributeValueCount": updated.attribute_values.len(),
-            "changedFields": ["object_type_id", "title", "description", "shape_override", "color_override", "outline_color_override", "fill_override", "event_fields", "attribute_values"],
+            "changedFields": ["object_type_id", "title", "description", "shape_override", "color_override", "outline_color_override", "fill_override", "fill_transparency_override", "outline_width_override", "event_fields", "attribute_values"],
         })),
     )
     .await?;
@@ -24040,6 +24233,8 @@ async fn save_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
+    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -24093,10 +24288,10 @@ async fn save_postgres_experiment_object_command(
     if created {
         tx.execute(
             "
-            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, outline_color_override, fill_override, image_storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO research_objects (id, object_type_id, object_type, title, description, shape_override, color_override, outline_color_override, fill_override, fill_transparency_override, outline_width_override, image_storage_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ",
-            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &image_storage_path],
+            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &fill_transparency_override, &outline_width_override, &image_storage_path],
         ).await
     } else {
         tx.execute(
@@ -24110,11 +24305,13 @@ async fn save_postgres_experiment_object_command(
                 color_override = $7,
                 outline_color_override = $8,
                 fill_override = $9,
-                image_storage_path = $10,
+                fill_transparency_override = $10,
+                outline_width_override = $11,
+                image_storage_path = $12,
                 updated_at = NOW()
             WHERE id = $1
             ",
-            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &image_storage_path],
+            &[&resolved_object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &fill_transparency_override, &outline_width_override, &image_storage_path],
         ).await
     }
     .map_err(|e| format!("Could not save PostgreSQL experiment object: {e}"))?;
@@ -24174,7 +24371,7 @@ async fn save_postgres_experiment_object_command(
             "title": saved.title,
             "objectType": saved.object_type,
             "attributeValueCount": saved.attribute_values.len(),
-            "changedFields": if created { serde_json::Value::Null } else { serde_json::json!(["object_type_id", "title", "description", "shape_override", "color_override", "outline_color_override", "fill_override", "event_fields", "attribute_values"]) },
+            "changedFields": if created { serde_json::Value::Null } else { serde_json::json!(["object_type_id", "title", "description", "shape_override", "color_override", "outline_color_override", "fill_override", "fill_transparency_override", "outline_width_override", "event_fields", "attribute_values"]) },
         })),
     ).await?;
     connection_task.abort();
@@ -24268,6 +24465,145 @@ async fn import_postgres_experiment_object_image_command(
     .await?;
     connection_task.abort();
     emit_postgres_experiment_project_change(&app, &project_id, "object", &object_id, "updated");
+    Ok(updated)
+}
+
+#[tauri::command]
+async fn import_postgres_experiment_source_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    request: ImportPostgresExperimentSourceImageRequest,
+) -> Result<PostgresExperimentSource, String> {
+    let project_id = request.project_id.trim().to_string();
+    let source_id = request.source_id.trim().to_string();
+    if project_id.is_empty() || source_id.is_empty() {
+        return Err("Project and source identifiers are required.".to_string());
+    }
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let previous_path = client
+        .query_one(
+            "SELECT image_storage_path FROM sources WHERE id = $1",
+            &[&source_id],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment source image: {e}"))?
+        .get::<usize, String>(0);
+    let image_storage_path = write_postgres_experiment_project_image_file(
+        &project,
+        "sources",
+        &source_id,
+        &request.original_file_name,
+        &request.file_bytes_base64,
+    )?;
+    let updated_count = client
+        .execute(
+            "
+            UPDATE sources
+            SET image_storage_path = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            ",
+            &[&source_id, &image_storage_path],
+        )
+        .await
+        .map_err(|e| format!("Could not update PostgreSQL experiment source image: {e}"))?;
+    if updated_count == 0 {
+        connection_task.abort();
+        return Err("The selected source could not be found.".to_string());
+    }
+    remove_postgres_experiment_project_file_if_present(&project, &previous_path);
+    let updated = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    append_postgres_experiment_project_log_for_client(
+        &client,
+        &project_id,
+        &session,
+        "source.update",
+        &format!("Updated source \"{}\"", updated.title),
+        Some(&updated.id),
+        Some(serde_json::json!({
+            "title": updated.title,
+            "sourceKind": updated.source_kind,
+            "changedFields": ["image_storage_path"],
+        })),
+    )
+    .await?;
+    connection_task.abort();
+    emit_postgres_experiment_project_change(&app, &project_id, "source", &source_id, "updated");
+    Ok(updated)
+}
+
+#[tauri::command]
+async fn remove_postgres_experiment_source_image_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+    source_id: String,
+) -> Result<PostgresExperimentSource, String> {
+    let project_id = project_id.trim().to_string();
+    let source_id = source_id.trim().to_string();
+    if project_id.is_empty() || source_id.is_empty() {
+        return Err("Project and source identifiers are required.".to_string());
+    }
+    let project = load_postgres_experiment_project_record(&app, &project_id).await?;
+    let session = require_postgres_experiment_project_source_management(
+        &app,
+        Some(&runtime_auth_state),
+        &project,
+    )
+    .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let previous_path = client
+        .query_one(
+            "SELECT image_storage_path FROM sources WHERE id = $1",
+            &[&source_id],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL experiment source image: {e}"))?
+        .get::<usize, String>(0);
+    let empty_path = String::new();
+    let updated_count = client
+        .execute(
+            "
+            UPDATE sources
+            SET image_storage_path = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            ",
+            &[&source_id, &empty_path],
+        )
+        .await
+        .map_err(|e| format!("Could not remove PostgreSQL experiment source image: {e}"))?;
+    if updated_count == 0 {
+        connection_task.abort();
+        return Err("The selected source could not be found.".to_string());
+    }
+    remove_postgres_experiment_project_file_if_present(&project, &previous_path);
+    let updated = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    append_postgres_experiment_project_log_for_client(
+        &client,
+        &project_id,
+        &session,
+        "source.update",
+        &format!("Updated source \"{}\"", updated.title),
+        Some(&updated.id),
+        Some(serde_json::json!({
+            "title": updated.title,
+            "sourceKind": updated.source_kind,
+            "changedFields": ["image_storage_path"],
+        })),
+    )
+    .await?;
+    connection_task.abort();
+    emit_postgres_experiment_project_change(&app, &project_id, "source", &source_id, "updated");
     Ok(updated)
 }
 
@@ -24789,8 +25125,8 @@ async fn create_postgres_experiment_relationship_command(
         return Err("Choose a relationship type.".to_string());
     }
     if let Some(line_weight_override) = line_weight_override {
-        if !(1..=4).contains(&line_weight_override) {
-            return Err("Line weight override must be between 1 and 4.".to_string());
+        if !(1..=16).contains(&line_weight_override) {
+            return Err("Line weight override must be between 1 and 16 px.".to_string());
         }
     }
 
@@ -24953,8 +25289,8 @@ async fn update_postgres_experiment_relationship_command(
         return Err("Choose a relationship type.".to_string());
     }
     if let Some(line_weight_override) = line_weight_override {
-        if !(1..=4).contains(&line_weight_override) {
-            return Err("Line weight override must be between 1 and 4.".to_string());
+        if !(1..=16).contains(&line_weight_override) {
+            return Err("Line weight override must be between 1 and 16 px.".to_string());
         }
     }
 
@@ -25136,8 +25472,8 @@ async fn save_postgres_experiment_relationship_command(
         return Err("Choose a relationship type.".to_string());
     }
     if let Some(line_weight_override) = line_weight_override {
-        if !(1..=4).contains(&line_weight_override) {
-            return Err("Line weight override must be between 1 and 4.".to_string());
+        if !(1..=16).contains(&line_weight_override) {
+            return Err("Line weight override must be between 1 and 16 px.".to_string());
         }
     }
 
@@ -34108,6 +34444,8 @@ pub fn run() {
             save_postgres_experiment_source_type_setting_command,
             import_postgres_experiment_source_type_image_command,
             remove_postgres_experiment_source_type_image_command,
+            import_postgres_experiment_source_image_command,
+            remove_postgres_experiment_source_image_command,
             create_postgres_experiment_source_command,
             import_postgres_experiment_source_file_command,
             update_postgres_experiment_source_command,

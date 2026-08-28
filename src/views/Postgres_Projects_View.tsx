@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   getPostgresInstallationSettings,
@@ -28,6 +28,46 @@ function formatProjectLastLogin(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatProjectLastLoginBadge(value: string): string {
+  const date = new Date(value);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const dayDelta = Math.floor((startOfToday - startOfDate) / 86_400_000);
+  if (dayDelta === 0) return "Today";
+  if (dayDelta === 1) return "Yesterday";
+  if (dayDelta > 1 && dayDelta < 7) return `${dayDelta} days ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function getProjectInitials(name: string): string {
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return "P";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+}
+
+function getProjectAccentStyle(project: PostgresProject): CSSProperties {
+  const seed = `${project.id}:${project.name}`;
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) % 360;
+  }
+  const hue = hash;
+  return {
+    "--project-accent": `hsl(${hue} 58% 46%)`,
+    "--project-accent-soft": `hsl(${hue} 68% 93%)`,
+    "--project-accent-border": `hsl(${hue} 48% 78%)`,
+  } as CSSProperties;
 }
 
 export type PostgresProjectsViewProps = {
@@ -235,36 +275,45 @@ export function PostgresProjectsView({
               <p>No projects yet</p>
             </div>
           ) : (
-            <div className="project-selection-table-wrap">
-              <table className="users-table project-selection-table">
-                <thead>
-                  <tr>
-                    <th className="users-th">Project</th>
-                    <th className="users-th project-selection-last-login-th">Last Login</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedProjects.map((project) => {
-                    const recentProject = recentProjectById.get(project.id);
-                    return (
-                      <tr
-                        key={project.id}
-                        className={`users-row project-selection-row${selectedProjectId === project.id ? " project-selection-row--selected" : ""}`}
-                        onClick={() => {
-                          setSelectedProjectId(project.id);
-                          setOpenedProjectId(project.id);
-                          void recordProjectOpened(project);
-                        }}
-                      >
-                        <td className="users-td project-selection-name-cell">{project.name}</td>
-                        <td className="users-td project-selection-last-login-cell">
-                          {recentProject?.openedAt ? formatProjectLastLogin(recentProject.openedAt) : "Never"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="project-selection-card-list">
+              {sortedProjects.map((project) => {
+                const recentProject = recentProjectById.get(project.id);
+                const description = (project.description || recentProject?.description || "").trim();
+                return (
+                  <button
+                    key={project.id}
+                    type="button"
+                    className={`project-selection-card${selectedProjectId === project.id ? " project-selection-card--selected" : ""}`}
+                    style={getProjectAccentStyle(project)}
+                    onClick={() => {
+                      setSelectedProjectId(project.id);
+                      setOpenedProjectId(project.id);
+                      void recordProjectOpened(project);
+                    }}
+                  >
+                    <span className="project-selection-card-accent" aria-hidden="true">
+                      {getProjectInitials(project.name)}
+                    </span>
+                    <span className="project-selection-card-body">
+                      <span className="project-selection-card-name">{project.name}</span>
+                      <span className="project-selection-card-desc">
+                        {description || "No description"}
+                      </span>
+                    </span>
+                    <span className="project-selection-card-meta">
+                      <span className="project-selection-card-last-label">Last opened</span>
+                      <span className="project-selection-card-last-badge">
+                        {recentProject?.openedAt ? formatProjectLastLoginBadge(recentProject.openedAt) : "Never"}
+                      </span>
+                      {recentProject?.openedAt ? (
+                        <span className="project-selection-card-last-time">
+                          {formatProjectLastLogin(recentProject.openedAt)}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
 

@@ -11,7 +11,7 @@ import { useI18n } from "../i18n/provider";
 import { readAppSettings } from "../lib/appSettings";
 import type { RelevantSegmentsAiJobResult } from "../lib/aiJobs";
 import { buildLlmInvokeRequestFields } from "../lib/llmRuntime";
-import { NewCodeModal, type CodeRow } from "./Project_Codebook_View";
+import { NewCodeModal, type CodeRow } from "../components/NewCodeModal";
 import type { SourceAnnotationRow } from "./Postgres_Sources_View";
 import {
   AnnotationEditorModal,

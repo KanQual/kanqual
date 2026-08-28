@@ -37,7 +37,7 @@ import {
   PostgresAttributeValueHistoryModal,
   type PostgresAttributeValueHistoryTarget,
 } from "../components/PostgresAttributeValueHistoryModal";
-import { PlusIcon } from "../components/AppIcons";
+import { CloseIcon, PlusIcon } from "../components/AppIcons";
 import {
   PostgresRelationshipModal,
   type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
@@ -52,6 +52,16 @@ import { createMediaWaveformCache, serializeMediaWaveformCache } from "../lib/me
 import { createMediaVideoFrameIndexCache, serializeMediaVideoFrameIndexCache } from "../lib/mediaVideoFrameIndex";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import {
+  isVisibleItemTimelineAttribute,
+  itemTimelineAttributeDefaultValue,
+  itemTimelineAttributeLabel,
+} from "../lib/timelineAttributeUi";
+import {
+  inferUploadMediaType,
+  sourceImportFileExtension,
+  uploadMediaTypeFromFileExtension,
+} from "../lib/sourceUploadMedia";
+import {
   acquirePostgresSourceLock,
   createPostgresAnnotation,
   createPostgresCode,
@@ -63,6 +73,7 @@ import {
   type PostgresRelationship,
   type PostgresRelationshipAttributeDefinition,
   type PostgresRelationshipType,
+  type PostgresSource,
   type PostgresSourceAttributeDefinition,
   type PostgresSourceAttributeValue,
   type PostgresSourceLock,
@@ -72,11 +83,13 @@ import {
   deletePostgresSourceAttributeDefinition,
   getPostgresProjectDocumentImportSettings,
   importPostgresSourceFile,
+  importPostgresSourceImage,
   importPostgresSourceTypeImage,
   kickPostgresSourceLock,
   listPostgresProjects,
   releasePostgresSourceLock,
   removePostgresSourceTypeImage,
+  removePostgresSourceImage,
   savePostgresSourceAttribute,
   savePostgresSourceTypeSetting,
   savePostgresRelationship,
@@ -119,15 +132,32 @@ type SourceObjectTypeShape =
   | "star";
 type SourceObjectFill = "filled" | "outline";
 type SourceObjectVisualKey = "source_text" | "source_processed_transcript" | "source_pdf" | "source_image" | "source_audio" | "source_video";
+type SourceGraphicMode = "inherit" | "select" | "upload";
+
+const SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY = 0;
+const SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH = 2;
+const SOURCE_SHAPE_PICKER_PREVIEW_COLOR = "#64748b";
+const SOURCE_SHAPE_PICKER_PREVIEW_FILL_TRANSPARENCY = 60;
 
 type SourceUploadDraft = {
   id: string;
   file: File;
   title: string;
   sourceKind: string;
+  notes: string;
   extractedText: string;
   fileTypeLabel: string;
   characterCount: number | null;
+  shapeOverride: string;
+  colorOverride: string;
+  outlineColorOverride: string;
+  fillOverride: string;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
+  imageStoragePath: string;
+  pendingImageFile: File | null;
+  removeImage: boolean;
+  attributeValuesByDefinitionId: Record<string, string>;
 };
 
 export type SourceRow = {
@@ -144,9 +174,33 @@ export type SourceRow = {
   extractedFromVideoSourceId: string;
   extractedFromVideoTimeMs: number | null;
   filePath: string;
+  shapeOverride: string;
+  colorOverride: string;
+  outlineColorOverride: string;
+  fillOverride: string;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
+  imageStoragePath: string;
   annotationCount: number;
   objectCount: number;
   createdAt: string;
+};
+
+export type SourceEditorPayload = {
+  sourceKind: string;
+  name: string;
+  notes: string;
+  content: string;
+  shapeOverride: string | null;
+  colorOverride: string | null;
+  outlineColorOverride: string | null;
+  fillOverride: string | null;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
+  imageStoragePath: string | null;
+  pendingImageFile: File | null;
+  removeImage: boolean;
+  attributeValuesByDefinitionId: Record<string, string>;
 };
 
 function normalizeSourceKindFilterValue(value: string): string {
@@ -326,6 +380,30 @@ const SOURCE_OBJECT_SHAPE_OPTIONS: Array<{ value: SourceObjectTypeShape; label: 
   { value: "tag", label: "Tag" },
   { value: "star", label: "Star" },
 ];
+
+function getSourceShapePickerPreviewSize(shape: SourceObjectTypeShape): { width: number; height: number } {
+  switch (shape) {
+    case "rounded":
+    case "diamond":
+      return { width: 34, height: 34 };
+    case "triangle":
+      return { width: 34, height: 32 };
+    case "rectangle":
+      return { width: 38, height: 26 };
+    case "hexagon":
+    case "parallelogram":
+    case "trapezoid":
+    case "tag":
+      return { width: 40, height: 28 };
+    case "octagon":
+      return { width: 36, height: 30 };
+    case "star":
+      return { width: 34, height: 32 };
+    default:
+      return { width: 36, height: 30 };
+  }
+}
+
 const SOURCE_OBJECT_VISUAL_ASSET_URLS: Record<SourceObjectVisualKey, string> = {
   source_text: buildSvgDataUrl(sourceTextOutlineShapeSvg),
   source_processed_transcript: buildSvgDataUrl(sourceProcessedTranscriptOutlineShapeSvg),
@@ -400,6 +478,38 @@ function getSourceObjectMaskStyle(url: string): CSSProperties {
   };
 }
 
+function sourceGraphicHexToRgba(color: string, alpha: number): string {
+  const normalized = normalizeSourceObjectColor(color);
+  const hex = normalized.replace("#", "");
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${Math.max(0, Math.min(1, alpha))})`;
+}
+
+function getSourceSvgShapePoints(shape: SourceObjectTypeShape, width: number, height: number, x = 0, y = 0): string | null {
+  switch (shape) {
+    case "triangle":
+      return `${x + width / 2},${y} ${x + width},${y + height} ${x},${y + height}`;
+    case "diamond":
+      return `${x + width / 2},${y} ${x + width},${y + height / 2} ${x + width / 2},${y + height} ${x},${y + height / 2}`;
+    case "hexagon":
+      return `${x + width * 0.12},${y} ${x + width * 0.88},${y} ${x + width},${y + height / 2} ${x + width * 0.88},${y + height} ${x + width * 0.12},${y + height} ${x},${y + height / 2}`;
+    case "octagon":
+      return `${x + width * 0.18},${y} ${x + width * 0.82},${y} ${x + width},${y + height * 0.18} ${x + width},${y + height * 0.82} ${x + width * 0.82},${y + height} ${x + width * 0.18},${y + height} ${x},${y + height * 0.82} ${x},${y + height * 0.18}`;
+    case "parallelogram":
+      return `${x + width * 0.14},${y} ${x + width},${y} ${x + width * 0.86},${y + height} ${x},${y + height}`;
+    case "trapezoid":
+      return `${x + width * 0.14},${y} ${x + width * 0.86},${y} ${x + width},${y + height} ${x},${y + height}`;
+    case "tag":
+      return `${x},${y} ${x + width * 0.78},${y} ${x + width},${y + height / 2} ${x + width * 0.78},${y + height} ${x},${y + height} ${x + width * 0.12},${y + height / 2}`;
+    case "star":
+      return `${x + width * 0.5},${y} ${x + width * 0.61},${y + height * 0.35} ${x + width * 0.98},${y + height * 0.35} ${x + width * 0.68},${y + height * 0.57} ${x + width * 0.79},${y + height * 0.91} ${x + width * 0.5},${y + height * 0.7} ${x + width * 0.21},${y + height * 0.91} ${x + width * 0.32},${y + height * 0.57} ${x + width * 0.02},${y + height * 0.35} ${x + width * 0.39},${y + height * 0.35}`;
+    default:
+      return null;
+  }
+}
+
 function SourceObjectTypeSwatch(props: {
   shape: SourceObjectTypeShape;
   fill: SourceObjectFill;
@@ -408,12 +518,65 @@ function SourceObjectTypeSwatch(props: {
   sourceVisualKey: SourceObjectVisualKey | null;
   width?: number;
   height?: number;
+  fillTransparency?: number;
+  outlineWidth?: number;
 }) {
-  const { shape, fill, color, outlineColor, sourceVisualKey, width = 24, height = 18 } = props;
+  const { shape, fill, color, outlineColor, sourceVisualKey, width = 24, height = 18, fillTransparency = 0, outlineWidth = 2 } = props;
   const sourceOutlineAsset = sourceVisualKey ? SOURCE_OBJECT_VISUAL_ASSET_URLS[sourceVisualKey] : null;
   const shapeAssets = sourceVisualKey ? null : SOURCE_OBJECT_SHAPE_ASSET_URLS[shape];
   const edgeColor = outlineColor || color;
-  const background = fill === "outline" ? "transparent" : `${color}2e`;
+  const background = fill === "outline" ? "transparent" : sourceGraphicHexToRgba(color, 1 - (Math.max(0, Math.min(100, fillTransparency)) / 100));
+  const strokeWidth = Math.max(1, Math.min(10, outlineWidth));
+
+  if (!sourceVisualKey) {
+    const strokePadding = shape === "star" ? Math.ceil(strokeWidth * 2.5) + 4 : Math.ceil(strokeWidth / 2) + 2;
+    const swatchWidth = width + (strokePadding * 2);
+    const swatchHeight = height + (strokePadding * 2);
+    const inset = strokeWidth / 2;
+    const innerWidth = Math.max(0, width - strokeWidth);
+    const innerHeight = Math.max(0, height - strokeWidth);
+    const points = getSourceSvgShapePoints(shape, innerWidth, innerHeight, inset, inset);
+    return (
+      <svg
+        aria-hidden="true"
+        width={swatchWidth}
+        height={swatchHeight}
+        viewBox={`0 0 ${swatchWidth} ${swatchHeight}`}
+        style={{ display: "block", flexShrink: 0 }}
+      >
+        <g transform={`translate(${strokePadding} ${strokePadding})`}>
+          {points ? (
+            <polygon
+              points={points}
+              fill={background}
+              stroke={edgeColor}
+              strokeWidth={strokeWidth}
+              strokeLinejoin="round"
+            />
+          ) : shape === "rectangle" ? (
+            <rect
+              x={inset}
+              y={inset}
+              width={innerWidth}
+              height={innerHeight}
+              fill={background}
+              stroke={edgeColor}
+              strokeWidth={strokeWidth}
+            />
+          ) : (
+            <circle
+              cx={width / 2}
+              cy={height / 2}
+              r={Math.max(0, Math.min(innerWidth, innerHeight) / 2)}
+              fill={background}
+              stroke={edgeColor}
+              strokeWidth={strokeWidth}
+            />
+          )}
+        </g>
+      </svg>
+    );
+  }
 
   return (
     <span
@@ -458,6 +621,8 @@ type SourceTypeEditModalDraft = {
   color: string;
   outlineColor: string;
   fill: SourceObjectFill;
+  fillTransparency: number;
+  outlineWidth: number;
   imageStoragePath: string;
   attributes: SourceTypeAttributeDraft[];
   attributeValuesByDraftId: EditableAttributeMatrixValues;
@@ -484,6 +649,7 @@ function createSourceTypeAttributeDraft(sourceKind: string): SourceTypeAttribute
 
 function SourceTypeEditModal({
   sourceType,
+  projectStoragePath,
   attributeDefinitions,
   sources,
   attributeValues,
@@ -497,6 +663,7 @@ function SourceTypeEditModal({
   onRemoveImage,
 }: {
   sourceType: PostgresSourceTypeSetting;
+  projectStoragePath: string;
   attributeDefinitions: PostgresSourceAttributeDefinition[];
   sources: SourceRow[];
   attributeValues: PostgresSourceAttributeValue[];
@@ -510,7 +677,11 @@ function SourceTypeEditModal({
   onRemoveImage: (sourceKind: string) => Promise<PostgresSourceTypeSetting>;
 }) {
   const [tab, setTab] = useState<"details" | "graphics" | "attributes" | "timeline">(initialTab);
-  const [graphicsTab, setGraphicsTab] = useState<"default" | "geometry" | "upload">("default");
+  const defaultSourceVisualKey = sourceObjectTypeSystemKeyFromKind(sourceType.sourceKind);
+  const defaultSourceVisual = getSourceKindVisual(sourceType.sourceKind);
+  const [graphicMode, setGraphicMode] = useState<"default" | "select" | "upload">(
+    sourceType.imageStoragePath ? "upload" : defaultSourceVisualKey ? "default" : "select",
+  );
   const [editingAttributeDraft, setEditingAttributeDraft] = useState<SourceTypeAttributeDraft | null>(null);
   const [removedAttributeIds, setRemovedAttributeIds] = useState<string[]>([]);
   const [name, setName] = useState(sourceType.name);
@@ -521,12 +692,14 @@ function SourceTypeEditModal({
     normalizeOptionalSourceObjectColor(sourceType.outlineColor) || normalizeSourceObjectColor(sourceType.color),
   );
   const [fill, setFill] = useState<SourceObjectFill>(normalizeSourceObjectFill(sourceType.fill));
+  const [fillTransparency, setFillTransparency] = useState(Math.max(0, Math.min(100, sourceType.fillTransparency ?? SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY)));
+  const [outlineWidth, setOutlineWidth] = useState(Math.max(1, Math.min(10, sourceType.outlineWidth ?? SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH)));
   const [imageStoragePath, setImageStoragePath] = useState(sourceType.imageStoragePath ?? "");
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const sourceVisualKey = sourceObjectTypeSystemKeyFromKind(sourceType.sourceKind);
   const normalizedColor = normalizeSourceObjectColor(color);
   const normalizedOutlineColor = normalizeOptionalSourceObjectColor(outlineColor) || normalizedColor;
+  const savedImageUrl = useStoredImageUrl(projectStoragePath, imageStoragePath);
   const sourceTypeAttributeOptions = [{ kind: sourceType.sourceKind, label: sourceType.name, count: 0 }];
   const [attributeDrafts, setAttributeDrafts] = useState<SourceTypeAttributeDraft[]>(() => {
     const currentKind = normalizeSourceKindFilterValue(sourceType.sourceKind);
@@ -583,7 +756,7 @@ function SourceTypeEditModal({
         if (current) URL.revokeObjectURL(current);
         return previewUrl;
       });
-      setGraphicsTab("upload");
+      setGraphicMode("upload");
     } catch {
       URL.revokeObjectURL(previewUrl);
     } finally {
@@ -617,6 +790,8 @@ function SourceTypeEditModal({
       color: normalizedColor,
       outlineColor: normalizedOutlineColor,
       fill,
+      fillTransparency: fill === "filled" ? Math.max(0, Math.min(100, fillTransparency)) : SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY,
+      outlineWidth: Math.max(1, Math.min(10, outlineWidth)),
       imageStoragePath,
       attributes: attributeDrafts,
       attributeValuesByDraftId,
@@ -731,33 +906,11 @@ function SourceTypeEditModal({
     );
   }
 
-  function renderColorControls() {
+  function renderSourceTypeUploadGraphicControls() {
+    if (!imageStoragePath && !imagePreviewUrl) return null;
+    const effectiveOutlineWidth = Math.max(1, Math.min(10, outlineWidth));
     return (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 14,
-        }}
-      >
-        <label className="form-label">
-          Fill
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-            <input
-              className="form-input form-input--color"
-              type="color"
-              value={normalizedColor}
-              onChange={(event) => setColor(event.target.value)}
-              style={{ width: 92, minWidth: 92, height: 56 }}
-            />
-            <input
-              className="form-input"
-              value={color}
-              onChange={(event) => setColor(event.target.value)}
-              style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
-            />
-          </div>
-        </label>
+      <>
         <label className="form-label">
           Outline
           <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
@@ -772,74 +925,199 @@ function SourceTypeEditModal({
               className="form-input"
               value={outlineColor}
               onChange={(event) => setOutlineColor(event.target.value)}
-              style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
+              style={{ flex: "0 0 148px", fontFamily: "monospace" }}
             />
           </div>
         </label>
-      </div>
+        <label className="form-label timeline-group-opacity-control">
+          Outline Width
+          <div className="timeline-group-slider-row">
+            <input
+              className="form-range"
+              type="range"
+              min="1"
+              max="10"
+              step="1"
+              value={effectiveOutlineWidth}
+              onChange={(event) => setOutlineWidth(Number(event.target.value))}
+            />
+            <span className="timeline-group-slider-value">{effectiveOutlineWidth}px</span>
+          </div>
+        </label>
+      </>
     );
   }
 
-  function renderOutlineColorControl() {
+  function renderSourceTypeSelectGraphicControls() {
+    const effectiveFillTransparency = Math.max(0, Math.min(100, fillTransparency));
+    const effectiveOutlineWidth = Math.max(1, Math.min(10, outlineWidth));
     return (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(220px, 1fr)",
-          gap: 14,
-        }}
-      >
+      <>
         <label className="form-label">
-          Outline
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-            <input
-              className="form-input form-input--color"
-              type="color"
-              value={normalizedOutlineColor}
-              onChange={(event) => setOutlineColor(event.target.value)}
-              style={{ width: 92, minWidth: 92, height: 56 }}
-            />
-            <input
-              className="form-input"
-              value={outlineColor}
-              onChange={(event) => setOutlineColor(event.target.value)}
-              style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
-            />
+          Shape
+          <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Source type shape">
+            {SOURCE_OBJECT_SHAPE_OPTIONS.map((option) => {
+              const previewSize = getSourceShapePickerPreviewSize(option.value);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`shape-picker-option${shape === option.value ? " shape-picker-option--selected" : ""}`}
+                  onClick={() => setShape(option.value)}
+                  aria-pressed={shape === option.value}
+                >
+                  <div className="shape-picker-preview" aria-hidden="true">
+                    <SourceObjectTypeSwatch
+                      shape={option.value}
+                      fill="filled"
+                      color={SOURCE_SHAPE_PICKER_PREVIEW_COLOR}
+                      outlineColor={SOURCE_SHAPE_PICKER_PREVIEW_COLOR}
+                      sourceVisualKey={null}
+                      width={previewSize.width}
+                      height={previewSize.height}
+                      fillTransparency={SOURCE_SHAPE_PICKER_PREVIEW_FILL_TRANSPARENCY}
+                      outlineWidth={2}
+                    />
+                  </div>
+                  <span className="shape-picker-label">{option.label}</span>
+                </button>
+              );
+            })}
           </div>
         </label>
-      </div>
-    );
-  }
-
-  function renderFillOptions(sourceKey: SourceObjectVisualKey | null) {
-    return (
-      <label className="form-label">
-        Fill Style
-        <div className="shape-picker-grid" role="radiogroup" aria-label="Source type fill style">
-          {(["filled", "outline"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              className={`shape-picker-option${fill === option ? " shape-picker-option--selected" : ""}`}
-              onClick={() => setFill(option)}
-              aria-pressed={fill === option}
-            >
-              <div className="shape-picker-preview" aria-hidden="true">
-                <SourceObjectTypeSwatch
-                  shape={shape}
-                  fill={option}
-                  color={normalizedColor}
-                  outlineColor={normalizedOutlineColor}
-                  sourceVisualKey={sourceKey}
-                  width={72}
-                  height={54}
+        <div className="source-graphics-setting-row">
+          <span className="form-label">Fill Style</span>
+          <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label="Source type fill style">
+            {(["outline", "filled"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`segmented-control-option ${fill === option ? "segmented-control-option--active" : ""}`}
+                onClick={() => setFill(option)}
+                aria-pressed={fill === option}
+              >
+                {option === "outline" ? "Outline" : "Filled"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {fill === "filled" ? (
+          <>
+            <label className="form-label">
+              Fill
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+                <input
+                  className="form-input form-input--color"
+                  type="color"
+                  value={normalizedColor}
+                  onChange={(event) => setColor(event.target.value)}
+                  style={{ width: 92, minWidth: 92, height: 56 }}
+                />
+                <input
+                  className="form-input"
+                  value={color}
+                  onChange={(event) => setColor(event.target.value)}
+                  style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
                 />
               </div>
-              <span className="shape-picker-label">{option === "filled" ? "Filled" : "Outline"}</span>
-            </button>
-          ))}
-        </div>
-      </label>
+            </label>
+            <label className="form-label timeline-group-opacity-control">
+              Fill Transparency
+              <div className="timeline-group-slider-row">
+                <input
+                  className="form-range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={effectiveFillTransparency}
+                  onChange={(event) => setFillTransparency(Number(event.target.value))}
+                />
+                <span className="timeline-group-slider-value">{effectiveFillTransparency}%</span>
+              </div>
+            </label>
+          </>
+        ) : null}
+        <label className="form-label">
+          Outline
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+            <input
+              className="form-input form-input--color"
+              type="color"
+              value={normalizedOutlineColor}
+              onChange={(event) => setOutlineColor(event.target.value)}
+              style={{ width: 92, minWidth: 92, height: 56 }}
+            />
+            <input
+              className="form-input"
+              value={outlineColor}
+              onChange={(event) => setOutlineColor(event.target.value)}
+              style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
+            />
+          </div>
+        </label>
+        <label className="form-label timeline-group-opacity-control">
+          Outline Width
+          <div className="timeline-group-slider-row">
+            <input
+              className="form-range"
+              type="range"
+              min="1"
+              max="10"
+              step="1"
+              value={effectiveOutlineWidth}
+              onChange={(event) => setOutlineWidth(Number(event.target.value))}
+            />
+            <span className="timeline-group-slider-value">{effectiveOutlineWidth}px</span>
+          </div>
+        </label>
+      </>
+    );
+  }
+
+  function renderSourceTypeGraphicPreview() {
+    const displayImageUrl = imagePreviewUrl || savedImageUrl;
+    if (graphicMode === "default" && defaultSourceVisualKey) {
+      const defaultColor = defaultSourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR;
+      return (
+        <SourceObjectTypeSwatch
+          shape="rounded"
+          fill="outline"
+          color={defaultColor}
+          outlineColor={defaultColor}
+          sourceVisualKey={defaultSourceVisualKey}
+          width={144}
+          height={108}
+          fillTransparency={SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY}
+          outlineWidth={SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH}
+        />
+      );
+    }
+    if (graphicMode === "upload" && displayImageUrl) {
+      return (
+        <img
+          src={displayImageUrl}
+          alt=""
+          className="source-graphics-preview-image"
+          style={{ borderColor: normalizedOutlineColor, borderWidth: Math.max(1, Math.min(10, outlineWidth)) }}
+        />
+      );
+    }
+    if (graphicMode === "upload") {
+      return null;
+    }
+    return (
+      <SourceObjectTypeSwatch
+        shape={shape}
+        fill={fill}
+        color={normalizedColor}
+        outlineColor={normalizedOutlineColor}
+        sourceVisualKey={null}
+        width={144}
+        height={108}
+        fillTransparency={Math.max(0, Math.min(100, fillTransparency))}
+        outlineWidth={Math.max(1, Math.min(10, outlineWidth))}
+      />
     );
   }
 
@@ -850,7 +1128,7 @@ function SourceTypeEditModal({
       closeDisabled={saving || uploading}
       modalClassName="modal--wide"
     >
-      <form className="form" onSubmit={submit}>
+      <form className={`form ${tab === "graphics" ? "source-editor-modal-body--graphics source-editor-form--graphics" : ""}`} onSubmit={submit}>
         <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Edit source type tabs">
           {(["details", "graphics", "attributes", "timeline"] as const).map((tabId) => (
             <button
@@ -887,107 +1165,73 @@ function SourceTypeEditModal({
           </>
         ) : tab === "graphics" ? (
           <>
-            <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label="Source type graphics tabs">
-              {(["default", "geometry", "upload"] as const).map((tabId) => (
-                <button
-                  key={tabId}
-                  type="button"
-                  className={`segmented-control-option ${graphicsTab === tabId ? "segmented-control-option--active" : ""}`}
-                  onClick={() => setGraphicsTab(tabId)}
-                >
-                  {tabId.slice(0, 1).toUpperCase() + tabId.slice(1)}
-                </button>
-              ))}
-            </div>
-
-            {graphicsTab === "default" ? (
-              <>
-                <div style={{ display: "flex", justifyContent: "center", padding: "8px 0 2px" }}>
-                  <div className="shape-picker-preview" aria-hidden="true" style={{ width: 112, minHeight: 84 }}>
-                    <SourceObjectTypeSwatch
-                      shape={shape}
-                      fill="outline"
-                      color={normalizedColor}
-                      outlineColor={normalizedOutlineColor}
-                      sourceVisualKey={sourceVisualKey}
-                      width={96}
-                      height={72}
-                    />
-                  </div>
-                </div>
-                {renderOutlineColorControl()}
-              </>
-            ) : graphicsTab === "geometry" ? (
-              <>
-                <label className="form-label">
-                  Shape
-                  <div className="shape-picker-grid" role="radiogroup" aria-label="Source type shape">
-                    {SOURCE_OBJECT_SHAPE_OPTIONS.map((option) => (
+              <div className="source-graphics-layout">
+                <div className="source-graphics-controls">
+                  <div style={{ display: "flex", justifyContent: "center" }}>
+                    <div
+                      className={`segmented-control modal-segmented-control modal-secondary-segmented-control ${
+                        defaultSourceVisualKey ? "modal-secondary-segmented-control--three" : "modal-secondary-segmented-control--two"
+                      }`}
+                      role="tablist"
+                      aria-label="Source type graphics tabs"
+                    >
+                    {([
+                      ...(defaultSourceVisualKey ? ["default"] as const : []),
+                      "select",
+                      "upload",
+                    ] as const).map((mode) => (
                       <button
-                        key={option.value}
+                        key={mode}
                         type="button"
-                        className={`shape-picker-option${shape === option.value ? " shape-picker-option--selected" : ""}`}
-                        onClick={() => setShape(option.value)}
-                        aria-pressed={shape === option.value}
+                        role="tab"
+                        aria-selected={graphicMode === mode}
+                        className={`segmented-control-option ${graphicMode === mode ? "segmented-control-option--active" : ""}`}
+                        onClick={() => setGraphicMode(mode)}
+                        disabled={saving || uploading}
                       >
-                        <div className="shape-picker-preview" aria-hidden="true">
-                          <SourceObjectTypeSwatch
-                            shape={option.value}
-                            fill={fill}
-                            color={normalizedColor}
-                            outlineColor={normalizedOutlineColor}
-                            sourceVisualKey={null}
-                            width={72}
-                            height={54}
-                          />
-                        </div>
-                        <span className="shape-picker-label">{option.label}</span>
+                        {mode === "default" ? "Default" : mode.slice(0, 1).toUpperCase() + mode.slice(1)}
                       </button>
                     ))}
+                    </div>
                   </div>
-                </label>
-                {renderColorControls()}
-                {renderFillOptions(null)}
-              </>
-            ) : (
-              <div className="settings-modal-panel" style={{ display: "grid", gap: 14 }}>
-                <input
-                  ref={uploadInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                  style={{ display: "none" }}
-                  onChange={(event) => void handleUploadFile(event.currentTarget.files?.[0])}
-                />
-                <div className="shape-picker-preview" style={{ minHeight: 160, display: "grid", placeItems: "center" }}>
-                  {imagePreviewUrl ? (
-                    <img
-                      src={imagePreviewUrl}
-                      alt=""
-                      style={{ maxWidth: "100%", maxHeight: 150, objectFit: "contain" }}
+
+                {graphicMode === "default" ? null : graphicMode === "select" ? (
+                  renderSourceTypeSelectGraphicControls()
+                ) : (
+                  <>
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                      style={{ display: "none" }}
+                      onChange={(event) => void handleUploadFile(event.currentTarget.files?.[0])}
                     />
-                  ) : imageStoragePath ? (
-                    <span className="settings-small-text">Custom image saved.</span>
-                  ) : (
-                    <span className="settings-small-text">No custom image selected.</span>
-                  )}
-                </div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                  {imageStoragePath ? (
-                    <button type="button" className="btn" onClick={() => void handleRemoveImage()} disabled={saving || uploading}>
-                      Clear
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={() => uploadInputRef.current?.click()}
-                    disabled={saving || uploading}
-                  >
-                    {uploading ? "Uploading..." : "Select Image"}
-                  </button>
+                    <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        onClick={() => uploadInputRef.current?.click()}
+                        disabled={saving || uploading}
+                      >
+                        {uploading ? "Uploading..." : imageStoragePath || imagePreviewUrl ? "Replace image" : "Upload Image"}
+                      </button>
+                      {imageStoragePath ? (
+                        <button type="button" className="btn" onClick={() => void handleRemoveImage()} disabled={saving || uploading}>
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+                    {renderSourceTypeUploadGraphicControls()}
+                  </>
+                )}
+              </div>
+              <div className="source-graphics-preview-card" aria-label="Source type graphic preview">
+                <span className="form-label">Preview</span>
+                <div className="source-graphics-preview-stage">
+                  {renderSourceTypeGraphicPreview()}
                 </div>
               </div>
-            )}
+            </div>
           </>
         ) : tab === "timeline" ? (
           renderTimelineFieldMappings()
@@ -1206,10 +1450,6 @@ async function extractTextFromFile(file: File): Promise<string> {
   throw new Error(`File type ".${ext}" is not supported.`);
 }
 
-function sourceImportFileExtension(file: File): string {
-  return file.name.split(".").pop()?.toLowerCase() ?? "";
-}
-
 function shouldExtractTextFromUploadFile(file: File): boolean {
   return SOURCE_IMPORT_TEXT_EXTS.has(sourceImportFileExtension(file));
 }
@@ -1231,33 +1471,6 @@ function describeUploadProcessing(file: File): string {
   if (inferSourceKindFromUploadFile(file) === "audio") return "Audio will be stored as original media without text extraction.";
   if (inferSourceKindFromUploadFile(file) === "video") return "Video will be stored as original media without text extraction.";
   return "Original file will be stored without text extraction.";
-}
-
-export function inferUploadMediaType(file: File): string | null {
-  if (file.type.trim()) return file.type;
-  const ext = sourceImportFileExtension(file);
-  return mediaTypeFromFileExtension(ext);
-}
-
-function mediaTypeFromFileExtension(ext: string): string | null {
-  if (ext === "pdf") return "application/pdf";
-  if (ext === "png") return "image/png";
-  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-  if (ext === "gif") return "image/gif";
-  if (ext === "webp") return "image/webp";
-  if (ext === "bmp") return "image/bmp";
-  if (ext === "svg") return "image/svg+xml";
-  if (ext === "mp3") return "audio/mpeg";
-  if (ext === "wav") return "audio/wav";
-  if (ext === "m4a" || ext === "aac") return "audio/mp4";
-  if (ext === "ogg") return "audio/ogg";
-  if (ext === "flac") return "audio/flac";
-  if (ext === "mp4" || ext === "m4v") return "video/mp4";
-  if (ext === "mov") return "video/quicktime";
-  if (ext === "avi") return "video/x-msvideo";
-  if (ext === "mkv") return "video/x-matroska";
-  if (ext === "webm") return "video/webm";
-  return null;
 }
 
 function uploadTabAcceptValue(tab: SourceUploadTab): string {
@@ -1338,6 +1551,47 @@ function resolveProjectStoragePath(projectStoragePath: string, sourceStoragePath
   if (!trimmedProjectPath) return trimmedSourcePath;
   const normalizedSourcePath = trimmedSourcePath.replace(/^([\\/])+/, "");
   return `${trimmedProjectPath}\\${normalizedSourcePath.replace(/\//g, "\\")}`;
+}
+
+function storedImageMimeType(imageStoragePath: string): string {
+  const extension = imageStoragePath.split(".").pop()?.toLowerCase() ?? "";
+  if (extension === "svg") return "image/svg+xml";
+  if (extension === "webp") return "image/webp";
+  if (extension === "gif") return "image/gif";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  return "image/png";
+}
+
+function useStoredImageUrl(projectStoragePath: string, imageStoragePath: string): string {
+  const [imageUrl, setImageUrl] = useState("");
+
+  useEffect(() => {
+    if (!projectStoragePath || !imageStoragePath) {
+      setImageUrl("");
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl = "";
+    const resolvedPath = resolveProjectStoragePath(projectStoragePath, imageStoragePath);
+    void readTauriFile(resolvedPath)
+      .then((bytes) => {
+        if (cancelled) return;
+        const blob = new Blob([bytes], { type: storedImageMimeType(imageStoragePath) });
+        objectUrl = URL.createObjectURL(blob);
+        setImageUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setImageUrl("");
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [projectStoragePath, imageStoragePath]);
+
+  return imageUrl;
 }
 
 async function readDroppedFile(path: string): Promise<File> {
@@ -1846,6 +2100,8 @@ function RichTextEditor({
 
 export function SourceImportModal({
   importSettings,
+  attributeDefinitions,
+  sourceTypeSettings = [],
   saving,
   error,
   onCancel,
@@ -1858,6 +2114,8 @@ export function SourceImportModal({
     warnBeforeEmptyImport: boolean;
     storeOriginalFileName: boolean;
   };
+  attributeDefinitions: PostgresSourceAttributeDefinition[];
+  sourceTypeSettings?: PostgresSourceTypeSetting[];
   saving: boolean;
   error: string | null;
   onCancel: () => void;
@@ -1875,7 +2133,18 @@ export function SourceImportModal({
           file: File;
           title: string;
           sourceKind: string;
+          notes: string;
           extractedText: string;
+          shapeOverride: string;
+          colorOverride: string;
+          outlineColorOverride: string;
+          fillOverride: string;
+          fillTransparencyOverride: number | null;
+          outlineWidthOverride: number | null;
+          imageStoragePath: string;
+          pendingImageFile: File | null;
+          removeImage: boolean;
+          attributeValuesByDefinitionId: Record<string, string>;
         }>;
       }
   ) => Promise<void>;
@@ -1890,6 +2159,7 @@ export function SourceImportModal({
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractingDraftIds, setExtractingDraftIds] = useState<string[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewDraftId, setReviewDraftId] = useState<string | null>(null);
   const [pasteHasContent, setPasteHasContent] = useState(false);
   const pastedRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1902,6 +2172,7 @@ export function SourceImportModal({
     setExtracting(false);
     setExtractingDraftIds([]);
     setReviewOpen(false);
+    setReviewDraftId(null);
     dragDepthRef.current = 0;
     setDragging(false);
   }
@@ -1960,9 +2231,20 @@ export function SourceImportModal({
           file,
           title: preliminarySourceTitleFromFileName(file.name),
           sourceKind: draftSourceKind,
+          notes: "",
           extractedText,
           fileTypeLabel: sourceUploadFileTypeLabel(file),
           characterCount: shouldExtractText ? extractedText.length : null,
+          shapeOverride: "",
+          colorOverride: "",
+          outlineColorOverride: "",
+          fillOverride: "",
+          fillTransparencyOverride: null,
+          outlineWidthOverride: null,
+          imageStoragePath: "",
+          pendingImageFile: null,
+          removeImage: false,
+          attributeValuesByDefinitionId: {},
         });
       }
       setUploadDrafts(nextDrafts);
@@ -2061,64 +2343,63 @@ export function SourceImportModal({
       ? "PDF"
       : POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
 
-  function updateUploadDraftTitle(draftId: string, nextTitle: string) {
-    setUploadDrafts((current) => current.map((draft) => (
-      draft.id === draftId
-        ? { ...draft, title: nextTitle }
-        : draft
-    )));
+  function removeUploadDraft(draftId: string) {
+    setUploadDrafts((current) => current.filter((draft) => draft.id !== draftId));
+    if (reviewDraftId === draftId) setReviewDraftId(null);
   }
 
-  async function updateUploadDraftSourceKind(draftId: string, nextSourceKind: string) {
-    const draft = uploadDrafts.find((item) => item.id === draftId) ?? null;
-    if (!draft) return;
+  function sourceRowForUploadDraft(draft: SourceUploadDraft): SourceRow {
+    return {
+      id: draft.id,
+      name: draft.title,
+      type: draft.sourceKind,
+      sourceObjectType: reviewSourceTypeLabel(draft.sourceKind),
+      sourceObjectTypeSystemKey: null,
+      notes: draft.notes,
+      content: draft.sourceKind === "text" ? draft.extractedText : "",
+      structuredContentJson: "",
+      waveformPeaksJson: "",
+      videoFrameIndexJson: "",
+      extractedFromVideoSourceId: "",
+      extractedFromVideoTimeMs: null,
+      filePath: draft.file.name,
+      shapeOverride: draft.shapeOverride,
+      colorOverride: draft.colorOverride,
+      outlineColorOverride: draft.outlineColorOverride,
+      fillOverride: draft.fillOverride,
+      fillTransparencyOverride: draft.fillTransparencyOverride,
+      outlineWidthOverride: draft.outlineWidthOverride,
+      imageStoragePath: draft.imageStoragePath,
+      annotationCount: 0,
+      objectCount: 0,
+      createdAt: "",
+    };
+  }
 
-    if (nextSourceKind === draft.sourceKind) return;
-
-    if (nextSourceKind === "pdf") {
-      setUploadDrafts((current) => current.map((item) => (
-        item.id === draftId
-          ? { ...item, sourceKind: "pdf", extractedText: "", characterCount: null }
-          : item
-      )));
-      return;
-    }
-
-    if (nextSourceKind !== "text") {
-      setUploadDrafts((current) => current.map((item) => (
-        item.id === draftId
-          ? { ...item, sourceKind: nextSourceKind }
-          : item
-      )));
-      return;
-    }
-
-    setExtractError(null);
-    setExtractingDraftIds((current) => [...current, draftId]);
-    try {
-      const extractedText = importSettings.trimImportedText
-        ? (await extractTextFromFile(draft.file)).trim()
-        : await extractTextFromFile(draft.file);
-      setUploadDrafts((current) => current.map((item) => (
-        item.id === draftId
-          ? {
-              ...item,
-              sourceKind: "text",
-              extractedText,
-              characterCount: extractedText.length,
-            }
-          : item
-      )));
-    } catch {
-      setExtractError(`Could not extract text from ${draft.file.name}.`);
-      setUploadDrafts((current) => current.map((item) => (
-        item.id === draftId
-          ? { ...item, sourceKind: "pdf", extractedText: "", characterCount: null }
-          : item
-      )));
-    } finally {
-      setExtractingDraftIds((current) => current.filter((item) => item !== draftId));
-    }
+  function saveReviewedUploadDraft(draftId: string, payload: SourceEditorPayload) {
+    setUploadDrafts((current) => current.map((draft) => (
+      draft.id === draftId
+        ? {
+            ...draft,
+            title: payload.name,
+            sourceKind: payload.sourceKind,
+            notes: payload.notes,
+            extractedText: payload.sourceKind === "text" ? payload.content : draft.extractedText,
+            characterCount: payload.sourceKind === "text" ? payload.content.length : null,
+            shapeOverride: payload.shapeOverride ?? "",
+            colorOverride: payload.colorOverride ?? "",
+            outlineColorOverride: payload.outlineColorOverride ?? "",
+            fillOverride: payload.fillOverride ?? "",
+            fillTransparencyOverride: payload.fillTransparencyOverride,
+            outlineWidthOverride: payload.outlineWidthOverride,
+            imageStoragePath: payload.imageStoragePath ?? "",
+            pendingImageFile: payload.pendingImageFile,
+            removeImage: payload.removeImage,
+            attributeValuesByDefinitionId: payload.attributeValuesByDefinitionId,
+          }
+        : draft
+    )));
+    setReviewDraftId(null);
   }
 
   return (
@@ -2294,50 +2575,37 @@ export function SourceImportModal({
             <div className="users-table-wrap source-import-review-table-wrap">
               <table className="users-table">
                 <thead>
-                  <tr>
-                    <th className="users-th" style={{ width: "28%", cursor: "default" }}>Original Filename</th>
-                    <th className="users-th" style={{ width: "14%", cursor: "default" }}>File Type</th>
-                    <th className="users-th" style={{ width: "18%", cursor: "default" }}>Source Type</th>
-                    <th className="users-th" style={{ width: "12%", cursor: "default" }}>Characters</th>
-                    <th className="users-th" style={{ width: "28%", cursor: "default" }}>Preliminary Title</th>
+                    <tr>
+                    <th className="users-th" style={{ width: "70%", cursor: "default" }}>Original Filename</th>
+                    <th className="users-th" style={{ width: "30%", cursor: "default" }} aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
                   {uploadDrafts.map((draft) => (
                     <tr key={draft.id}>
                       <td className="users-td users-td--name">{draft.file.name}</td>
-                      <td className="users-td users-td--muted">{draft.fileTypeLabel}</td>
-                      <td className="users-td">
-                        <select
-                          className="form-input"
-                          value={draft.sourceKind}
-                          disabled={saving || extractingDraftIds.includes(draft.id) || uploadTab !== "pdf"}
-                          onChange={(event) => {
-                            void updateUploadDraftSourceKind(draft.id, event.target.value);
-                          }}
+                      <td className="users-td source-import-review-actions-cell">
+                        <button
+                          type="button"
+                          className="btn btn--ghost source-import-review-btn"
+                          onClick={() => setReviewDraftId(draft.id)}
+                          disabled={saving || extractingDraftIds.includes(draft.id)}
                         >
-                          {uploadTab === "pdf" ? (
-                            <>
-                              <option value="pdf">PDF</option>
-                              <option value="text">Text</option>
-                            </>
-                          ) : (
-                            <option value={draft.sourceKind}>{reviewSourceTypeLabel(draft.sourceKind)}</option>
-                          )}
-                        </select>
+                          Review
+                        </button>
                         {uploadTab === "pdf" && extractingDraftIds.includes(draft.id) ? (
                           <div className="postgres-users-meta" style={{ marginTop: 6 }}>Extracting text...</div>
                         ) : null}
-                      </td>
-                      <td className="users-td users-td--muted">
-                        {draft.characterCount != null ? formatCurrentNumber(draft.characterCount) : "\u2014"}
-                      </td>
-                      <td className="users-td">
-                        <input
-                          className="form-input"
-                          value={draft.title}
-                          onChange={(event) => updateUploadDraftTitle(draft.id, event.target.value)}
-                        />
+                        <button
+                          type="button"
+                          className="source-import-review-remove-btn"
+                          onClick={() => removeUploadDraft(draft.id)}
+                          disabled={saving}
+                          aria-label={`Remove source ${draft.file.name}`}
+                          title="Remove source"
+                        >
+                          <CloseIcon className="source-import-review-remove-icon" />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -2358,7 +2626,18 @@ export function SourceImportModal({
                       file: draft.file,
                       title: draft.title,
                       sourceKind: draft.sourceKind,
+                      notes: draft.notes,
                       extractedText: draft.sourceKind === "text" ? draft.extractedText : "",
+                      shapeOverride: draft.shapeOverride,
+                      colorOverride: draft.colorOverride,
+                      outlineColorOverride: draft.outlineColorOverride,
+                      fillOverride: draft.fillOverride,
+                      fillTransparencyOverride: draft.fillTransparencyOverride,
+                      outlineWidthOverride: draft.outlineWidthOverride,
+                      imageStoragePath: draft.imageStoragePath,
+                      pendingImageFile: draft.pendingImageFile,
+                      removeImage: draft.removeImage,
+                      attributeValuesByDefinitionId: draft.attributeValuesByDefinitionId,
                     })),
                   });
                 }}
@@ -2368,6 +2647,24 @@ export function SourceImportModal({
           </div>
         </SettingsModal>
       ) : null}
+      {reviewDraftId ? (() => {
+        const reviewDraft = uploadDrafts.find((draft) => draft.id === reviewDraftId) ?? null;
+        if (!reviewDraft) return null;
+        return (
+          <SourceEditorModal
+            title="Review Source"
+            initialRow={sourceRowForUploadDraft(reviewDraft)}
+            projectStoragePath=""
+            sourceTypeSettings={sourceTypeSettings}
+            attributeDefinitions={attributeDefinitions}
+            attributeValuesByDefinitionId={reviewDraft.attributeValuesByDefinitionId}
+            saving={saving}
+            error={null}
+            onCancel={() => setReviewDraftId(null)}
+            onSave={(payload) => saveReviewedUploadDraft(reviewDraft.id, payload)}
+          />
+        );
+      })() : null}
     </>
   );
 }
@@ -2375,6 +2672,8 @@ export function SourceImportModal({
 export function SourceEditorModal({
   title,
   initialRow,
+  projectStoragePath = "",
+  sourceTypeSettings = [],
   attributeDefinitions,
   attributeValuesByDefinitionId,
   saving,
@@ -2384,27 +2683,53 @@ export function SourceEditorModal({
 }: {
   title: string;
   initialRow?: SourceRow | null;
+  projectStoragePath?: string;
+  sourceTypeSettings?: PostgresSourceTypeSetting[];
   attributeDefinitions: PostgresSourceAttributeDefinition[];
   attributeValuesByDefinitionId: Record<string, string>;
   saving: boolean;
   error: string | null;
   onCancel: () => void;
-  onSave: (payload: {
-    sourceKind: string;
-    name: string;
-    notes: string;
-    content: string;
-    attributeValuesByDefinitionId: Record<string, string>;
-  }) => void;
+  onSave: (payload: SourceEditorPayload) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"details" | "attributes" | "timeline">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
+  const [graphicMode, setGraphicMode] = useState<SourceGraphicMode>(() => {
+    if (initialRow?.imageStoragePath) return "upload";
+    if (initialRow?.shapeOverride || initialRow?.colorOverride || initialRow?.outlineColorOverride || initialRow?.fillOverride) return "select";
+    return "inherit";
+  });
   const [sourceKind, setSourceKind] = useState(normalizeSourceKindSelection(initialRow?.type));
   const [name, setName] = useState(initialRow?.name || "");
   const [notes, setNotes] = useState(initialRow?.notes || "");
   const [content, setContent] = useState(initialRow?.content || "");
+  const [shapeOverride, setShapeOverride] = useState(initialRow?.shapeOverride ?? "");
+  const [colorOverride, setColorOverride] = useState(initialRow?.colorOverride ?? "");
+  const [outlineColorOverride, setOutlineColorOverride] = useState(initialRow?.outlineColorOverride ?? "");
+  const [fillOverride, setFillOverride] = useState(initialRow?.fillOverride ?? "");
+  const [fillTransparencyOverride, setFillTransparencyOverride] = useState(initialRow?.fillTransparencyOverride ?? SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY);
+  const [outlineWidthOverride, setOutlineWidthOverride] = useState(initialRow?.outlineWidthOverride ?? SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH);
+  const [imageStoragePath, setImageStoragePath] = useState(initialRow?.imageStoragePath ?? "");
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const [removeImage, setRemoveImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [attributeDraftValues, setAttributeDraftValues] = useState<Record<string, string>>(() => ({
     ...attributeValuesByDefinitionId,
   }));
+  const selectedSourceType = useMemo(() => (
+    sourceTypeSettings.find((setting) => normalizeSourceKindFilterValue(setting.sourceKind) === normalizeSourceKindFilterValue(sourceKind)) ?? null
+  ), [sourceKind, sourceTypeSettings]);
+  const sourceVisualKey = sourceObjectTypeSystemKeyFromKind(sourceKind);
+  const inheritedShape = normalizeSourceObjectTypeShape(selectedSourceType?.shape ?? "");
+  const inheritedColor = normalizeSourceObjectColor(selectedSourceType?.color ?? "");
+  const inheritedOutlineColor = normalizeOptionalSourceObjectColor(selectedSourceType?.outlineColor ?? "") || inheritedColor;
+  const effectiveShape = normalizeSourceObjectTypeShape(shapeOverride || selectedSourceType?.shape || "");
+  const effectiveColor = normalizeSourceObjectColor(colorOverride || selectedSourceType?.color || "");
+  const effectiveOutlineColor = normalizeOptionalSourceObjectColor(outlineColorOverride || selectedSourceType?.outlineColor || "") || effectiveColor;
+  const effectiveFill = graphicMode === "select" ? normalizeSourceObjectFill(fillOverride || "outline") : normalizeSourceObjectFill(fillOverride || selectedSourceType?.fill || "");
+  const effectiveFillTransparency = Math.max(0, Math.min(100, fillTransparencyOverride ?? SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY));
+  const effectiveOutlineWidth = Math.max(1, Math.min(10, outlineWidthOverride ?? SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH));
+  const savedImageUrl = useStoredImageUrl(projectStoragePath, imageStoragePath);
   const displayedAttributeDefinitions = useMemo(
     () => attributeDefinitions.filter((definition) => {
       const sourceKinds = definition.sourceKinds ?? [];
@@ -2413,9 +2738,13 @@ export function SourceEditorModal({
     [attributeDefinitions, sourceKind],
   );
   const displayedTimelineDefinitions = useMemo(
-    () => displayedAttributeDefinitions.filter((definition) => (definition.timelineRole ?? "").trim()),
+    () => displayedAttributeDefinitions.filter(isVisibleItemTimelineAttribute),
     [displayedAttributeDefinitions],
   );
+
+  useEffect(() => () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  }, [imagePreviewUrl]);
 
   function updateAttributeValue(attributeDefinitionId: string, value: string) {
     setAttributeDraftValues((current) => ({
@@ -2424,9 +2753,100 @@ export function SourceEditorModal({
     }));
   }
 
+  function setSourceGraphicMode(nextMode: SourceGraphicMode) {
+    setGraphicMode(nextMode);
+    if (nextMode === "inherit") {
+      setShapeOverride("");
+      setColorOverride("");
+      setOutlineColorOverride("");
+      setFillOverride("");
+      setFillTransparencyOverride(SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY);
+      setOutlineWidthOverride(SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH);
+      setImageStoragePath("");
+      setPendingImageFile(null);
+      setRemoveImage(Boolean(initialRow?.imageStoragePath));
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+    } else if (nextMode === "select") {
+      setFillOverride((current) => current || "outline");
+      setImageStoragePath("");
+      setPendingImageFile(null);
+      setRemoveImage(Boolean(initialRow?.imageStoragePath));
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+    } else {
+      setShapeOverride("");
+      setColorOverride("");
+      setFillOverride("");
+      setFillTransparencyOverride(SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY);
+      setOutlineWidthOverride(SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH);
+      setRemoveImage(false);
+    }
+  }
+
+  function selectSourceImage(file: File | null | undefined) {
+    if (!file) return;
+    const nextPreviewUrl = URL.createObjectURL(file);
+    setPendingImageFile(file);
+    setImagePreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return nextPreviewUrl;
+    });
+    setImageStoragePath("");
+    setRemoveImage(false);
+    setGraphicMode("upload");
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  }
+
+  function clearSourceImage() {
+    setPendingImageFile(null);
+    setImageStoragePath("");
+    setRemoveImage(Boolean(initialRow?.imageStoragePath));
+    setImagePreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+  }
+
+  function renderSourceGraphicPreview() {
+    const displayImageUrl = imagePreviewUrl || savedImageUrl;
+    if (graphicMode === "upload" && displayImageUrl) {
+      return (
+        <img
+          src={displayImageUrl}
+          alt=""
+          className="source-graphics-preview-image"
+          style={{ borderColor: effectiveOutlineColor, borderWidth: effectiveOutlineWidth }}
+        />
+      );
+    }
+
+    if (graphicMode === "upload") {
+      return null;
+    }
+
+    return (
+      <SourceObjectTypeSwatch
+        shape={effectiveShape}
+        fill={effectiveFill}
+        color={effectiveColor}
+        outlineColor={effectiveOutlineColor}
+        sourceVisualKey={graphicMode === "select" ? null : sourceVisualKey}
+        width={144}
+        height={108}
+        fillTransparency={effectiveFillTransparency}
+        outlineWidth={effectiveOutlineWidth}
+      />
+    );
+  }
+
   return (
     <SettingsModal title={title} onClose={onCancel} closeDisabled={saving} modalClassName="modal--wide assoc-doc-modal">
-      <div className="app-settings-modal-body">
+      <div className={`app-settings-modal-body ${activeTab === "graphics" ? "source-editor-modal-body--graphics" : ""}`}>
         <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Source editor tabs">
           <button
             type="button"
@@ -2434,6 +2854,13 @@ export function SourceEditorModal({
             onClick={() => setActiveTab("details")}
           >
             Details
+          </button>
+          <button
+            type="button"
+            className={activeTab === "graphics" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+            onClick={() => setActiveTab("graphics")}
+          >
+            Graphics
           </button>
           <button
             type="button"
@@ -2450,7 +2877,7 @@ export function SourceEditorModal({
             Timeline
           </button>
         </div>
-        <div className="form">
+        <div className={`form ${activeTab === "graphics" ? "source-editor-form--graphics" : ""}`}>
           {activeTab === "details" ? (
             <>
               <label className="form-label">
@@ -2476,6 +2903,222 @@ export function SourceEditorModal({
                 <textarea className="form-input" rows={14} value={content} onChange={(event) => setContent(event.target.value)} />
               </label>
             </>
+          ) : activeTab === "graphics" ? (
+            <>
+              <div className="source-graphics-layout">
+                <div className="source-graphics-controls">
+                  <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label="Source graphic source">
+                    {(["inherit", "select", "upload"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        role="tab"
+                        aria-selected={graphicMode === mode}
+                        className={`segmented-control-option ${graphicMode === mode ? "segmented-control-option--active" : ""}`}
+                        onClick={() => setSourceGraphicMode(mode)}
+                        disabled={saving}
+                      >
+                        {mode.slice(0, 1).toUpperCase() + mode.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  {graphicMode === "inherit" ? (
+                    <p className="auth-hint source-graphics-hint">
+                      This source will inherit its graphical elements from its source type.
+                    </p>
+                  ) : graphicMode === "upload" ? (
+                    <>
+                      <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                        style={{ display: "none" }}
+                        onChange={(event) => selectSourceImage(event.currentTarget.files?.[0])}
+                      />
+                      <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          onClick={() => imageInputRef.current?.click()}
+                          disabled={saving}
+                        >
+                          {imageStoragePath || imagePreviewUrl ? "Replace image" : "Upload Image"}
+                        </button>
+                        {imageStoragePath || imagePreviewUrl ? (
+                          <button type="button" className="btn" onClick={clearSourceImage} disabled={saving}>
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                      {imageStoragePath || imagePreviewUrl ? (
+                        <>
+                          <label className="form-label">
+                            Outline
+                            <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+                              <input
+                                className="form-input form-input--color"
+                                type="color"
+                                value={effectiveOutlineColor}
+                                onChange={(event) => setOutlineColorOverride(event.target.value)}
+                                style={{ width: 92, minWidth: 92, height: 56 }}
+                              />
+                              <input
+                                className="form-input"
+                                value={outlineColorOverride || inheritedOutlineColor}
+                                onChange={(event) => setOutlineColorOverride(event.target.value)}
+                                style={{ flex: "0 0 148px", fontFamily: "monospace" }}
+                              />
+                            </div>
+                          </label>
+                          <label className="form-label timeline-group-opacity-control">
+                            Outline Width
+                            <div className="timeline-group-slider-row">
+                              <input
+                                className="form-range"
+                                type="range"
+                                min="1"
+                                max="10"
+                                step="1"
+                                value={effectiveOutlineWidth}
+                                onChange={(event) => setOutlineWidthOverride(Number(event.target.value))}
+                              />
+                              <span className="timeline-group-slider-value">{effectiveOutlineWidth}px</span>
+                            </div>
+                          </label>
+                        </>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <label className="form-label">
+                        Shape
+                        <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Source shape">
+                          {SOURCE_OBJECT_SHAPE_OPTIONS.map((option) => {
+                            const previewSize = getSourceShapePickerPreviewSize(option.value);
+                            return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`shape-picker-option${effectiveShape === option.value ? " shape-picker-option--selected" : ""}`}
+                              onClick={() => setShapeOverride(option.value === inheritedShape ? "" : option.value)}
+                              aria-pressed={effectiveShape === option.value}
+                            >
+                              <div className="shape-picker-preview" aria-hidden="true">
+                                <SourceObjectTypeSwatch
+                                  shape={option.value}
+                                  fill="filled"
+                                  color={SOURCE_SHAPE_PICKER_PREVIEW_COLOR}
+                                  outlineColor={SOURCE_SHAPE_PICKER_PREVIEW_COLOR}
+                                  sourceVisualKey={null}
+                                  width={previewSize.width}
+                                  height={previewSize.height}
+                                  fillTransparency={SOURCE_SHAPE_PICKER_PREVIEW_FILL_TRANSPARENCY}
+                                  outlineWidth={2}
+                                />
+                              </div>
+                              <span className="shape-picker-label">{option.label}</span>
+                            </button>
+                            );
+                          })}
+                        </div>
+                      </label>
+                      <div className="source-graphics-setting-row">
+                        <span className="form-label">Fill Style</span>
+                        <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label="Source fill style">
+                          {(["outline", "filled"] as const).map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              className={`segmented-control-option ${effectiveFill === option ? "segmented-control-option--active" : ""}`}
+                              onClick={() => setFillOverride(option)}
+                              aria-pressed={effectiveFill === option}
+                            >
+                              {option === "outline" ? "Outline" : "Filled"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {effectiveFill === "filled" ? (
+                        <>
+                          <label className="form-label">
+                            Fill
+                            <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+                              <input
+                                className="form-input form-input--color"
+                                type="color"
+                                value={effectiveColor}
+                                onChange={(event) => setColorOverride(event.target.value)}
+                                style={{ width: 92, minWidth: 92, height: 56 }}
+                              />
+                              <input
+                                className="form-input"
+                                value={colorOverride || inheritedColor}
+                                onChange={(event) => setColorOverride(event.target.value)}
+                                style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
+                              />
+                            </div>
+                          </label>
+                          <label className="form-label timeline-group-opacity-control">
+                            Fill Transparency
+                            <div className="timeline-group-slider-row">
+                              <input
+                                className="form-range"
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={effectiveFillTransparency}
+                                onChange={(event) => setFillTransparencyOverride(Number(event.target.value))}
+                              />
+                              <span className="timeline-group-slider-value">{effectiveFillTransparency}%</span>
+                            </div>
+                          </label>
+                        </>
+                      ) : null}
+                      <label className="form-label">
+                        Outline
+                        <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+                          <input
+                            className="form-input form-input--color"
+                            type="color"
+                            value={effectiveOutlineColor}
+                            onChange={(event) => setOutlineColorOverride(event.target.value)}
+                            style={{ width: 92, minWidth: 92, height: 56 }}
+                          />
+                          <input
+                            className="form-input"
+                            value={outlineColorOverride || inheritedOutlineColor}
+                            onChange={(event) => setOutlineColorOverride(event.target.value)}
+                            style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
+                          />
+                        </div>
+                      </label>
+                      <label className="form-label timeline-group-opacity-control">
+                        Outline Width
+                        <div className="timeline-group-slider-row">
+                          <input
+                            className="form-range"
+                            type="range"
+                            min="1"
+                            max="10"
+                            step="1"
+                            value={effectiveOutlineWidth}
+                            onChange={(event) => setOutlineWidthOverride(Number(event.target.value))}
+                          />
+                          <span className="timeline-group-slider-value">{effectiveOutlineWidth}px</span>
+                        </div>
+                      </label>
+                    </>
+                  )}
+                </div>
+                <div className="source-graphics-preview-card" aria-label="Source graphic preview">
+                  <span className="form-label">Preview</span>
+                  <div className="source-graphics-preview-stage">
+                    {renderSourceGraphicPreview()}
+                  </div>
+                </div>
+              </div>
+            </>
           ) : activeTab === "timeline" ? (
             displayedTimelineDefinitions.length === 0 ? (
               <p className="case-card-empty">No timeline fields have been configured for this source type yet.</p>
@@ -2483,9 +3126,11 @@ export function SourceEditorModal({
               <div className="case-detail-attributes-table-wrap">
                 <table className="case-detail-attributes-table">
                   <tbody>
-                    {displayedTimelineDefinitions.map((definition) => (
+                    {displayedTimelineDefinitions.map((definition) => {
+                      const defaultValue = itemTimelineAttributeDefaultValue(definition, name);
+                      return (
                       <tr key={definition.id}>
-                        <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                        <th className="case-detail-attributes-label" scope="row">{itemTimelineAttributeLabel(definition)}</th>
                         <td className="case-detail-attributes-value">
                           {definition.dataType === "categorical" ? (
                             <select
@@ -2493,7 +3138,7 @@ export function SourceEditorModal({
                               value={attributeDraftValues[definition.id] ?? ""}
                               onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
                             >
-                              <option value="">-</option>
+                              <option value="">{defaultValue || "-"}</option>
                               {definition.options.map((option) => (
                                 <option key={option} value={option}>{option}</option>
                               ))}
@@ -2503,13 +3148,15 @@ export function SourceEditorModal({
                               className="form-input"
                               type={definition.dataType === "number" ? "number" : definition.dataType === "datetime" ? "datetime-local" : "text"}
                               step={definition.dataType === "number" ? "any" : undefined}
+                              placeholder={defaultValue}
                               value={attributeDraftValues[definition.id] ?? ""}
                               onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
                             />
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2558,7 +3205,22 @@ export function SourceEditorModal({
         <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
         <button
           className="btn btn--primary"
-          onClick={() => onSave({ sourceKind, name, notes, content, attributeValuesByDefinitionId: attributeDraftValues })}
+          onClick={() => onSave({
+            sourceKind,
+            name,
+            notes,
+            content,
+            shapeOverride: graphicMode === "select" ? effectiveShape : null,
+            colorOverride: graphicMode === "select" && effectiveFill === "filled" ? normalizeSourceObjectColor(colorOverride || inheritedColor) : null,
+            outlineColorOverride: graphicMode === "inherit" ? null : normalizeOptionalSourceObjectColor(outlineColorOverride) || null,
+            fillOverride: graphicMode === "select" ? effectiveFill : null,
+            fillTransparencyOverride: graphicMode === "select" && effectiveFill === "filled" ? effectiveFillTransparency : null,
+            outlineWidthOverride: graphicMode === "select" || graphicMode === "upload" ? effectiveOutlineWidth : null,
+            imageStoragePath: graphicMode === "upload" ? imageStoragePath.trim() || null : null,
+            pendingImageFile: graphicMode === "upload" ? pendingImageFile : null,
+            removeImage,
+            attributeValuesByDefinitionId: attributeDraftValues,
+          })}
           disabled={saving || !name.trim()}
         >
           {saving ? "Saving..." : "Save"}
@@ -3141,7 +3803,7 @@ function PostgresSourceDetail({
     void readTauriFile(resolvedFilePath)
       .then((bytes) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaTypeFromFileExtension(fileExt) ?? undefined }));
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: uploadMediaTypeFromFileExtension(fileExt) ?? undefined }));
         setAudioPreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
           return objectUrl;
@@ -3185,7 +3847,7 @@ function PostgresSourceDetail({
     void readTauriFile(resolvedFilePath)
       .then((bytes) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaTypeFromFileExtension(fileExt) ?? undefined }));
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: uploadMediaTypeFromFileExtension(fileExt) ?? undefined }));
         setVideoPreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
           return objectUrl;
@@ -3915,6 +4577,13 @@ export function PostgresSourcesView({
             extractedFromVideoSourceId: source.extractedFromVideoSourceId ?? "",
             extractedFromVideoTimeMs: source.extractedFromVideoTimeMs ?? null,
             filePath: source.storagePath,
+            shapeOverride: source.shapeOverride ?? "",
+            colorOverride: source.colorOverride ?? "",
+            outlineColorOverride: source.outlineColorOverride ?? "",
+            fillOverride: source.fillOverride ?? "",
+            fillTransparencyOverride: source.fillTransparencyOverride ?? null,
+            outlineWidthOverride: source.outlineWidthOverride ?? null,
+            imageStoragePath: source.imageStoragePath ?? "",
             annotationCount: annotationCountBySourceId.get(source.id) ?? 0,
             objectCount: objectCountBySourceId.get(source.id) ?? 0,
             createdAt: source.createdAt,
@@ -4325,6 +4994,8 @@ export function PostgresSourcesView({
         color: normalizeSourceObjectColor(draft.color),
         outlineColor: normalizeOptionalSourceObjectColor(draft.outlineColor) || normalizeSourceObjectColor(draft.color),
         fill: draft.fill,
+        fillTransparency: draft.fill === "filled" ? Math.max(0, Math.min(100, draft.fillTransparency)) : SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY,
+        outlineWidth: Math.max(1, Math.min(10, draft.outlineWidth)),
         imageStoragePath: draft.imageStoragePath || null,
       });
       const currentKind = normalizeSourceKindFilterValue(sourceType.sourceKind);
@@ -4416,18 +5087,15 @@ export function PostgresSourcesView({
     }
   }
 
-  async function handleSaveSource(payload: {
-    sourceKind: string;
-    name: string;
-    notes: string;
-    content: string;
-    attributeValuesByDefinitionId: Record<string, string>;
-  }) {
+  async function handleSaveSource(payload: SourceEditorPayload) {
     setSubmitting(true);
     setSubmitError(null);
     try {
       let savedSourceId = editingRow?.id ?? "";
       if (editingRow) {
+        if (payload.removeImage) {
+          await removePostgresSourceImage(projectId, editingRow.id);
+        }
         const saved = await updatePostgresSource({
           projectId,
           sourceId: editingRow.id,
@@ -4442,6 +5110,13 @@ export function PostgresSourcesView({
           extractedFromVideoTimeMs: editingRow.extractedFromVideoTimeMs,
           originalFileName: editingRow.filePath,
           storagePath: editingRow.filePath,
+          shapeOverride: payload.shapeOverride,
+          colorOverride: payload.colorOverride,
+          outlineColorOverride: payload.outlineColorOverride,
+          fillOverride: payload.fillOverride,
+          fillTransparencyOverride: payload.fillTransparencyOverride,
+          outlineWidthOverride: payload.outlineWidthOverride,
+          imageStoragePath: payload.pendingImageFile ? editingRow.imageStoragePath || null : payload.imageStoragePath,
         });
         savedSourceId = saved.id;
       } else {
@@ -4458,8 +5133,24 @@ export function PostgresSourcesView({
           extractedFromVideoTimeMs: null,
           originalFileName: "",
           storagePath: "",
+          shapeOverride: payload.shapeOverride,
+          colorOverride: payload.colorOverride,
+          outlineColorOverride: payload.outlineColorOverride,
+          fillOverride: payload.fillOverride,
+          fillTransparencyOverride: payload.fillTransparencyOverride,
+          outlineWidthOverride: payload.outlineWidthOverride,
+          imageStoragePath: payload.imageStoragePath,
         });
         savedSourceId = saved.id;
+      }
+      if (payload.pendingImageFile && savedSourceId) {
+        const bytes = new Uint8Array(await payload.pendingImageFile.arrayBuffer());
+        await importPostgresSourceImage({
+          projectId,
+          sourceId: savedSourceId,
+          originalFileName: payload.pendingImageFile.name,
+          fileBytesBase64: bytesToBase64(bytes),
+        });
       }
 
       for (const definition of sourceAttributeDefinitions) {
@@ -4512,7 +5203,18 @@ export function PostgresSourcesView({
           file: File;
           title: string;
           sourceKind: string;
+          notes: string;
           extractedText: string;
+          shapeOverride: string;
+          colorOverride: string;
+          outlineColorOverride: string;
+          fillOverride: string;
+          fillTransparencyOverride: number | null;
+          outlineWidthOverride: number | null;
+          imageStoragePath: string;
+          pendingImageFile: File | null;
+          removeImage: boolean;
+          attributeValuesByDefinitionId: Record<string, string>;
         }>;
       }
   ) {
@@ -4530,11 +5232,12 @@ export function PostgresSourcesView({
           waveformPeaksJson: "",
           videoFrameIndexJson: "",
           extractedFromVideoSourceId: "",
-          extractedFromVideoTimeMs: null,
-          originalFileName: "",
-          storagePath: "",
-        });
+            extractedFromVideoTimeMs: null,
+            originalFileName: "",
+            storagePath: "",
+          });
       } else {
+        const createdUploadItems: Array<{ source: PostgresSource; draft: typeof payload.items[number] }> = [];
         for (const item of payload.items) {
           const bytes = new Uint8Array(await item.file.arrayBuffer());
           const waveformPeaksJson = item.sourceKind === "audio" || item.sourceKind === "video"
@@ -4543,7 +5246,7 @@ export function PostgresSourcesView({
           const videoFrameIndexJson = item.sourceKind === "video"
             ? serializeMediaVideoFrameIndexCache(await createMediaVideoFrameIndexCache(bytes))
             : "";
-          await importPostgresSourceFile({
+          const createdSource = await importPostgresSourceFile({
             projectId,
             sourceKind: item.sourceKind,
             title: item.title,
@@ -4556,7 +5259,50 @@ export function PostgresSourcesView({
             videoFrameIndexJson,
             extractedFromVideoSourceId: "",
             extractedFromVideoTimeMs: null,
-            notes: "",
+            notes: item.notes,
+            shapeOverride: item.shapeOverride || null,
+            colorOverride: item.colorOverride || null,
+            outlineColorOverride: item.outlineColorOverride || null,
+            fillOverride: item.fillOverride || null,
+            fillTransparencyOverride: item.fillTransparencyOverride,
+            outlineWidthOverride: item.outlineWidthOverride,
+            imageStoragePath: item.imageStoragePath || null,
+          });
+          if (item.pendingImageFile) {
+            const imageBytes = new Uint8Array(await item.pendingImageFile.arrayBuffer());
+            await importPostgresSourceImage({
+              projectId,
+              sourceId: createdSource.id,
+              originalFileName: item.pendingImageFile.name,
+              fileBytesBase64: bytesToBase64(imageBytes),
+            });
+          }
+          createdUploadItems.push({ source: createdSource, draft: item });
+        }
+        for (const definition of sourceAttributeDefinitions) {
+          const nextCreatedValues = createdUploadItems
+            .map(({ source, draft }) => ({
+              sourceId: source.id,
+              value: draft.attributeValuesByDefinitionId[definition.id] ?? "",
+            }))
+            .filter((value) => value.value);
+          if (nextCreatedValues.length === 0) continue;
+          await savePostgresSourceAttribute({
+            projectId,
+            attributeDefinitionId: definition.id,
+            name: definition.name,
+            dataType: definition.dataType,
+            description: definition.description,
+            options: definition.options,
+            sourceKinds: definition.sourceKinds,
+            values: rows
+              .map((row) => ({
+                sourceId: row.id,
+                value: sourceAttributeValues.find((value) =>
+                  value.sourceId === row.id && value.attributeDefinitionId === definition.id
+                )?.value ?? "",
+              }))
+              .concat(nextCreatedValues),
           });
         }
       }
@@ -4942,6 +5688,13 @@ export function PostgresSourcesView({
       extractedFromVideoTimeMs: sourceRow.extractedFromVideoTimeMs,
       originalFileName: sourceRow.filePath,
       storagePath: sourceRow.filePath,
+      shapeOverride: sourceRow.shapeOverride || null,
+      colorOverride: sourceRow.colorOverride || null,
+      outlineColorOverride: sourceRow.outlineColorOverride || null,
+      fillOverride: sourceRow.fillOverride || null,
+      fillTransparencyOverride: sourceRow.fillTransparencyOverride,
+      outlineWidthOverride: sourceRow.outlineWidthOverride,
+      imageStoragePath: sourceRow.imageStoragePath || null,
     });
 
     setRows((current) => current.map((entry) => (
@@ -4974,6 +5727,13 @@ export function PostgresSourcesView({
       extractedFromVideoTimeMs: sourceRow.extractedFromVideoTimeMs,
       originalFileName: sourceRow.filePath,
       storagePath: sourceRow.filePath,
+      shapeOverride: sourceRow.shapeOverride || null,
+      colorOverride: sourceRow.colorOverride || null,
+      outlineColorOverride: sourceRow.outlineColorOverride || null,
+      fillOverride: sourceRow.fillOverride || null,
+      fillTransparencyOverride: sourceRow.fillTransparencyOverride,
+      outlineWidthOverride: sourceRow.outlineWidthOverride,
+      imageStoragePath: sourceRow.imageStoragePath || null,
     });
 
     setRows((current) => current.map((entry) => (
@@ -5369,6 +6129,8 @@ export function PostgresSourcesView({
           <SourceEditorModal
             title={editingRow ? "Edit Source" : "New Source"}
             initialRow={editingRow}
+            projectStoragePath={projectStoragePath}
+            sourceTypeSettings={sourceTypeSettings}
             attributeDefinitions={sourceAttributeDefinitionsForEditor}
             attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
             saving={submitting}
@@ -5585,19 +6347,21 @@ export function PostgresSourcesView({
                           }
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                          <SourceObjectTypeSwatch
-                            shape={summary.shape}
-                            fill={summary.fill}
-                            color={summary.color}
-                            outlineColor={summary.outlineColor}
-                            sourceVisualKey={getSourceObjectVisualKey(summary.systemKey)}
-                          />
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-                            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div className="project-type-list-cell">
+                          <div className="project-type-list-icon" aria-hidden="true">
+                            <SourceObjectTypeSwatch
+                              shape={summary.shape}
+                              fill={summary.fill}
+                              color={summary.color}
+                              outlineColor={summary.outlineColor}
+                              sourceVisualKey={getSourceObjectVisualKey(summary.systemKey)}
+                            />
+                          </div>
+                          <div className="project-type-list-copy">
+                            <span className="project-type-list-title">
                               {sourceTypeRowLabel(summary.label)}
                             </span>
-                            <span className="postgres-users-meta" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            <span className="postgres-users-meta project-type-list-meta">
                               {summary.attributeDefinitionCount} attributes
                             </span>
                           </div>
@@ -5847,6 +6611,8 @@ export function PostgresSourcesView({
                 <SourceEditorModal
                   title={editingRow ? "Edit Source" : "New Source"}
                   initialRow={editingRow}
+                  projectStoragePath={projectStoragePath}
+                  sourceTypeSettings={sourceTypeSettings}
                   attributeDefinitions={sourceAttributeDefinitionsForEditor}
                   attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
                   saving={submitting}
@@ -6017,6 +6783,7 @@ export function PostgresSourcesView({
       {editingSourceType ? (
         <SourceTypeEditModal
           sourceType={editingSourceType}
+          projectStoragePath={projectStoragePath}
           attributeDefinitions={sourceAttributeDefinitionsForEditor}
           initialTab={sourceTypeInitialTab}
           saving={sourceTypeSaving}
@@ -6039,6 +6806,8 @@ export function PostgresSourcesView({
       {newSourceOpen && (
         <SourceImportModal
           importSettings={sourceImportSettings}
+          attributeDefinitions={sourceAttributeDefinitions}
+          sourceTypeSettings={sourceTypeSettings}
           saving={submitting}
           error={submitError}
           onCancel={() => {
@@ -6078,9 +6847,11 @@ export function PostgresSourcesView({
       ) : null}
       {editorOpen && !selectedRow && (
         <SourceEditorModal
-          title={editingRow ? "Edit Source" : "New Source"}
-          initialRow={editingRow}
-          attributeDefinitions={sourceAttributeDefinitionsForEditor}
+        title={editingRow ? "Edit Source" : "New Source"}
+        initialRow={editingRow}
+        projectStoragePath={projectStoragePath}
+        sourceTypeSettings={sourceTypeSettings}
+        attributeDefinitions={sourceAttributeDefinitionsForEditor}
           attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
           saving={submitting}
           error={submitError}

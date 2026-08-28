@@ -41,7 +41,7 @@ import {
   type PostgresSourceMediaTimelineHandle,
   type PostgresSourceMediaTimelineZoomUiState,
 } from "./Postgres_Source_Media_Timeline";
-import { NewCodeModal, type CodeRow } from "./Project_Codebook_View";
+import { NewCodeModal, type CodeRow } from "../components/NewCodeModal";
 import "./Postgres_Source_Media_Coding_View.css";
 
 function fileExtensionFromPath(path: string): string {
