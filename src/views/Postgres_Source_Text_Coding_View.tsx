@@ -18,16 +18,13 @@ import {
   type PostgresSourceCodingViewProps,
   PostgresSourceAnnotationPanel,
   PostgresSourceCodingFiltersModal,
-  SOURCE_TEXT_SIZE_DEFAULT_PX,
-  SOURCE_TEXT_SIZE_MAX_PX,
-  SOURCE_TEXT_SIZE_MIN_PX,
-  SOURCE_TEXT_SIZE_STEP_PX,
   TextSizeControls,
   orderedCodesWithDepth,
   tooltipExcerpt,
   type AnnotationHover,
   type StripeBar,
   type StripeHover,
+  usePostgresSourceTextSizePreference,
   visibleCodeNodes,
 } from "./Postgres_Source_Coding_Shared";
 
@@ -108,7 +105,7 @@ export function PostgresSourceTextCodingView({
   const [hiddenUserIds, setHiddenUserIds] = useState<Set<string>>(new Set());
   const [hiddenCodeIds, setHiddenCodeIds] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
+  const { textSizePx, decreaseTextSize, increaseTextSize } = usePostgresSourceTextSizePreference();
   const [textSearchOpen, setTextSearchOpen] = useState(false);
   const [textSearchQuery, setTextSearchQuery] = useState("");
   const [activeTextSearchIndex, setActiveTextSearchIndex] = useState<number | null>(null);
@@ -431,14 +428,6 @@ export function PostgresSourceTextCodingView({
       else next.add(codeId);
       return next;
     });
-  }
-
-  function decreaseTextSize() {
-    setTextSizePx((current) => Math.max(SOURCE_TEXT_SIZE_MIN_PX, current - SOURCE_TEXT_SIZE_STEP_PX));
-  }
-
-  function increaseTextSize() {
-    setTextSizePx((current) => Math.min(SOURCE_TEXT_SIZE_MAX_PX, current + SOURCE_TEXT_SIZE_STEP_PX));
   }
 
   function goToPreviousTextSearchMatch() {

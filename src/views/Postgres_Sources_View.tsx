@@ -102,11 +102,8 @@ import { PostgresSourceAudioCodingView } from "./Postgres_Source_Audio_Coding_Vi
 import { PostgresSourceImageCodingView } from "./Postgres_Source_Image_Coding_View";
 import {
   AnnotationEditorModal,
-  SOURCE_TEXT_SIZE_DEFAULT_PX,
-  SOURCE_TEXT_SIZE_MAX_PX,
-  SOURCE_TEXT_SIZE_MIN_PX,
-  SOURCE_TEXT_SIZE_STEP_PX,
   TextSizeControls,
+  usePostgresSourceTextSizePreference,
 } from "./Postgres_Source_Coding_Shared";
 import { formatMediaTime } from "./Postgres_Source_Media_Timeline";
 import { PostgresSourceAiTextCodingView } from "./Postgres_Source_AI_Text_Coding_View";
@@ -3612,7 +3609,7 @@ function PostgresSourceDetail({
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
   const [videoPreviewLoading, setVideoPreviewLoading] = useState(false);
-  const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
+  const { textSizePx, decreaseTextSize, increaseTextSize } = usePostgresSourceTextSizePreference();
   const [textSearchOpen, setTextSearchOpen] = useState(false);
   const [textSearchQuery, setTextSearchQuery] = useState("");
   const [activeTextSearchIndex, setActiveTextSearchIndex] = useState<number | null>(null);
@@ -3887,14 +3884,6 @@ function PostgresSourceDetail({
     const endOffset = startOffset + quote.length;
     setPendingSelection({ startOffset, endOffset, quote });
     selection.removeAllRanges();
-  }
-
-  function decreaseTextSize() {
-    setTextSizePx((current) => Math.max(SOURCE_TEXT_SIZE_MIN_PX, current - SOURCE_TEXT_SIZE_STEP_PX));
-  }
-
-  function increaseTextSize() {
-    setTextSizePx((current) => Math.min(SOURCE_TEXT_SIZE_MAX_PX, current + SOURCE_TEXT_SIZE_STEP_PX));
   }
 
   function goToPreviousTextSearchMatch() {

@@ -1664,6 +1664,7 @@ export function PostgresAppSettingsView({
   const [theme, setTheme] = useState<Theme>("light");
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
+  const [sourceTextSizePx, setSourceTextSizePx] = useState(15);
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
   const permissionMatrixRows = useMemo(() => buildPermissionMatrixRows(t), [t]);
 
@@ -1678,6 +1679,7 @@ export function PostgresAppSettingsView({
       setTheme(nextUserPreferences.theme);
       setDensity(nextUserPreferences.density);
       setFontSize(nextUserPreferences.fontSize);
+      setSourceTextSizePx(nextUserPreferences.sourceTextSizePx);
       setRecentProjectLimit(nextUserPreferences.recentProjectLimit);
       if (nextUserPreferences.locale !== locale) setLocale(nextUserPreferences.locale);
       applyPostgresRuntimeThemePreferences(nextUserPreferences);
@@ -1697,6 +1699,7 @@ export function PostgresAppSettingsView({
       setTheme(saved.theme);
       setDensity(saved.density);
       setFontSize(saved.fontSize);
+      setSourceTextSizePx(saved.sourceTextSizePx);
       setRecentProjectLimit(saved.recentProjectLimit);
       applyPostgresRuntimeThemePreferences(saved);
       if (successMessage) setNotice(successMessage);
@@ -1711,6 +1714,7 @@ export function PostgresAppSettingsView({
       theme,
       density,
       fontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
@@ -1722,9 +1726,10 @@ export function PostgresAppSettingsView({
     setLocale(nextLocale);
     await persistUserPreferences({
       theme,
-      density,
-      fontSize,
-      locale: nextLocale,
+        density,
+        fontSize,
+        sourceTextSizePx,
+        locale: nextLocale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
     }, "Language updated.");
@@ -1737,6 +1742,7 @@ export function PostgresAppSettingsView({
       theme: nextTheme,
       density,
       fontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),

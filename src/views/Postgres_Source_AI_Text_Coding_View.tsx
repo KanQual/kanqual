@@ -23,15 +23,12 @@ import {
   type PostgresSourceCodingViewProps,
   PostgresSourceAnnotationPanel,
   PostgresSourceCodingFiltersModal,
-  SOURCE_TEXT_SIZE_DEFAULT_PX,
-  SOURCE_TEXT_SIZE_MAX_PX,
-  SOURCE_TEXT_SIZE_MIN_PX,
-  SOURCE_TEXT_SIZE_STEP_PX,
   TextSizeControls,
   tooltipExcerpt,
   type AnnotationHover,
   type StripeBar,
   type StripeHover,
+  usePostgresSourceTextSizePreference,
 } from "./Postgres_Source_Coding_Shared";
 
 const STRIPE_LANE_WIDTH = 8;
@@ -151,7 +148,7 @@ export function PostgresSourceAiTextCodingView({
   const [hiddenUserIds, setHiddenUserIds] = useState<Set<string>>(new Set());
   const [hiddenCodeIds, setHiddenCodeIds] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
+  const { textSizePx, decreaseTextSize, increaseTextSize } = usePostgresSourceTextSizePreference();
   const [stripeBars, setStripeBars] = useState<StripeBar[]>([]);
   const [stripeHover, setStripeHover] = useState<StripeHover | null>(null);
   const [annotationHover, setAnnotationHover] = useState<AnnotationHover | null>(null);
@@ -416,14 +413,6 @@ export function PostgresSourceAiTextCodingView({
     const startOffset = preRange.toString().length;
     const endOffset = startOffset + quote.length;
     setPendingSelection({ startOffset, endOffset, quote });
-  }
-
-  function decreaseTextSize() {
-    setTextSizePx((current) => Math.max(SOURCE_TEXT_SIZE_MIN_PX, current - SOURCE_TEXT_SIZE_STEP_PX));
-  }
-
-  function increaseTextSize() {
-    setTextSizePx((current) => Math.min(SOURCE_TEXT_SIZE_MAX_PX, current + SOURCE_TEXT_SIZE_STEP_PX));
   }
 
   async function handleQuickCode(codeId: string) {

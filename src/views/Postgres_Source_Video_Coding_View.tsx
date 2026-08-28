@@ -4,9 +4,6 @@ import {
   MediaController,
   MediaControlBar,
   MediaMuteButton,
-  MediaPlayButton,
-  MediaSeekBackwardButton,
-  MediaSeekForwardButton,
   MediaVolumeRange,
 } from "media-chrome/react";
 import { SettingsModal } from "../components/SettingsModal";
@@ -305,6 +302,43 @@ function FrameForwardIcon() {
   );
 }
 
+function PlayIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="28" height="28" fill="currentColor">
+      <path d="M6.5 4.25v11.5L15 10 6.5 4.25Z" />
+    </svg>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="28" height="28" fill="currentColor">
+      <path d="M5.75 4.25h3v11.5h-3V4.25Z" />
+      <path d="M11.25 4.25h3v11.5h-3V4.25Z" />
+    </svg>
+  );
+}
+
+function BackFiveIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7.3 5.2H4.2V2.1" />
+      <path d="M4.45 5.2A6.25 6.25 0 1 1 3.9 12" />
+      <path d="M8.05 8.05h3.1l-.35 2h-2.1l-.2 1.45h1.35c.95 0 1.7.7 1.7 1.6 0 .95-.75 1.65-1.8 1.65H7.9" />
+    </svg>
+  );
+}
+
+function ForwardFiveIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12.7 5.2h3.1V2.1" />
+      <path d="M15.55 5.2A6.25 6.25 0 1 0 16.1 12" />
+      <path d="M8.05 8.05h3.1l-.35 2h-2.1l-.2 1.45h1.35c.95 0 1.7.7 1.7 1.6 0 .95-.75 1.65-1.8 1.65H7.9" />
+    </svg>
+  );
+}
+
 function sanitizeFrameFileNamePart(value: string) {
   const sanitized = value
     .trim()
@@ -488,6 +522,7 @@ export function PostgresSourceVideoCodingView({
   const [mediaElement, setMediaElement] = useState<HTMLMediaElement | null>(null);
   const [videoWaveformPanelWidth, setVideoWaveformPanelWidth] = useState<number | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [zoomUiState, setZoomUiState] = useState<PostgresSourceMediaTimelineZoomUiState>({
     canZoomIn: false,
     canZoomOut: false,
@@ -859,6 +894,7 @@ export function PostgresSourceVideoCodingView({
     setMediaElement(null);
     mediaElementRef.current = null;
     setPlaybackRate(1);
+    setIsPlaying(false);
   }, [previewUrl, mediaKind]);
 
   useEffect(() => {
@@ -1002,9 +1038,13 @@ export function PostgresSourceVideoCodingView({
       logOpenTiming("media-can-play");
     };
 
-    const handleEnded = () => setClipPlaybackAnnotationId(null);
+    const handleEnded = () => {
+      setClipPlaybackAnnotationId(null);
+      setIsPlaying(false);
+    };
     const handleRateChange = () => setPlaybackRate(mediaElement.playbackRate || 1);
     const handlePlay = () => {
+      setIsPlaying(true);
       const playbackRange = playbackRangeRef.current;
       if (playbackRange) {
         const currentTimeMs = mediaElement.currentTime * 1000;
@@ -1016,6 +1056,7 @@ export function PostgresSourceVideoCodingView({
       startPlaybackMonitor();
     };
     const handlePause = () => {
+      setIsPlaying(false);
       cancelPlaybackMonitor();
       if (!mediaElement.ended) setClipPlaybackAnnotationId(null);
     };
@@ -1165,6 +1206,32 @@ export function PostgresSourceVideoCodingView({
     void mediaElement.play().catch(() => {
       setClipPlaybackAnnotationId(null);
     });
+  }
+
+  function seekMediaBySeconds(deltaSeconds: number) {
+    const mediaElement = mediaElementRef.current;
+    if (!mediaElement) return;
+    const durationSeconds = Number.isFinite(mediaElement.duration) ? mediaElement.duration : null;
+    const unclampedTime = mediaElement.currentTime + deltaSeconds;
+    const nextTime = Math.max(0, durationSeconds == null ? unclampedTime : Math.min(unclampedTime, durationSeconds));
+    mediaElement.currentTime = nextTime;
+    if (videoPreviewElementRef.current) {
+      videoPreviewElementRef.current.currentTime = nextTime;
+    }
+    setCurrentTimeMs(nextTime * 1000);
+    setClipPlaybackAnnotationId(null);
+  }
+
+  function toggleMediaPlayback() {
+    const mediaElement = mediaElementRef.current;
+    if (!mediaElement) return;
+    if (mediaElement.paused || mediaElement.ended) {
+      void mediaElement.play().catch(() => {
+        setIsPlaying(false);
+      });
+      return;
+    }
+    mediaElement.pause();
   }
 
   function createSelectionFromCurrentTime() {
@@ -1720,48 +1787,107 @@ export function PostgresSourceVideoCodingView({
                         playsInline
                       />
                     </div>
-                    <PostgresSourceMediaTimeline
-                      ref={mediaTimelineRef}
-                      mediaElement={mediaElement}
-                      waveformCache={waveformCache}
-                      annotations={mediaAnnotations}
-                      selectedAnnotationId={selectedAnnotationId}
+                    <div className="media-player-video-waveform-row">
+                      <div className="media-player-video-waveform-square" aria-label="Video transport controls">
+                        <button
+                          type="button"
+                          className="media-player-video-square-play"
+                          onClick={toggleMediaPlayback}
+                          disabled={!mediaElement}
+                          aria-label={isPlaying ? "Pause" : "Play"}
+                          title={isPlaying ? "Pause" : "Play"}
+                        >
+                          {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                        </button>
+                        <div className="media-player-video-square-step-row">
+                          <button
+                            type="button"
+                            className="media-player-video-square-step"
+                            onClick={() => seekMediaBySeconds(-5)}
+                            disabled={!mediaElement}
+                            title="Back 5 seconds"
+                            aria-label="Back 5 seconds"
+                          >
+                            <BackFiveIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="media-player-video-square-step"
+                            onClick={() => stepMediaByFrame(-1)}
+                            disabled={!mediaElement}
+                            title="Back 1 frame"
+                            aria-label="Back 1 frame"
+                          >
+                            <FrameBackIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="media-player-video-square-step"
+                            onClick={() => stepMediaByFrame(1)}
+                            disabled={!mediaElement}
+                            title="Forward 1 frame"
+                            aria-label="Forward 1 frame"
+                          >
+                            <FrameForwardIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="media-player-video-square-step"
+                            onClick={() => seekMediaBySeconds(5)}
+                            disabled={!mediaElement}
+                            title="Forward 5 seconds"
+                            aria-label="Forward 5 seconds"
+                          >
+                            <ForwardFiveIcon />
+                          </button>
+                        </div>
+                      </div>
+                      <PostgresSourceMediaTimeline
+                        ref={mediaTimelineRef}
+                        mediaElement={mediaElement}
+                        waveformCache={waveformCache}
+                        annotations={mediaAnnotations}
+                        selectedAnnotationId={selectedAnnotationId}
                       canEditAnnotations={canEditAnnotations}
                       waveformHeight={47}
+                      annotationStripReservedLanes={1}
+                      reserveScrollbarGutter={false}
                       waveformShellStyle={{
                         width: "100%",
-                        padding: "0 14px 0",
+                        padding: 0,
+                        scrollbarGutter: "auto",
                       }}
-                      pendingSelection={pendingSelection ? {
-                        startMs: pendingSelection.timeStartMs,
-                        endMs: pendingSelection.timeEndMs,
-                      } : null}
-                      pendingSelectionCodeColors={pendingClipCodeColors}
-                      onCreateSelection={(startMs, endMs) => {
-                        setPendingSelection(clipSelectionFromRange(startMs, endMs));
-                        setPendingClipCodeIds([]);
-                        setSelectedAnnotationId(null);
-                      }}
-                      onSelectAnnotation={(annotationId) => {
-                        setPendingSelection(null);
-                        setPendingClipCodeIds([]);
-                        setSelectedAnnotationId(annotationId);
-                        const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
-                        if (annotation) seekToAnnotation(annotation);
-                      }}
-                      onAnnotationContextMenu={(annotation, x, y) => {
-                        if (!canManageMemos && !canEditAnnotations) return;
-                        setPendingSelection(null);
-                        setPendingClipCodeIds([]);
-                        setSelectedAnnotationId(annotation.id);
-                        setAnnotationContextMenu({ x, y, annotation });
-                      }}
-                      onUpdateAnnotationRange={(annotationId, startMs, endMs) => {
-                        void handleUpdateAnnotationRange(annotationId, startMs, endMs);
-                      }}
-                      onPlayClip={playClip}
-                      onZoomUiStateChange={setZoomUiState}
-                    />
+                        pendingSelection={pendingSelection ? {
+                          startMs: pendingSelection.timeStartMs,
+                          endMs: pendingSelection.timeEndMs,
+                        } : null}
+                        pendingSelectionCodeColors={pendingClipCodeColors}
+                        onCreateSelection={(startMs, endMs) => {
+                          setPendingSelection(clipSelectionFromRange(startMs, endMs));
+                          setPendingClipCodeIds([]);
+                          setSelectedAnnotationId(null);
+                        }}
+                        onSelectAnnotation={(annotationId) => {
+                          setPendingSelection(null);
+                          setPendingClipCodeIds([]);
+                          setSelectedAnnotationId(annotationId);
+                          const annotation = mediaAnnotations.find((entry) => entry.id === annotationId);
+                          if (annotation) seekToAnnotation(annotation);
+                        }}
+                        onAnnotationContextMenu={(annotation, x, y) => {
+                          if (!canManageMemos && !canEditAnnotations) return;
+                          setPendingSelection(null);
+                          setPendingClipCodeIds([]);
+                          setSelectedAnnotationId(annotation.id);
+                          setAnnotationContextMenu({ x, y, annotation });
+                        }}
+                        onUpdateAnnotationRange={(annotationId, startMs, endMs) => {
+                          void handleUpdateAnnotationRange(annotationId, startMs, endMs);
+                        }}
+                        onPlayClip={playClip}
+                        onZoomUiStateChange={setZoomUiState}
+                      />
+                    </div>
                   </div>
 
                   <div className={`media-player-controls-panel media-player-controls-panel--video${activeClipRange ? " media-player-controls-panel--clip-active" : ""}`}>
@@ -2000,35 +2126,6 @@ export function PostgresSourceVideoCodingView({
                             </div>
                           </div>
                         </div>
-                        <div className="media-player-grid-seek-back">
-                          <MediaSeekBackwardButton
-                            className="media-player-native-control"
-                            seekOffset={5}
-                            title="Back 5 seconds"
-                            aria-label="Back 5 seconds"
-                            noTooltip
-                          />
-                        </div>
-                        <div className="media-player-grid-frame-back">
-                          <button
-                            type="button"
-                            className="media-player-native-control media-player-frame-step-button"
-                            onClick={() => stepMediaByFrame(-1)}
-                            disabled={!mediaElement}
-                            title="Back 1 frame"
-                            aria-label="Back 1 frame"
-                          >
-                            <FrameBackIcon />
-                          </button>
-                        </div>
-                        <div className="media-player-grid-play">
-                          <MediaPlayButton
-                            className="media-player-native-control media-player-native-control--play"
-                            title="Play"
-                            aria-label="Play"
-                            noTooltip
-                          />
-                        </div>
                         <div className="media-player-grid-extract-frame">
                           <button
                             type="button"
@@ -2040,27 +2137,6 @@ export function PostgresSourceVideoCodingView({
                           >
                             <ExtractFrameIcon />
                           </button>
-                        </div>
-                        <div className="media-player-grid-frame-forward">
-                          <button
-                            type="button"
-                            className="media-player-native-control media-player-frame-step-button"
-                            onClick={() => stepMediaByFrame(1)}
-                            disabled={!mediaElement}
-                            title="Forward 1 frame"
-                            aria-label="Forward 1 frame"
-                          >
-                            <FrameForwardIcon />
-                          </button>
-                        </div>
-                        <div className="media-player-grid-seek-forward">
-                          <MediaSeekForwardButton
-                            className="media-player-native-control"
-                            seekOffset={5}
-                            title="Forward 5 seconds"
-                            aria-label="Forward 5 seconds"
-                            noTooltip
-                          />
                         </div>
                         <div className="media-player-grid-speed">
                           <div

@@ -84,6 +84,8 @@ type PostgresSourceMediaTimelineProps = {
   canEditAnnotations: boolean;
   waveformHeight?: number;
   waveformShellStyle?: CSSProperties;
+  annotationStripReservedLanes?: number;
+  reserveScrollbarGutter?: boolean;
   pendingSelection: PendingClipSelection | null;
   pendingSelectionCodeColors?: string[];
   onCreateSelection: (startMs: number, endMs: number) => void;
@@ -212,7 +214,7 @@ function shouldShowHorizontalScrollbar(scrollContainer: HTMLElement, isFitZoom: 
   return !isFitZoom && hasUsableHorizontalOverflow(scrollContainer);
 }
 
-function applyWaveScrollContainerStyles(scrollContainer: HTMLElement | null, isFitZoom = false) {
+function applyWaveScrollContainerStyles(scrollContainer: HTMLElement | null, isFitZoom = false, reserveScrollbarGutter = true) {
   if (!scrollContainer) return;
   const shouldShowScrollbar = shouldShowHorizontalScrollbar(scrollContainer, isFitZoom);
   if (!shouldShowScrollbar) {
@@ -220,7 +222,7 @@ function applyWaveScrollContainerStyles(scrollContainer: HTMLElement | null, isF
   }
   scrollContainer.style.overflowX = shouldShowScrollbar ? "auto" : "hidden";
   scrollContainer.style.overflowY = "hidden";
-  scrollContainer.style.scrollbarGutter = "stable";
+  scrollContainer.style.scrollbarGutter = reserveScrollbarGutter ? "stable" : "auto";
   scrollContainer.style.boxSizing = "border-box";
   scrollContainer.style.paddingBottom = `${SCROLLBAR_RESERVE_PX}px`;
 }
@@ -283,6 +285,8 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
   canEditAnnotations,
   waveformHeight = 140,
   waveformShellStyle,
+  annotationStripReservedLanes = SEGMENT_STRIP_RESERVED_LANES,
+  reserveScrollbarGutter = true,
   pendingSelection,
   pendingSelectionCodeColors = [],
   onCreateSelection,
@@ -370,7 +374,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       laneCount: laneEndTimes.length,
     };
   }, [mediaAnnotations]);
-  const segmentStripLaneCount = Math.max(SEGMENT_STRIP_RESERVED_LANES, annotationStripBars.laneCount);
+  const segmentStripLaneCount = Math.max(annotationStripReservedLanes, annotationStripBars.laneCount);
   const segmentStripHeight = SEGMENT_STRIP_PADDING_TOP_PX
     + SEGMENT_STRIP_PADDING_BOTTOM_PX
     + segmentStripLaneCount * SEGMENT_STRIP_ROW_HEIGHT_PX
@@ -514,7 +518,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
 
     const wrapper = waveSurfer.getWrapper();
     const scrollContainer = wrapper.parentElement;
-    applyWaveScrollContainerStyles(scrollContainer, isFitZoomRef.current);
+    applyWaveScrollContainerStyles(scrollContainer, isFitZoomRef.current, reserveScrollbarGutter);
 
     const unsubscribers = [
       waveSurfer.on("ready", (durationSeconds) => {
@@ -582,7 +586,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       resetWaveScrollContainerStyles(scrollContainer);
       waveSurfer.destroy();
     };
-  }, [mediaElement, waveformCache, waveformHeight]);
+  }, [mediaElement, reserveScrollbarGutter, waveformCache, waveformHeight]);
 
   useEffect(() => {
     const container = waveformContainerRef.current;
@@ -629,7 +633,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
       resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
     };
-  }, [waveReady]);
+  }, [reserveScrollbarGutter, waveReady]);
 
   useEffect(() => {
     const waveSurfer = waveSurferRef.current;
@@ -703,7 +707,7 @@ export const PostgresSourceMediaTimeline = forwardRef<PostgresSourceMediaTimelin
         window.cancelAnimationFrame(frameId);
       }
       frameId = window.requestAnimationFrame(() => {
-        applyWaveScrollContainerStyles(scrollContainer, isFitZoomRef.current);
+        applyWaveScrollContainerStyles(scrollContainer, isFitZoomRef.current, reserveScrollbarGutter);
         waveSurfer.options.autoScroll = shouldWaveSurferAutoScroll(scrollContainer, isFitZoomRef.current);
         syncViewport();
         frameId = null;

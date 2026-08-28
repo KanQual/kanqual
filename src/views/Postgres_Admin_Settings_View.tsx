@@ -567,6 +567,7 @@ export function PostgresAdminSettingsView({
   const [theme, setTheme] = useState<Theme>("light");
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
+  const [sourceTextSizePx, setSourceTextSizePx] = useState(15);
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
   const [networkSwitching, setNetworkSwitching] = useState(false);
   const [confirmEnableNetworkMode, setConfirmEnableNetworkMode] = useState(false);
@@ -1659,6 +1660,7 @@ export function PostgresAdminSettingsView({
     setTheme(saved.theme);
     setDensity(saved.density);
     setFontSize(saved.fontSize);
+    setSourceTextSizePx(saved.sourceTextSizePx);
     setRecentProjectLimit(saved.recentProjectLimit);
     applyPostgresRuntimeThemePreferences(saved);
     if (successMessage) setNotice(successMessage);
@@ -1699,6 +1701,7 @@ export function PostgresAdminSettingsView({
       setTheme(nextUserPreferences.theme);
       setDensity(nextUserPreferences.density);
       setFontSize(nextUserPreferences.fontSize);
+      setSourceTextSizePx(nextUserPreferences.sourceTextSizePx);
       setRecentProjectLimit(nextUserPreferences.recentProjectLimit);
       applyPostgresRuntimeThemePreferences(nextUserPreferences);
       return { projects: nextProjects };
@@ -1895,6 +1898,7 @@ export function PostgresAdminSettingsView({
       theme,
       density: nextDensity,
       fontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
@@ -1908,6 +1912,7 @@ export function PostgresAdminSettingsView({
       theme,
       density,
       fontSize: nextFontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
@@ -1921,6 +1926,7 @@ export function PostgresAdminSettingsView({
       theme: nextTheme,
       density,
       fontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
@@ -2518,6 +2524,7 @@ export function PostgresAdminSettingsView({
               theme,
               density,
               fontSize,
+              sourceTextSizePx,
               locale: nextLocale,
               recentProjectLimit,
               themeState: getStoredThemeState(),

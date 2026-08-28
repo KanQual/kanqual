@@ -1723,6 +1723,7 @@ fn default_postgres_experiment_user_preferences() -> PostgresExperimentUserPrefe
         theme: "light".to_string(),
         density: "comfortable".to_string(),
         font_size: "normal".to_string(),
+        source_text_size_px: 15,
         locale: "en".to_string(),
         recent_project_limit: 10,
         theme_state: default_postgres_experiment_theme_state(),
@@ -1955,6 +1956,10 @@ fn normalize_postgres_experiment_font_size(value: &str) -> String {
         "large" => "large".to_string(),
         _ => "normal".to_string(),
     }
+}
+
+fn normalize_postgres_experiment_source_text_size_px(value: i32) -> i32 {
+    value.clamp(12, 24)
 }
 
 fn normalize_postgres_experiment_locale(value: &str) -> String {
@@ -2371,7 +2376,7 @@ async fn ensure_postgres_experiment_control_schema(
             "CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'standard', active BOOLEAN NOT NULL DEFAULT TRUE, disabled_at TIMESTAMPTZ, must_change_password BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ)",
             "CREATE TABLE IF NOT EXISTS installation_settings (id TEXT PRIMARY KEY, startup_reopen_last_project BOOLEAN NOT NULL DEFAULT FALSE, document_import_default_mode TEXT NOT NULL DEFAULT 'upload', document_import_auto_name_from_file BOOLEAN NOT NULL DEFAULT TRUE, document_import_trim_imported_text BOOLEAN NOT NULL DEFAULT TRUE, document_import_warn_before_empty_import BOOLEAN NOT NULL DEFAULT TRUE, privacy_mask_file_paths BOOLEAN NOT NULL DEFAULT FALSE, privacy_clear_recent_projects_on_sign_out BOOLEAN NOT NULL DEFAULT FALSE, updates_auto_check BOOLEAN NOT NULL DEFAULT TRUE, updates_banner_enabled BOOLEAN NOT NULL DEFAULT TRUE, llm_settings_json TEXT NOT NULL DEFAULT '{}', ai_assist_policy_json TEXT NOT NULL DEFAULT '{\"mode\":\"disabled\",\"serverEnabled\":false,\"projectOverrides\":{}}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS ai_llm_catalog (scope TEXT NOT NULL, provider_id TEXT NOT NULL, provider_label TEXT NOT NULL, model_id TEXT NOT NULL, model_label TEXT NOT NULL, model_publisher TEXT, endpoint TEXT, protocol TEXT, host TEXT, port INTEGER, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (scope, provider_id, model_id))",
-            "CREATE TABLE IF NOT EXISTS user_preferences (subject_key TEXT PRIMARY KEY, theme TEXT NOT NULL DEFAULT 'light', density TEXT NOT NULL DEFAULT 'comfortable', font_size TEXT NOT NULL DEFAULT 'normal', locale TEXT NOT NULL DEFAULT 'en', recent_project_limit INTEGER NOT NULL DEFAULT 10, theme_state_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+            "CREATE TABLE IF NOT EXISTS user_preferences (subject_key TEXT PRIMARY KEY, theme TEXT NOT NULL DEFAULT 'light', density TEXT NOT NULL DEFAULT 'comfortable', font_size TEXT NOT NULL DEFAULT 'normal', source_text_size_px INTEGER NOT NULL DEFAULT 15, locale TEXT NOT NULL DEFAULT 'en', recent_project_limit INTEGER NOT NULL DEFAULT 10, theme_state_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS device_state (id TEXT PRIMARY KEY, dismissed_update_version TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS remembered_accounts (email TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS user_project_state (subject_key TEXT PRIMARY KEY, last_opened_project_id TEXT, recent_projects_json TEXT NOT NULL DEFAULT '[]', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
@@ -2391,6 +2396,7 @@ async fn ensure_postgres_experiment_control_schema(
             "ALTER TABLE installation_settings ADD COLUMN IF NOT EXISTS updates_banner_enabled BOOLEAN",
             "ALTER TABLE installation_settings ADD COLUMN IF NOT EXISTS llm_settings_json TEXT",
             "ALTER TABLE installation_settings ADD COLUMN IF NOT EXISTS ai_assist_policy_json TEXT",
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS source_text_size_px INTEGER",
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS locale TEXT",
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS recent_project_limit INTEGER",
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS theme_state_json TEXT",
@@ -2449,6 +2455,9 @@ async fn ensure_postgres_experiment_control_schema(
         &*client,
         &[
             "ALTER TABLE installation_settings DROP COLUMN IF EXISTS startup_auto_login_last_user",
+            "ALTER TABLE user_preferences ALTER COLUMN source_text_size_px SET DEFAULT 15",
+            "UPDATE user_preferences SET source_text_size_px = 15 WHERE source_text_size_px IS NULL",
+            "ALTER TABLE user_preferences ALTER COLUMN source_text_size_px SET NOT NULL",
             "ALTER TABLE user_preferences ALTER COLUMN locale SET DEFAULT 'en'",
             "UPDATE user_preferences SET locale = 'en' WHERE locale IS NULL OR TRIM(locale) = ''",
             "ALTER TABLE user_preferences ALTER COLUMN locale SET NOT NULL",
@@ -6193,6 +6202,7 @@ struct PostgresExperimentUserPreferences {
     theme: String,
     density: String,
     font_size: String,
+    source_text_size_px: i32,
     locale: String,
     recent_project_limit: i32,
     theme_state: PostgresExperimentThemeState,
@@ -10420,6 +10430,7 @@ async fn get_postgres_experiment_user_preferences_command(
         .query_opt(
             "
             SELECT theme, density, font_size
+                 , source_text_size_px
                  , locale
                  , recent_project_limit
                  , theme_state_json
@@ -10437,11 +10448,12 @@ async fn get_postgres_experiment_user_preferences_command(
             theme: normalize_postgres_experiment_theme(row.get::<_, String>(0).as_str()),
             density: normalize_postgres_experiment_density(row.get::<_, String>(1).as_str()),
             font_size: normalize_postgres_experiment_font_size(row.get::<_, String>(2).as_str()),
-            locale: normalize_postgres_experiment_locale(row.get::<_, String>(3).as_str()),
-            recent_project_limit: normalize_postgres_experiment_recent_project_limit(row.get(4)),
+            source_text_size_px: normalize_postgres_experiment_source_text_size_px(row.get(3)),
+            locale: normalize_postgres_experiment_locale(row.get::<_, String>(4).as_str()),
+            recent_project_limit: normalize_postgres_experiment_recent_project_limit(row.get(5)),
             theme_state: normalize_postgres_experiment_theme_state(
                 serde_json::from_str::<PostgresExperimentThemeState>(
-                    row.get::<_, String>(5).as_str(),
+                    row.get::<_, String>(6).as_str(),
                 )
                 .unwrap_or_else(|_| default_postgres_experiment_theme_state()),
             ),
@@ -10462,6 +10474,7 @@ async fn save_postgres_experiment_user_preferences_command(
         theme: normalize_postgres_experiment_theme(&preferences.theme),
         density: normalize_postgres_experiment_density(&preferences.density),
         font_size: normalize_postgres_experiment_font_size(&preferences.font_size),
+        source_text_size_px: normalize_postgres_experiment_source_text_size_px(preferences.source_text_size_px),
         locale: normalize_postgres_experiment_locale(&preferences.locale),
         recent_project_limit: normalize_postgres_experiment_recent_project_limit(
             preferences.recent_project_limit,
@@ -10481,16 +10494,18 @@ async fn save_postgres_experiment_user_preferences_command(
                 theme,
                 density,
                 font_size,
+                source_text_size_px,
                 locale,
                 recent_project_limit,
                 theme_state_json,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
             ON CONFLICT (subject_key) DO UPDATE
             SET theme = EXCLUDED.theme,
                 density = EXCLUDED.density,
                 font_size = EXCLUDED.font_size,
+                source_text_size_px = EXCLUDED.source_text_size_px,
                 locale = EXCLUDED.locale,
                 recent_project_limit = EXCLUDED.recent_project_limit,
                 theme_state_json = EXCLUDED.theme_state_json,
@@ -10501,6 +10516,7 @@ async fn save_postgres_experiment_user_preferences_command(
                 &next.theme,
                 &next.density,
                 &next.font_size,
+                &next.source_text_size_px,
                 &next.locale,
                 &next.recent_project_limit,
                 &theme_state_json,

@@ -23,6 +23,11 @@ import {
   type FontSize,
   type Theme,
 } from "../theme";
+import {
+  normalizeSourceTextSizePx,
+  SOURCE_TEXT_SIZE_STEP_PX,
+  TextSizeControls,
+} from "./Postgres_Source_Coding_Shared";
 
 export type PostgresUserSettingsViewProps = {
   authSession: PostgresAuthSession;
@@ -98,6 +103,7 @@ export function PostgresUserSettingsView({
   const [theme, setTheme] = useState<Theme>("light");
   const [density, setDensity] = useState<Density>("comfortable");
   const [fontSize, setFontSize] = useState<FontSize>("normal");
+  const [sourceTextSizePx, setSourceTextSizePx] = useState(15);
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
 
   useEffect(() => {
@@ -110,6 +116,7 @@ export function PostgresUserSettingsView({
         setTheme(nextPreferences.theme);
         setDensity(nextPreferences.density);
         setFontSize(nextPreferences.fontSize);
+        setSourceTextSizePx(normalizeSourceTextSizePx(nextPreferences.sourceTextSizePx));
         setRecentProjectLimit(nextPreferences.recentProjectLimit);
         if (nextPreferences.locale !== locale) {
           setLocale(nextPreferences.locale);
@@ -137,6 +144,7 @@ export function PostgresUserSettingsView({
     setTheme(saved.theme);
     setDensity(saved.density);
     setFontSize(saved.fontSize);
+    setSourceTextSizePx(normalizeSourceTextSizePx(saved.sourceTextSizePx));
     setRecentProjectLimit(saved.recentProjectLimit);
     applyPostgresRuntimeThemePreferences(saved);
     if (successMessage) setNotice(successMessage);
@@ -207,6 +215,7 @@ export function PostgresUserSettingsView({
       theme,
       density: nextDensity,
       fontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
@@ -220,6 +229,7 @@ export function PostgresUserSettingsView({
       theme,
       density,
       fontSize: nextFontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
@@ -233,6 +243,7 @@ export function PostgresUserSettingsView({
         theme,
         density,
         fontSize,
+        sourceTextSizePx,
         locale: nextLocale,
         recentProjectLimit,
         themeState: getStoredThemeState(),
@@ -249,10 +260,25 @@ export function PostgresUserSettingsView({
       theme: nextTheme,
       density,
       fontSize,
+      sourceTextSizePx,
       locale,
       recentProjectLimit,
       themeState: getStoredThemeState(),
     }, "Theme updated.");
+  }
+
+  function handleSourceTextSize(nextTextSizePx: number) {
+    const normalized = normalizeSourceTextSizePx(nextTextSizePx);
+    setSourceTextSizePx(normalized);
+    void persistUserPreferences({
+      theme,
+      density,
+      fontSize,
+      sourceTextSizePx: normalized,
+      locale,
+      recentProjectLimit,
+      themeState: getStoredThemeState(),
+    });
   }
 
   return (
@@ -515,6 +541,17 @@ export function PostgresUserSettingsView({
                           </button>
                         ))}
                       </div>
+                    </div>
+                    <div className="settings-row">
+                      <div className="settings-row-info">
+                        <div className="settings-row-label">Source and coding text</div>
+                        <div className="settings-row-desc">Set the default text size for source reading and text coding.</div>
+                      </div>
+                      <TextSizeControls
+                        fontSizePx={sourceTextSizePx}
+                        onDecrease={() => handleSourceTextSize(sourceTextSizePx - SOURCE_TEXT_SIZE_STEP_PX)}
+                        onIncrease={() => handleSourceTextSize(sourceTextSizePx + SOURCE_TEXT_SIZE_STEP_PX)}
+                      />
                     </div>
                     <div className="settings-row">
                       <div className="settings-row-info">

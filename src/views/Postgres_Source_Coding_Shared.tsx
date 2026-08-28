@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { SettingsModal } from "../components/SettingsModal";
 import type {
   PostgresCode,
   PostgresSourceLock,
+} from "../lib/postgres";
+import {
+  getPostgresUserPreferences,
+  savePostgresUserPreferences,
 } from "../lib/postgres";
 import type {
   CodeOption,
@@ -57,6 +61,69 @@ export const SOURCE_TEXT_SIZE_DEFAULT_PX = 15;
 export const SOURCE_TEXT_SIZE_MIN_PX = 12;
 export const SOURCE_TEXT_SIZE_MAX_PX = 24;
 export const SOURCE_TEXT_SIZE_STEP_PX = 1;
+
+export function normalizeSourceTextSizePx(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return SOURCE_TEXT_SIZE_DEFAULT_PX;
+  return Math.max(SOURCE_TEXT_SIZE_MIN_PX, Math.min(SOURCE_TEXT_SIZE_MAX_PX, Math.round(value)));
+}
+
+export function usePostgresSourceTextSizePreference() {
+  const [textSizePx, setTextSizePx] = useState(SOURCE_TEXT_SIZE_DEFAULT_PX);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTextSizePreference() {
+      try {
+        const preferences = await getPostgresUserPreferences();
+        if (!cancelled) setTextSizePx(normalizeSourceTextSizePx(preferences.sourceTextSizePx));
+      } catch (error) {
+        console.warn("[kanqual] Could not load source text size preference.", error);
+      }
+    }
+    void loadTextSizePreference();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persistTextSizePx = useCallback(async (nextValue: number) => {
+    const nextTextSizePx = normalizeSourceTextSizePx(nextValue);
+    setTextSizePx(nextTextSizePx);
+    try {
+      const preferences = await getPostgresUserPreferences();
+      const saved = await savePostgresUserPreferences({
+        ...preferences,
+        sourceTextSizePx: nextTextSizePx,
+      });
+      setTextSizePx(normalizeSourceTextSizePx(saved.sourceTextSizePx));
+    } catch (error) {
+      console.warn("[kanqual] Could not save source text size preference.", error);
+    }
+  }, []);
+
+  const decreaseTextSize = useCallback(() => {
+    setTextSizePx((current) => {
+      const nextValue = normalizeSourceTextSizePx(current - SOURCE_TEXT_SIZE_STEP_PX);
+      void persistTextSizePx(nextValue);
+      return nextValue;
+    });
+  }, [persistTextSizePx]);
+
+  const increaseTextSize = useCallback(() => {
+    setTextSizePx((current) => {
+      const nextValue = normalizeSourceTextSizePx(current + SOURCE_TEXT_SIZE_STEP_PX);
+      void persistTextSizePx(nextValue);
+      return nextValue;
+    });
+  }, [persistTextSizePx]);
+
+  return {
+    textSizePx,
+    setTextSizePx: persistTextSizePx,
+    decreaseTextSize,
+    increaseTextSize,
+  };
+}
 
 export type PostgresSourceCodingViewProps = {
   projectId: string;

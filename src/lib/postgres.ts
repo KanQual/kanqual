@@ -308,6 +308,7 @@ export type PostgresUserPreferences = {
   theme: "light" | "dark";
   density: "comfortable" | "compact";
   fontSize: "small" | "normal" | "large";
+  sourceTextSizePx: number;
   locale: "en";
   recentProjectLimit: number;
   themeState: {
