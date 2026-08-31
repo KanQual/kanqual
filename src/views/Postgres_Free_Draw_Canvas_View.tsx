@@ -3,6 +3,8 @@ import cytoscape, { type Core as CytoscapeCore } from "cytoscape";
 // @ts-expect-error cytoscape-grid-guide does not ship TypeScript declarations.
 import gridGuide from "cytoscape-grid-guide";
 import { CanvasRichTextEditor } from "../components/CanvasRichTextEditor";
+import { HelpIcon } from "../components/AppIcons";
+import { SettingsModal } from "../components/SettingsModal";
 import { normalizeCanvasTextHtml } from "../lib/canvasTextHtml";
 import {
   buildPostgresCanvasCytoscapeElements,
@@ -336,6 +338,7 @@ export function PostgresCanvasView({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [pendingConnectionSourceId, setPendingConnectionSourceId] = useState<string | null>(null);
   const [connectPreviewWorld, setConnectPreviewWorld] = useState<PostgresCanvasPoint | null>(null);
   const [hoveredConnectTargetId, setHoveredConnectTargetId] = useState<string | null>(null);
@@ -1408,8 +1411,19 @@ export function PostgresCanvasView({
   return (
     <div className="view users-view">
       <header className="view-header">
-        <div className="users-title-wrap">
-          <h1>{isReadOnly ? "Saved Canvas" : "Free Draw"}</h1>
+        <div>
+          <div className="users-title-wrap">
+            <h1>{isReadOnly ? "Saved Canvas" : "Free Draw"}</h1>
+            <button
+              type="button"
+              className="users-help-icon-btn"
+              onClick={() => setHelpOpen(true)}
+              title="Open canvas help"
+              aria-label="Open canvas help"
+            >
+              <HelpIcon className="users-help-icon" />
+            </button>
+          </div>
           <p className="auth-hint" style={{ margin: "6px 0 0" }}>
             {savedCanvasSession
               ? `${isReadOnly ? "Viewing" : "Editing"} saved canvas: ${savedCanvasSession.name}`
@@ -1430,6 +1444,23 @@ export function PostgresCanvasView({
         </div>
       </header>
       {freeDrawSaveNotice ? <p className="settings-success">{freeDrawSaveNotice}</p> : null}
+      {helpOpen ? (
+        <SettingsModal title={isReadOnly ? "Saved Canvas Help" : "Free Draw Help"} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Use Free Draw to arrange research objects, connect relationships, add shapes or text, and save the visual canvas as a reusable project view.
+            </p>
+            <p className="users-guide-copy">
+              Saved canvases preserve layout and drawing choices separately from the underlying project data.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
       {canvasNotice ? <p className="settings-success">{canvasNotice}</p> : null}
       {canvasError ? <p className="users-error">{canvasError}</p> : null}
       {canvasSaveError ? <p className="users-error">Could not save canvas state: {canvasSaveError}</p> : null}

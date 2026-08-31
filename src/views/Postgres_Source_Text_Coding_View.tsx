@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeftIcon, HelpIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SettingsModal } from "../components/SettingsModal";
 import {
@@ -109,6 +110,7 @@ export function PostgresSourceTextCodingView({
   const [textSearchOpen, setTextSearchOpen] = useState(false);
   const [textSearchQuery, setTextSearchQuery] = useState("");
   const [activeTextSearchIndex, setActiveTextSearchIndex] = useState<number | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [stripeBars, setStripeBars] = useState<StripeBar[]>([]);
   const [stripeHover, setStripeHover] = useState<StripeHover | null>(null);
   const [annotationHover, setAnnotationHover] = useState<AnnotationHover | null>(null);
@@ -669,9 +671,29 @@ export function PostgresSourceTextCodingView({
 
   return (
     <div className="view doc-detail-view">
-      <div className="workspace-back-row workspace-back-row--text-coding">
-        <button className="btn" onClick={onBack}>Back</button>
-      </div>
+      <header className="view-header">
+        <div className="users-title-wrap code-text-title-wrap">
+          <button
+            type="button"
+            className="code-text-header-back-button"
+            onClick={onBack}
+            title="Back"
+            aria-label="Back"
+          >
+            <ArrowLeftIcon className="code-text-header-back-icon" />
+          </button>
+          <h1>Code Text</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Open code text help"
+            aria-label="Open code text help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
+        </div>
+      </header>
 
       <div className="annotate-layout code-text-annotate-layout" style={{ minHeight: 0 }}>
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
@@ -1044,6 +1066,24 @@ export function PostgresSourceTextCodingView({
           onClearCodes={() => setHiddenCodeIds(new Set(codes.map((code) => code.id)))}
           onClose={() => setFiltersOpen(false)}
         />
+      ) : null}
+
+      {helpOpen ? (
+        <SettingsModal title="Code Text Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Select text in the source, choose a code from the codebook, and review the resulting annotation in the annotation panel.
+            </p>
+            <p className="users-guide-copy">
+              Use filters, search, annotation stripes, and text size controls to navigate longer sources. Source locks and project permissions determine whether you can edit annotations or codes.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {newCodeOpen ? (

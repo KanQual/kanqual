@@ -12,7 +12,7 @@ import {
   TextRun,
 } from "docx";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import { HelpIcon } from "../components/AppIcons";
+import { ArrowLeftIcon, HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -268,6 +268,7 @@ export function MemoEditorView({
   const [annCardCollapsed,     setAnnCardCollapsed]     = useState(true);
   const [saving,               setSaving]               = useState(false);
   const [error,                setError]                = useState<string | null>(null);
+  const [builderHelpOpen,      setBuilderHelpOpen]      = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
 
   // ── Load cases and annotations ─────────────────────────────────────────────
@@ -389,14 +390,29 @@ export function MemoEditorView({
 
   return (
     <div className="view doc-detail-view">
-      <div className="workspace-back-row">
-        <button className="btn" onClick={onBack}>
-          {backLabel ?? t("analysisMemos.actions.backToMemos")}
-        </button>
-      </div>
-      <div className="case-detail-topbar">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
+      <header className="view-header">
+        <div className="users-title-wrap code-text-title-wrap">
+          <button
+            type="button"
+            className="code-text-header-back-button"
+            onClick={onBack}
+            title={backLabel ?? t("analysisMemos.actions.backToMemos")}
+            aria-label={backLabel ?? t("analysisMemos.actions.backToMemos")}
+          >
+            <ArrowLeftIcon className="code-text-header-back-icon" />
+          </button>
+          <h1>Memo Builder</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setBuilderHelpOpen(true)}
+            title="Open memo builder help"
+            aria-label="Open memo builder help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
+        </div>
+        <div className="view-header-actions">
           <button
             className="btn btn--primary"
             onClick={handleSave}
@@ -405,7 +421,27 @@ export function MemoEditorView({
             {saving ? t("analysisMemos.statuses.saving") : isEdit ? t("analysisMemos.actions.saveChanges") : t("analysisMemos.actions.saveMemo")}
           </button>
         </div>
-      </div>
+      </header>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      {builderHelpOpen ? (
+        <SettingsModal title="Memo Builder Help" onClose={() => setBuilderHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Write a memo, attach relevant project material, and save it as analytic context.
+            </p>
+            <p className="users-guide-copy">
+              Use the association panels to connect cases, documents, codes, annotations, and attributes to the memo before saving.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setBuilderHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       <div className="doc-detail-layout">
 

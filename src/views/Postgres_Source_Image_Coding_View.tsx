@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { ArrowLeftIcon, HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { useI18n } from "../i18n/provider";
@@ -276,6 +277,7 @@ export function PostgresSourceImageCodingView({
   const [deletingCode, setDeletingCode] = useState(false);
   const [deleteCodeError, setDeleteCodeError] = useState("");
   const [annotationContextMenu, setAnnotationContextMenu] = useState<AnnotationContextMenuState | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const annotationContextMenuRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -310,6 +312,8 @@ export function PostgresSourceImageCodingView({
   const normalizedSourceType = row.type.trim().toLowerCase();
   const isPdfSource = normalizedSourceType === "pdf" || fileExt === "pdf";
   const isImageSource = SOURCE_IMPORT_IMAGE_EXTS.has(fileExt) || normalizedSourceType === "image" || isPdfSource;
+  const codingSourceLabel = isPdfSource ? "PDF" : "Image";
+  const codingSourceName = isPdfSource ? "PDF" : "image";
   const resolvedFilePath = resolveProjectStoragePath(projectStoragePath, row.filePath);
   const regionAnnotations = useMemo(
     () => annotations.filter((annotation) => annotation.anchorKind === "image_rect" && annotation.imageRegion),
@@ -816,12 +820,29 @@ export function PostgresSourceImageCodingView({
 
   return (
     <div className="view doc-detail-view">
-      <div className="workspace-back-row workspace-back-row--split">
-        <button className="btn" onClick={onBack}>{t("projectDocuments.detail.backToDocuments")}</button>
-        <p className="users-guide-copy" style={{ margin: 0 }}>
-          PostgreSQL {isPdfSource ? "PDF" : "image"} coding workspace
-        </p>
-      </div>
+      <header className="view-header">
+        <div className="users-title-wrap code-text-title-wrap">
+          <button
+            type="button"
+            className="code-text-header-back-button"
+            onClick={onBack}
+            title={t("projectDocuments.detail.backToDocuments")}
+            aria-label={t("projectDocuments.detail.backToDocuments")}
+          >
+            <ArrowLeftIcon className="code-text-header-back-icon" />
+          </button>
+          <h1>Code {codingSourceLabel}</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title={`Open code ${codingSourceName} help`}
+            aria-label={`Open code ${codingSourceName} help`}
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
+        </div>
+      </header>
 
       <div className="annotate-layout code-text-annotate-layout" style={{ minHeight: 0 }}>
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
@@ -1315,6 +1336,24 @@ export function PostgresSourceImageCodingView({
           onDone={() => setEditingCodeId(null)}
           onClose={() => setEditingCodeId(null)}
         />
+      ) : null}
+
+      {helpOpen ? (
+        <SettingsModal title={`Code ${codingSourceLabel} Help`} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Draw a region on the {codingSourceName}, choose one or more codes, and save it as a coded annotation.
+            </p>
+            <p className="users-guide-copy">
+              Use zoom, {isPdfSource ? "page selection, " : ""}region handles, annotation filters, and the annotation panel to review or edit {codingSourceName} annotations.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {deletingCodeRow ? (

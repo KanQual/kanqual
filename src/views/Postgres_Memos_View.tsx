@@ -16,7 +16,7 @@ import {
 } from "../lib/postgres";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { formatCurrentDateTime } from "../i18n/formatters";
-import { PlusIcon } from "../components/AppIcons";
+import { ArrowLeftIcon, HelpIcon, PlusIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { orderedCodesWithDepth } from "./Postgres_Source_Coding_Shared";
 
@@ -395,6 +395,7 @@ export function PostgresMemosView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [editorDraft, setEditorDraft] = useState<MemoEditorDraft | null>(null);
   const [collapsedSelectorCards, setCollapsedSelectorCards] = useState<Set<"codes" | "sources" | "annotations">>(new Set());
   const [annotationTooltip, setAnnotationTooltip] = useState<{ annotationId: string; x: number; y: number } | null>(null);
@@ -598,18 +599,32 @@ export function PostgresMemosView({
 
     return (
       <div className="view doc-detail-view postgres-memo-editor-view">
-        <div className="workspace-back-row workspace-back-row--split">
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              if (submitting) return;
-              setEditorDraft(null);
-            }}
-            disabled={submitting}
-          >
-            Back to memos
-          </button>
+        <header className="view-header">
+          <div className="users-title-wrap code-text-title-wrap">
+            <button
+              type="button"
+              className="code-text-header-back-button"
+              onClick={() => {
+                if (submitting) return;
+                setEditorDraft(null);
+              }}
+              disabled={submitting}
+              title="Back to memos"
+              aria-label="Back to memos"
+            >
+              <ArrowLeftIcon className="code-text-header-back-icon" />
+            </button>
+            <h1>Memo Builder</h1>
+            <button
+              type="button"
+              className="users-help-icon-btn"
+              onClick={() => setHelpOpen(true)}
+              title="Open memo builder help"
+              aria-label="Open memo builder help"
+            >
+              <HelpIcon className="users-help-icon" />
+            </button>
+          </div>
           <div className="view-header-actions">
             <button
               type="button"
@@ -620,9 +635,27 @@ export function PostgresMemosView({
               {submitting ? "Saving..." : "Save"}
             </button>
           </div>
-        </div>
+        </header>
 
         {error ? <div className="error-banner">{error}</div> : null}
+
+        {helpOpen ? (
+          <SettingsModal title="Memo Builder Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+            <div className="app-settings-modal-body">
+              <p className="users-guide-copy">
+                Write a memo, attach relevant sources, annotations, codes, or objects, and save it as project context.
+              </p>
+              <p className="users-guide-copy">
+                Use the left column to choose linked material and the editor to draft the memo body. Linked context keeps the note connected to the evidence or concepts that prompted it.
+              </p>
+            </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+          </SettingsModal>
+        ) : null}
 
         <div className="annotate-layout code-text-annotate-layout postgres-memo-editor-layout">
           <div className="annotate-left postgres-memo-editor-left">
@@ -905,8 +938,35 @@ export function PostgresMemosView({
       <header className="view-header">
         <div className="users-title-wrap">
           <h1>Memos</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Open memos help"
+            aria-label="Open memos help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
         </div>
       </header>
+
+      {helpOpen ? (
+        <SettingsModal title="Memos Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Create and edit analytic memos, link them to sources, annotations, codes, and objects, and use the memo table to review saved notes across the project.
+            </p>
+            <p className="users-guide-copy">
+              Memo creation and editing are role-limited. Linked context helps keep notes connected to the material that prompted them.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       {error ? <div className="error-banner">{error}</div> : null}
       {notice ? <div className="success-banner">{notice}</div> : null}

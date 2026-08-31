@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
+import { HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
@@ -98,6 +99,7 @@ export function PostgresUserSettingsView({
   const [newPasswordVisible, setNewPasswordVisible] = useState(false);
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState<"password" | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [theme, setTheme] = useState<Theme>("light");
@@ -287,8 +289,35 @@ export function PostgresUserSettingsView({
         <header className="view-header">
           <div className="view-title-with-help">
             <h1>User Settings</h1>
+            <button
+              type="button"
+              className="users-help-icon-btn"
+              onClick={() => setHelpOpen(true)}
+              title="Open user settings help"
+              aria-label="Open user settings help"
+            >
+              <HelpIcon className="users-help-icon" />
+            </button>
           </div>
         </header>
+      ) : null}
+
+      {!embedded && helpOpen ? (
+        <SettingsModal title="User Settings Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Review your account profile, change your password, and adjust personal interface preferences such as theme, density, font size, source text size, language, and recent project count.
+            </p>
+            <p className="users-guide-copy">
+              These preferences are saved for your signed-in app user and do not change project data for other collaborators.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {notice ? <p className="settings-success">{notice}</p> : null}

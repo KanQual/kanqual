@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
-import { HelpIcon } from "../components/AppIcons";
+import type { EChartsCoreOption } from "echarts/core";
+import { DownloadIcon, HelpIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -11,8 +14,10 @@ import {
   projectLogActionLabel,
   projectLogDescriptionLabel,
 } from "./Project_Log_View";
-import { createPostgresReport, deletePostgresReport, listPostgresReports } from "../lib/postgres";
+import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
 import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
+
+const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
 
 export type CoderReportKind = "activity" | "comparison" | "agreement";
 type CoderReportSortCol = "name" | "kind" | "createdByName" | "createdAt";
@@ -213,6 +218,19 @@ function getPocketBaseErrorMessage(error: unknown): string {
   return details || maybe.response?.message || maybe.message || "Failed to save report.";
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function csvCell(value: string | number | null | undefined): string {
+  const text = value == null ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 function formatAttributeTypeLabel(
   dataType: string,
   t: ReturnType<typeof useI18n>["t"],
@@ -311,6 +329,81 @@ function NewCoderReportModal({
       </div>
       <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
         <button className="btn" onClick={onClose}>{t("reportsUsers.cancel")}</button>
+      </div>
+    </SettingsModal>
+  );
+}
+
+function UserReportExportModal({
+  onClose,
+  onExportHTML,
+  onExportCSV,
+  exportingFormat,
+}: {
+  onClose: () => void;
+  onExportHTML: () => void;
+  onExportCSV: () => void;
+  exportingFormat: string | null;
+}) {
+  const options = [
+    {
+      key: "html",
+      label: "HTML",
+      description: "Can be opened in a web browser and preserves the report's readable layout.",
+      onClick: onExportHTML,
+    },
+    {
+      key: "csv",
+      label: "CSV",
+      description: "Exports report tables in a spreadsheet-friendly text format.",
+      onClick: onExportCSV,
+    },
+  ] as const;
+
+  return (
+    <SettingsModal title="Export Report" onClose={onClose} closeDisabled={!!exportingFormat} modalClassName="modal--wide">
+      <div className="app-settings-modal-body">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 12,
+            alignItems: "stretch",
+          }}
+        >
+          {options.map((option) => (
+            <button
+              key={option.key}
+              className={`btn export-option-card${exportingFormat === option.key ? " export-option-card--active" : ""}`}
+              onClick={option.onClick}
+              disabled={!!exportingFormat}
+              type="button"
+              style={{
+                minHeight: 170,
+                padding: 18,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "space-between",
+                textAlign: "center",
+                whiteSpace: "normal",
+                color: "var(--color-text)",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>
+                  {exportingFormat === option.key ? "Exporting..." : option.label}
+                </div>
+                <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--color-text-muted)" }}>
+                  {option.description}
+                </div>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                Export as {option.label}
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
     </SettingsModal>
   );
@@ -424,7 +517,7 @@ function CoderSelectionPanel({
   );
 }
 
-const LOG_CATEGORY_ORDER = ["all", "project", "case", "document", "code", "annotation", "memo", "report", "other"] as const;
+const LOG_CATEGORY_ORDER = ["all", "project", "source", "object", "relationship", "case", "code", "annotation", "memo", "report", "other"] as const;
 type LogCategory = typeof LOG_CATEGORY_ORDER[number];
 function logCategoryLabel(
   t: ReturnType<typeof useI18n>["t"],
@@ -434,7 +527,23 @@ function logCategoryLabel(
 }
 
 function getLogCategory(action: string): LogCategory {
+  if (action.startsWith("source.") || action.startsWith("source_attribute.") || action.startsWith("document_attribute.")) return "source";
+  if (action.startsWith("object.") || action.startsWith("object_type.")) return "object";
+  if (action.startsWith("relationship.") || action.startsWith("relationship_type.")) return "relationship";
   return projectLogActionCategory(action) as LogCategory;
+}
+
+function getLogCategoryCounts(rows: ProjectLogEntry[]): Map<LogCategory, number> {
+  const counts = new Map<LogCategory, number>();
+  for (const entry of rows) {
+    const category = getLogCategory(entry.action);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function getAvailableLogCategories(categoryCounts: Map<LogCategory, number>): LogCategory[] {
+  return LOG_CATEGORY_ORDER.filter((category) => category === "all" || (categoryCounts.get(category) ?? 0) > 0);
 }
 
 function startOfWeek(date: Date): Date {
@@ -479,37 +588,66 @@ function formatPeriodLabel(periodKey: string, granularity: "day" | "week" | "mon
   return `${formatCurrentDate(start, { month: "short", day: "numeric" })} - ${formatCurrentDate(end, { month: "short", day: "numeric", year: "numeric" })}`;
 }
 
-function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
+function ActivityCategoryFilterCard({
+  rows,
+  activeCategory,
+  onChange,
+}: {
+  rows: ProjectLogEntry[];
+  activeCategory: LogCategory;
+  onChange: (category: LogCategory) => void;
+}) {
   const { t } = useI18n();
-  const plotHeight = 180;
   const sorted = useMemo(
     () => [...rows].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()),
     [rows],
   );
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<LogCategory, number>();
-    for (const entry of sorted) {
-      const category = getLogCategory(entry.action);
-      counts.set(category, (counts.get(category) ?? 0) + 1);
-    }
-    return counts;
-  }, [sorted]);
-  const availableTabs = useMemo(
-    () => LOG_CATEGORY_ORDER.filter((category) => category === "all" || (categoryCounts.get(category) ?? 0) > 0),
-    [categoryCounts],
+  const categoryCounts = useMemo(() => getLogCategoryCounts(sorted), [sorted]);
+  const availableTabs = useMemo(() => getAvailableLogCategories(categoryCounts), [categoryCounts]);
+
+  return (
+    <div className="annotate-card" style={{ flexShrink: 0 }}>
+      <div className="annotate-card-header">
+        <span className="annotate-card-title">{t("reportsUsers.activity.categoryFilters")}</span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: 14 }}>
+        {availableTabs.map((tab) => {
+          const count = tab === "all" ? sorted.length : (categoryCounts.get(tab) ?? 0);
+          const isActive = activeCategory === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              className={`btn${isActive ? " btn--primary" : ""}`}
+              style={{ fontSize: 11, padding: "2px 10px" }}
+              onClick={() => onChange(tab)}
+            >
+              {logCategoryLabel(t, tab)} ({count})
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
-  const [activeTab, setActiveTab] = useState<LogCategory>("all");
+}
+
+function CoderActivityOverTimeCard({
+  rows,
+  activeCategory,
+}: {
+  rows: ProjectLogEntry[];
+  activeCategory: LogCategory;
+}) {
+  const { t } = useI18n();
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()),
+    [rows],
+  );
   const [granularity, setGranularity] = useState<"day" | "week" | "month">("week");
 
-  useEffect(() => {
-    if (!availableTabs.includes(activeTab)) {
-      setActiveTab("all");
-    }
-  }, [activeTab, availableTabs]);
-
   const visibleRows = useMemo(
-    () => activeTab === "all" ? sorted : sorted.filter((entry) => getLogCategory(entry.action) === activeTab),
-    [activeTab, sorted],
+    () => activeCategory === "all" ? sorted : sorted.filter((entry) => getLogCategory(entry.action) === activeCategory),
+    [activeCategory, sorted],
   );
   const coderColumns = useMemo(() => {
     const map = new Map<string, string>();
@@ -544,8 +682,76 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
 
   function coderColor(index: number): string {
     const hue = (index * 67) % 360;
-    return `hsl(${hue} 55% 45%)`;
+    return `hsl(${hue}, 55%, 45%)`;
   }
+
+  const activityChartOption = useMemo<EChartsCoreOption>(() => ({
+    animation: false,
+    color: coderColumns.map((_, index) => coderColor(index)),
+    grid: {
+      left: 42,
+      right: 16,
+      top: 18,
+      bottom: 54,
+      containLabel: true,
+    },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: {
+        type: "none",
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: periodRows.map((row) => row.label),
+      axisLabel: {
+        color: "#687385",
+        fontSize: 10,
+        interval: 0,
+        rotate: periodRows.length > 5 ? 28 : 0,
+      },
+      axisLine: {
+        lineStyle: { color: "#d5dbe3" },
+      },
+      axisTick: {
+        lineStyle: { color: "#d5dbe3" },
+      },
+    },
+    yAxis: {
+      type: "value",
+      minInterval: 1,
+      max: maxCount > 0 ? undefined : 1,
+      axisLabel: {
+        color: "#687385",
+        fontSize: 10,
+      },
+      axisLine: {
+        lineStyle: { color: "#d5dbe3" },
+      },
+      axisTick: {
+        lineStyle: { color: "#d5dbe3" },
+      },
+      splitLine: {
+        lineStyle: { color: "#eef2f6" },
+      },
+    },
+    series: coderColumns.map((coder) => ({
+      name: coder.name,
+      type: "bar",
+      z: 2,
+      barMaxWidth: 18,
+      data: periodRows.map((row) => row.counts.get(coder.id) ?? 0),
+      itemStyle: {
+        borderRadius: [5, 5, 0, 0],
+      },
+      emphasis: {
+        disabled: true,
+        itemStyle: {
+          opacity: 1,
+        },
+      },
+    })),
+  }), [coderColumns, maxCount, periodRows]);
 
   return (
     <div className="annotate-card" style={{ flexShrink: 0 }}>
@@ -553,31 +759,16 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
         <span className="annotate-card-title">{t("reportsUsers.activity.overTime")}</span>
         <span className="users-filter-count">{visibleRows.length}</span>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 14px 10px", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {availableTabs.map((tab) => {
-            const count = tab === "all" ? sorted.length : (categoryCounts.get(tab) ?? 0);
-            const isActive = activeTab === tab;
-            return (
-              <button
-                key={tab}
-                type="button"
-                className={`btn${isActive ? " btn--primary" : ""}`}
-                style={{ fontSize: 11, padding: "2px 10px" }}
-                onClick={() => setActiveTab(tab)}
-              >
-                {logCategoryLabel(t, tab)} ({count})
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "center", padding: "0 14px 10px" }}>
+        <div className="segmented-control" role="tablist" aria-label="Activity time scale" style={{ width: "fit-content" }}>
           {(["day", "week", "month"] as const).map((option) => (
             <button
               key={option}
               type="button"
-              className={`btn${granularity === option ? " btn--primary" : ""}`}
-              style={{ fontSize: 11, padding: "2px 10px" }}
+              role="tab"
+              aria-selected={granularity === option}
+              className={`segmented-control-option${granularity === option ? " segmented-control-option--active" : ""}`}
+              style={{ fontSize: 11, padding: "3px 10px" }}
               onClick={() => setGranularity(option)}
             >
               {t(`reportsUsers.activity.granularity.${option}` as const)}
@@ -589,108 +780,48 @@ function CoderActivityOverTimeCard({ rows }: { rows: ProjectLogEntry[] }) {
         {periodRows.length === 0 || coderColumns.length === 0 ? (
           <div className="users-td-msg" style={{ padding: "24px 12px" }}>{t("reportsUsers.empty.noLogActivity")}</div>
         ) : (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 18, alignItems: "center" }}>
-              <div style={{ overflowX: "auto", paddingBottom: 4 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "40px minmax(0, 1fr)", gap: 10, minWidth: "max-content" }}>
-                  <div
-                    style={{
-                      height: plotHeight,
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      alignItems: "flex-end",
-                      fontSize: 11,
-                      color: "var(--color-text-muted)",
-                    }}
-                  >
-                    {[maxCount, Math.round(maxCount / 2), 0].map((tick, index) => (
-                      <span key={`${tick}-${index}`}>{tick}</span>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: "max-content" }}>
-                    <div style={{ borderLeft: "1px solid var(--color-border-strong, var(--color-border))", borderBottom: "1px solid var(--color-border-strong, var(--color-border))", padding: "8px 8px 0 12px" }}>
-                      <div style={{ display: "flex", alignItems: "flex-end", gap: 18, minHeight: plotHeight, minWidth: "max-content" }}>
-                        {periodRows.map((row) => (
-                          <div key={row.periodKey} style={{ display: "flex", justifyContent: "center", minWidth: 92 }}>
-                            <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: plotHeight }}>
-                              {coderColumns.map((coder, index) => {
-                                const value = row.counts.get(coder.id) ?? 0;
-                                const barHeight = maxCount > 0 ? Math.max((value / maxCount) * plotHeight, value > 0 ? 6 : 0) : 0;
-                                return (
-                                  <div key={`${row.periodKey}-${coder.id}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", width: 18 }}>
-                                    <div
-                                      className="coder-activity-bar"
-                                      style={{
-                                        width: "100%",
-                                        height: barHeight,
-                                        borderRadius: "8px 8px 0 0",
-                                        background: coderColor(index),
-                                      }}
-                                      title={`${row.label} - ${coder.name}: ${value}`}
-                                    />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 18, minWidth: "max-content", paddingLeft: 12, paddingRight: 8 }}>
-                      {periodRows.map((row) => (
-                        <div key={`${row.periodKey}-label`} style={{ minWidth: 92, fontSize: 12, fontWeight: 600, color: "var(--color-text)", textAlign: "center", lineHeight: 1.3 }}>
-                          {row.label}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 10, minHeight: plotHeight }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 18, alignItems: "center" }}>
+            <div style={{ minWidth: 0, overflowX: "auto", paddingBottom: 4 }}>
+              <Suspense fallback={<div className="users-td-msg" style={{ padding: "24px 12px" }}>Loading chart...</div>}>
+                <EChart
+                  option={activityChartOption}
+                  style={{
+                    width: Math.max(520, periodRows.length * 96),
+                    height: 260,
+                  }}
+                />
+              </Suspense>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 10, minHeight: 220 }}>
                 {coderColumns.map((coder, index) => (
                   <div key={coder.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--color-text-muted)" }}>
                     <span style={{ width: 10, height: 10, borderRadius: 999, background: coderColor(index), flexShrink: 0 }} />
                     <span>{coder.name}</span>
                   </div>
                 ))}
-              </div>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function CoderProjectLogCard({ rows }: { rows: ProjectLogEntry[] }) {
+function CoderProjectLogCard({
+  rows,
+  activeCategory,
+}: {
+  rows: ProjectLogEntry[];
+  activeCategory: LogCategory;
+}) {
   const { t } = useI18n();
   const sorted = [...rows].sort(
     (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
   );
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<LogCategory, number>();
-    for (const entry of sorted) {
-      const category = getLogCategory(entry.action);
-      counts.set(category, (counts.get(category) ?? 0) + 1);
-    }
-    return counts;
-  }, [sorted]);
-  const availableTabs = useMemo(
-    () => LOG_CATEGORY_ORDER.filter((category) => category === "all" || (categoryCounts.get(category) ?? 0) > 0),
-    [categoryCounts],
-  );
-  const [activeTab, setActiveTab] = useState<LogCategory>("all");
-
-  useEffect(() => {
-    if (!availableTabs.includes(activeTab)) {
-      setActiveTab("all");
-    }
-  }, [activeTab, availableTabs]);
 
   const visibleRows = useMemo(
-    () => activeTab === "all" ? sorted : sorted.filter((entry) => getLogCategory(entry.action) === activeTab),
-    [activeTab, sorted],
+    () => activeCategory === "all" ? sorted : sorted.filter((entry) => getLogCategory(entry.action) === activeCategory),
+    [activeCategory, sorted],
   );
 
   function accessModeLabel(mode?: "local" | "remote"): string {
@@ -705,25 +836,6 @@ function CoderProjectLogCard({ rows }: { rows: ProjectLogEntry[] }) {
         <span className="annotate-card-title">{t("projectLog.title")}</span>
         <span className="users-filter-count">{sorted.length}</span>
       </div>
-      {availableTabs.length > 1 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 14px 10px" }}>
-          {availableTabs.map((tab) => {
-            const count = tab === "all" ? sorted.length : (categoryCounts.get(tab) ?? 0);
-            const isActive = activeTab === tab;
-            return (
-              <button
-                key={tab}
-                type="button"
-                className={`btn${isActive ? " btn--primary" : ""}`}
-                style={{ fontSize: 11, padding: "2px 10px" }}
-                onClick={() => setActiveTab(tab)}
-              >
-                {logCategoryLabel(t, tab)} ({count})
-              </button>
-            );
-          })}
-        </div>
-      )}
       <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 320 }}>
         <table className="users-table">
           <thead>
@@ -866,6 +978,7 @@ function CoderReportCreationPage({
   const frozenSnapshot = row?.snapshot;
   const isFrozen = !!row;
   const canStartReports = true;
+  const canExportReports = true;
   const reportKind = frozenSnapshot?.kind ?? kind;
   const settings = initialSettings ?? frozenSnapshot?.settings;
   const caseItems = frozenSnapshot?.caseItems ?? [];
@@ -894,6 +1007,9 @@ function CoderReportCreationPage({
   const [showCaseAttributeFilters, setShowCaseAttributeFilters] = useState(false);
   const [loadingFilters, setLoadingFilters] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
+  const [activityCategory, setActivityCategory] = useState<LogCategory>("all");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1076,6 +1192,17 @@ function CoderReportCreationPage({
     );
     return (postgresLogEntries ?? []).filter((entry) => selectedAppUserIds.has(entry.userId));
   }, [coderItems, frozenSnapshot, postgresLogEntries, reportKind, selCoderIds]);
+  const activityCategoryCounts = useMemo(() => getLogCategoryCounts(projectLogRows), [projectLogRows]);
+  const availableActivityCategories = useMemo(
+    () => getAvailableLogCategories(activityCategoryCounts),
+    [activityCategoryCounts],
+  );
+
+  useEffect(() => {
+    if (!availableActivityCategories.includes(activityCategory)) {
+      setActivityCategory("all");
+    }
+  }, [activityCategory, availableActivityCategories]);
 
   const comparisonColumns = useMemo(() => {
     if (frozenSnapshot?.frozenCodeUsageColumns) return frozenSnapshot.frozenCodeUsageColumns;
@@ -1336,6 +1463,179 @@ function CoderReportCreationPage({
     }
   }
 
+  async function recordReportExport(format: string, filePath: string) {
+    if (!postgresProjectId || !row?.id) return;
+    try {
+      await logPostgresReportExport({
+        projectId: postgresProjectId,
+        reportId: row.id,
+        title: name || row.name || "User Report",
+        reportType: "coder-report",
+        format,
+        filePath,
+      });
+    } catch (e) {
+      console.warn("Could not log report export:", e);
+    }
+  }
+
+  function getExportHtml(): string {
+    const title = name || t("reportsUsers.defaultReportName", { kind: reportLabelText });
+    const summaryHeader = summaryRows.map((summary) => `<th>${escapeHtml(summary.coderName)}</th>`).join("");
+    const metricRows = [
+      ["Annotations", ...summaryRows.map((summary) => summary.annotations)],
+      ["Documents", ...summaryRows.map((summary) => summary.documents)],
+      ["Codes", ...summaryRows.map((summary) => summary.codes)],
+      ["Last coded", ...summaryRows.map((summary) => fmtDate(summary.lastCodedAt))],
+    ];
+    const summaryTable = `
+      <table>
+        <thead><tr><th>Metric</th>${summaryHeader}</tr></thead>
+        <tbody>
+          ${metricRows.map((cells) => `<tr>${cells.map((cell) => `<td>${escapeHtml(String(cell))}</td>`).join("")}</tr>`).join("")}
+        </tbody>
+      </table>
+    `;
+    const activityTable = reportKind === "activity"
+      ? `
+        <h2>${escapeHtml(t("projectLog.title"))}</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>${escapeHtml(t("projectLog.columns.time"))}</th>
+              <th>${escapeHtml(t("reportsUsers.activity.coder"))}</th>
+              <th>${escapeHtml(t("projectLog.columns.access"))}</th>
+              <th>${escapeHtml(t("reportsUsers.activity.action"))}</th>
+              <th>${escapeHtml(t("reportsUsers.activity.description"))}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${projectLogRows.map((entry) => {
+              const details = parseProjectLogDetails(entry.detailsJson);
+              return `
+                <tr>
+                  <td>${escapeHtml(fmtDate(entry.occurredAt))}</td>
+                  <td>${escapeHtml(entry.userName || "-")}</td>
+                  <td>${escapeHtml(entry.accessMode ?? "-")}</td>
+                  <td>${escapeHtml(projectLogActionLabel(entry.action, t))}</td>
+                  <td>${escapeHtml(projectLogDescriptionLabel(entry, details, t))}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      `
+      : "";
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; color: #1f2933; margin: 32px; line-height: 1.45; }
+    h1 { margin: 0 0 16px; font-size: 26px; }
+    h2 { margin: 28px 0 10px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0 20px; }
+    th, td { border: 1px solid #d8dee8; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f4f6f9; font-weight: 700; }
+    .meta td:first-child { width: 180px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  <table class="meta">
+    <tbody>
+      <tr><td>Type</td><td>${escapeHtml(reportLabelText)}</td></tr>
+      <tr><td>${escapeHtml(t("reportsUsers.summary.createdBy"))}</td><td>${escapeHtml(createdBy)}</td></tr>
+      <tr><td>${escapeHtml(t("reportsUsers.summary.created"))}</td><td>${escapeHtml(row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString()))}</td></tr>
+      <tr><td>${escapeHtml(t("reportsUsers.casesLabel"))}</td><td>${escapeHtml(caseFilterDetails.length > 0 ? caseFilterDetails.join(", ") : t("reportsUsers.allCases"))}</td></tr>
+      <tr><td>${escapeHtml(t("reportsUsers.summary.coders"))}</td><td>${escapeHtml(selectedCoderLabels)}</td></tr>
+    </tbody>
+  </table>
+  <h2>${escapeHtml(t("reportsUsers.reportDetails"))}</h2>
+  ${summaryTable}
+  ${activityTable}
+</body>
+</html>`;
+  }
+
+  function getExportCsv(): string {
+    const rows: Array<Array<string | number>> = [
+      ["Report", name || t("reportsUsers.defaultReportName", { kind: reportLabelText })],
+      ["Type", reportLabelText],
+      [t("reportsUsers.summary.createdBy"), createdBy],
+      [t("reportsUsers.summary.created"), row ? fmtDate(row.createdAt) : fmtDate(new Date().toISOString())],
+      [t("reportsUsers.casesLabel"), caseFilterDetails.length > 0 ? caseFilterDetails.join(", ") : t("reportsUsers.allCases")],
+      [t("reportsUsers.summary.coders"), selectedCoderLabels],
+      [],
+      ["Summary"],
+      ["Metric", ...summaryRows.map((summary) => summary.coderName)],
+      ["Annotations", ...summaryRows.map((summary) => summary.annotations)],
+      ["Documents", ...summaryRows.map((summary) => summary.documents)],
+      ["Codes", ...summaryRows.map((summary) => summary.codes)],
+      ["Last coded", ...summaryRows.map((summary) => fmtDate(summary.lastCodedAt))],
+    ];
+    if (reportKind === "activity") {
+      rows.push(
+        [],
+        [t("projectLog.title")],
+        [
+          t("projectLog.columns.time"),
+          t("reportsUsers.activity.coder"),
+          t("projectLog.columns.access"),
+          t("reportsUsers.activity.action"),
+          t("reportsUsers.activity.description"),
+        ],
+      );
+      for (const entry of projectLogRows) {
+        rows.push([
+          fmtDate(entry.occurredAt),
+          entry.userName || "-",
+          entry.accessMode ?? "-",
+          projectLogActionLabel(entry.action, t),
+          projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t),
+        ]);
+      }
+    }
+    return rows.map((csvRow) => csvRow.map(csvCell).join(",")).join("\n");
+  }
+
+  async function handleExportHTML() {
+    if (!isFrozen || !canExportReports) return;
+    setExportingFormat("html");
+    setError(null);
+    try {
+      const path = await save({ defaultPath: `${name || "User Report"}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
+      if (!path) return;
+      await writeTextFile(path, getExportHtml());
+      await recordReportExport("html", path);
+    } catch (e) {
+      console.error(e);
+      setError("HTML export failed.");
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
+  async function handleExportCSV() {
+    if (!isFrozen || !canExportReports) return;
+    setExportingFormat("csv");
+    setError(null);
+    try {
+      const path = await save({ defaultPath: `${name || "User Report"}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+      if (!path) return;
+      await writeTextFile(path, getExportCsv());
+      await recordReportExport("csv", path);
+    } catch (e) {
+      console.error(e);
+      setError("CSV export failed.");
+    } finally {
+      setExportingFormat(null);
+      setShowExportModal(false);
+    }
+  }
+
   return (
     <div className="annotate-view">
       <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
@@ -1348,11 +1648,7 @@ function CoderReportCreationPage({
               {t("reportsUsers.newFromSettings")}
             </button>
             ) : null
-          ) : (
-            <button className="btn btn--primary" onClick={handleSave} disabled={saving || !canStartReports}>
-              {saving ? t("reportsUsers.actions.saving") : t("reportsUsers.actions.save")}
-            </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -1367,6 +1663,13 @@ function CoderReportCreationPage({
             onChange={setSelCoderIds}
             disabled={isFrozen}
           />
+          {reportKind === "activity" && (
+            <ActivityCategoryFilterCard
+              rows={projectLogRows}
+              activeCategory={activityCategory}
+              onChange={setActivityCategory}
+            />
+          )}
           {loadingFilters && (
             <div className="annotate-card" style={{ flexShrink: 0 }}>
               <div style={{ padding: 14, fontSize: 13, color: "var(--color-text-muted)" }}>{t("reportsUsers.empty.loading")}</div>
@@ -1379,8 +1682,32 @@ function CoderReportCreationPage({
           style={reportKind === "activity" ? { gap: 10, paddingTop: 2, paddingBottom: 2, overflowY: "auto" } : undefined}
         >
           <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header">
+            <div className="annotate-card-header" style={{ gap: 10 }}>
               <span className="annotate-card-title">{t("reportsUsers.reportTitle")}</span>
+              <div className="report-action-group" style={{ gap: 8, marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                  onClick={() => setShowExportModal(true)}
+                  disabled={!isFrozen || !canExportReports}
+                  title={!isFrozen ? "Only saved reports can be exported" : "Export Report"}
+                  aria-label="Export Report"
+                >
+                  <DownloadIcon className="project-table-header-icon" />
+                </button>
+                {!isFrozen ? (
+                  <button
+                    type="button"
+                    className="btn btn--primary project-table-header-icon-button report-title-action-button"
+                    onClick={handleSave}
+                    disabled={saving || !canStartReports}
+                    title={saving ? t("reportsUsers.actions.saving") : t("reportsUsers.actions.save")}
+                    aria-label={saving ? t("reportsUsers.actions.saving") : t("reportsUsers.actions.save")}
+                  >
+                    <SaveIcon className="project-table-header-icon" />
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div style={{ padding: 14 }}>
               <input
@@ -1489,8 +1816,8 @@ function CoderReportCreationPage({
 
           {reportKind === "activity" && (
             <>
-              <CoderActivityOverTimeCard rows={projectLogRows} />
-              <CoderProjectLogCard rows={projectLogRows} />
+              <CoderActivityOverTimeCard rows={projectLogRows} activeCategory={activityCategory} />
+              <CoderProjectLogCard rows={projectLogRows} activeCategory={activityCategory} />
             </>
           )}
 
@@ -1638,6 +1965,15 @@ function CoderReportCreationPage({
           </div>
         </SettingsModal>
       )}
+
+      {showExportModal ? (
+        <UserReportExportModal
+          onClose={() => setShowExportModal(false)}
+          onExportHTML={handleExportHTML}
+          onExportCSV={handleExportCSV}
+          exportingFormat={exportingFormat}
+        />
+      ) : null}
     </div>
   );
 }

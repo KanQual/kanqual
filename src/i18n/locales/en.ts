@@ -2235,14 +2235,17 @@ export const en = {
     },
     activity: {
       overTime: "Activity Over Time",
+      categoryFilters: "Activity Filters",
       coder: "Coder",
       action: "Action",
       description: "Description",
       categories: {
         all: "All",
         project: "Project",
+        source: "Sources",
+        object: "Objects",
+        relationship: "Relationships",
         case: "Case",
-        document: "Document",
         code: "Code",
         annotation: "Annotation",
         memo: "Memo",

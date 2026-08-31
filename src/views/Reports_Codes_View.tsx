@@ -7,7 +7,7 @@ import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
-import { HelpIcon } from "../components/AppIcons";
+import { DownloadIcon, HelpIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -3808,20 +3808,6 @@ function CodeReportCreationPage({
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsCodes.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
-          <button
-            className="btn btn--secondary"
-            title={
-              !isFrozen
-                ? "Only saved reports can be exported"
-                : !canExportReports
-                  ? "You do not have permission to export reports"
-                  : t("reportsCodes.exportTitle")
-            }
-            disabled={!isFrozen || !canExportReports}
-            onClick={() => setShowExportModal(true)}
-          >
-            {t("reportsCodes.export")}
-          </button>
           {isFrozen ? (
             canStartReports ? (
             <button
@@ -3831,11 +3817,7 @@ function CodeReportCreationPage({
               {t("reportsCodes.newFromSettings")}
             </button>
             ) : null
-          ) : (
-            <button className="btn btn--primary" onClick={handleSave} disabled={saving || !canStartReports}>
-              {saving ? "Saving..." : "Save"}
-            </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -4184,7 +4166,39 @@ function CodeReportCreationPage({
           style={{ overflowY: "auto", gap: 10, flexDirection: "column", display: "flex", paddingTop: 2, paddingBottom: 2 }}
         >
           <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsCodes.reportTitle")}</span></div>
+            <div className="annotate-card-header" style={{ gap: 10 }}>
+              <span className="annotate-card-title">{t("reportsCodes.reportTitle")}</span>
+              <div className="report-action-group" style={{ gap: 8, marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                  title={
+                    !isFrozen
+                      ? "Only saved reports can be exported"
+                      : !canExportReports
+                        ? "You do not have permission to export reports"
+                        : t("reportsCodes.exportTitle")
+                  }
+                  disabled={!isFrozen || !canExportReports}
+                  onClick={() => setShowExportModal(true)}
+                  aria-label={t("reportsCodes.export")}
+                >
+                  <DownloadIcon className="project-table-header-icon" />
+                </button>
+                {!isFrozen ? (
+                  <button
+                    type="button"
+                    className="btn btn--primary project-table-header-icon-button report-title-action-button"
+                    onClick={handleSave}
+                    disabled={saving || !canStartReports}
+                    title={saving ? "Saving..." : "Save"}
+                    aria-label={saving ? "Saving..." : "Save"}
+                  >
+                    <SaveIcon className="project-table-header-icon" />
+                  </button>
+                ) : null}
+              </div>
+            </div>
             <div style={{ padding: "10px 14px" }}>
               <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("reportsCodes.reportNamePlaceholder")} autoFocus={!isFrozen} disabled={isFrozen} />
             </div>

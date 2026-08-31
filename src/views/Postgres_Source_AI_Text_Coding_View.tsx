@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { ArrowLeftIcon, HelpIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SettingsModal } from "../components/SettingsModal";
 import {
@@ -148,6 +149,7 @@ export function PostgresSourceAiTextCodingView({
   const [hiddenUserIds, setHiddenUserIds] = useState<Set<string>>(new Set());
   const [hiddenCodeIds, setHiddenCodeIds] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const { textSizePx, decreaseTextSize, increaseTextSize } = usePostgresSourceTextSizePreference();
   const [stripeBars, setStripeBars] = useState<StripeBar[]>([]);
   const [stripeHover, setStripeHover] = useState<StripeHover | null>(null);
@@ -682,9 +684,29 @@ export function PostgresSourceAiTextCodingView({
 
   return (
     <div className="view doc-detail-view">
-      <div className="workspace-back-row workspace-back-row--text-coding">
-        <button className="btn" onClick={onBack}>Back</button>
-      </div>
+      <header className="view-header">
+        <div className="users-title-wrap code-text-title-wrap">
+          <button
+            type="button"
+            className="code-text-header-back-button"
+            onClick={onBack}
+            title="Back"
+            aria-label="Back"
+          >
+            <ArrowLeftIcon className="code-text-header-back-icon" />
+          </button>
+          <h1>Code Text</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Open code text help"
+            aria-label="Open code text help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
+        </div>
+      </header>
 
       <div className="annotate-layout code-text-annotate-layout" style={{ minHeight: 0 }}>
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
@@ -980,6 +1002,24 @@ export function PostgresSourceAiTextCodingView({
         canManageMemos={canManageMemos}
         canDeleteAnnotations={canEditAnnotations}
       />
+
+      {helpOpen ? (
+        <SettingsModal title="Code Text Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Select text in the source, choose a code from the codebook, and review the resulting annotation in the annotation panel.
+            </p>
+            <p className="users-guide-copy">
+              Use filters, annotation stripes, text size controls, and AI suggested relevant segments to navigate longer sources. Source locks and project permissions determine whether you can edit annotations or codes.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       {filtersOpen ? (
         <PostgresSourceCodingFiltersModal

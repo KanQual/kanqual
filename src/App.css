@@ -720,6 +720,8 @@ body {
 }
 
 .sidebar:not(.sidebar--expanded):not(:hover) .sidebar-nav {
+  flex: 0 0 auto;
+  padding: 0;
   overflow-y: hidden;
 }
 
@@ -2126,12 +2128,15 @@ body {
 }
 
 .postgres-experiment-home-canvas-column {
+  --project-home-graph-canvas-min-height: 680px;
   position: relative;
   min-width: 0;
-  min-height: 680px;
+  min-height: var(--project-home-graph-canvas-min-height);
   display: flex;
   border-left: none;
   padding-left: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .project-home-canvas-filter-control {
@@ -2344,8 +2349,12 @@ body {
 .postgres-explore-canvas-view--embedded {
   padding: 0;
   flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  min-height: var(--project-home-graph-canvas-min-height, 680px);
+  overflow: visible;
+}
+
+.postgres-experiment-home-canvas-column > .postgres-explore-canvas-view--embedded {
+  min-height: var(--project-home-graph-canvas-min-height, 680px);
 }
 
 .postgres-explore-canvas-layout {
@@ -2359,6 +2368,7 @@ body {
 .postgres-explore-canvas-layout--embedded {
   display: flex;
   min-width: 0;
+  min-height: var(--project-home-graph-canvas-min-height, 680px);
   width: 100%;
 }
 
@@ -2383,7 +2393,7 @@ body {
 .postgres-explore-canvas-layout--embedded .postgres-explore-canvas-stage {
   flex: 1;
   min-width: 0;
-  min-height: 0;
+  min-height: var(--project-home-graph-canvas-min-height, 680px);
   width: 100%;
   border-radius: 8px;
 }
@@ -2419,6 +2429,14 @@ body {
   padding: 0;
   font-size: var(--text-xs);
   line-height: 1;
+}
+
+.postgres-explore-canvas-controls .project-home-canvas-create-main {
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  min-height: 46px;
+  border-radius: 12px;
 }
 
 .postgres-explore-zoom-control {
@@ -2931,9 +2949,10 @@ body {
   }
 
   .postgres-experiment-home-canvas-column {
+    --project-home-graph-canvas-min-height: 620px;
     border-left: none;
     padding-left: 0;
-    min-height: 620px;
+    min-height: var(--project-home-graph-canvas-min-height);
   }
 
   .postgres-explore-canvas-layout {
@@ -3977,6 +3996,17 @@ input[type="password"].form-input::-ms-clear {
   height: 100%;
 }
 
+.report-title-action-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+}
+
+.report-title-action-button .project-table-header-icon {
+  width: 17px;
+  height: 17px;
+}
+
 .annotate-layout {
   display: flex;
   flex: 1;
@@ -4641,7 +4671,9 @@ input[type="password"].form-input::-ms-clear {
 .annotation-item-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 4px;
   margin-bottom: 6px;
 }
 
@@ -4734,6 +4766,7 @@ input[type="password"].form-input::-ms-clear {
 .annotation-excerpt-media--video {
   aspect-ratio: 16 / 9;
   object-fit: contain;
+  pointer-events: none;
 }
 
 .annotation-clip-player {
@@ -4797,7 +4830,7 @@ input[type="password"].form-input::-ms-clear {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: #111827;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .annotation-clip-player--video {
@@ -6166,6 +6199,42 @@ input[type="password"].form-input::-ms-clear {
   display: block;
   color: var(--color-text-muted);
   flex-shrink: 0;
+}
+
+.code-text-header-back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(53, 80, 112, 0.14);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.code-text-title-wrap {
+  position: relative;
+}
+
+.code-text-title-wrap .code-text-header-back-button {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
+}
+
+.code-text-header-back-button:hover {
+  border-color: rgba(53, 80, 112, 0.28);
+  background: var(--color-surface-alt);
+}
+
+.code-text-header-back-icon {
+  width: 17px;
+  height: 17px;
+  display: block;
 }
 
 .admin-signout-button {
@@ -15014,6 +15083,27 @@ input[type="password"].form-input::-ms-clear {
   border-radius: 10px;
   background: var(--color-surface, #fff);
   box-shadow: none;
+}
+
+.project-home-canvas-create-control--dock {
+  position: relative;
+  left: auto;
+  top: auto;
+  z-index: 12;
+  flex-direction: row;
+  gap: 0;
+}
+
+.project-home-canvas-create-control--dock .project-home-canvas-create-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.project-home-canvas-create-control--dock .project-home-canvas-create-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 12;
 }
 
 .project-home-timeline-controls {

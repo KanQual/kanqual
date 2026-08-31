@@ -447,84 +447,87 @@ export function PostgresProjectHomeGraphView({
   onToggleSizeSectionCollapsed: (section: ProjectHomeCanvasSizeSectionKey) => void;
   onResizeNodeGroup: (nodeIds: string[], scale: number) => void;
 }) {
-  return (
-    <div className="home-dashboard postgres-experiment-home-dashboard">
-      <div className="postgres-experiment-home-canvas-column">
-        <div className="project-home-canvas-create-control" ref={createControlRef}>
+  const renderGraphCreateControl = () => (
+    <div className="project-home-canvas-create-control project-home-canvas-create-control--dock" ref={createControlRef}>
+      <button
+        type="button"
+        className="btn btn--primary project-home-canvas-create-main"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setCreateMenuOpen((current) => !current);
+        }}
+        aria-expanded={createMenuOpen}
+        aria-label={createMenuOpen ? "Close create menu" : "Create project item"}
+      >
+        <PlusIcon className="project-home-canvas-create-icon" />
+      </button>
+      {createMenuOpen ? (
+        <div className="project-home-canvas-create-menu" role="menu">
           <button
             type="button"
-            className="btn btn--primary project-home-canvas-create-main"
+            className="btn project-home-canvas-create-action"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              setCreateMenuOpen((current) => !current);
+              onCreateSource();
             }}
-            aria-expanded={createMenuOpen}
-            aria-label={createMenuOpen ? "Close create menu" : "Create project item"}
+            disabled={!canManageSources}
+            aria-label="Add source"
+            title="Source"
           >
-            <PlusIcon className="project-home-canvas-create-icon" />
+            <SourceIcon className="project-home-canvas-create-action-icon" />
           </button>
-          {createMenuOpen ? (
-            <div className="project-home-canvas-create-menu">
-              <button
-                type="button"
-                className="btn project-home-canvas-create-action"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onCreateSource();
-                }}
-                disabled={!canManageSources}
-                aria-label="Add source"
-                title="Source"
-              >
-                <SourceIcon className="project-home-canvas-create-action-icon" />
-              </button>
-              <button
-                type="button"
-                className="btn project-home-canvas-create-action"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onCreateObject();
-                }}
-                disabled={!canManageSources}
-                aria-label="Add object"
-                title="Object"
-              >
-                <ObjectIcon className="project-home-canvas-create-action-icon" />
-              </button>
-              <button
-                type="button"
-                className="btn project-home-canvas-create-action"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onCreateRelationship();
-                }}
-                disabled={!canManageSources}
-                aria-label="Add relationship"
-                title="Relationship"
-              >
-                <RelationshipIcon className="project-home-canvas-create-action-icon" />
-              </button>
-              <button
-                type="button"
-                className="btn project-home-canvas-create-action"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onCreateCode();
-                }}
-                disabled={!canManageAnnotations}
-                aria-label="Add code"
-                title="Code"
-              >
-                <CodeIcon className="project-home-canvas-create-action-icon" />
-              </button>
-            </div>
-          ) : null}
+          <button
+            type="button"
+            className="btn project-home-canvas-create-action"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onCreateObject();
+            }}
+            disabled={!canManageSources}
+            aria-label="Add object"
+            title="Object"
+          >
+            <ObjectIcon className="project-home-canvas-create-action-icon" />
+          </button>
+          <button
+            type="button"
+            className="btn project-home-canvas-create-action"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onCreateRelationship();
+            }}
+            disabled={!canManageSources}
+            aria-label="Add relationship"
+            title="Relationship"
+          >
+            <RelationshipIcon className="project-home-canvas-create-action-icon" />
+          </button>
+          <button
+            type="button"
+            className="btn project-home-canvas-create-action"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onCreateCode();
+            }}
+            disabled={!canManageAnnotations}
+            aria-label="Add code"
+            title="Code"
+          >
+            <CodeIcon className="project-home-canvas-create-action-icon" />
+          </button>
         </div>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="home-dashboard postgres-experiment-home-dashboard">
+      <div className="postgres-experiment-home-canvas-column">
         {graphLoading && !canvasStateLoaded ? (
           loadingFallback
         ) : (
@@ -551,6 +554,7 @@ export function PostgresProjectHomeGraphView({
               fitOnVisibleKey={fitOnVisibleKey}
               controlStart={(
                 <>
+                  {renderGraphCreateControl()}
                   <div className="project-home-canvas-filter-control" ref={filterControlRef}>
                     <button
                       type="button"

@@ -18,6 +18,22 @@ export function HelpIcon({ className }: IconProps) {
   );
 }
 
+export function ArrowLeftIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M10.8 5.4 4.2 12l6.6 6.6 1.4-1.4L8 13h12v-2H8l4.2-4.2z"
+      />
+    </svg>
+  );
+}
+
 export function ComputerIcon({ className }: IconProps) {
   return (
     <svg
@@ -271,6 +287,22 @@ export function DownloadIcon({ className }: IconProps) {
       <path
         fill="currentColor"
         d="M11 4h2v8.2l3.1-3.1 1.4 1.4L12 16l-5.5-5.5 1.4-1.4 3.1 3.1zM5 18h14v2H5z"
+      />
+    </svg>
+  );
+}
+
+export function SaveIcon({ className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M5 3h12l2 2v16H5zm2 2v14h10V6.2L15.8 5H15v5H8V5zm3 0v3h3V5zm-1 9h6v2H9z"
       />
     </svg>
   );

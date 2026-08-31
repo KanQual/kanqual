@@ -6,7 +6,7 @@ import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
-import { DownloadIcon } from "../components/AppIcons";
+import { DownloadIcon, HelpIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
@@ -1659,6 +1659,7 @@ export function PostgresAppSettingsView({
   const [activeModal, setActiveModal] = useState<AppSettingsModalId | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
   const [appInfo, setAppInfo] = useState<AppRuntimeInfo | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [theme, setTheme] = useState<Theme>("light");
@@ -1773,8 +1774,35 @@ export function PostgresAppSettingsView({
       <header className="view-header">
         <div className="view-title-with-help">
           <h1>Settings</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Open settings help"
+            aria-label="Open settings help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
         </div>
       </header>
+
+      {helpOpen ? (
+        <SettingsModal title="Settings Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Manage project details, storage, snapshots, imports and exports, codebook transfer, permissions, and personal display preferences from this settings hub.
+            </p>
+            <p className="users-guide-copy">
+              Some settings affect only your signed-in user, while project administration actions depend on your project role.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       {notice ? <p className="settings-success">{notice}</p> : null}
       {error ? <p className="auth-error">{error}</p> : null}

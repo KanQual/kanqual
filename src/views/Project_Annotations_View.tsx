@@ -392,14 +392,10 @@ function VideoAnnotationClip({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [clipProgressMs, setClipProgressMs] = useState(0);
   const resolvedPath = resolveProjectStoragePath(projectStoragePath, sourcePath);
   const startMs = timeStartMs ?? null;
   const endMs = timeEndMs ?? null;
   const startSeconds = Math.max(0, (startMs ?? 0) / 1000);
-  const endSeconds = Math.max(startSeconds, (endMs ?? startMs ?? 0) / 1000);
-  const clipDurationMs = Math.max(1, (endMs ?? 0) - (startMs ?? 0));
   const mediaType = mediaTypeFromFileExtension(fileExtensionFromPath(sourcePath ?? ""));
 
   useEffect(() => {
@@ -444,53 +440,6 @@ function VideoAnnotationClip({
   function handleLoadedMetadata() {
     if (!videoRef.current) return;
     videoRef.current.currentTime = startSeconds;
-    setClipProgressMs(0);
-  }
-
-  function handlePlay() {
-    if (!videoRef.current) return;
-    if (videoRef.current.currentTime < startSeconds || videoRef.current.currentTime >= endSeconds) {
-      videoRef.current.currentTime = startSeconds;
-    }
-    setPlaying(true);
-  }
-
-  function handleTimeUpdate() {
-    if (!videoRef.current) return;
-    const nextProgressMs = Math.max(0, Math.min(clipDurationMs, (videoRef.current.currentTime - startSeconds) * 1000));
-    setClipProgressMs(nextProgressMs);
-    if (videoRef.current.currentTime >= endSeconds) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = startSeconds;
-      setPlaying(false);
-      setClipProgressMs(0);
-    }
-  }
-
-  function handlePause() {
-    setPlaying(false);
-  }
-
-  function togglePlayback() {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      if (video.currentTime < startSeconds || video.currentTime >= endSeconds) {
-        video.currentTime = startSeconds + (clipProgressMs / 1000);
-      }
-      void video.play();
-      return;
-    }
-    video.pause();
-  }
-
-  function seekWithinClip(progressMs: number) {
-    const video = videoRef.current;
-    const nextProgressMs = Math.max(0, Math.min(clipDurationMs, progressMs));
-    setClipProgressMs(nextProgressMs);
-    if (video) {
-      video.currentTime = startSeconds + (nextProgressMs / 1000);
-    }
   }
 
   return (
@@ -510,39 +459,10 @@ function VideoAnnotationClip({
               preload="metadata"
               playsInline
               onLoadedMetadata={handleLoadedMetadata}
-              onPlay={handlePlay}
-              onPause={handlePause}
-              onTimeUpdate={handleTimeUpdate}
-              onClick={togglePlayback}
+              aria-label="Video clip preview"
             >
               <source src={videoUrl} type={mediaType ?? undefined} />
             </video>
-            <div className="annotation-clip-player annotation-clip-player--video">
-              <button
-                type="button"
-                className="annotation-clip-play-btn"
-                onClick={togglePlayback}
-                title={playing ? "Pause" : "Play"}
-                aria-label={playing ? "Pause video clip" : "Play video clip"}
-              >
-                {playing ? <ClipPauseIcon /> : <ClipPlayIcon />}
-              </button>
-              <div className="annotation-clip-scrubber">
-                <input
-                  type="range"
-                  min="0"
-                  max={clipDurationMs}
-                  step="100"
-                  value={Math.round(clipProgressMs)}
-                  onChange={(event) => seekWithinClip(Number(event.target.value))}
-                  aria-label="Clip position"
-                />
-                <div className="annotation-clip-time-row">
-                  <span>{formatMediaMilliseconds(clipProgressMs)}</span>
-                  <span>{formatMediaMilliseconds(clipDurationMs)}</span>
-                </div>
-              </div>
-            </div>
           </div>
         ) : (
           <p className="users-guide-copy" style={{ margin: 0 }}>Loading video clip...</p>

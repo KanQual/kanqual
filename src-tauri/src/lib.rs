@@ -10426,7 +10426,7 @@ async fn get_postgres_experiment_user_preferences_command(
 
     let subject_key = postgres_experiment_preference_subject_key(&session);
     let (client, connection_task) = connect_postgres_runtime(&app).await?;
-    let row = client
+    let row_result = client
         .query_opt(
             "
             SELECT theme, density, font_size
@@ -10439,8 +10439,15 @@ async fn get_postgres_experiment_user_preferences_command(
             ",
             &[&subject_key],
         )
-        .await
-        .map_err(|e| format!("Could not load PostgreSQL experiment user preferences: {e}"))?;
+        .await;
+    let row = match row_result {
+        Ok(row) => row,
+        Err(e) => {
+            eprintln!("Could not load PostgreSQL experiment user preferences; using defaults: {e}");
+            connection_task.abort();
+            return Ok(default_postgres_experiment_user_preferences());
+        }
+    };
     connection_task.abort();
 
     Ok(row

@@ -35,6 +35,7 @@ import {
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 
 const CLOUD_PROVIDER_OPTIONS: Array<{
@@ -262,6 +263,7 @@ export function PostgresAiAssistHomeView({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [activeDeviceModal, setActiveDeviceModal] = useState<null | "embedding-tuning" | "connection-settings" | "generation-defaults">(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [buildModalOpen, setBuildModalOpen] = useState(false);
   const [llmConnectionStatus, setLlmConnectionStatus] = useState<"checking" | "live" | "offline" | "disabled">("checking");
   const [ollamaError, setOllamaError] = useState("");
@@ -778,10 +780,37 @@ export function PostgresAiAssistHomeView({
   return (
     <div className="view home-view ai-assist-home-view">
       <header className="view-header">
-        <div>
+        <div className="users-title-wrap">
           <h1>AI Assist</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Open AI Assist help"
+            aria-label="Open AI Assist help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
         </div>
       </header>
+
+      {helpOpen ? (
+        <SettingsModal title="AI Assist Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Use AI Assist Home to check project AI readiness, manage embeddings, and review the local or host-managed runtime used by AI workflows.
+            </p>
+            <p className="users-guide-copy">
+              Device-level controls affect the AI runtime on this machine when editable. Project-level controls determine whether this project can use AI Assist and whether embeddings are ready.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       {notice ? <p className="settings-success">{notice}</p> : null}
       {error ? <p className="auth-error">{error}</p> : null}

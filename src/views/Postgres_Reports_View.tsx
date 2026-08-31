@@ -8,7 +8,7 @@ import {
 } from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { LoadingCard } from "../components/LoadingCard";
-import { PlusIcon } from "../components/AppIcons";
+import { ArrowLeftIcon, HelpIcon, PlusIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import type { CodeReportKind } from "./Reports_Codes_View";
 import type { CoderReportKind } from "./Reports_Users_View";
@@ -188,16 +188,50 @@ function ReportBuilderShell({
   onBack: () => void;
   children: ReactNode;
 }) {
+  const [helpOpen, setHelpOpen] = useState(false);
+
   return (
     <div className="view users-view">
       <header className="view-header">
-        <div className="users-title-wrap">
+        <div className="users-title-wrap code-text-title-wrap">
+          <button
+            type="button"
+            className="code-text-header-back-button"
+            onClick={onBack}
+            title="Back to reports"
+            aria-label="Back to reports"
+          >
+            <ArrowLeftIcon className="code-text-header-back-icon" />
+          </button>
           <h1>{title}</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title={`Open ${title.toLowerCase()} help`}
+            aria-label={`Open ${title.toLowerCase()} help`}
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
         </div>
-        <button type="button" className="btn" onClick={onBack}>
-          Back to reports
-        </button>
       </header>
+      {helpOpen ? (
+        <SettingsModal title={`${title} Help`} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Choose the report scope, adjust filters and display options, then save the report when the output matches what you need.
+            </p>
+            <p className="users-guide-copy">
+              Saved reports can be reopened, exported, or used as the starting point for another report with the same settings.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
       <div style={{ minHeight: 0, flex: 1 }}>
         {children}
       </div>
@@ -214,6 +248,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
   const [reports, setReports] = useState<PostgresReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const loadReports = useCallback(async () => {
     setLoadingReports(true);
@@ -328,7 +363,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
 
   if (activeBuilder?.type === "annotation") {
     return (
-      <ReportBuilderShell title="Annotation Report" onBack={backToReportsLanding}>
+      <ReportBuilderShell title="Annotation Report Builder" onBack={backToReportsLanding}>
         <Suspense fallback={<ReportBuilderLoading />}>
           <LegacyAnnotationReportsViewLazy
             initialNewReportOpen
@@ -346,8 +381,35 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       <header className="view-header">
         <div className="users-title-wrap">
           <h1>Reports</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Open reports help"
+            aria-label="Open reports help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
         </div>
       </header>
+
+      {helpOpen ? (
+        <SettingsModal title="Reports Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Use Reports to create, reopen, and manage saved code, annotation, and user reports for the current project.
+            </p>
+            <p className="users-guide-copy">
+              Select a report type on the left to filter saved reports, or start a new report from the available report builders.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       <div
         className="postgres-sources-grid"

@@ -7,7 +7,7 @@ import {
   POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON,
   POSTGRES_CYTOSCAPE_STYLESHEET,
 } from "../lib/postgresCanvasGraph";
-import { DownloadIcon, FitCornersIcon, LayoutNetworkIcon, PlusIcon, ZoomIcon } from "../components/AppIcons";
+import { DownloadIcon, FitCornersIcon, HelpIcon, LayoutNetworkIcon, PlusIcon, ZoomIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import type {
   PostgresCanvasNodeState,
@@ -386,6 +386,7 @@ export function PostgresExploreCanvasView({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [layoutRunning, setLayoutRunning] = useState(false);
   const [layoutError, setLayoutError] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [connectorHandle, setConnectorHandle] = useState<PostgresExploreConnectorHandle | null>(null);
   const [resizeHandle, setResizeHandle] = useState<PostgresExploreResizeHandle | null>(null);
   const [relationshipDraft, setRelationshipDraft] = useState<PostgresExploreRelationshipDraft | null>(null);
@@ -1308,13 +1309,42 @@ export function PostgresExploreCanvasView({
     <div className={`view users-view postgres-explore-canvas-view${embedded ? " postgres-explore-canvas-view--embedded" : ""}`}>
       {!embedded ? (
         <header className="view-header">
-          <div className="users-title-wrap">
-            <h1>Explore</h1>
+          <div>
+            <div className="users-title-wrap">
+              <h1>Explore</h1>
+              <button
+                type="button"
+                className="users-help-icon-btn"
+                onClick={() => setHelpOpen(true)}
+                title="Open explore help"
+                aria-label="Open explore help"
+              >
+                <HelpIcon className="users-help-icon" />
+              </button>
+            </div>
             <p className="auth-hint" style={{ margin: "6px 0 0" }}>
               Browse project objects as a navigable relationship graph and re-run auto layout when the structure changes.
             </p>
           </div>
         </header>
+      ) : null}
+
+      {helpOpen ? (
+        <SettingsModal title="Explore Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Use Explore to browse project objects and relationships as an interactive graph, inspect selected items, and re-run layout when the structure changes.
+            </p>
+            <p className="users-guide-copy">
+              Layout changes help navigation in this view; they do not change object or relationship records unless you use editing actions made available by your role.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {layoutError ? <p className="users-error">{layoutError}</p> : null}

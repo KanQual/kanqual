@@ -7,7 +7,7 @@ import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { FilterIcon } from "../components/FilterIcon";
-import { HelpIcon } from "../components/AppIcons";
+import { DownloadIcon, HelpIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -3273,20 +3273,6 @@ function ReportPage({
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsAnnotations.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
-          <button
-            className="btn btn--secondary"
-            title={
-              !isFrozen
-                ? t("reportsAnnotations.exportSavedOnly")
-                : !canExportReports
-                  ? "You do not have permission to export reports"
-                  : t("reportsAnnotations.exportTitle")
-            }
-            disabled={!isFrozen || !canExportReports}
-            onClick={() => setShowExportModal(true)}
-          >
-            {t("reportsAnnotations.exportButton")}
-          </button>
           {isFrozen && onUseSettings && canStartReports && (
             <button
               className="btn btn--primary"
@@ -3303,11 +3289,6 @@ function ReportPage({
               })}
             >
               {t("reportsAnnotations.useSettingsForNewReport")}
-            </button>
-          )}
-          {!isFrozen && (
-            <button className="btn btn--primary" onClick={handleSave} disabled={saving || !name.trim() || !canStartReports}>
-              {saving ? t("reportsAnnotations.saving") : t("reportsAnnotations.saveReport")}
             </button>
           )}
         </div>
@@ -3690,7 +3671,39 @@ function ReportPage({
 
           {/* Title */}
           <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsAnnotations.reportTitle")}</span></div>
+            <div className="annotate-card-header" style={{ gap: 10 }}>
+              <span className="annotate-card-title">{t("reportsAnnotations.reportTitle")}</span>
+              <div className="report-action-group" style={{ gap: 8, marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                  title={
+                    !isFrozen
+                      ? t("reportsAnnotations.exportSavedOnly")
+                      : !canExportReports
+                        ? "You do not have permission to export reports"
+                        : t("reportsAnnotations.exportTitle")
+                  }
+                  disabled={!isFrozen || !canExportReports}
+                  onClick={() => setShowExportModal(true)}
+                  aria-label={t("reportsAnnotations.exportButton")}
+                >
+                  <DownloadIcon className="project-table-header-icon" />
+                </button>
+                {!isFrozen && (
+                  <button
+                    type="button"
+                    className="btn btn--primary project-table-header-icon-button report-title-action-button"
+                    onClick={handleSave}
+                    disabled={saving || !name.trim() || !canStartReports}
+                    title={saving ? t("reportsAnnotations.saving") : t("reportsAnnotations.saveReport")}
+                    aria-label={saving ? t("reportsAnnotations.saving") : t("reportsAnnotations.saveReport")}
+                  >
+                    <SaveIcon className="project-table-header-icon" />
+                  </button>
+                )}
+              </div>
+            </div>
             <div style={{ padding: "10px 14px" }}>
               {!isFrozen ? (
                 <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("reportsAnnotations.reportNamePlaceholder")} autoFocus={isNew} />
@@ -4577,9 +4590,6 @@ export function CodeReportsView({ initialNewReportOpen = false, postgresProjectI
       {helpOpen && (
         <SettingsModal title={t("reportsAnnotations.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
-            <p className="users-guide-copy">
-              {t("reportsAnnotations.help.line1")}
-            </p>
             <p className="users-guide-copy">
               {t("reportsAnnotations.help.line1")}
             </p>

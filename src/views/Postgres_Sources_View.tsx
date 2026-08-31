@@ -37,7 +37,7 @@ import {
   PostgresAttributeValueHistoryModal,
   type PostgresAttributeValueHistoryTarget,
 } from "../components/PostgresAttributeValueHistoryModal";
-import { CloseIcon, PlusIcon } from "../components/AppIcons";
+import { CloseIcon, HelpIcon, PlusIcon } from "../components/AppIcons";
 import {
   PostgresRelationshipModal,
   type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
@@ -4475,6 +4475,7 @@ export function PostgresSourcesView({
   );
   const [sourceKindSortCol, setSourceKindSortCol] = useState<SourceKindSortCol>("label");
   const [sourceKindSortDir, setSourceKindSortDir] = useState<SortDir>("asc");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [attributeSortCol, setAttributeSortCol] = useState<AttributeSortCol>("name");
   const [attributeSortDir, setAttributeSortDir] = useState<AttributeSortDir>("asc");
   const [attributeDraft, setAttributeDraft] = useState<SourceAttributeDraft | null>(null);
@@ -6195,8 +6196,35 @@ export function PostgresSourcesView({
       <header className="view-header">
         <div className="users-title-wrap">
           <h1>{pageTitle}</h1>
+          <button
+            type="button"
+            className="users-help-icon-btn"
+            onClick={() => setHelpOpen(true)}
+            title="Open sources help"
+            aria-label="Open sources help"
+          >
+            <HelpIcon className="users-help-icon" />
+          </button>
         </div>
       </header>
+
+      {helpOpen ? (
+        <SettingsModal title="Sources Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Add sources, edit source details and graphics, manage source type defaults, and open coding workspaces for text, image, audio, video, PDF, and transcript material.
+            </p>
+            <p className="users-guide-copy">
+              Use the left column to filter by source type or switch into the attributes table. Select a source to review its details, relationships, annotations, and available actions.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       {error && <p className="users-error">{error}</p>}
       {attributeError && <p className="users-error">{attributeError}</p>}

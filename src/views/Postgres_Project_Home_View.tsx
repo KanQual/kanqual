@@ -15,7 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readFile as readTauriFile, writeFile } from "@tauri-apps/plugin-fs";
-import { PlusIcon } from "../components/AppIcons";
+import { HelpIcon, PlusIcon } from "../components/AppIcons";
 import type { EditableAttributeMatrixValues } from "../components/EditableAttributesMatrix";
 import { SettingsModal } from "../components/SettingsModal";
 import type { SourceEditorPayload, SourceRow } from "./Postgres_Sources_View";
@@ -412,6 +412,58 @@ type PostgresRelationshipTypeSortCol = "relationshipType" | "count";
 type PostgresHomeCanvasSection = "sources" | "objects" | "relationships" | "codes" | "annotations";
 type PostgresHomeCanvasSizeSectionKey = "sources" | "objects" | "codes";
 type PostgresProjectHomeTab = "details" | "graph" | "timeline";
+type PostgresProjectHelpModalId =
+  | "home"
+  | "users"
+  | "objects"
+  | "relationships"
+  | "construct"
+  | "view";
+
+const POSTGRES_PROJECT_HELP_COPY: Record<PostgresProjectHelpModalId, { title: string; lines: string[] }> = {
+  home: {
+    title: "Project Home Help",
+    lines: [
+      "Use Project Home to review project totals, inspect the graph, and arrange dated project material on the timeline.",
+      "The Details tab summarizes project activity. The Graph tab shows sources, objects, codes, annotations, and relationships as a canvas. The Timeline tab shows items with timeline fields and group assignments.",
+    ],
+  },
+  users: {
+    title: "Project Users Help",
+    lines: [
+      "Review project members, their roles, and account status. Project owners and administrators can use this view to manage collaboration access.",
+      "Role counts in the left column filter the user list without changing the project.",
+    ],
+  },
+  objects: {
+    title: "Objects Help",
+    lines: [
+      "Create and edit project objects, manage object type defaults, define object attributes, and review object details from one workspace.",
+      "The left column filters by object type or switches to the attributes table. Select an object to inspect details, attributes, relationships, annotations, and timeline data.",
+    ],
+  },
+  relationships: {
+    title: "Relationships Help",
+    lines: [
+      "Create and edit relationships between sources and objects, manage relationship type defaults, and define relationship attributes.",
+      "The left column filters by relationship type or switches to the attributes table. Select a relationship to review endpoints, graphics, attributes, and timeline fields.",
+    ],
+  },
+  construct: {
+    title: "Construct Help",
+    lines: [
+      "Construct is reserved for assembling structured visual models from research objects and relationships.",
+      "This mode is currently a placeholder and does not save project changes yet.",
+    ],
+  },
+  view: {
+    title: "View Help",
+    lines: [
+      "Browse saved canvases by mode, open a saved canvas, export it, or delete it if your role allows.",
+      "Saved canvases preserve visual arrangements separately from the underlying project objects and relationships.",
+    ],
+  },
+};
 
 function readPostgresHomeCanvasAppearanceDraft(): PostgresHomeCanvasAppearanceDraft {
   const theme = getStoredTheme();
@@ -744,6 +796,7 @@ export function PostgresProjectHomeView({
   const PROJECT_ROLE_OPTIONS = ["owner", "editor", "coder", "viewer"] as const;
   const [activeScreen, setActiveScreen] = useState<PostgresProjectScreen>("home");
   const [projectHomeTab, setProjectHomeTab] = useState<PostgresProjectHomeTab>("details");
+  const [projectHelpModal, setProjectHelpModal] = useState<PostgresProjectHelpModalId | null>(null);
   const [projectHomeGraphFitKey, setProjectHomeGraphFitKey] = useState(0);
   const projectHomeDetailsStatsRef = useRef<HTMLDivElement | null>(null);
   const [projectHomeDetailsStatsHeight, setProjectHomeDetailsStatsHeight] = useState(0);
@@ -5974,6 +6027,15 @@ export function PostgresProjectHomeView({
               <header className="view-header">
                 <div className="users-title-wrap">
                   <h1>{project.name || "Untitled project"}</h1>
+                  <button
+                    type="button"
+                    className="users-help-icon-btn"
+                    onClick={() => setProjectHelpModal("home")}
+                    title="Open project home help"
+                    aria-label="Open project home help"
+                  >
+                    <HelpIcon className="users-help-icon" />
+                  </button>
                 </div>
               </header>
               <div className="ai-assist-home-tabbar" style={{ marginBottom: 18 }}>
@@ -6247,6 +6309,15 @@ export function PostgresProjectHomeView({
                 <header className="view-header">
                   <div className="users-title-wrap">
                     <h1>Project Users</h1>
+                    <button
+                      type="button"
+                      className="users-help-icon-btn"
+                      onClick={() => setProjectHelpModal("users")}
+                      title="Open project users help"
+                      aria-label="Open project users help"
+                    >
+                      <HelpIcon className="users-help-icon" />
+                    </button>
                   </div>
                 </header>
 
@@ -6926,6 +6997,15 @@ export function PostgresProjectHomeView({
                 <header className="view-header">
                   <div className="users-title-wrap">
                     <h1>Objects</h1>
+                    <button
+                      type="button"
+                      className="users-help-icon-btn"
+                      onClick={() => setProjectHelpModal("objects")}
+                      title="Open objects help"
+                      aria-label="Open objects help"
+                    >
+                      <HelpIcon className="users-help-icon" />
+                    </button>
                   </div>
                 </header>
 
@@ -7816,6 +7896,15 @@ export function PostgresProjectHomeView({
                 <header className="view-header">
                   <div className="users-title-wrap">
                     <h1>Relationships</h1>
+                    <button
+                      type="button"
+                      className="users-help-icon-btn"
+                      onClick={() => setProjectHelpModal("relationships")}
+                      title="Open relationships help"
+                      aria-label="Open relationships help"
+                    >
+                      <HelpIcon className="users-help-icon" />
+                    </button>
                   </div>
                 </header>
 
@@ -8677,8 +8766,19 @@ export function PostgresProjectHomeView({
           ) : activeScreen === "construct" ? (
             <div className="view users-view">
               <header className="view-header">
-                <div className="users-title-wrap">
-                  <h1>Construct</h1>
+                <div>
+                  <div className="users-title-wrap">
+                    <h1>Construct</h1>
+                    <button
+                      type="button"
+                      className="users-help-icon-btn"
+                      onClick={() => setProjectHelpModal("construct")}
+                      title="Open construct help"
+                      aria-label="Open construct help"
+                    >
+                      <HelpIcon className="users-help-icon" />
+                    </button>
+                  </div>
                   <p className="auth-hint" style={{ margin: "6px 0 0" }}>
                     This canvas mode will focus on assembling structured visual models from research objects and relationships.
                   </p>
@@ -8691,8 +8791,19 @@ export function PostgresProjectHomeView({
           ) : activeScreen === "view" ? (
             <div className="view users-view">
               <header className="view-header">
-                <div className="users-title-wrap">
-                  <h1>View</h1>
+                <div>
+                  <div className="users-title-wrap">
+                    <h1>View</h1>
+                    <button
+                      type="button"
+                      className="users-help-icon-btn"
+                      onClick={() => setProjectHelpModal("view")}
+                      title="Open view help"
+                      aria-label="Open view help"
+                    >
+                      <HelpIcon className="users-help-icon" />
+                    </button>
+                  </div>
                   <p className="auth-hint" style={{ margin: "6px 0 0" }}>
                     Browse saved canvases by mode.
                   </p>
@@ -9012,6 +9123,26 @@ export function PostgresProjectHomeView({
               onRemoveFromGroup={(menu) => void handleRemoveHomeTimelineItemFromGroup(menu)}
               onDeleteItem={startHomeCanvasDelete}
             />
+          ) : null}
+          {projectHelpModal ? (
+            <SettingsModal
+              title={POSTGRES_PROJECT_HELP_COPY[projectHelpModal].title}
+              onClose={() => setProjectHelpModal(null)}
+              modalClassName="modal--help"
+            >
+              <div className="app-settings-modal-body">
+                {POSTGRES_PROJECT_HELP_COPY[projectHelpModal].lines.map((line) => (
+                  <p key={line} className="users-guide-copy">
+                    {line}
+                  </p>
+                ))}
+              </div>
+              <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+                <button type="button" className="btn btn--primary" onClick={() => setProjectHelpModal(null)}>
+                  Close
+                </button>
+              </div>
+            </SettingsModal>
           ) : null}
           {homeCanvasAppearanceDraft ? (
             <PostgresCanvasAppearanceModal

@@ -786,7 +786,10 @@ export function PostgresSourceAnnotationPanel({
         ) : (
           annotations.map((annotation) => {
             const selected = annotation.id === selectedAnnotationId;
-            const primaryCode = annotation.codeIds[0] ? codesById.get(annotation.codeIds[0]) : null;
+            const annotationCodes = annotation.codeIds
+              .map((codeId) => codesById.get(codeId))
+              .filter((code): code is PostgresCode => Boolean(code));
+            const showQuote = !(annotation.anchorKind === "time_range" && annotation.quote.trim().startsWith("Clip "));
             return (
               <li
                 key={annotation.id}
@@ -800,13 +803,13 @@ export function PostgresSourceAnnotationPanel({
                 }}
               >
                 <div className="annotation-item-header">
-                  {primaryCode ? (
-                    <span className="annotation-code-badge" style={{ background: primaryCode.color }}>
-                      {primaryCode.label}
+                  {annotationCodes.map((code) => (
+                    <span key={code.id} className="annotation-code-badge" style={{ background: code.color }}>
+                      {code.label}
                     </span>
-                  ) : null}
+                  ))}
                 </div>
-                <blockquote className="annotation-quote">"{annotation.quote}"</blockquote>
+                {showQuote ? <blockquote className="annotation-quote">"{annotation.quote}"</blockquote> : null}
                 {renderAnnotationExcerpt ? renderAnnotationExcerpt(annotation) : null}
                 {annotation.note ? <p className="annotation-note">{annotation.note}</p> : null}
                 <p className="annotation-meta">
