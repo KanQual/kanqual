@@ -12,9 +12,10 @@ export type PostgresHomeCanvasContextMenuState = {
 };
 
 export type PostgresHomeCanvasDeleteTarget = {
-  kind: "source" | "object" | "relationship" | "code";
+  kind: "source" | "object" | "relationship" | "code" | "annotation";
   id: string;
   label: string;
+  canvasOnly?: boolean;
 };
 
 export function PostgresHomeCanvasContextMenu(props: {
@@ -33,6 +34,8 @@ export function PostgresHomeCanvasContextMenu(props: {
   onEditItem: (menu: PostgresHomeCanvasContextMenuState) => void;
   onRemoveFromGroup: (menu: PostgresHomeCanvasContextMenuState) => void;
   onDeleteItem: (menu: PostgresHomeCanvasContextMenuState) => void;
+  deleteLabel?: string;
+  deleteDisabledTitle?: string;
 }) {
   const {
     menu,
@@ -50,6 +53,8 @@ export function PostgresHomeCanvasContextMenu(props: {
     onEditItem,
     onRemoveFromGroup,
     onDeleteItem,
+    deleteLabel = "Delete",
+    deleteDisabledTitle = "Coders and viewers cannot delete canvas items.",
   } = props;
   const canEditItem = menu.kind === "code" ? canManageAnnotations : canManageSources;
   const canRemoveFromGroup = canManageSources && menu.timelineGroupId?.startsWith("group:");
@@ -151,13 +156,13 @@ export function PostgresHomeCanvasContextMenu(props: {
               type="button"
               className={canDeleteItems ? "context-menu-item context-menu-item--danger" : "context-menu-item context-menu-item--disabled"}
               disabled={!canDeleteItems}
-              title={!canDeleteItems ? "Coders and viewers cannot delete canvas items." : undefined}
+              title={!canDeleteItems ? deleteDisabledTitle : undefined}
               onClick={() => onDeleteItem(menu)}
             >
-              Delete
+              {deleteLabel}
             </button>
           ) : (
-            <div className="context-menu-item context-menu-item--disabled">Delete</div>
+            <div className="context-menu-item context-menu-item--disabled">{deleteLabel}</div>
           )}
         </>
       )}

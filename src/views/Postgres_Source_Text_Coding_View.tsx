@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftIcon, HelpIcon } from "../components/AppIcons";
+import { ArrowLeftIcon, HelpIcon, ZoomIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SettingsModal } from "../components/SettingsModal";
 import {
@@ -871,10 +871,7 @@ export function PostgresSourceTextCodingView({
                     aria-label={textSearchOpen ? "Close text search" : "Search source text"}
                     title={textSearchOpen ? "Close search" : "Search"}
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <circle cx="11" cy="11" r="6" />
-                      <path d="M16 16l4 4" />
-                    </svg>
+                    <ZoomIcon />
                   </button>
                 </div>
                 <TextSizeControls

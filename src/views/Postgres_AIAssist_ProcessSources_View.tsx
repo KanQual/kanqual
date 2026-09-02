@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { HelpIcon, ProcessTranscriptIcon } from "../components/AppIcons";
+import { DeleteIcon, HelpIcon, PlusIcon, ProcessTranscriptIcon } from "../components/AppIcons";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
 import { SettingsModal } from "../components/SettingsModal";
 import {
@@ -115,25 +115,6 @@ function toProcessedSourceReviewRecord(review: PostgresProcessedDocumentReview):
     properNameCandidates: parseJson<TranscriptNameCandidate[]>(review.properNameCandidatesJson, []),
     enabledReviewLenses: normalizeReviewLenses(parseJson<Record<string, boolean> | null>(review.enabledReviewLensesJson, null)),
   };
-}
-
-function TrashIcon({ className }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" focusable="false">
-      <path
-        fill="currentColor"
-        d="M9 3h6l1 2h5v2H3V5h5l1-2Zm-3 6h12l-1 12H7L6 9Zm3 2v8h2v-8H9Zm4 0v8h2v-8h-2Z"
-      />
-    </svg>
-  );
-}
-
-function PlusIcon({ className }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" focusable="false">
-      <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z" />
-    </svg>
-  );
 }
 
 const SPEAKER_SEGMENT_COLOR_COUNT = 12;
@@ -259,7 +240,7 @@ function ReviewResultsPanel({
                           title="Delete segment"
                           aria-label="Delete segment"
                         >
-                          <TrashIcon className="ai-process-doc-segment-delete-icon" />
+                          <DeleteIcon className="ai-process-doc-segment-delete-icon" />
                         </button>
                         <div className="ai-process-doc-segment-two-col">
                           <div className="ai-process-doc-segment-controls">

@@ -2553,7 +2553,7 @@ export const en = {
       docxDescription: "Uses a simpler layout and is the best for further editing.",
     },
     errors: {
-      selectAtLeastOne: "Select at least one object, source, code, and user before saving the report.",
+      selectAtLeastOne: "Show at least one annotation before saving the report.",
       xlsxExportFailed: "XLSX export failed.",
       htmlExportFailed: "HTML export failed.",
       pdfExportFailed: "PDF export failed.",

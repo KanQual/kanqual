@@ -11,7 +11,7 @@ This inventory is generated from:
 
 Generation details:
 
-- Generated at: `2026-08-03T20:17:08.161Z`
+- Generated at: `2026-09-01T15:36:11.492Z`
 - JavaScript scope: `runtime dependencies only`
 - Rust scope: `runtime dependency graph only`
 
@@ -40,18 +40,18 @@ The corresponding license text files included with KanQual releases are kept in 
 | `@formatjs/fast-memoize` | `3.1.6` | `MIT` |
 | `@formatjs/icu-messageformat-parser` | `3.5.11` | `MIT` |
 | `@formatjs/icu-skeleton-parser` | `2.1.10` | `MIT` |
-| `@napi-rs/canvas` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-android-arm64` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-darwin-arm64` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-darwin-x64` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-linux-arm-gnueabihf` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-linux-arm64-gnu` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-linux-arm64-musl` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-linux-riscv64-gnu` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-linux-x64-gnu` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-linux-x64-musl` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-win32-arm64-msvc` | `0.1.98` | `MIT` |
-| `@napi-rs/canvas-win32-x64-msvc` | `0.1.98` | `MIT` |
+| `@napi-rs/canvas` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-android-arm64` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-darwin-arm64` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-darwin-x64` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-linux-arm-gnueabihf` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-linux-arm64-gnu` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-linux-arm64-musl` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-linux-riscv64-gnu` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-linux-x64-gnu` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-linux-x64-musl` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-win32-arm64-msvc` | `1.0.8` | `MIT` |
+| `@napi-rs/canvas-win32-x64-msvc` | `1.0.8` | `MIT` |
 | `@tauri-apps/api` | `2.10.1` | `Apache-2.0 OR MIT` |
 | `@tauri-apps/plugin-dialog` | `2.7.0` | `MIT OR Apache-2.0` |
 | `@tauri-apps/plugin-fs` | `2.5.0` | `MIT OR Apache-2.0` |
@@ -107,7 +107,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `base64-arraybuffer` | `1.0.2` | `MIT` |
 | `base64-js` | `1.5.1` | `MIT` |
 | `bluebird` | `3.7.2` | `MIT` |
-| `brace-expansion` | `5.0.6` | `MIT` |
+| `brace-expansion` | `5.0.9` | `MIT` |
 | `buffer` | `6.0.3` | `MIT` |
 | `buffer-crc32` | `1.0.0` | `MIT` |
 | `canvg` | `3.0.11` | `MIT` |
@@ -122,7 +122,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `cytoscape` | `3.34.0` | `MIT` |
 | `cytoscape-grid-guide` | `2.3.3` | `MIT` |
 | `docx` | `9.6.1` | `MIT` |
-| `dompurify` | `3.4.0` | `(MPL-2.0 OR Apache-2.0)` |
+| `dompurify` | `3.4.14` | `(MPL-2.0 OR Apache-2.0)` |
 | `duplexer2` | `0.1.4` | `BSD-3-Clause` |
 | `echarts` | `6.1.0` | `Apache-2.0` |
 | `elkjs` | `0.11.1` | `EPL-2.0` |
@@ -151,18 +151,18 @@ The corresponding license text files included with KanQual releases are kept in 
 | `jszip` | `3.10.1` | `(MIT OR GPL-3.0-or-later)` |
 | `lie` | `3.3.0` | `MIT` |
 | `linkifyjs` | `4.3.2` | `MIT` |
+| `lucide-react` | `1.39.0` | `ISC` |
 | `media-chrome` | `4.19.2` | `MIT` |
 | `minimalistic-assert` | `1.0.1` | `ISC` |
 | `minimatch` | `10.2.5` | `BlueOak-1.0.0` |
 | `mp4box` | `2.4.1` | `BSD-3-Clause` |
-| `nanoid` | `5.1.9` | `MIT` |
+| `nanoid` | `5.1.16` | `MIT` |
 | `node-int64` | `0.4.0` | `MIT` |
-| `node-readable-to-web-readable-stream` | `0.4.2` | `MIT` |
 | `normalize-path` | `3.0.0` | `MIT` |
 | `orderedmap` | `2.1.1` | `MIT` |
 | `pako` | `1.0.11` | `(MIT AND Zlib)` |
 | `pako` | `2.1.0` | `(MIT AND Zlib)` |
-| `pdfjs-dist` | `5.6.205` | `Apache-2.0` |
+| `pdfjs-dist` | `6.3.289` | `Apache-2.0` |
 | `performance-now` | `2.1.0` | `MIT` |
 | `pocketbase` | `0.26.8` | `MIT` |
 | `process` | `0.11.10` | `MIT` |
@@ -213,6 +213,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `use-sync-external-store` | `1.6.0` | `MIT` |
 | `util-deprecate` | `1.0.2` | `MIT` |
 | `utrie` | `1.0.2` | `MIT` |
+| `vis-timeline` | `8.5.4` | `(Apache-2.0 OR MIT)` |
 | `w3c-keyname` | `2.2.8` | `MIT` |
 | `wavesurfer.js` | `7.12.10` | `BSD-3-Clause` |
 | `write-excel-file` | `4.0.7` | `MIT` |

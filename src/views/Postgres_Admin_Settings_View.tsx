@@ -7,7 +7,7 @@ import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
-import { CloseIcon, DownloadIcon, HelpIcon, LogoutIcon, PlusIcon } from "../components/AppIcons";
+import { CheckIcon, CloseIcon, DownloadIcon, EyeIcon, EyeOffIcon, HelpIcon, LogoutIcon, PlusIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { LoadingCard } from "../components/LoadingCard";
 import { useI18n } from "../i18n/provider";
@@ -343,33 +343,6 @@ function PostgresNetworkAddressCard({
         {testDisabledReason && testDisabled ? <span className="network-address-card-note">{testDisabledReason}</span> : null}
       </div>
     </div>
-  );
-}
-
-function PasswordVisibilityIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
-      <path
-        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} focusable="false">
-      <path
-        fill="currentColor"
-        d="M9.2 16.2 4.8 11.8l-1.4 1.4 5.8 5.8L21 7.2l-1.4-1.4z"
-      />
-    </svg>
   );
 }
 
@@ -3981,7 +3954,7 @@ export function PostgresAdminSettingsView({
                     onClick={() => setUpgradeBackupPasswordVisible((current) => !current)}
                     disabled={upgradeBackupSubmitting}
                   >
-                    <PasswordVisibilityIcon />
+                    {upgradeBackupPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
               </label>
@@ -4886,7 +4859,7 @@ export function PostgresAdminSettingsView({
                               onClick={() => setAddUserPasswordVisible((current) => !current)}
                               disabled={creatingUser || authSession.authKind !== "postgres_admin"}
                             >
-                              <PasswordVisibilityIcon />
+                              {addUserPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                             </button>
                           </div>
                           <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -4910,7 +4883,7 @@ export function PostgresAdminSettingsView({
                               onClick={() => setAddUserPasswordConfirmVisible((current) => !current)}
                               disabled={creatingUser || authSession.authKind !== "postgres_admin"}
                             >
-                              <PasswordVisibilityIcon />
+                              {addUserPasswordConfirmVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                             </button>
                           </div>
                         </label>
@@ -5748,7 +5721,7 @@ export function PostgresAdminSettingsView({
                     onClick={() => setResetPasswordVisible((current) => !current)}
                     disabled={resettingPassword}
                   >
-                    <PasswordVisibilityIcon />
+                    {resetPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
                 <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -5772,7 +5745,7 @@ export function PostgresAdminSettingsView({
                     onClick={() => setResetPasswordConfirmVisible((current) => !current)}
                     disabled={resettingPassword}
                   >
-                    <PasswordVisibilityIcon />
+                    {resetPasswordConfirmVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
               </label>

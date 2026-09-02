@@ -120,6 +120,25 @@ export type RestorePostgresUpgradeBackupResult = {
   userCount: number;
 };
 
+export type PostgresProjectExportTable = {
+  name: string;
+  rowsJson: string;
+};
+
+export type PostgresProjectExportAsset = {
+  collection: string;
+  recordId: string;
+  field: string;
+  fileName: string;
+  mimeType: string;
+  dataBase64: string;
+};
+
+export type PostgresProjectExportBundle = {
+  tables: PostgresProjectExportTable[];
+  assets: PostgresProjectExportAsset[];
+};
+
 export type BundledPostgresInitPreflight = {
   status: BundledPostgresStatus;
   dataRootWritable: boolean;
@@ -472,6 +491,8 @@ export type PostgresCanvasRect = {
   width: number;
   height: number;
   color: string;
+  fillColor?: string;
+  fillOpacity?: number;
   fill: "filled" | "outline";
   lineStyle: "solid" | "dashed" | "long_dashed" | "short_dashed" | "dotted" | "loose_dotted" | "dash_dot" | "dash_dot_dot";
   strokeWidth: number;
@@ -498,6 +519,8 @@ export type PostgresCanvasPlacedShape = {
   width: number;
   height: number;
   color: string;
+  fillColor?: string;
+  fillOpacity?: number;
   fill: "filled" | "outline";
   lineStyle: "solid" | "dashed" | "long_dashed" | "short_dashed" | "dotted" | "loose_dotted" | "dash_dot" | "dash_dot_dot";
   strokeWidth: number;
@@ -1123,6 +1146,12 @@ export async function restorePostgresUpgradeBackup(data: {
 }): Promise<RestorePostgresUpgradeBackupResult> {
   return invoke<RestorePostgresUpgradeBackupResult>("restore_postgres_experiment_upgrade_backup_command", {
     request: data,
+  });
+}
+
+export async function exportPostgresProjectLosslessBundle(projectId: string): Promise<PostgresProjectExportBundle> {
+  return invoke<PostgresProjectExportBundle>("export_postgres_experiment_project_lossless_bundle_command", {
+    projectId,
   });
 }
 

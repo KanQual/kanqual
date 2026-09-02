@@ -1,10 +1,12 @@
 import {
   createPostgresCode,
+  exportPostgresProjectLosslessBundle,
   listPostgresAiAnalyses,
   listPostgresProjectLog,
   listPostgresProjectUsers,
   listPostgresReports,
   type PostgresCode,
+  type PostgresProjectExportTable,
   type PostgresProject,
 } from "./postgres";
 import { loadPostgresProjectWorkspaceSnapshot } from "./postgresProjectWorkspace";
@@ -36,13 +38,26 @@ function safeCodeColor(color: string | undefined): string {
   return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed : "#6b7280";
 }
 
+function parseSupplementTable(table: PostgresProjectExportTable): { name: string; rows: Record<string, unknown>[] } {
+  try {
+    const rows = JSON.parse(table.rowsJson) as unknown;
+    return {
+      name: table.name,
+      rows: Array.isArray(rows) ? rows.filter((row): row is Record<string, unknown> => row != null && typeof row === "object" && !Array.isArray(row)) : [],
+    };
+  } catch {
+    return { name: table.name, rows: [] };
+  }
+}
+
 export async function fetchPostgresProjectExportData(project: PostgresProject): Promise<ProjectExportData> {
-  const [snapshot, users, projectLog, reports, aiAnalyses] = await Promise.all([
+  const [snapshot, users, projectLog, reports, aiAnalyses, losslessBundle] = await Promise.all([
     loadPostgresProjectWorkspaceSnapshot(project.id),
     listPostgresProjectUsers(project.id),
     listPostgresProjectLog(project.id),
     listPostgresReports(project.id),
     listPostgresAiAnalyses(project.id),
+    exportPostgresProjectLosslessBundle(project.id),
   ]);
 
   const projectRow = {
@@ -174,13 +189,7 @@ export async function fetchPostgresProjectExportData(project: PostgresProject): 
     })),
   );
 
-  return {
-    format: "kanqual-project-export",
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    project: projectRow,
-    assets: [],
-    tables: [
+  const tables: ProjectExportData["tables"] = [
       { name: "projects", rows: [projectRow] },
       { name: "project_members", rows: users.map((user) => ({
         id: user.id,
@@ -233,7 +242,22 @@ export async function fetchPostgresProjectExportData(project: PostgresProject): 
       { name: "reports", rows: reports.map((report) => rowFromRecord(report as unknown as Record<string, unknown>)) },
       { name: "ai_analyses", rows: aiAnalyses.map((analysis) => rowFromRecord(analysis as unknown as Record<string, unknown>)) },
       { name: "project_log", rows: projectLog.map((entry) => rowFromRecord(entry as unknown as Record<string, unknown>)) },
-    ],
+  ];
+  const existingTableNames = new Set(tables.map((table) => table.name));
+  for (const table of losslessBundle.tables.map(parseSupplementTable)) {
+    if (!existingTableNames.has(table.name)) {
+      tables.push(table);
+      existingTableNames.add(table.name);
+    }
+  }
+
+  return {
+    format: "kanqual-project-export",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    project: projectRow,
+    assets: losslessBundle.assets,
+    tables,
   };
 }
 

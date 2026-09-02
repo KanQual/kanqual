@@ -286,6 +286,8 @@ export function PostgresExploreCanvasView({
   getNodeDefaultDimensions,
   getNodeRenderedDimensions,
   controlStart = null,
+  controlLead = null,
+  controlSecondary = null,
   onCanvasContextMenu,
   onCanvasSelectionDelete,
   getRelationshipEndpointKey,
@@ -293,6 +295,7 @@ export function PostgresExploreCanvasView({
   getInspectorDetails,
   embedded = false,
   fitOnVisibleKey = 0,
+  autoLayoutOnVisibleKey = 0,
 }: {
   objectTypes: PostgresObjectType[];
   objects: PostgresObject[];
@@ -346,6 +349,8 @@ export function PostgresExploreCanvasView({
     nodeState: PostgresCanvasNodeState,
   ) => { width: number; height: number };
   controlStart?: ReactNode;
+  controlLead?: ReactNode;
+  controlSecondary?: ReactNode;
   onCanvasContextMenu?: (context: {
     kind: "background" | "node" | "edge";
     id: string | null;
@@ -370,13 +375,16 @@ export function PostgresExploreCanvasView({
   ) => PostgresExploreInspectorDetails;
   embedded?: boolean;
   fitOnVisibleKey?: number;
+  autoLayoutOnVisibleKey?: number;
 }) {
   const cyContainerRef = useRef<HTMLDivElement | null>(null);
   const zoomControlRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<CytoscapeCore | null>(null);
   const relationshipDraftRef = useRef<PostgresExploreRelationshipDraft | null>(null);
   const relationshipDraftLineRef = useRef<SVGLineElement | null>(null);
+  const suppressNextBackgroundTapRef = useRef(false);
   const initialGraphFitDoneRef = useRef(false);
+  const lastAutoLayoutVisibleKeyRef = useRef(0);
   const pendingViewportRestoreRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
   const objectTypeById = useMemo(
     () => new Map(objectTypes.map((objectType) => [objectType.id, objectType])),
@@ -427,7 +435,11 @@ export function PostgresExploreCanvasView({
     getEndpointKeyForNodeIdRef.current = getEndpointKeyForNodeId;
     onCanvasContextMenuRef.current = onCanvasContextMenu;
     onCanvasRelationshipDraftCompleteRef.current = onCanvasRelationshipDraftComplete;
-  }, [getEndpointKeyForNodeId, onCanvasContextMenu, onCanvasRelationshipDraftComplete]);
+  }, [
+    getEndpointKeyForNodeId,
+    onCanvasContextMenu,
+    onCanvasRelationshipDraftComplete,
+  ]);
 
   const updateConnectorHandle = useCallback(() => {
     const cy = cyRef.current;
@@ -538,6 +550,17 @@ export function PostgresExploreCanvasView({
       y: event.clientY - rect.top,
     };
   }, []);
+  const worldPointFromPointerEvent = useCallback((event: MouseEvent | PointerEvent): PostgresExploreRenderedPoint | null => {
+    const renderedPoint = renderedPointFromPointerEvent(event);
+    if (!renderedPoint) return null;
+    const cy = cyRef.current;
+    const zoom = cy?.zoom() ?? 1;
+    const pan = cy?.pan() ?? { x: 0, y: 0 };
+    return {
+      x: (renderedPoint.x - pan.x) / Math.max(0.01, zoom),
+      y: (renderedPoint.y - pan.y) / Math.max(0.01, zoom),
+    };
+  }, [renderedPointFromPointerEvent]);
   const cancelRelationshipDraft = useCallback(() => {
     relationshipDraftRef.current = null;
     setRelationshipDraft(null);
@@ -879,6 +902,10 @@ export function PostgresExploreCanvasView({
     };
     const handleBackgroundTap = (event: { target: unknown }) => {
       if (event.target !== cy) return;
+      if (suppressNextBackgroundTapRef.current) {
+        suppressNextBackgroundTapRef.current = false;
+        return;
+      }
       if (relationshipDraftRef.current) {
         cancelRelationshipDraft();
         return;
@@ -1033,7 +1060,7 @@ export function PostgresExploreCanvasView({
       cy.destroy();
       cyRef.current = null;
     };
-  }, [cancelRelationshipDraft, setCanvasNodes]);
+  }, [cancelRelationshipDraft, setCanvasNodes, worldPointFromPointerEvent]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -1092,6 +1119,22 @@ export function PostgresExploreCanvasView({
       });
     });
   }, [embedded, fitOnVisibleKey]);
+
+  useEffect(() => {
+    if (!embedded || autoLayoutOnVisibleKey <= 0 || graphElements.length === 0) return;
+    if (lastAutoLayoutVisibleKeyRef.current === autoLayoutOnVisibleKey) return;
+    lastAutoLayoutVisibleKeyRef.current = autoLayoutOnVisibleKey;
+    void handleAutoLayout().then(() => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      requestAnimationFrame(() => {
+        fitPostgresExploreCanvas(cy, 36);
+        recordCurrentCanvasZoomAsDefault(cy);
+        updateConnectorHandleRef.current();
+        updateResizeHandleRef.current();
+      });
+    });
+  }, [autoLayoutOnVisibleKey, embedded, graphElements.length]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -1262,12 +1305,14 @@ export function PostgresExploreCanvasView({
 
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("mouseup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
     return () => {
       resizeDragRef.current = null;
       cyRef.current?.nodes().grabify();
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("mouseup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
     };
   }, [setCanvasNodes]);
@@ -1303,7 +1348,13 @@ export function PostgresExploreCanvasView({
 
     window.addEventListener("keydown", handleCanvasKeyboard);
     return () => window.removeEventListener("keydown", handleCanvasKeyboard);
-  }, [cancelRelationshipDraft, onCanvasSelectionDelete, relationshipDraftActive, selectedEdgeId, selectedNodeId]);
+  }, [
+    cancelRelationshipDraft,
+    onCanvasSelectionDelete,
+    relationshipDraftActive,
+    selectedEdgeId,
+    selectedNodeId,
+  ]);
 
   return (
     <div className={`view users-view postgres-explore-canvas-view${embedded ? " postgres-explore-canvas-view--embedded" : ""}`}>
@@ -1417,77 +1468,90 @@ export function PostgresExploreCanvasView({
               {inspectorCard}
             </div>
           ) : null}
-          <div className="postgres-explore-canvas-controls" aria-label="Canvas controls">
-            {controlStart}
-            <div className="postgres-explore-zoom-control" ref={zoomControlRef}>
-              <button
-                type="button"
-                className={`btn ${zoomIsCustomized ? "btn--primary" : "btn--ghost"}`}
-                onClick={() => setZoomMenuOpen((current) => !current)}
-                aria-expanded={zoomMenuOpen}
-                aria-label={zoomMenuOpen ? "Hide zoom control" : "Show zoom control"}
-                title="Zoom"
-              >
-                <ZoomIcon className="postgres-explore-canvas-control-icon" />
-              </button>
-              {zoomMenuOpen ? (
-                <div className="postgres-explore-zoom-menu">
-                  <label className="postgres-explore-zoom-slider-label" htmlFor="postgres-explore-zoom-slider">
-                    <span>Zoom</span>
-                    <strong>{zoomPercent}%</strong>
-                  </label>
-                  <input
-                    id="postgres-explore-zoom-slider"
-                    className="postgres-explore-zoom-slider"
-                    type="range"
-                    min={10}
-                    max={300}
-                    step={5}
-                    value={zoomPercent}
-                    onChange={(event) => setCanvasZoomFromPercent(Number(event.target.value))}
-                  />
+          <div
+            className={`postgres-explore-canvas-controls${controlSecondary ? " postgres-explore-canvas-controls--stacked" : ""}`}
+            aria-label="Canvas controls"
+          >
+            {controlLead}
+            <div className="postgres-explore-canvas-controls-stack">
+              <div className="postgres-explore-canvas-controls-row">
+                {controlStart}
+                <div className="postgres-explore-zoom-control" ref={zoomControlRef}>
                   <button
                     type="button"
-                    className="btn btn--ghost postgres-explore-zoom-fit-btn"
-                    onClick={() => {
-                      const cy = cyRef.current;
-                      if (!cy) return;
-                      fitPostgresExploreCanvas(cy, 36);
-                      recordCurrentCanvasZoomAsDefault(cy);
-                      updateConnectorHandleRef.current();
-                      updateResizeHandleRef.current();
-                    }}
-                    aria-label="Fit canvas"
-                    title="Fit canvas"
+                    className={`btn ${zoomIsCustomized ? "btn--primary" : "btn--ghost"}`}
+                    onClick={() => setZoomMenuOpen((current) => !current)}
+                    aria-expanded={zoomMenuOpen}
+                    aria-label={zoomMenuOpen ? "Hide zoom control" : "Show zoom control"}
+                    title="Zoom"
                   >
-                    <FitCornersIcon className="postgres-explore-canvas-control-icon" />
+                    <ZoomIcon className="postgres-explore-canvas-control-icon" />
                   </button>
+                  {zoomMenuOpen ? (
+                    <div className="postgres-explore-zoom-menu">
+                      <label className="postgres-explore-zoom-slider-label" htmlFor="postgres-explore-zoom-slider">
+                        <span>Zoom</span>
+                        <strong>{zoomPercent}%</strong>
+                      </label>
+                      <input
+                        id="postgres-explore-zoom-slider"
+                        className="postgres-explore-zoom-slider"
+                        type="range"
+                        min={10}
+                        max={300}
+                        step={5}
+                        value={zoomPercent}
+                        onChange={(event) => setCanvasZoomFromPercent(Number(event.target.value))}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn--ghost postgres-explore-zoom-fit-btn"
+                        onClick={() => {
+                          const cy = cyRef.current;
+                          if (!cy) return;
+                          fitPostgresExploreCanvas(cy, 36);
+                          recordCurrentCanvasZoomAsDefault(cy);
+                          updateConnectorHandleRef.current();
+                          updateResizeHandleRef.current();
+                        }}
+                        aria-label="Fit canvas"
+                        title="Fit canvas"
+                      >
+                        <FitCornersIcon className="postgres-explore-canvas-control-icon" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className={`btn ${autoLayoutIsCustomized ? "btn--primary" : "btn--ghost"}`}
+                  onClick={() => void handleAutoLayout()}
+                  disabled={layoutRunning || Object.keys(canvasNodes).length === 0}
+                  aria-label={layoutRunning ? "Auto layout running" : "Auto layout"}
+                  title={layoutRunning ? "Auto layout running" : "Auto layout"}
+                >
+                  <LayoutNetworkIcon className="postgres-explore-canvas-control-icon" />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    setGraphExportError("");
+                    setGraphExportModalOpen(true);
+                  }}
+                  disabled={Object.keys(canvasNodes).length === 0}
+                  aria-label="Export graph"
+                  title="Export graph"
+                >
+                  <DownloadIcon className="postgres-explore-canvas-control-icon" />
+                </button>
+              </div>
+              {controlSecondary ? (
+                <div className="postgres-explore-canvas-controls-row postgres-explore-canvas-controls-row--secondary">
+                  {controlSecondary}
                 </div>
               ) : null}
             </div>
-            <button
-              type="button"
-              className={`btn ${autoLayoutIsCustomized ? "btn--primary" : "btn--ghost"}`}
-              onClick={() => void handleAutoLayout()}
-              disabled={layoutRunning || Object.keys(canvasNodes).length === 0}
-              aria-label={layoutRunning ? "Auto layout running" : "Auto layout"}
-              title={layoutRunning ? "Auto layout running" : "Auto layout"}
-            >
-              <LayoutNetworkIcon className="postgres-explore-canvas-control-icon" />
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => {
-                setGraphExportError("");
-                setGraphExportModalOpen(true);
-              }}
-              disabled={Object.keys(canvasNodes).length === 0}
-              aria-label="Export graph"
-              title="Export graph"
-            >
-              <DownloadIcon className="postgres-explore-canvas-control-icon" />
-            </button>
           </div>
         </section>
 

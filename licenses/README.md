@@ -18,6 +18,8 @@ It is intended to ship alongside the application and the
 - `MIT.txt`
   Generic MIT license text used by many JavaScript, Rust, and bundled
   components.
+- `ISC.txt`
+  Generic ISC license text used by JavaScript and Rust dependencies.
 - `ECHARTS-D3-BSD-3-Clause.txt`
   Apache ECharts subcomponent notice and d3.js BSD 3-Clause license text.
 - `POSTGRESQL.txt`

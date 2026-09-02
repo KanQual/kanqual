@@ -129,6 +129,7 @@ export function wrapCanvasTextLines(text: string, width: number, fontSize: numbe
 export function renderCanvasSketchShapeElement(
   shape: Extract<PostgresCanvasShape, { kind: "rectangle" | "shape" }>,
   selected: boolean,
+  interactive = true,
 ) {
   const stroke = selected ? "#d62828" : shape.color;
   const strokeWidth = selected ? shape.strokeWidth + 1 : shape.strokeWidth;
@@ -137,8 +138,8 @@ export function renderCanvasSketchShapeElement(
   const fill = selected
     ? "rgba(214, 40, 40, 0.08)"
     : fillMode === "outline"
-      ? "#ffffff"
-      : hexToRgba(shape.color, 0.08);
+      ? "transparent"
+      : hexToRgba(shape.fillColor || shape.color, (shape.fillOpacity ?? 8) / 100);
   const shapeType = getCanvasSketchShapeType(shape);
 
   if (shapeType === "rectangle") {
@@ -152,8 +153,8 @@ export function renderCanvasSketchShapeElement(
         stroke={stroke}
         strokeWidth={strokeWidth}
         strokeDasharray={strokeDasharray}
-        pointerEvents="all"
-        style={{ cursor: "pointer" }}
+        pointerEvents={interactive ? "all" : "none"}
+        style={{ cursor: interactive ? "pointer" : "default" }}
       />
     );
   }
@@ -169,8 +170,8 @@ export function renderCanvasSketchShapeElement(
         stroke={stroke}
         strokeWidth={strokeWidth}
         strokeDasharray={strokeDasharray}
-        pointerEvents="all"
-        style={{ cursor: "pointer" }}
+        pointerEvents={interactive ? "all" : "none"}
+        style={{ cursor: interactive ? "pointer" : "default" }}
       />
     );
   }
@@ -192,8 +193,8 @@ export function renderCanvasSketchShapeElement(
       strokeWidth={strokeWidth}
       strokeDasharray={strokeDasharray}
       strokeLinejoin="round"
-      pointerEvents="all"
-      style={{ cursor: "pointer" }}
+      pointerEvents={interactive ? "all" : "none"}
+      style={{ cursor: interactive ? "pointer" : "default" }}
     />
   );
 }

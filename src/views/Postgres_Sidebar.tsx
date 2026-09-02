@@ -34,10 +34,6 @@ type PostgresSidebarProps = {
   onShowAiAnalyze?: () => void;
   onShowAiAssistSourceAttributes?: () => void;
   onShowAiAssistProcessDocuments?: () => void;
-  onShowFreeDraw?: () => void;
-  onShowExplore?: () => void;
-  onShowConstruct?: () => void;
-  onShowCanvasView?: () => void;
   onShowAppSettings?: () => void;
   onBackToGate: () => void;
   onSignOut: () => Promise<void>;
@@ -69,10 +65,6 @@ export function PostgresSidebar({
   onShowAiAnalyze,
   onShowAiAssistSourceAttributes,
   onShowAiAssistProcessDocuments,
-  onShowFreeDraw,
-  onShowExplore,
-  onShowConstruct,
-  onShowCanvasView,
   onShowAppSettings,
   onSignOut,
 }: PostgresSidebarProps) {
@@ -96,12 +88,6 @@ export function PostgresSidebar({
     { id: "relationships", label: "Relationships", disabled: !activeProject, onClick: onShowProjectRelationships },
     { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
     { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
-  ];
-  const canvasItems = [
-    { id: "free-draw", label: "Free Draw", disabled: !activeProject, onClick: onShowFreeDraw },
-    { id: "explore", label: "Explore", disabled: !activeProject, onClick: onShowExplore },
-    { id: "construct", label: "Construct", disabled: !activeProject, onClick: onShowConstruct },
-    { id: "view", label: "View", disabled: !activeProject, onClick: onShowCanvasView },
   ];
   const analysisItems = [
     { id: "code-text", label: "Code Sources", disabled: !activeProject, onClick: onShowProjectCodeText },
@@ -292,33 +278,6 @@ export function PostgresSidebar({
           >
             <span>Settings</span>
           </button>
-        </div>
-        <div className="sidebar-section">
-          <button
-            type="button"
-            className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("canvas")}
-            onClick={() => toggleSidebarSection("canvas")}
-          >
-            <span>Canvas</span>
-            <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("canvas") ? "\u25b8" : "\u25be"}
-            </span>
-          </button>
-          <div className={`sidebar-section-items ${collapsedSidebarSections.has("canvas") ? "sidebar-section-items--collapsed" : ""}`}>
-            {canvasItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
-                onClick={() => item.onClick?.()}
-                disabled={item.disabled}
-                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
         </div>
       </nav>
 

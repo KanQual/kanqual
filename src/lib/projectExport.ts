@@ -981,6 +981,20 @@ function writeUint32(out: number[], value: number): void {
   out.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
 }
 
+function pushBytes(out: number[], bytes: Uint8Array): void {
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    out.push(...bytes.subarray(index, Math.min(index + chunkSize, bytes.length)));
+  }
+}
+
+function pushNumbers(out: number[], values: number[]): void {
+  const chunkSize = 0x8000;
+  for (let index = 0; index < values.length; index += chunkSize) {
+    out.push(...values.slice(index, index + chunkSize));
+  }
+}
+
 function dosDateTime(date = new Date()): { time: number; date: number } {
   const year = Math.max(1980, date.getFullYear());
   return {
@@ -1012,7 +1026,8 @@ function createZip(files: { path: string; content: string | Uint8Array }[]): Uin
     writeUint32(out, contentBytes.length);
     writeUint16(out, pathBytes.length);
     writeUint16(out, 0);
-    out.push(...pathBytes, ...contentBytes);
+    pushBytes(out, pathBytes);
+    pushBytes(out, contentBytes);
 
     writeUint32(central, 0x02014b50);
     writeUint16(central, 20);
@@ -1031,11 +1046,11 @@ function createZip(files: { path: string; content: string | Uint8Array }[]): Uin
     writeUint16(central, 0);
     writeUint32(central, 0);
     writeUint32(central, offset);
-    central.push(...pathBytes);
+    pushBytes(central, pathBytes);
   }
 
   const centralOffset = out.length;
-  out.push(...central);
+  pushNumbers(out, central);
   writeUint32(out, 0x06054b50);
   writeUint16(out, 0);
   writeUint16(out, 0);
@@ -1545,6 +1560,47 @@ function safeSourceFileName(name: string, id: unknown): string {
   return `${safeName}_${String(id).slice(0, 8)}.txt`;
 }
 
+function safeZipPathPart(value: unknown, fallback: string): string {
+  const normalized = String(value || fallback)
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => part.replace(/[<>:"|?*\x00-\x1f]+/g, "_").replace(/\s+/g, "_").trim())
+    .filter(Boolean)
+    .join("/");
+  return normalized || fallback;
+}
+
+function uniqueZipPath(path: string, usedPaths: Set<string>): string {
+  if (!usedPaths.has(path)) {
+    usedPaths.add(path);
+    return path;
+  }
+  const dotIndex = path.lastIndexOf(".");
+  const base = dotIndex > 0 ? path.slice(0, dotIndex) : path;
+  const extension = dotIndex > 0 ? path.slice(dotIndex) : "";
+  let index = 2;
+  while (usedPaths.has(`${base}_${index}${extension}`)) index += 1;
+  const uniquePath = `${base}_${index}${extension}`;
+  usedPaths.add(uniquePath);
+  return uniquePath;
+}
+
+function sourceAssetZipPath(asset: ProjectExportAsset): string {
+  return `Sources/Files/${safeZipPathPart(asset.fileName, "source-file")}`;
+}
+
+function sourceFileNameFromPath(path: unknown): string {
+  const normalized = String(path || "").replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || normalized || "source file";
+}
+
+function appendTextBlock(...parts: unknown[]): string {
+  return parts
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function variableType(dataType: unknown): string {
   if (dataType === "number") return "Float";
   if (dataType === "datetime") return "DateTime";
@@ -1557,11 +1613,22 @@ function variableValueXml(variableGuid: string, dataType: unknown, value: unknow
   return `<VariableValue><VariableRef targetGUID="${variableGuid}"/>${textElement(tag, value)}</VariableValue>`;
 }
 
-function codeXml(code: Record<string, unknown>, childrenByParent: Map<string, Record<string, unknown>[]>): string {
+function codeXml(
+  code: Record<string, unknown>,
+  childrenByParent: Map<string, Record<string, unknown>[]>,
+  codeObjectLinksByCode: Map<string, string[]> = new Map(),
+  caseById: Map<string, Record<string, unknown>> = new Map(),
+): string {
   const children = childrenByParent.get(String(code.id)) ?? [];
+  const linkedObjects = (codeObjectLinksByCode.get(String(code.id)) ?? [])
+    .map((objectId) => caseById.get(objectId)?.name || caseById.get(objectId)?.title || objectId)
+    .filter(Boolean);
+  const description = linkedObjects.length
+    ? appendTextBlock(code.description, `Linked objects: ${linkedObjects.join(", ")}`)
+    : code.description;
   const body = [
-    textElement("Description", code.description),
-    ...children.map((child) => codeXml(child, childrenByParent)),
+    textElement("Description", description),
+    ...children.map((child) => codeXml(child, childrenByParent, codeObjectLinksByCode, caseById)),
   ].join("");
   return element("Code", {
     guid: guidFor("code", code.id),
@@ -1598,13 +1665,24 @@ function makeRefiProjectXml(data: ProjectExportData): string {
   const documents = tableRows(data, "documents").filter((row) => !row.deleted_at);
   const codes = tableRows(data, "codes").filter((row) => !row.deleted_at);
   const annotations = tableRows(data, "annotations").filter((row) => !row.deleted_at);
+  const annotationCodes = tableRows(data, "annotation_codes");
+  const annotationObjects = tableRows(data, "annotation_objects");
+  const codeObjects = tableRows(data, "code_objects");
   const cases = tableRows(data, "cases").filter((row) => !row.deleted_at);
   const caseDocuments = tableRows(data, "case_documents");
   const caseAttrDefs = tableRows(data, "case_attribute_definitions").filter((row) => !row.deleted_at);
   const caseAttrValues = tableRows(data, "case_attribute_values").filter((row) => !row.deleted_at);
   const docAttrDefs = tableRows(data, "document_attribute_definitions").filter((row) => !row.deleted_at);
   const docAttrValues = tableRows(data, "document_attribute_values").filter((row) => !row.deleted_at);
+  const sourceFiles = tableRows(data, "source_files");
+  const relationships = tableRows(data, "object_relationships").length
+    ? tableRows(data, "object_relationships")
+    : tableRows(data, "relationships");
+  const relationshipAttrValues = tableRows(data, "relationship_attribute_values");
+  const relationshipAttrDefs = tableRows(data, "relationship_attribute_definitions");
   const memos = tableRows(data, "memos").filter((row) => !row.deleted_at);
+  const projectStorageAssets = data.assets.filter((asset) => asset.collection === "project_storage_files");
+  const assetPathByRelativePath = new Map(projectStorageAssets.map((asset) => [asset.fileName, sourceAssetZipPath(asset)]));
 
   const userRows = members
     .map((member) => {
@@ -1628,9 +1706,18 @@ function makeRefiProjectXml(data: ProjectExportData): string {
     if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
     childrenByParent.get(parent)!.push(code);
   }
+  const caseById = new Map(cases.map((row) => [String(row.id), row]));
+  const codeObjectLinksByCode = new Map<string, string[]>();
+  for (const link of codeObjects) {
+    const codeId = typeof link.code_id === "string" ? link.code_id : typeof link.code === "string" ? link.code : "";
+    const objectId = typeof link.object_id === "string" ? link.object_id : typeof link.object === "string" ? link.object : "";
+    if (!codeId || !objectId) continue;
+    if (!codeObjectLinksByCode.has(codeId)) codeObjectLinksByCode.set(codeId, []);
+    codeObjectLinksByCode.get(codeId)!.push(objectId);
+  }
   const topCodes = childrenByParent.get("") ?? [];
   const codeBookXml = topCodes.length
-    ? `<CodeBook><Codes>${topCodes.map((code) => codeXml(code, childrenByParent)).join("")}</Codes></CodeBook>`
+    ? `<CodeBook><Codes>${topCodes.map((code) => codeXml(code, childrenByParent, codeObjectLinksByCode, caseById)).join("")}</Codes></CodeBook>`
     : "";
 
   const allVariableDefs: Array<Record<string, unknown> & { scope: "case" | "document" }> = [
@@ -1677,6 +1764,36 @@ function makeRefiProjectXml(data: ProjectExportData): string {
       }).join(""))
     : "";
 
+  const annotationObjectLinksByAnnotation = new Map<string, string[]>();
+  for (const link of annotationObjects) {
+    const annotationId = typeof link.annotation_id === "string" ? link.annotation_id : typeof link.annotation === "string" ? link.annotation : "";
+    const objectId = typeof link.object_id === "string" ? link.object_id : typeof link.object === "string" ? link.object : "";
+    if (!annotationId || !objectId) continue;
+    if (!annotationObjectLinksByAnnotation.has(annotationId)) annotationObjectLinksByAnnotation.set(annotationId, []);
+    annotationObjectLinksByAnnotation.get(annotationId)!.push(objectId);
+  }
+  const annotationCodeIdsByAnnotation = new Map<string, string[]>();
+  for (const annotation of annotations) {
+    const annotationId = String(annotation.id);
+    const codeIds = stringArray(annotation.code_ids);
+    if (typeof annotation.code === "string" && annotation.code) codeIds.unshift(annotation.code);
+    annotationCodeIdsByAnnotation.set(annotationId, [...new Set(codeIds.filter(Boolean))]);
+  }
+  for (const link of annotationCodes) {
+    const annotationId = typeof link.annotation_id === "string" ? link.annotation_id : typeof link.annotation === "string" ? link.annotation : "";
+    const codeId = typeof link.code_id === "string" ? link.code_id : typeof link.code === "string" ? link.code : "";
+    if (!annotationId || !codeId) continue;
+    const current = annotationCodeIdsByAnnotation.get(annotationId) ?? [];
+    if (!current.includes(codeId)) current.push(codeId);
+    annotationCodeIdsByAnnotation.set(annotationId, current);
+  }
+  const sourceFilesBySource = new Map<string, Record<string, unknown>[]>();
+  for (const file of sourceFiles) {
+    const sourceId = typeof file.source_id === "string" ? file.source_id : typeof file.source === "string" ? file.source : "";
+    if (!sourceId) continue;
+    if (!sourceFilesBySource.has(sourceId)) sourceFilesBySource.set(sourceId, []);
+    sourceFilesBySource.get(sourceId)!.push(file);
+  }
   const annotationsByDocument = new Map<string, Record<string, unknown>[]>();
   for (const annotation of annotations) {
     if (typeof annotation.document !== "string") continue;
@@ -1693,11 +1810,19 @@ function makeRefiProjectXml(data: ProjectExportData): string {
   const sourcesXml = documents.length
     ? element("Sources", {}, documents.map((doc) => {
         const selections = (annotationsByDocument.get(String(doc.id)) ?? []).map((annotation, index) => {
-          const coding = element("Coding", {
-            guid: guidFor("coding", annotation.id),
-            creatingUser: annotation.created_by ? guidFor("user", annotation.created_by) : undefined,
-            creationDateTime: refiDate(annotation.created),
-          }, element("CodeRef", { targetGUID: guidFor("code", annotation.code) }));
+          const codings = (annotationCodeIdsByAnnotation.get(String(annotation.id)) ?? [])
+            .map((codeId) => element("Coding", {
+              guid: guidFor("coding", `${annotation.id}:${codeId}`),
+              creatingUser: annotation.created_by ? guidFor("user", annotation.created_by) : undefined,
+              creationDateTime: refiDate(annotation.created),
+            }, element("CodeRef", { targetGUID: guidFor("code", codeId) })))
+            .join("");
+          const linkedObjects = (annotationObjectLinksByAnnotation.get(String(annotation.id)) ?? [])
+            .map((objectId) => caseById.get(objectId)?.name || caseById.get(objectId)?.title || objectId)
+            .filter(Boolean);
+          const description = linkedObjects.length
+            ? appendTextBlock(annotation.note, `Linked objects: ${linkedObjects.join(", ")}`)
+            : annotation.note;
           return element("PlainTextSelection", {
             guid: guidFor("annotation", annotation.id),
             name: `Selection ${index + 1}`,
@@ -1705,12 +1830,25 @@ function makeRefiProjectXml(data: ProjectExportData): string {
             endPosition: annotation.end_offset,
             creatingUser: annotation.created_by ? guidFor("user", annotation.created_by) : undefined,
             creationDateTime: refiDate(annotation.created),
-          }, textElement("Description", annotation.note) + coding);
+          }, textElement("Description", description) + codings);
         }).join("");
         const variableValues = (docValuesByDoc.get(String(doc.id)) ?? []).map((value) => {
           const def = docDefById.get(String(value.attribute));
           return def ? variableValueXml(guidFor("document_variable", def.id), def.data_type, value.value) : "";
         }).join("");
+        const attachedFiles = (sourceFilesBySource.get(String(doc.id)) ?? [])
+          .map((file) => {
+            const storagePath = String(file.storage_path || "");
+            const packagePath = assetPathByRelativePath.get(storagePath);
+            const fileName = file.original_file_name || sourceFileNameFromPath(storagePath);
+            return packagePath ? `${fileName}: ${packagePath}` : String(fileName);
+          })
+          .filter(Boolean);
+        const sourceStoragePath = typeof doc.storage_path === "string" ? assetPathByRelativePath.get(doc.storage_path) : "";
+        const fileDescription = [
+          sourceStoragePath ? `Primary source file: ${sourceStoragePath}` : "",
+          attachedFiles.length ? `Attached source files:\n${attachedFiles.join("\n")}` : "",
+        ].filter(Boolean).join("\n\n");
         return element("TextSource", {
           guid: guidFor("document", doc.id),
           name: doc.name,
@@ -1718,10 +1856,83 @@ function makeRefiProjectXml(data: ProjectExportData): string {
           creatingUser: doc.created_by ? guidFor("user", doc.created_by) : undefined,
           creationDateTime: refiDate(doc.created),
           modifiedDateTime: refiDate(doc.updated),
-        }, textElement("Description", doc.notes) + selections + variableValues);
+        }, textElement("Description", appendTextBlock(doc.notes, fileDescription)) + selections + variableValues);
       }).join(""))
     : "";
 
+  const relationshipDefById = new Map(relationshipAttrDefs.map((def) => [String(def.id), def]));
+  const relationshipValuesByRelationship = new Map<string, Record<string, unknown>[]>();
+  for (const value of relationshipAttrValues) {
+    const relationshipId = typeof value.relationship_id === "string" ? value.relationship_id : typeof value.relationship === "string" ? value.relationship : "";
+    if (!relationshipId) continue;
+    if (!relationshipValuesByRelationship.has(relationshipId)) relationshipValuesByRelationship.set(relationshipId, []);
+    relationshipValuesByRelationship.get(relationshipId)!.push(value);
+  }
+  const relationshipNotesXml = relationships.map((relationship) => {
+    const relationshipId = String(relationship.id || "");
+    const fromId = String(relationship.from_entity_id || relationship.from_object_id || relationship.object1Id || relationship.fromObjectId || "");
+    const toId = String(relationship.to_entity_id || relationship.to_object_id || relationship.object2Id || relationship.toObjectId || "");
+    const fromName = caseById.get(fromId)?.name || caseById.get(fromId)?.title || fromId || "Unknown";
+    const toName = caseById.get(toId)?.name || caseById.get(toId)?.title || toId || "Unknown";
+    const attrLines = (relationshipValuesByRelationship.get(relationshipId) ?? [])
+      .map((value) => {
+        const def = relationshipDefById.get(String(value.attribute_definition_id || value.attribute));
+        const name = def?.name || value.attribute_definition_id || value.attribute || "Attribute";
+        return `${name}: ${value.value ?? ""}`;
+      })
+      .filter(Boolean);
+    const body = appendTextBlock(
+      `${fromName} -> ${toName}`,
+      `Type: ${relationship.relationship_type || relationship.relationshipType || "Relationship"}`,
+      relationship.description,
+      attrLines.length ? attrLines.join("\n") : "",
+    );
+    return element("Note", {
+      guid: guidFor("relationship_note", relationshipId),
+      name: `Relationship: ${fromName} -> ${toName}`,
+      creationDateTime: refiDate(relationship.created_at || relationship.created),
+      modifiedDateTime: refiDate(relationship.updated_at || relationship.updated),
+    }, textElement("PlainTextContent", body));
+  }).join("");
+  const supplementTableNames = [
+    "project_settings",
+    "source_type_settings",
+    "source_files",
+    "annotation_codes",
+    "annotation_objects",
+    "code_objects",
+    "event_objects",
+    "object_relationships",
+    "relationship_attribute_values",
+    "source_attribute_value_history",
+    "object_attribute_value_history",
+    "relationship_attribute_value_history",
+    "memo_sources",
+    "memo_annotations",
+    "memo_codes",
+    "memo_objects",
+    "saved_drawings",
+    "timeline_groups",
+    "timeline_item_group_assignments",
+    "timeline_group_row_orders",
+  ];
+  const supplementPayload = {
+    format: "kanqual-refi-qda-supplement",
+    version: 1,
+    exportedAt: data.exportedAt,
+    tables: supplementTableNames.map((name) => ({ name, rows: tableRows(data, name) })),
+    assets: projectStorageAssets.map((asset) => ({
+      fileName: asset.fileName,
+      packagePath: sourceAssetZipPath(asset),
+      sizeBase64Chars: asset.dataBase64.length,
+    })),
+  };
+  const supplementXml = element("Note", {
+    guid: guidFor("kanqual_supplement", project.id || project.name || "project"),
+    name: "Kanqual export supplement",
+    creationDateTime: refiDate(data.exportedAt),
+    modifiedDateTime: refiDate(data.exportedAt),
+  }, textElement("PlainTextContent", JSON.stringify(supplementPayload, null, 2)));
   const notesXml = memos.length
     ? element("Notes", {}, memos.map((memo) =>
         element("Note", {
@@ -1731,8 +1942,8 @@ function makeRefiProjectXml(data: ProjectExportData): string {
           creationDateTime: refiDate(memo.created),
           modifiedDateTime: refiDate(memo.updated),
         }, textElement("PlainTextContent", memo.body))
-      ).join(""))
-    : "";
+      ).join("") + relationshipNotesXml + supplementXml)
+    : element("Notes", {}, relationshipNotesXml + supplementXml);
 
   const body = [
     usersXml,
@@ -1756,11 +1967,17 @@ function makeRefiProjectXml(data: ProjectExportData): string {
 
 export function makeRefiQdaProject(data: ProjectExportData): Uint8Array {
   const documents = tableRows(data, "documents").filter((row) => !row.deleted_at);
+  const usedPaths = new Set<string>();
+  const projectStorageAssets = data.assets.filter((asset) => asset.collection === "project_storage_files");
   const files = [
-    { path: "project.qde", content: makeRefiProjectXml(data) },
+    { path: uniqueZipPath("project.qde", usedPaths), content: makeRefiProjectXml(data) },
     ...documents.map((doc) => ({
-      path: `Sources/${safeSourceFileName(String(doc.name || "source"), doc.id)}`,
+      path: uniqueZipPath(`Sources/${safeSourceFileName(String(doc.name || "source"), doc.id)}`, usedPaths),
       content: String(doc.content ?? ""),
+    })),
+    ...projectStorageAssets.map((asset) => ({
+      path: uniqueZipPath(sourceAssetZipPath(asset), usedPaths),
+      content: base64ToBytes(asset.dataBase64),
     })),
   ];
   return createZip(files);

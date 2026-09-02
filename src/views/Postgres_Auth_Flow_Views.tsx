@@ -21,7 +21,7 @@ import {
   getPostgresAccounts,
   savePostgresAccount as savePostgresAccountHistory,
 } from "../lib/authHistory";
-import { ComputerIcon, NetworkIcon } from "../components/AppIcons";
+import { ComputerIcon, EyeIcon, EyeOffIcon, NetworkIcon } from "../components/AppIcons";
 import { LoadingCard } from "../components/LoadingCard";
 
 function describeUnknownError(error: unknown): string {
@@ -131,22 +131,6 @@ function mergeRememberedAccounts(
   return Array.from(byEmail.values())
     .sort((left, right) => new Date(right.lastLogin).getTime() - new Date(left.lastLogin).getTime())
     .slice(0, 20);
-}
-
-function PasswordVisibilityIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
-      <path
-        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
 }
 
 export type PostgresLaunchViewProps = {
@@ -503,7 +487,7 @@ export function PostgresLaunchView({
                     aria-pressed={firstAccountPasswordVisible}
                     onClick={() => setFirstAccountPasswordVisible((current) => !current)}
                   >
-                    <PasswordVisibilityIcon />
+                    {firstAccountPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
                 <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -525,7 +509,7 @@ export function PostgresLaunchView({
                     aria-pressed={confirmFirstAccountPasswordVisible}
                     onClick={() => setConfirmFirstAccountPasswordVisible((current) => !current)}
                   >
-                    <PasswordVisibilityIcon />
+                    {confirmFirstAccountPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
               </label>
@@ -619,7 +603,7 @@ export function PostgresLaunchView({
                         aria-pressed={restoreBackupPasswordVisible}
                         onClick={() => setRestoreBackupPasswordVisible((current) => !current)}
                       >
-                        <PasswordVisibilityIcon />
+                        {restoreBackupPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                       </button>
                     </div>
                   </label>
@@ -640,7 +624,7 @@ export function PostgresLaunchView({
                         aria-pressed={restoreAdminPasswordVisible}
                         onClick={() => setRestoreAdminPasswordVisible((current) => !current)}
                       >
-                        <PasswordVisibilityIcon />
+                        {restoreAdminPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                       </button>
                     </div>
                     <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -662,7 +646,7 @@ export function PostgresLaunchView({
                         aria-pressed={confirmRestoreAdminPasswordVisible}
                         onClick={() => setConfirmRestoreAdminPasswordVisible((current) => !current)}
                       >
-                        <PasswordVisibilityIcon />
+                        {confirmRestoreAdminPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                       </button>
                     </div>
                   </label>
@@ -719,7 +703,7 @@ export function PostgresLaunchView({
                         aria-pressed={initialAdminPasswordVisible}
                         onClick={() => setInitialAdminPasswordVisible((current) => !current)}
                       >
-                        <PasswordVisibilityIcon />
+                        {initialAdminPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                       </button>
                     </div>
                     <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -742,7 +726,7 @@ export function PostgresLaunchView({
                         aria-pressed={confirmInitialAdminPasswordVisible}
                         onClick={() => setConfirmInitialAdminPasswordVisible((current) => !current)}
                       >
-                        <PasswordVisibilityIcon />
+                        {confirmInitialAdminPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                       </button>
                     </div>
                   </label>
@@ -789,7 +773,7 @@ export function PostgresLaunchView({
                     aria-pressed={superuserPasswordVisible}
                     onClick={() => setSuperuserPasswordVisible((current) => !current)}
                   >
-                    <PasswordVisibilityIcon />
+                    {superuserPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
               </label>
@@ -1063,7 +1047,7 @@ export function PostgresAuthView({
                   aria-pressed={passwordVisible}
                   onClick={() => setPasswordVisible((current) => !current)}
                 >
-                  <PasswordVisibilityIcon />
+                  {passwordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                 </button>
               </div>
               <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -1085,7 +1069,7 @@ export function PostgresAuthView({
                   aria-pressed={confirmFirstAccountPasswordVisible}
                   onClick={() => setConfirmFirstAccountPasswordVisible((current) => !current)}
                 >
-                  <PasswordVisibilityIcon />
+                  {confirmFirstAccountPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                 </button>
               </div>
             </label>
@@ -1150,7 +1134,7 @@ export function PostgresAuthView({
                   aria-pressed={passwordVisible}
                   onClick={() => setPasswordVisible((current) => !current)}
                 >
-                  <PasswordVisibilityIcon />
+                  {passwordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                 </button>
               </div>
             </label>
@@ -1263,7 +1247,7 @@ export function PostgresAuthView({
                   aria-pressed={passwordVisible}
                   onClick={() => setPasswordVisible((current) => !current)}
                 >
-                  <PasswordVisibilityIcon />
+                  {passwordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                 </button>
               </div>
             </label>

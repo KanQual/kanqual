@@ -7,7 +7,7 @@ import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
-import { DownloadIcon, HelpIcon, SaveIcon } from "../components/AppIcons";
+import { DownloadIcon, HelpIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -172,7 +172,7 @@ interface CodeReportSettings {
   documentAttributeFilters?: Record<string, AttributeFilterConfig>;
 }
 
-interface CodeReportSnapshot {
+export interface CodeReportSnapshot {
   reportType: "code-report";
   kind: CodeReportKind;
   settings: CodeReportSettings;
@@ -192,7 +192,7 @@ interface CodeReportSnapshot {
   description?: string;
 }
 
-interface CodeReportRow {
+export interface CodeReportRow {
   id: string;
   name: string;
   createdByName: string;
@@ -3808,16 +3808,6 @@ function CodeReportCreationPage({
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsCodes.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
-          {isFrozen ? (
-            canStartReports ? (
-            <button
-              className="btn btn--primary"
-              onClick={() => onUseSettings?.(row!.snapshot.settings)}
-            >
-              {t("reportsCodes.newFromSettings")}
-            </button>
-            ) : null
-          ) : null}
         </div>
       </div>
 
@@ -4185,6 +4175,17 @@ function CodeReportCreationPage({
                 >
                   <DownloadIcon className="project-table-header-icon" />
                 </button>
+                {isFrozen && onUseSettings && canStartReports ? (
+                  <button
+                    type="button"
+                    className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                    onClick={() => onUseSettings(row!.snapshot.settings)}
+                    title={t("reportsCodes.newFromSettings")}
+                    aria-label={t("reportsCodes.newFromSettings")}
+                  >
+                    <RestartListIcon className="project-table-header-icon" />
+                  </button>
+                ) : null}
                 {!isFrozen ? (
                   <button
                     type="button"
@@ -4545,11 +4546,12 @@ function CodeReportCreationPage({
 export type CodesViewProps = {
   initialNewModalOpen?: boolean;
   initialNewReportKind?: CodeReportKind;
+  initialSavedReport?: CodeReportRow | null;
   postgresProjectId?: string;
   onBackToReports?: () => void;
 };
 
-export function CodesView({ initialNewModalOpen = false, initialNewReportKind, postgresProjectId, onBackToReports }: CodesViewProps = {}) {
+export function CodesView({ initialNewModalOpen = false, initialNewReportKind, initialSavedReport = null, postgresProjectId, onBackToReports }: CodesViewProps = {}) {
   const { t } = useI18n();
   const codeReportColumns = getCodeReportColumns(t);
   const canCreateReports = true;
@@ -4557,7 +4559,7 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, p
 
   const [showNewModal, setShowNewModal] = useState(initialNewModalOpen && !initialNewReportKind);
   const [newReportKind, setNewReportKind] = useState<CodeReportKind | null>(initialNewReportKind ?? null);
-  const [openSavedRow, setOpenSavedRow] = useState<CodeReportRow | null>(null);
+  const [openSavedRow, setOpenSavedRow] = useState<CodeReportRow | null>(initialSavedReport);
   const [newFromSettings, setNewFromSettings] = useState<CodeReportSettings | null>(null);
   const [rows, setRows] = useState<CodeReportRow[]>([]);
   const [loading, setLoading] = useState(false);

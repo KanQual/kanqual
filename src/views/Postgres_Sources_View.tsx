@@ -37,7 +37,7 @@ import {
   PostgresAttributeValueHistoryModal,
   type PostgresAttributeValueHistoryTarget,
 } from "../components/PostgresAttributeValueHistoryModal";
-import { CloseIcon, HelpIcon, PlusIcon } from "../components/AppIcons";
+import { CloseIcon, HelpIcon, PlusIcon, ZoomIcon } from "../components/AppIcons";
 import {
   PostgresRelationshipModal,
   type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
@@ -4161,10 +4161,7 @@ function PostgresSourceDetail({
                       aria-label={textSearchOpen ? "Close text search" : "Search source text"}
                       title={textSearchOpen ? "Close search" : "Search"}
                     >
-                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <circle cx="11" cy="11" r="6" />
-                        <path d="M16 16l4 4" />
-                      </svg>
+                      <ZoomIcon />
                     </button>
                   </div>
                 ) : null}

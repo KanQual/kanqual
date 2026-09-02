@@ -10,8 +10,9 @@ import { formatCurrentDateTime } from "../i18n/formatters";
 import { LoadingCard } from "../components/LoadingCard";
 import { ArrowLeftIcon, HelpIcon, PlusIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
-import type { CodeReportKind } from "./Reports_Codes_View";
-import type { CoderReportKind } from "./Reports_Users_View";
+import type { CodeReportKind, CodeReportRow, CodeReportSnapshot } from "./Reports_Codes_View";
+import type { CoderReportKind, CoderReportRow, CoderReportSnapshot } from "./Reports_Users_View";
+import type { ReportRow as AnnotationReportRow, ReportSnapshot as AnnotationReportSnapshot } from "./Reports_Annotations_View";
 
 const LegacyCodeReportsViewLazy = lazy(() =>
   import("./Reports_Codes_View").then((module) => ({ default: module.CodesView })),
@@ -33,9 +34,9 @@ type ReportTypeFilter =
   | "annotations";
 type ReportTypeSortCol = "type" | "count";
 type ActiveReportBuilder =
-  | { type: "code"; kind: CodeReportKind }
-  | { type: "user"; kind: CoderReportKind }
-  | { type: "annotation" };
+  | { type: "code"; kind?: CodeReportKind; savedReport?: CodeReportRow }
+  | { type: "user"; kind?: CoderReportKind; savedReport?: CoderReportRow }
+  | { type: "annotation"; savedReport?: AnnotationReportRow };
 
 type ReportTypeOption = {
   id: ReportTypeFilter;
@@ -168,6 +169,71 @@ function getReportFilterType(report: PostgresReport): Exclude<ReportTypeFilter, 
     return "user-activity";
   }
   if (normalized === "annotation" || normalized === "annotations") return "annotations";
+  return null;
+}
+
+function makeSavedReportBuilder(report: PostgresReport): ActiveReportBuilder | null {
+  const normalized = report.reportType.trim().toLowerCase();
+
+  try {
+    if (normalized === "code-report" || normalized === "code") {
+      const snapshot = JSON.parse(report.contentJson || "{}") as CodeReportSnapshot;
+      if (snapshot?.reportType !== "code-report") return null;
+      return {
+        type: "code",
+        kind: snapshot.kind,
+        savedReport: {
+          id: report.id,
+          name: report.title,
+          createdByName: report.createdByName || "-",
+          createdAt: report.createdAt,
+          snapshot,
+        },
+      };
+    }
+
+    if (normalized === "coder-report" || normalized === "coder" || normalized === "user") {
+      const snapshot = JSON.parse(report.contentJson || "{}") as CoderReportSnapshot;
+      if (snapshot?.reportType !== "coder-report") return null;
+      return {
+        type: "user",
+        kind: snapshot.kind,
+        savedReport: {
+          id: report.id,
+          name: report.title,
+          createdByName: report.createdByName || "-",
+          createdAt: report.createdAt,
+          snapshot,
+        },
+      };
+    }
+
+    if (normalized === "annotations" || normalized === "annotation") {
+      const snapshot = JSON.parse(report.contentJson || "{}") as AnnotationReportSnapshot;
+      if (snapshot?.reportType !== "annotations") return null;
+      const settings = JSON.parse(report.settingsJson || "{}") as Partial<AnnotationReportRow>;
+      return {
+        type: "annotation",
+        savedReport: {
+          id: report.id,
+          name: report.title,
+          createdByName: report.createdByName || "-",
+          createdAt: report.createdAt,
+          caseIds: Array.isArray(settings.caseIds) ? settings.caseIds : [],
+          documentIds: Array.isArray(settings.documentIds)
+            ? settings.documentIds
+            : snapshot.filteredAnns.map((ann) => ann.documentId),
+          codeIds: Array.isArray(settings.codeIds)
+            ? settings.codeIds
+            : snapshot.filteredAnns.map((ann) => ann.codeId),
+          snapshot,
+        },
+      };
+    }
+  } catch {
+    return null;
+  }
+
   return null;
 }
 
@@ -331,13 +397,25 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
 
   const backToReportsLanding = () => setActiveBuilder(null);
 
+  function handleOpenSavedReport(report: PostgresReport) {
+    const builder = makeSavedReportBuilder(report);
+    if (!builder) {
+      setReportError(`Unable to open "${report.title}" because its saved report data could not be read.`);
+      return;
+    }
+    setReportError(null);
+    setActiveBuilder(builder);
+  }
+
   if (activeBuilder?.type === "code") {
-    const title = activeBuilder.kind === "frequencies" ? "Code Frequency Report" : "Code Co-Occurrence Report";
+    const kind = activeBuilder.kind ?? activeBuilder.savedReport?.snapshot.kind ?? "frequencies";
+    const title = kind === "frequencies" ? "Code Frequency Report" : "Code Co-Occurrence Report";
     return (
       <ReportBuilderShell title={title} onBack={backToReportsLanding}>
         <Suspense fallback={<ReportBuilderLoading />}>
           <LegacyCodeReportsViewLazy
-            initialNewReportKind={activeBuilder.kind}
+            initialNewReportKind={activeBuilder.savedReport ? undefined : kind}
+            initialSavedReport={activeBuilder.savedReport ?? null}
             postgresProjectId={projectId}
             onBackToReports={backToReportsLanding}
           />
@@ -347,12 +425,14 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
   }
 
   if (activeBuilder?.type === "user") {
-    const title = activeBuilder.kind === "activity" ? "User Activity Report" : "User Reports";
+    const kind = activeBuilder.kind ?? activeBuilder.savedReport?.snapshot.kind ?? "activity";
+    const title = kind === "activity" ? "User Activity Report" : "User Reports";
     return (
       <ReportBuilderShell title={title} onBack={backToReportsLanding}>
         <Suspense fallback={<ReportBuilderLoading />}>
           <LegacyUserReportsViewLazy
-            initialNewReportKind={activeBuilder.kind}
+            initialNewReportKind={activeBuilder.savedReport ? undefined : kind}
+            initialSavedReport={activeBuilder.savedReport ?? null}
             postgresProjectId={projectId}
             onBackToReports={backToReportsLanding}
           />
@@ -366,7 +446,8 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       <ReportBuilderShell title="Annotation Report Builder" onBack={backToReportsLanding}>
         <Suspense fallback={<ReportBuilderLoading />}>
           <LegacyAnnotationReportsViewLazy
-            initialNewReportOpen
+            initialNewReportOpen={!activeBuilder.savedReport}
+            initialSavedReport={activeBuilder.savedReport ?? null}
             postgresProjectId={projectId}
             projectStoragePath={projectStoragePath}
             onBackToReports={backToReportsLanding}
@@ -583,7 +664,19 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                     </tr>
                   ) : (
                     sortedReports.map((report) => (
-                      <tr key={report.id} className="users-row">
+                      <tr
+                        key={report.id}
+                        className="users-row"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleOpenSavedReport(report)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleOpenSavedReport(report);
+                          }
+                        }}
+                      >
                         <td className="users-td">
                           <strong>{report.title}</strong>
                         </td>

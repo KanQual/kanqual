@@ -5,6 +5,7 @@ import {
   itemTimelineAttributeDefaultValue,
   itemTimelineAttributeLabel,
 } from "../lib/timelineAttributeUi";
+import { ArrowLeftRightIcon } from "./AppIcons";
 import { SettingsModal } from "./SettingsModal";
 
 export type PostgresRelationshipEndpointOption = {
@@ -397,16 +398,7 @@ export function PostgresRelationshipModal({
                       justifyContent: "center",
                     }}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path
-                        d="M7 6h12m0 0-4-4m4 4-4 4M17 18H5m0 0 4 4m-4-4 4-4"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                    <ArrowLeftRightIcon />
                   </button>
                 </div>
                 <RelationshipEndpointSingleSelect label="To" options={availableToEndpoints} value={toEndpointKey} onChange={(value) => {

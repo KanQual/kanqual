@@ -295,6 +295,8 @@ export function PostgresProjectHomeGraphView({
   homeCanvasRelationshipTypes,
   canvasNodes,
   setCanvasNodes,
+  canvasShapes: _canvasShapes,
+  setCanvasShapes: _setCanvasShapes,
   hiddenCanvasRelationshipIds,
   getObjectAppearance,
   getObjectSurfaceStyle,
@@ -334,6 +336,9 @@ export function PostgresProjectHomeGraphView({
   codeSizeRows,
   onToggleSizeSectionCollapsed,
   onResizeNodeGroup,
+  onOpenDrawTool: _onOpenDrawTool,
+  drawCanvasToolbar: _drawCanvasToolbar,
+  autoLayoutOnVisibleKey,
 }: {
   createControlRef: RefObject<HTMLDivElement | null>;
   filterControlRef: RefObject<HTMLDivElement | null>;
@@ -360,6 +365,8 @@ export function PostgresProjectHomeGraphView({
   homeCanvasRelationshipTypes: PostgresRelationshipType[];
   canvasNodes: Record<string, PostgresCanvasNodeState>;
   setCanvasNodes: Dispatch<SetStateAction<Record<string, PostgresCanvasNodeState>>>;
+  canvasShapes?: unknown[];
+  setCanvasShapes?: unknown;
   hiddenCanvasRelationshipIds: string[];
   getObjectAppearance: (
     object: PostgresObject,
@@ -446,6 +453,9 @@ export function PostgresProjectHomeGraphView({
   codeSizeRows: ProjectHomeCanvasSizeRow[];
   onToggleSizeSectionCollapsed: (section: ProjectHomeCanvasSizeSectionKey) => void;
   onResizeNodeGroup: (nodeIds: string[], scale: number) => void;
+  onOpenDrawTool?: unknown;
+  drawCanvasToolbar?: ReactNode;
+  autoLayoutOnVisibleKey?: number;
 }) {
   const renderGraphCreateControl = () => (
     <div className="project-home-canvas-create-control project-home-canvas-create-control--dock" ref={createControlRef}>
@@ -552,9 +562,10 @@ export function PostgresProjectHomeGraphView({
               getRelationshipEndpointKey={getRelationshipEndpointKey}
               onCanvasRelationshipDraftComplete={onCanvasRelationshipDraftComplete}
               fitOnVisibleKey={fitOnVisibleKey}
+              autoLayoutOnVisibleKey={autoLayoutOnVisibleKey}
+              controlLead={renderGraphCreateControl()}
               controlStart={(
                 <>
-                  {renderGraphCreateControl()}
                   <div className="project-home-canvas-filter-control" ref={filterControlRef}>
                     <button
                       type="button"

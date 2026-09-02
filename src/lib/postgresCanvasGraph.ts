@@ -266,6 +266,13 @@ export function buildPostgresCanvasCytoscapeElements(args: {
 
 export const POSTGRES_CYTOSCAPE_STYLESHEET = [
   {
+    selector: "core",
+    style: {
+      "active-bg-opacity": 0,
+      "active-bg-size": 0,
+    },
+  },
+  {
     selector: "node.canvas-object",
     style: {
       shape: (element: { data: (key: string) => string }) => getPostgresCanvasCytoscapeShape(element.data("shape") as CanvasObjectShape),

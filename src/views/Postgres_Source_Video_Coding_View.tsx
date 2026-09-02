@@ -3,7 +3,22 @@ import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import { SettingsModal } from "../components/SettingsModal";
 import type { PostgresCode } from "../lib/postgres";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import { ArrowLeftIcon, CloseIcon, HelpIcon } from "../components/AppIcons";
+import {
+  ArrowLeftIcon,
+  BackFiveIcon,
+  CheckIcon as SaveClipIcon,
+  CloseIcon,
+  ExtractFrameIcon,
+  ForwardFiveIcon,
+  HelpIcon,
+  MediaZoomFitIcon as ZoomFitIcon,
+  NewClipIcon,
+  PauseIcon,
+  PlayIcon,
+  StepBackIcon as FrameBackIcon,
+  StepForwardIcon as FrameForwardIcon,
+  VolumeIcon,
+} from "../components/AppIcons";
 import {
   createMediaWaveformCache,
   parseMediaWaveformCache,
@@ -169,52 +184,6 @@ function parseEditableTimestamp(value: string): number | null {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function ZoomFitIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="6.8" cy="6.8" r="4.7" />
-      <path d="M10.15 10.15L14 14" />
-      <path d="M5.55 5.55L4.55 4.55" />
-      <path d="M8.05 5.55L9.05 4.55" />
-      <path d="M5.55 8.05L4.55 9.05" />
-      <path d="M8.05 8.05L9.05 9.05" />
-      <path d="M5.3 4.55H4.55V5.3" />
-      <path d="M8.3 4.55H9.05V5.3" />
-      <path d="M5.3 9.05H4.55V8.3" />
-      <path d="M8.3 9.05H9.05V8.3" />
-    </svg>
-  );
-}
-
-function NewClipIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4.5 3.5h-2v9h2" />
-      <path d="M11.5 3.5h2v9h-2" />
-      <path d="M8 5.5v5" />
-      <path d="M5.5 8h5" />
-    </svg>
-  );
-}
-
-function ExtractFrameIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5.25 4.25L6.25 2.75H9.75L10.75 4.25H12.25C13.2 4.25 14 5.05 14 6V11.5C14 12.45 13.2 13.25 12.25 13.25H3.75C2.8 13.25 2 12.45 2 11.5V6C2 5.05 2.8 4.25 3.75 4.25H5.25Z" />
-      <circle cx="8" cy="8.75" r="2.35" />
-      <path d="M11.75 6.25H11.8" />
-    </svg>
-  );
-}
-
-function SaveClipIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 8.25l3.25 3.25L13 4.5" />
-    </svg>
-  );
-}
-
 function findAdjacentFrameTimestamp(
   timestampsSeconds: number[],
   currentTimeSeconds: number,
@@ -242,80 +211,6 @@ function findAdjacentFrameTimestamp(
     else right = mid;
   }
   return timestampsSeconds[Math.max(0, left - 1)] ?? null;
-}
-
-function FrameBackIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 4v8" />
-      <path d="M12 4L6.5 8L12 12V4Z" />
-    </svg>
-  );
-}
-
-function FrameForwardIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 4v8" />
-      <path d="M4 4L9.5 8L4 12V4Z" />
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" width="28" height="28" fill="currentColor">
-      <path d="M6.5 4.25v11.5L15 10 6.5 4.25Z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" width="28" height="28" fill="currentColor">
-      <path d="M5.75 4.25h3v11.5h-3V4.25Z" />
-      <path d="M11.25 4.25h3v11.5h-3V4.25Z" />
-    </svg>
-  );
-}
-
-function BackFiveIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M7.3 5.2H4.2V2.1" />
-      <path d="M4.45 5.2A6.25 6.25 0 1 1 3.9 12" />
-      <path d="M8.05 8.05h3.1l-.35 2h-2.1l-.2 1.45h1.35c.95 0 1.7.7 1.7 1.6 0 .95-.75 1.65-1.8 1.65H7.9" />
-    </svg>
-  );
-}
-
-function ForwardFiveIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12.7 5.2h3.1V2.1" />
-      <path d="M15.55 5.2A6.25 6.25 0 1 0 16.1 12" />
-      <path d="M8.05 8.05h3.1l-.35 2h-2.1l-.2 1.45h1.35c.95 0 1.7.7 1.7 1.6 0 .95-.75 1.65-1.8 1.65H7.9" />
-    </svg>
-  );
-}
-
-function VolumeIcon({ muted }: { muted: boolean }) {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2.25 6.25v3.5h2.4l3.1 2.55V3.7l-3.1 2.55h-2.4Z" />
-      {muted ? (
-        <>
-          <path d="M10.25 6.25l3.25 3.25" />
-          <path d="M13.5 6.25l-3.25 3.25" />
-        </>
-      ) : (
-        <>
-          <path d="M10.25 6.25c.65.95.65 2.55 0 3.5" />
-          <path d="M12 4.75c1.15 1.75 1.15 4.75 0 6.5" />
-        </>
-      )}
-    </svg>
-  );
 }
 
 function sanitizeFrameFileNamePart(value: string) {

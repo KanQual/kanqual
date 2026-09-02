@@ -4330,6 +4330,124 @@ fn collect_postgres_project_snapshot_storage_files(
     Ok(files)
 }
 
+#[tauri::command]
+async fn export_postgres_experiment_project_lossless_bundle_command(
+    app: tauri::AppHandle,
+    runtime_auth_state: tauri::State<'_, PostgresExperimentAuthState>,
+    project_id: String,
+) -> Result<PostgresExperimentProjectExportBundle, String> {
+    let trimmed_project_id = project_id.trim().to_string();
+    if trimmed_project_id.is_empty() {
+        return Err("Project id is required.".to_string());
+    }
+
+    let project = load_postgres_experiment_project_record(&app, &trimmed_project_id).await?;
+    let _session =
+        require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
+            .await?;
+    ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+
+    let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
+    let table_queries = [
+        ("project_settings", "SELECT * FROM project_settings ORDER BY id"),
+        (
+            "source_type_settings",
+            "SELECT * FROM source_type_settings ORDER BY source_kind",
+        ),
+        (
+            "source_files",
+            "SELECT * FROM source_files ORDER BY source_id, created_at, id",
+        ),
+        ("annotation_codes", "SELECT * FROM annotation_codes ORDER BY annotation_id, code_id"),
+        (
+            "annotation_objects",
+            "SELECT * FROM annotation_objects ORDER BY annotation_id, object_id",
+        ),
+        ("code_objects", "SELECT * FROM code_objects ORDER BY code_id, object_id"),
+        ("event_objects", "SELECT * FROM event_objects ORDER BY start_at, object_id"),
+        (
+            "object_relationships",
+            "SELECT * FROM object_relationships ORDER BY created_at, id",
+        ),
+        (
+            "relationship_attribute_values",
+            "SELECT * FROM relationship_attribute_values ORDER BY relationship_id, attribute_definition_id, id",
+        ),
+        (
+            "source_attribute_value_history",
+            "SELECT * FROM source_attribute_value_history ORDER BY changed_at, id",
+        ),
+        (
+            "object_attribute_value_history",
+            "SELECT * FROM object_attribute_value_history ORDER BY changed_at, id",
+        ),
+        (
+            "relationship_attribute_value_history",
+            "SELECT * FROM relationship_attribute_value_history ORDER BY changed_at, id",
+        ),
+        ("memo_sources", "SELECT * FROM memo_sources ORDER BY memo_id, source_id"),
+        (
+            "memo_annotations",
+            "SELECT * FROM memo_annotations ORDER BY memo_id, annotation_id",
+        ),
+        ("memo_codes", "SELECT * FROM memo_codes ORDER BY memo_id, code_id"),
+        ("memo_objects", "SELECT * FROM memo_objects ORDER BY memo_id, object_id"),
+        (
+            "saved_drawings",
+            "SELECT * FROM saved_drawings ORDER BY updated_at, created_at, id",
+        ),
+        (
+            "timeline_groups",
+            "SELECT * FROM timeline_groups ORDER BY sort_order, created_at, id",
+        ),
+        (
+            "timeline_item_group_assignments",
+            "SELECT * FROM timeline_item_group_assignments ORDER BY item_kind, item_id",
+        ),
+        (
+            "timeline_group_row_orders",
+            "SELECT * FROM timeline_group_row_orders ORDER BY sort_order, group_key",
+        ),
+    ];
+    let mut tables = Vec::with_capacity(table_queries.len());
+    for (name, query) in table_queries {
+        let export_query = format!(
+            "SELECT COALESCE(json_agg(row_to_json(export_rows)), '[]'::json)::text FROM ({query}) export_rows"
+        );
+        let row = client
+            .query_one(&export_query, &[])
+            .await
+            .map_err(|e| format!("Could not export PostgreSQL project table {name}: {e}"))?;
+        tables.push(PostgresExperimentProjectExportTable {
+            name: name.to_string(),
+            rows_json: row.get(0),
+        });
+    }
+    connection_task.abort();
+
+    let storage_root = PathBuf::from(&project.storage_path);
+    let storage_files = if storage_root.exists() {
+        collect_postgres_project_snapshot_storage_files(&storage_root)?
+    } else {
+        Vec::new()
+    };
+    let assets = storage_files
+        .into_iter()
+        .map(
+            |(relative_path, bytes)| PostgresExperimentProjectExportAsset {
+                collection: "project_storage_files".to_string(),
+                record_id: trimmed_project_id.clone(),
+                field: "storage_path".to_string(),
+                file_name: relative_path,
+                mime_type: "application/octet-stream".to_string(),
+                data_base64: BASE64_STANDARD.encode(&bytes),
+            },
+        )
+        .collect();
+
+    Ok(PostgresExperimentProjectExportBundle { tables, assets })
+}
+
 fn map_postgres_experiment_object_type_row(
     project_id: &str,
     row: tokio_postgres::Row,
@@ -6360,6 +6478,31 @@ struct PostgresExperimentProjectSnapshotCreateResult {
     snapshot: PostgresExperimentProjectSnapshot,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresExperimentProjectExportTable {
+    name: String,
+    rows_json: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresExperimentProjectExportAsset {
+    collection: String,
+    record_id: String,
+    field: String,
+    file_name: String,
+    mime_type: String,
+    data_base64: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresExperimentProjectExportBundle {
+    tables: Vec<PostgresExperimentProjectExportTable>,
+    assets: Vec<PostgresExperimentProjectExportAsset>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct PostgresExperimentProjectSnapshotRetentionSettings {
@@ -6464,6 +6607,32 @@ enum PostgresExperimentCanvasShape {
         width: f64,
         height: f64,
         color: String,
+        #[serde(default, rename = "fillColor")]
+        fill_color: Option<String>,
+        #[serde(default, rename = "fillOpacity")]
+        fill_opacity: Option<f64>,
+        #[serde(default)]
+        fill: Option<String>,
+        #[serde(default, rename = "lineStyle")]
+        line_style: Option<String>,
+        #[serde(rename = "strokeWidth")]
+        stroke_width: f64,
+    },
+    Shape {
+        id: String,
+        shape: String,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        color: String,
+        #[serde(default, rename = "fillColor")]
+        fill_color: Option<String>,
+        #[serde(default, rename = "fillOpacity")]
+        fill_opacity: Option<f64>,
+        fill: String,
+        #[serde(rename = "lineStyle")]
+        line_style: String,
         #[serde(rename = "strokeWidth")]
         stroke_width: f64,
     },
@@ -10481,7 +10650,9 @@ async fn save_postgres_experiment_user_preferences_command(
         theme: normalize_postgres_experiment_theme(&preferences.theme),
         density: normalize_postgres_experiment_density(&preferences.density),
         font_size: normalize_postgres_experiment_font_size(&preferences.font_size),
-        source_text_size_px: normalize_postgres_experiment_source_text_size_px(preferences.source_text_size_px),
+        source_text_size_px: normalize_postgres_experiment_source_text_size_px(
+            preferences.source_text_size_px,
+        ),
         locale: normalize_postgres_experiment_locale(&preferences.locale),
         recent_project_limit: normalize_postgres_experiment_recent_project_limit(
             preferences.recent_project_limit,
@@ -16781,13 +16952,33 @@ async fn create_postgres_experiment_source_command(
         .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
-    let shape_override = request.shape_override.unwrap_or_default().trim().to_string();
-    let color_override = request.color_override.unwrap_or_default().trim().to_string();
-    let outline_color_override = request.outline_color_override.unwrap_or_default().trim().to_string();
+    let shape_override = request
+        .shape_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let color_override = request
+        .color_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let outline_color_override = request
+        .outline_color_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let fill_override = request.fill_override.unwrap_or_default().trim().to_string();
-    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
-    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
-    let image_storage_path = request.image_storage_path.unwrap_or_default().trim().to_string();
+    let fill_transparency_override = request
+        .fill_transparency_override
+        .map(|value| value.clamp(0, 100));
+    let outline_width_override = request
+        .outline_width_override
+        .map(|value| value.clamp(1, 10));
+    let image_storage_path = request
+        .image_storage_path
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     client
         .execute(
             "
@@ -16915,13 +17106,33 @@ async fn import_postgres_experiment_source_file_command(
         .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
-    let shape_override = request.shape_override.unwrap_or_default().trim().to_string();
-    let color_override = request.color_override.unwrap_or_default().trim().to_string();
-    let outline_color_override = request.outline_color_override.unwrap_or_default().trim().to_string();
+    let shape_override = request
+        .shape_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let color_override = request
+        .color_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let outline_color_override = request
+        .outline_color_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let fill_override = request.fill_override.unwrap_or_default().trim().to_string();
-    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
-    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
-    let image_storage_path = request.image_storage_path.unwrap_or_default().trim().to_string();
+    let fill_transparency_override = request
+        .fill_transparency_override
+        .map(|value| value.clamp(0, 100));
+    let outline_width_override = request
+        .outline_width_override
+        .map(|value| value.clamp(1, 10));
+    let image_storage_path = request
+        .image_storage_path
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let sanitized_file_name = sanitize_postgres_experiment_file_name(&original_file_name);
     let relative_storage_path = format!("sources/{source_id}/{sanitized_file_name}");
     let absolute_storage_path = Path::new(&project.storage_path).join(&relative_storage_path);
@@ -17088,13 +17299,33 @@ async fn update_postgres_experiment_source_command(
         .to_string();
     let extracted_from_video_time_ms = request.extracted_from_video_time_ms;
     let notes = request.notes.unwrap_or_default();
-    let shape_override = request.shape_override.unwrap_or_default().trim().to_string();
-    let color_override = request.color_override.unwrap_or_default().trim().to_string();
-    let outline_color_override = request.outline_color_override.unwrap_or_default().trim().to_string();
+    let shape_override = request
+        .shape_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let color_override = request
+        .color_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let outline_color_override = request
+        .outline_color_override
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let fill_override = request.fill_override.unwrap_or_default().trim().to_string();
-    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
-    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
-    let image_storage_path = request.image_storage_path.unwrap_or_default().trim().to_string();
+    let fill_transparency_override = request
+        .fill_transparency_override
+        .map(|value| value.clamp(0, 100));
+    let outline_width_override = request
+        .outline_width_override
+        .map(|value| value.clamp(1, 10));
+    let image_storage_path = request
+        .image_storage_path
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let updated_count = client
         .execute(
             "
@@ -18084,32 +18315,30 @@ async fn save_postgres_experiment_timeline_group_command(
         "outline" => "outline".to_string(),
         _ => "filled".to_string(),
     };
-    let item_fill_transparency = request
-        .item_fill_transparency
-        .unwrap_or(86)
-        .clamp(0, 100);
+    let item_fill_transparency = request.item_fill_transparency.unwrap_or(86).clamp(0, 100);
     let background_fill_raw = request
         .background_fill
         .unwrap_or_else(|| "tint".to_string())
         .trim()
         .to_lowercase();
-    let background_fill = if let Some(raw_percent) = background_fill_raw.strip_prefix("transparency:") {
-        match raw_percent.trim().parse::<u8>() {
-            Ok(percent) if percent <= 100 => format!("transparency:{}", percent),
-            _ => "tint".to_string(),
-        }
-    } else if let Some(raw_percent) = background_fill_raw.strip_prefix("opacity:") {
-        match raw_percent.trim().parse::<u8>() {
-            Ok(percent) if percent <= 100 => format!("opacity:{}", percent),
-            _ => "tint".to_string(),
-        }
-    } else {
-        match background_fill_raw.as_str() {
-            "solid" => "solid".to_string(),
-            "none" | "transparent" => "none".to_string(),
-            _ => "tint".to_string(),
-        }
-    };
+    let background_fill =
+        if let Some(raw_percent) = background_fill_raw.strip_prefix("transparency:") {
+            match raw_percent.trim().parse::<u8>() {
+                Ok(percent) if percent <= 100 => format!("transparency:{}", percent),
+                _ => "tint".to_string(),
+            }
+        } else if let Some(raw_percent) = background_fill_raw.strip_prefix("opacity:") {
+            match raw_percent.trim().parse::<u8>() {
+                Ok(percent) if percent <= 100 => format!("opacity:{}", percent),
+                _ => "tint".to_string(),
+            }
+        } else {
+            match background_fill_raw.as_str() {
+                "solid" => "solid".to_string(),
+                "none" | "transparent" => "none".to_string(),
+                _ => "tint".to_string(),
+            }
+        };
     let item_text_color = request
         .item_text_color
         .unwrap_or_default()
@@ -18377,9 +18606,10 @@ async fn reorder_postgres_experiment_timeline_group_rows_command(
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (mut client, connection_task) =
         connect_postgres_database(&app, &project.database_name).await?;
-    let tx = client.transaction().await.map_err(|e| {
-        format!("Could not prepare PostgreSQL experiment timeline row order: {e}")
-    })?;
+    let tx = client
+        .transaction()
+        .await
+        .map_err(|e| format!("Could not prepare PostgreSQL experiment timeline row order: {e}"))?;
     for (index, group_key) in group_keys.iter().enumerate() {
         tx.execute(
             "
@@ -23979,8 +24209,12 @@ async fn create_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
-    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
+    let fill_transparency_override = request
+        .fill_transparency_override
+        .map(|value| value.clamp(0, 100));
+    let outline_width_override = request
+        .outline_width_override
+        .map(|value| value.clamp(1, 10));
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -24109,8 +24343,12 @@ async fn update_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
-    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
+    let fill_transparency_override = request
+        .fill_transparency_override
+        .map(|value| value.clamp(0, 100));
+    let outline_width_override = request
+        .outline_width_override
+        .map(|value| value.clamp(1, 10));
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -24164,7 +24402,20 @@ async fn update_postgres_experiment_object_command(
                 updated_at = NOW()
             WHERE id = $1
             ",
-            &[&object_id, &object_type.id, &object_type.name, &title, &description, &shape_override, &color_override, &outline_color_override, &fill_override, &fill_transparency_override, &outline_width_override, &image_storage_path],
+            &[
+                &object_id,
+                &object_type.id,
+                &object_type.name,
+                &title,
+                &description,
+                &shape_override,
+                &color_override,
+                &outline_color_override,
+                &fill_override,
+                &fill_transparency_override,
+                &outline_width_override,
+                &image_storage_path,
+            ],
         )
         .await
         .map_err(|e| format!("Could not update PostgreSQL experiment object: {e}"))?;
@@ -24256,8 +24507,12 @@ async fn save_postgres_experiment_object_command(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let fill_transparency_override = request.fill_transparency_override.map(|value| value.clamp(0, 100));
-    let outline_width_override = request.outline_width_override.map(|value| value.clamp(1, 10));
+    let fill_transparency_override = request
+        .fill_transparency_override
+        .map(|value| value.clamp(0, 100));
+    let outline_width_override = request
+        .outline_width_override
+        .map(|value| value.clamp(1, 10));
     let image_storage_path = request
         .image_storage_path
         .as_deref()
@@ -24543,7 +24798,8 @@ async fn import_postgres_experiment_source_image_command(
         return Err("The selected source could not be found.".to_string());
     }
     remove_postgres_experiment_project_file_if_present(&project, &previous_path);
-    let updated = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let updated =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -24610,7 +24866,8 @@ async fn remove_postgres_experiment_source_image_command(
         return Err("The selected source could not be found.".to_string());
     }
     remove_postgres_experiment_project_file_if_present(&project, &previous_path);
-    let updated = load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
+    let updated =
+        load_postgres_experiment_source_for_client(&client, &project_id, &source_id).await?;
     append_postgres_experiment_project_log_for_client(
         &client,
         &project_id,
@@ -34446,6 +34703,7 @@ pub fn run() {
             create_postgres_experiment_project_snapshot_command,
             delete_postgres_experiment_project_snapshot_command,
             import_postgres_experiment_project_snapshot_as_project_command,
+            export_postgres_experiment_project_lossless_bundle_command,
             list_postgres_experiment_project_users_command,
             create_postgres_experiment_project_user_command,
             update_postgres_experiment_project_user_command,

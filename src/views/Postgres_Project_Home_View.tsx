@@ -1,6 +1,7 @@
 import {
   type ComponentType,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
   Suspense,
   lazy,
@@ -103,6 +104,7 @@ import {
   type PostgresCanvasNodeState,
   type PostgresCanvasPoint,
   type PostgresCanvasShape,
+  type PostgresProjectCanvasState,
   type PostgresCode,
   type PostgresObject,
   type PostgresObjectAttributeDefinition,
@@ -135,7 +137,6 @@ import {
 } from "../components/AttributeValuesModal";
 import {
   ObjectShapeSwatch,
-  PostgresRelationshipLineShapePicker,
   RelationshipTypeLinePreview,
 } from "../components/PostgresGraphicsControls";
 import {
@@ -210,21 +211,13 @@ import {
   type TimelineFieldRole,
 } from "./Postgres_Project_Home_Timeline_Fields";
 import {
-  POSTGRES_OBJECT_FILL_OPTIONS,
   POSTGRES_OBJECT_TYPE_DEFAULT_COLOR,
   POSTGRES_OBJECT_TYPE_DEFAULT_FILL_TRANSPARENCY,
   POSTGRES_OBJECT_TYPE_DEFAULT_OUTLINE_WIDTH,
-  POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS,
   POSTGRES_RELATIONSHIP_DEFAULT_COLOR,
-  POSTGRES_RELATIONSHIP_LINE_SHAPE_OPTIONS,
-  POSTGRES_RELATIONSHIP_LINE_WEIGHT_OPTIONS,
   POSTGRES_SOURCE_KIND_OPTIONS,
   formatPostgresObjectFillLabel,
   formatPostgresObjectShapeLabel,
-  formatPostgresRelationshipArrowheadLabel,
-  formatPostgresRelationshipLineShapeLabel,
-  formatPostgresRelationshipLineWeightLabel,
-  getCanvasNodeBoundaryPoint,
   getCanvasNodeDefaultDimensions,
   getCanvasNodeRenderedDimensions,
   getPostgresObjectAppearance,
@@ -233,7 +226,6 @@ import {
   getPostgresRelationshipStrokeDasharray,
   getPostgresRelationshipStrokeWidth,
   getPostgresSourceObjectVisualKey,
-  hexToRgba,
   isPostgresSourceObjectVisualKey,
   normalizeOptionalPostgresObjectTypeColor,
   normalizeOptionalPostgresRelationshipColor,
@@ -258,16 +250,7 @@ import {
 } from "../lib/postgresGraphics";
 import {
   escapeSvgText,
-  formatCanvasSketchShapeLabel,
-  getCanvasShapeBounds,
-  getCanvasSketchLineStyle,
-  getCanvasSketchShapeFill,
-  getCanvasSketchShapeType,
-  isWorldPointInsideCanvasShape,
-  renderCanvasSketchShapeElement,
   renderCanvasSketchShapeSvg,
-  resizeCanvasBoxShape,
-  translateCanvasShape,
 } from "../lib/postgresCanvasSketch";
 import {
   getPostgresImageMimeType,
@@ -301,12 +284,17 @@ const PostgresProjectHomeGraphViewLazy = lazy(
 const PostgresAnalysisCodeSourcesViewLazy = lazy(
   () => import("./Postgres_Analysis_Code_Sources_View").then((m) => ({ default: m.PostgresAnalysisCodeSourcesView })),
 );
+function RemovedCanvasPlaceholder(_props: { children?: ReactNode; [key: string]: unknown }) {
+  return null;
+}
+
+const PostgresAnalysisDrawViewLazy = RemovedCanvasPlaceholder;
+const PostgresAnalysisDrawCanvasViewLazy = RemovedCanvasPlaceholder;
+const PostgresAnalysisNetworkViewLazy = RemovedCanvasPlaceholder;
 const PostgresAiAssistAssistedCodingViewLazy = lazy(
   () => import("./Postgres_AIAssist_Assisted_Coding_View").then((m) => ({ default: m.PostgresAiAssistAssistedCodingView })),
 );
-const PostgresFreeDrawCanvasViewLazy = lazy(
-  () => import("./Postgres_Free_Draw_Canvas_View").then((m) => ({ default: m.PostgresCanvasView })),
-);
+const PostgresFreeDrawCanvasViewLazy = RemovedCanvasPlaceholder;
 const PostgresExploreCanvasViewLazy = lazy(
   () => import("./Postgres_Explore_Canvas_View").then((m) => ({ default: m.PostgresExploreCanvasView })),
 );
@@ -362,6 +350,9 @@ type PostgresProjectScreen =
   | "annotations"
   | "codebook"
   | "code-text"
+  | "analysis-draw"
+  | "analysis-draw-canvas"
+  | "analysis-network"
   | "memos"
   | "reports"
   | "objects"
@@ -483,7 +474,7 @@ type PostgresRelationshipEndpointOption = SharedPostgresRelationshipEndpointOpti
   name: string;
   type: string;
 };
-type PostgresCanvasTool = "select" | "hand" | "connect" | "pen" | "shape" | "text" | "eraser";
+type PostgresSavedCanvasKind = "free_draw" | "explore" | "construct" | "graph_draw";
 
 function getSourceCanvasNodeDefaultDimensions(): {
   width: number;
@@ -720,6 +711,8 @@ function formatCanvasKindLabel(kind: string): string {
   switch (kind) {
     case "free_draw":
       return "Free Draw";
+    case "graph_draw":
+      return "Draw";
     case "explore":
       return "Explore";
     case "construct":
@@ -760,7 +753,7 @@ function isHomeCanvasSelectionFiltered(selection: Set<string>, allIds: string[])
 type PostgresSavedCanvasSession = {
   id: string;
   name: string;
-  canvasKind: "free_draw" | "explore" | "construct";
+  canvasKind: PostgresSavedCanvasKind;
   mode: "view" | "edit";
 };
 
@@ -1033,7 +1026,7 @@ export function PostgresProjectHomeView({
   const [draftRelationshipArrowhead, setDraftRelationshipArrowhead] = useState<PostgresRelationshipArrowhead>("one_sided");
   const [draftRelationshipColor, setDraftRelationshipColor] = useState(POSTGRES_RELATIONSHIP_DEFAULT_COLOR);
   const [selectedRelationshipTypeFilter, setSelectedRelationshipTypeFilter] = useState<string>("all");
-  const [selectedCanvasViewKind, setSelectedCanvasViewKind] = useState<"free_draw" | "explore" | "construct">("free_draw");
+  const [selectedCanvasViewKind, setSelectedCanvasViewKind] = useState<PostgresSavedCanvasKind>("free_draw");
   const [openSavedDrawingActionsMenu, setOpenSavedDrawingActionsMenu] = useState<{
     id: string;
     left: number;
@@ -1080,7 +1073,6 @@ export function PostgresProjectHomeView({
   const [editingRelationshipAttributeValues, setEditingRelationshipAttributeValues] = useState<Record<string, string>>({});
   const [removingRelationshipId, setRemovingRelationshipId] = useState<string | null>(null);
   const [editingRelationshipAttributeTypeId, setEditingRelationshipAttributeTypeId] = useState<string | null>(null);
-  const [canvasTool, setCanvasTool] = useState<PostgresCanvasTool>("select");
   const [canvasScale, setCanvasScale] = useState(1);
   const [canvasOffset, setCanvasOffset] = useState<PostgresCanvasPoint>({ x: 140, y: 120 });
   const [canvasNodes, setCanvasNodes] = useState<Record<string, PostgresCanvasNodeState>>({});
@@ -1089,7 +1081,16 @@ export function PostgresProjectHomeView({
   const [canvasRelationshipTypeId, setCanvasRelationshipTypeId] = useState("");
   const [canvasStateLoaded, setCanvasStateLoaded] = useState(false);
   const [canvasSaveError, setCanvasSaveError] = useState("");
-  const [freeDrawSaveNotice, setFreeDrawSaveNotice] = useState("");
+  const [drawCanvasNodes, setDrawCanvasNodes] = useState<Record<string, PostgresCanvasNodeState>>({});
+  const [drawCanvasShapes, setDrawCanvasShapes] = useState<PostgresCanvasShape[]>([]);
+  const [drawCanvasHiddenRelationshipIds, setDrawCanvasHiddenRelationshipIds] = useState<string[]>([]);
+  const [drawCanvasStateLoaded, setDrawCanvasStateLoaded] = useState(false);
+  const [drawCanvasAutoLayoutKey, setDrawCanvasAutoLayoutKey] = useState(0);
+  const [drawSavedDrawingId, setDrawSavedDrawingId] = useState<string | null>(null);
+  const [drawSavedDrawingName, setDrawSavedDrawingName] = useState("");
+  const [drawCanvasSaveNotice, setDrawCanvasSaveNotice] = useState("");
+  const [drawCanvasSaving, setDrawCanvasSaving] = useState(false);
+  const [drawCanvasSaveModalOpen, setDrawCanvasSaveModalOpen] = useState(false);
   const [freeDrawSaving, setFreeDrawSaving] = useState(false);
   const [freeDrawSavedDrawingId, setFreeDrawSavedDrawingId] = useState<string | null>(null);
   const [saveFreeDrawModalOpen, setSaveFreeDrawModalOpen] = useState(false);
@@ -1305,7 +1306,6 @@ export function PostgresProjectHomeView({
     setCanvasShapes([]);
     setHiddenCanvasRelationshipIds([]);
     setCanvasSaveError("");
-    setFreeDrawSaveNotice("");
     setFreeDrawSavedDrawingId(null);
   }, []);
 
@@ -1313,13 +1313,6 @@ export function PostgresProjectHomeView({
     setSavedCanvasSession(null);
     setFreeDrawSavedDrawingId(null);
   }, []);
-
-  const openSaveFreeDrawModal = useCallback(() => {
-    setCanvasSaveError("");
-    setFreeDrawSaveNotice("");
-    setSaveFreeDrawName(savedCanvasSession?.name ?? "");
-    setSaveFreeDrawModalOpen(true);
-  }, [savedCanvasSession?.name]);
 
   const handleSaveFreeDrawCanvas = useCallback(async () => {
     const trimmedName = saveFreeDrawName.trim();
@@ -1329,7 +1322,6 @@ export function PostgresProjectHomeView({
     }
     setFreeDrawSaving(true);
     setCanvasSaveError("");
-    setFreeDrawSaveNotice("");
     try {
       const saved = await savePostgresSavedDrawing({
         projectId: project.id,
@@ -1360,13 +1352,66 @@ export function PostgresProjectHomeView({
         return [saved, ...next];
       });
       setSaveFreeDrawModalOpen(false);
-      setFreeDrawSaveNotice(`Saved ${saved.name}.`);
     } catch (error) {
       setCanvasSaveError(error instanceof Error ? error.message : String(error));
     } finally {
       setFreeDrawSaving(false);
     }
   }, [canvasNodes, canvasOffset.x, canvasOffset.y, canvasScale, canvasShapes, freeDrawSavedDrawingId, hiddenCanvasRelationshipIds, project.id, saveFreeDrawName]);
+  const openSaveGraphDrawModal = useCallback(() => {
+    setCanvasSaveError("");
+    setDrawCanvasSaveNotice("");
+    setSaveFreeDrawName(drawSavedDrawingName);
+    setDrawCanvasSaveModalOpen(true);
+  }, [drawSavedDrawingName]);
+  const handleSaveGraphDrawCanvas = useCallback(async () => {
+    const trimmedName = saveFreeDrawName.trim();
+    if (!trimmedName) {
+      setCanvasSaveError("Enter a name for the saved drawing.");
+      return;
+    }
+    setDrawCanvasSaving(true);
+    setCanvasSaveError("");
+    setDrawCanvasSaveNotice("");
+    try {
+      const state: PostgresProjectCanvasState = {
+        viewport: {
+          x: 0,
+          y: 0,
+          zoom: 1,
+        },
+        nodes: Object.values(drawCanvasNodes),
+        shapes: drawCanvasShapes,
+        hiddenRelationshipIds: drawCanvasHiddenRelationshipIds,
+      };
+      const saved = await savePostgresSavedDrawing({
+        projectId: project.id,
+        drawingId: drawSavedDrawingId,
+        name: trimmedName,
+        canvasKind: "graph_draw",
+        state,
+      });
+      setDrawSavedDrawingId(saved.id);
+      setDrawSavedDrawingName(saved.name);
+      setSavedDrawings((current) => {
+        const next = current.filter((entry) => entry.id !== saved.id);
+        return [saved, ...next];
+      });
+      setDrawCanvasSaveModalOpen(false);
+      setDrawCanvasSaveNotice(`Saved ${saved.name}.`);
+    } catch (error) {
+      setCanvasSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDrawCanvasSaving(false);
+    }
+  }, [
+    drawCanvasHiddenRelationshipIds,
+    drawCanvasNodes,
+    drawCanvasShapes,
+    drawSavedDrawingId,
+    project.id,
+    saveFreeDrawName,
+  ]);
   const filteredObjects =
     selectedObjectTypeFilter === "all"
       ? customObjects
@@ -2329,6 +2374,7 @@ export function PostgresProjectHomeView({
 
   async function handleConfirmHomeCanvasDelete() {
     if (!homeCanvasDeleteTarget || !canDeleteHomeCanvasItems) return;
+    if (homeCanvasDeleteTarget.kind === "annotation") return;
     setGraphSubmitting(true);
     setGraphError("");
     setGraphNotice("");
@@ -3151,6 +3197,57 @@ export function PostgresProjectHomeView({
     }
     return nextObjects;
   }, [codes, homeCanvasSectionEnabled, objects, sources, visibleHomeCanvasCodeIds, visibleHomeCanvasObjectTypeIds, visibleHomeCanvasSourceKinds]);
+  const drawCanvasObjects = useMemo<PostgresObject[]>(() => [
+    ...objects,
+    ...sources.map((source) => ({
+      id: source.id,
+      projectId: source.projectId,
+      objectTypeId: getHomeCanvasSourceObjectTypeId(source.sourceKind),
+      objectType: formatPostgresSourceKindLabel(source.sourceKind),
+      objectTypeSystemKey: getPostgresSourceKindOption(source.sourceKind)?.sourceVisualKey ?? "home_canvas_source",
+      title: source.title || source.originalFileName || "Untitled source",
+      description: source.notes || "",
+      shapeOverride: source.shapeOverride ?? "",
+      colorOverride: source.colorOverride ?? "",
+      outlineColorOverride: source.outlineColorOverride ?? "",
+      fillOverride: source.fillOverride ?? "",
+      fillTransparencyOverride: source.fillTransparencyOverride ?? null,
+      outlineWidthOverride: source.outlineWidthOverride ?? null,
+      imageStoragePath: source.imageStoragePath ?? "",
+      eventStartAt: null,
+      eventEndAt: null,
+      eventTimePrecision: null,
+      eventTimezone: null,
+      eventIsInstant: null,
+      attributeValues: [],
+      createdAt: source.createdAt,
+      updatedAt: source.updatedAt,
+    })),
+    ...codes.map((code) => ({
+      id: code.id,
+      projectId: code.projectId,
+      objectTypeId: "__home_canvas_code",
+      objectType: "Code",
+      objectTypeSystemKey: "home_canvas_code",
+      title: code.label || "Untitled code",
+      description: code.description || "",
+      shapeOverride: "",
+      colorOverride: code.color || "",
+      outlineColorOverride: code.color || "",
+      fillOverride: "",
+      fillTransparencyOverride: null,
+      outlineWidthOverride: null,
+      imageStoragePath: "",
+      eventStartAt: null,
+      eventEndAt: null,
+      eventTimePrecision: null,
+      eventTimezone: null,
+      eventIsInstant: null,
+      attributeValues: [],
+      createdAt: code.createdAt,
+      updatedAt: code.updatedAt,
+    })),
+  ], [codes, objects, sources]);
   const canvasObjectImageStoragePaths = useMemo(
     () => Array.from(new Set([
       ...objects.map((object) => object.imageStoragePath ?? ""),
@@ -3361,6 +3458,85 @@ export function PostgresProjectHomeView({
     }
     return nextRelationships;
   }, [annotationSummaries, codes, homeCanvasSectionEnabled, relationships, sources, visibleHomeCanvasCodeIds, visibleHomeCanvasRelationshipTypeIds, visibleHomeCanvasSourceKinds]);
+  const drawCanvasRelationships = useMemo<PostgresRelationship[]>(() => {
+    const nextRelationships: PostgresRelationship[] = [
+      ...relationships.map((relationship) => ({
+        ...relationship,
+        fromObjectId: relationship.fromEntityType === "source" ? relationship.fromEntityId : relationship.fromObjectId,
+        toObjectId: relationship.toEntityType === "source" ? relationship.toEntityId : relationship.toObjectId,
+      })),
+    ];
+    annotationSummaries.forEach((annotation) => {
+      const source = sources.find((entry) => entry.id === annotation.sourceId);
+      annotation.codeIds.forEach((codeId) => {
+        const code = codes.find((entry) => entry.id === codeId);
+        nextRelationships.push({
+          id: `annotation:${annotation.id}:${codeId}`,
+          projectId: annotation.projectId,
+          fromObjectId: annotation.sourceId,
+          toObjectId: codeId,
+          fromEntityType: "source",
+          fromEntityId: annotation.sourceId,
+          toEntityType: "object",
+          toEntityId: codeId,
+          fromEntityName: source?.title || source?.originalFileName || "Source",
+          toEntityName: code?.label ?? "Code",
+          relationshipTypeId: "__home_canvas_annotation",
+          relationshipType: `A${String(annotation.displayId).padStart(2, "0")}`,
+          description: annotation.quote || annotation.note || "",
+          lineShapeOverride: "",
+          lineWeightOverride: null,
+          arrowheadOverride: "",
+          colorOverride: "",
+          attributeValues: [],
+          createdAt: annotation.createdAt,
+          updatedAt: annotation.updatedAt,
+        });
+      });
+    });
+    return nextRelationships;
+  }, [annotationSummaries, codes, relationships, sources]);
+  const buildFreshDrawCanvasNodes = useCallback(() => {
+    const objectTypeById = new Map([...objectTypes, ...homeCanvasVirtualObjectTypes].map((objectType) => [objectType.id, objectType]));
+    const next: Record<string, PostgresCanvasNodeState> = {};
+    drawCanvasObjects.forEach((object, index) => {
+      const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
+      const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
+      const defaultDimensions = appearance.sourceImage
+        ? getSourceCanvasNodeDefaultDimensions()
+        : getCanvasNodeDefaultDimensions(appearance.shape);
+      const column = index % 4;
+      const row = Math.floor(index / 4);
+      const fallbackPosition = { x: column * 260, y: row * 180 };
+      const position = findAvailableCanvasNodePosition({
+        existingNodes: Object.values(next),
+        width: defaultDimensions.width,
+        height: defaultDimensions.height,
+        fallbackPosition,
+      });
+      next[object.id] = {
+        id: object.id,
+        x: position.x,
+        y: position.y,
+        width: defaultDimensions.width,
+        height: defaultDimensions.height,
+      };
+    });
+    return next;
+  }, [drawCanvasObjects, getCanvasPostgresObjectAppearance, homeCanvasVirtualObjectTypes, objectTypes]);
+  const startFreshDrawCanvasSession = useCallback(() => {
+    setDrawCanvasNodes(buildFreshDrawCanvasNodes());
+    setDrawCanvasShapes([]);
+    setDrawCanvasHiddenRelationshipIds([]);
+    setDrawCanvasStateLoaded(true);
+    setDrawSavedDrawingId(null);
+    setDrawSavedDrawingName("");
+    setDrawCanvasSaveNotice("");
+    setCanvasSaveError("");
+    setDrawCanvasAutoLayoutKey((current) => current + 1);
+    setProjectHomeGraphFitKey((current) => current + 1);
+    setActiveScreen("analysis-draw-canvas");
+  }, [buildFreshDrawCanvasNodes]);
   const handleHomeCanvasContextMenu = useCallback((context: {
     kind: "background" | "node" | "edge";
     id: string | null;
@@ -3407,7 +3583,8 @@ export function PostgresProjectHomeView({
       return;
     }
 
-    const canvasObject = homeCanvasObjects.find((object) => object.id === rawId);
+    const canvasObjectsForContext = activeScreen === "analysis-draw-canvas" ? drawCanvasObjects : homeCanvasObjects;
+    const canvasObject = canvasObjectsForContext.find((object) => object.id === rawId);
     const systemKey = canvasObject?.objectTypeSystemKey ?? "";
     if (systemKey === "home_canvas_code") {
       setHomeCanvasContextMenu({
@@ -3446,7 +3623,7 @@ export function PostgresProjectHomeView({
       y,
       canvasPosition: context.canvasPosition,
     });
-  }, [homeCanvasObjects]);
+  }, [activeScreen, drawCanvasObjects, homeCanvasObjects]);
   const handleHomeTimelineItemContextMenu = useCallback((context: {
     kind: "source" | "object" | "relationship";
     id: string;
@@ -3984,6 +4161,20 @@ export function PostgresProjectHomeView({
       setGraphSubmitting(true);
       try {
         const drawing = await getPostgresSavedDrawing(project.id, drawingId);
+        if (drawing.canvasKind === "graph_draw") {
+          setDrawCanvasNodes(Object.fromEntries(drawing.state.nodes.map((node) => [node.id, node])));
+          setDrawCanvasShapes(drawing.state.shapes);
+          setDrawCanvasHiddenRelationshipIds(drawing.state.hiddenRelationshipIds ?? []);
+          setDrawCanvasStateLoaded(true);
+          setDrawSavedDrawingId(drawing.id);
+          setDrawSavedDrawingName(drawing.name);
+          setDrawCanvasSaveNotice("");
+          setCanvasSaveError("");
+          setDrawCanvasAutoLayoutKey(0);
+          setProjectHomeGraphFitKey((current) => current + 1);
+          setActiveScreen("analysis-draw-canvas");
+          return;
+        }
         if (drawing.canvasKind !== "free_draw") {
           setGraphError(`Opening saved ${formatCanvasKindLabel(drawing.canvasKind)} canvases is not wired yet.`);
           return;
@@ -4004,7 +4195,6 @@ export function PostgresProjectHomeView({
         setHiddenCanvasRelationshipIds(drawing.state.hiddenRelationshipIds ?? []);
         setCanvasStateLoaded(true);
         setCanvasSaveError("");
-        setFreeDrawSaveNotice("");
         setFreeDrawSavedDrawingId(mode === "edit" ? drawing.id : null);
         setActiveScreen("free-draw");
       } catch (loadError) {
@@ -4518,8 +4708,8 @@ export function PostgresProjectHomeView({
   useEffect(() => {
     if (activeScreen !== "home" && activeScreen !== "explore") return;
     setCanvasNodes((current) => {
-      const canvasSourceObjects = activeScreen === "home" ? homeCanvasObjects : objects;
-      const canvasSourceObjectTypes = activeScreen === "home" ? [...objectTypes, ...homeCanvasVirtualObjectTypes] : objectTypes;
+      const canvasSourceObjects = activeScreen === "explore" ? objects : homeCanvasObjects;
+      const canvasSourceObjectTypes = activeScreen === "explore" ? objectTypes : [...objectTypes, ...homeCanvasVirtualObjectTypes];
       const objectTypeById = new Map(canvasSourceObjectTypes.map((objectType) => [objectType.id, objectType]));
       const next: Record<string, PostgresCanvasNodeState> = {};
       canvasSourceObjects.forEach((object, index) => {
@@ -5969,6 +6159,212 @@ export function PostgresProjectHomeView({
     }
   }
 
+  const renderAnalysisDrawCanvas = () => (
+    <Suspense fallback={<ViewLoadingFallback />}>
+      <PostgresAnalysisDrawCanvasViewLazy onBack={() => setActiveScreen("analysis-draw")}>
+        <div className="postgres-experiment-home-canvas-column">
+          <PostgresProjectHomeGraphViewLazy
+            createControlRef={homeCanvasCreateControlRef}
+            filterControlRef={homeCanvasFilterControlRef}
+            sizeControlRef={homeCanvasSizeControlRef}
+            createMenuOpen={homeCanvasCreateMenuOpen}
+            setCreateMenuOpen={setHomeCanvasCreateMenuOpen}
+            filterDrawerOpen={homeCanvasFilterDrawerOpen}
+            setFilterDrawerOpen={setHomeCanvasFilterDrawerOpen}
+            sizeMenuOpen={homeCanvasSizeMenuOpen}
+            setSizeMenuOpen={setHomeCanvasSizeMenuOpen}
+            graphLoading={graphLoading}
+            canvasStateLoaded={drawCanvasStateLoaded}
+            loadingFallback={<ViewLoadingFallback />}
+            canManageSources={canManageSources}
+            canManageAnnotations={canManageAnnotations}
+            onCreateSource={openCreateSourceModal}
+            onCreateObject={openCreateObjectModal}
+            onCreateRelationship={() => openCreateRelationshipModal()}
+            onCreateCode={openCreateCodeModal}
+            objectTypes={objectTypes}
+            homeCanvasVirtualObjectTypes={homeCanvasVirtualObjectTypes}
+            homeCanvasObjects={drawCanvasObjects}
+            homeCanvasRelationships={drawCanvasRelationships}
+            homeCanvasRelationshipTypes={homeCanvasRelationshipTypes}
+            canvasNodes={drawCanvasNodes}
+            setCanvasNodes={setDrawCanvasNodes}
+            canvasShapes={drawCanvasShapes}
+            setCanvasShapes={setDrawCanvasShapes}
+            hiddenCanvasRelationshipIds={drawCanvasHiddenRelationshipIds}
+            getObjectAppearance={getCanvasPostgresObjectAppearance}
+            getObjectSurfaceStyle={getPostgresObjectSurfaceStyle}
+            getRelationshipAppearance={getPostgresRelationshipAppearance}
+            getRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
+            getNodeDefaultDimensions={(object, objectTypeRecord) => {
+              const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
+              return appearance.sourceImage
+                ? getSourceCanvasNodeDefaultDimensions()
+                : getCanvasNodeDefaultDimensions(appearance.shape);
+            }}
+            getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
+              const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
+              return appearance.sourceImage
+                ? getSourceCanvasNodeRenderedDimensions(nodeState)
+                : getCanvasNodeRenderedDimensions(appearance.shape, nodeState);
+            }}
+            getInspectorDetails={(selection) => {
+              if (selection.kind === "relationship") {
+                if (selection.relationship.id.startsWith("annotation:")) {
+                  const annotationId = selection.relationship.id.split(":")[1] ?? "";
+                  const annotation = annotationSummaries.find((entry) => entry.id === annotationId);
+                  const source = annotation ? sources.find((entry) => entry.id === annotation.sourceId) : null;
+                  const codeLabel =
+                    selection.relationship.toEntityName.trim() ||
+                    annotation?.primaryCodeLabel?.trim() ||
+                    "";
+                  const previewText = truncatePostgresHomeAnnotationPreview(
+                    annotation?.quote || annotation?.note || selection.relationship.description || "",
+                  );
+
+                  return {
+                    title: annotation ? `Annotation A${String(annotation.displayId).padStart(2, "0")}` : "Annotation",
+                    itemType: "Annotation",
+                    typeDetail: codeLabel ? `Code: ${codeLabel}` : "",
+                    preview:
+                      annotation?.imageRegion && source?.storagePath ? (
+                        <PostgresHomeAnnotationImagePreview
+                          projectStoragePath={project.storagePath}
+                          sourceStoragePath={source.storagePath}
+                          sourceKind={annotation.sourceKind || source.sourceKind}
+                          imageRegion={annotation.imageRegion}
+                        />
+                      ) : previewText ? (
+                        <div className="postgres-explore-inspector-preview">
+                          <p className="postgres-explore-inspector-text">{previewText}</p>
+                        </div>
+                      ) : null,
+                    attributes: [],
+                  };
+                }
+
+                return {
+                  title: selection.relationship.relationshipType.trim() || "Relationship",
+                  itemType: "Relationship",
+                  typeDetail: selection.relationship.relationshipType.trim() || selection.relationshipTypeRecord?.name || "",
+                  attributes: selection.relationship.attributeValues
+                    .filter((value) => value.value.trim())
+                    .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
+                    .map((value) => ({ name: value.attributeName, value: value.value })),
+                };
+              }
+
+              const systemKey = selection.object.objectTypeSystemKey ?? selection.objectTypeRecord?.systemKey ?? "";
+              const sourceVisualKey = getPostgresSourceObjectVisualKey(systemKey);
+              if (sourceVisualKey || systemKey === "home_canvas_source") {
+                return {
+                  title: selection.object.title.trim() || "Untitled source",
+                  itemType: "Source",
+                  typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
+                  attributes: sourceAttributeValues
+                    .filter((value) => value.sourceId === selection.object.id && value.value.trim())
+                    .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
+                    .map((value) => ({ name: value.attributeName, value: value.value })),
+                };
+              }
+
+              if (systemKey === "home_canvas_code") {
+                const parentLabels: string[] = [];
+                let parentCodeId = codes.find((code) => code.id === selection.object.id)?.parentCodeId ?? "";
+                const visitedParentCodeIds = new Set<string>();
+                while (parentCodeId && !visitedParentCodeIds.has(parentCodeId)) {
+                  visitedParentCodeIds.add(parentCodeId);
+                  const parentCode = codes.find((code) => code.id === parentCodeId);
+                  if (!parentCode) break;
+                  parentLabels.unshift(parentCode.label || "Untitled code");
+                  parentCodeId = parentCode.parentCodeId;
+                }
+                return {
+                  title: selection.object.title.trim() || "Untitled code",
+                  itemType: "Code",
+                  typeDetail: parentLabels.length > 0 ? parentLabels.join(" > ") : "Top-level code",
+                  attributes: [],
+                };
+              }
+
+              return {
+                title: selection.object.title.trim() || "Untitled object",
+                itemType: "Object",
+                typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
+                attributes: selection.object.attributeValues
+                  .filter((value) => value.value.trim())
+                  .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
+                  .map((value) => ({ name: value.attributeName, value: value.value })),
+              };
+            }}
+            onCanvasContextMenu={handleHomeCanvasContextMenu}
+            onCanvasSelectionDelete={canDeleteHomeCanvasItems ? startHomeCanvasSelectionDelete : undefined}
+            getRelationshipEndpointKey={({ object, objectTypeRecord }) => {
+              if (!canManageSources) return null;
+              const systemKey = object.objectTypeSystemKey ?? objectTypeRecord?.systemKey ?? "";
+              if (systemKey === "home_canvas_code" || systemKey === "home_canvas_annotation") return null;
+              if (systemKey === "home_canvas_source" || getPostgresSourceObjectVisualKey(systemKey)) {
+                return `source:${object.id}`;
+              }
+              return `object:${object.id}`;
+            }}
+            onCanvasRelationshipDraftComplete={({ fromEndpointKey, toEndpointKey }) => {
+              openCreateRelationshipModal({ fromEndpointKey, toEndpointKey });
+            }}
+            fitOnVisibleKey={projectHomeGraphFitKey}
+            autoLayoutOnVisibleKey={drawCanvasAutoLayoutKey}
+            filteringActive={homeCanvasFilteringActive}
+            collapsedSections={homeCanvasCollapsedSections}
+            sourceRows={homeCanvasSourceRows}
+            objectRows={homeCanvasObjectRows}
+            relationshipRows={homeCanvasRelationshipRows}
+            codeRows={homeCanvasCodeRows}
+            sourceCount={sources.length}
+            objectCount={objects.length}
+            relationshipCount={relationships.length}
+            codeCount={codes.length}
+            onToggleCollapsedSection={toggleHomeCanvasSectionCollapsed}
+            showSection={showHomeCanvasSection}
+            clearSection={clearHomeCanvasSection}
+            setSourceKinds={setHomeCanvasSourceKinds}
+            setObjectTypeIds={setHomeCanvasObjectTypeIds}
+            setRelationshipTypeIds={setHomeCanvasRelationshipTypeIds}
+            setCodeIds={setHomeCanvasCodeIds}
+            customSizesActive={homeCanvasCustomSizesActive}
+            resetAllNodeSizes={resetAllHomeCanvasNodeSizes}
+            sizeGroupCount={homeCanvasSizeGroupCount}
+            sizeCollapsedSections={homeCanvasSizeCollapsedSections}
+            sourceSizeRows={homeCanvasSourceSizeRows}
+            objectSizeRows={homeCanvasObjectSizeRows}
+            codeSizeRows={homeCanvasCodeSizeRows}
+            onToggleSizeSectionCollapsed={toggleHomeCanvasSizeSectionCollapsed}
+            onResizeNodeGroup={resizeHomeCanvasNodeGroup}
+            onOpenDrawTool={() => undefined}
+            drawCanvasToolbar={(
+              <div className="postgres-analysis-draw-canvas-toolbar">
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={openSaveGraphDrawModal}
+                  disabled={drawCanvasSaving}
+                >
+                  {drawCanvasSaving ? "Saving..." : "Save"}
+                </button>
+                {drawSavedDrawingName ? (
+                  <span className="home-restricted-value">{drawSavedDrawingName}</span>
+                ) : (
+                  <span className="home-restricted-value">Unsaved drawing</span>
+                )}
+                {drawCanvasSaveNotice ? <span className="settings-success">{drawCanvasSaveNotice}</span> : null}
+                {canvasSaveError ? <span className="auth-error">{canvasSaveError}</span> : null}
+              </div>
+            )}
+          />
+        </div>
+      </PostgresAnalysisDrawCanvasViewLazy>
+    </Suspense>
+  );
+
   return (
     <div className="app-shell">
       <PostgresSidebar
@@ -6003,19 +6399,6 @@ export function PostgresProjectHomeView({
         onShowAiAnalyze={() => setActiveScreen("ai-analyze")}
         onShowAiAssistSourceAttributes={() => setActiveScreen("ai-assist-source-attributes")}
         onShowAiAssistProcessDocuments={() => setActiveScreen("ai-assist-process-documents")}
-        onShowFreeDraw={() => {
-          clearSavedCanvasSession();
-          setActiveScreen("free-draw");
-        }}
-        onShowExplore={() => {
-          clearSavedCanvasSession();
-          setActiveScreen("explore");
-        }}
-        onShowConstruct={() => {
-          clearSavedCanvasSession();
-          setActiveScreen("construct");
-        }}
-        onShowCanvasView={() => setActiveScreen("view")}
         onShowAppSettings={() => setActiveScreen("app-settings")}
         onBackToGate={onBack}
         onSignOut={onSignOut}
@@ -6551,6 +6934,22 @@ export function PostgresProjectHomeView({
                   setActiveScreen("memos");
                 }}
               />
+            </Suspense>
+          ) : activeScreen === "analysis-draw" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAnalysisDrawViewLazy
+                drawings={savedDrawings.filter((drawing) => drawing.canvasKind === "graph_draw")}
+                onCreateDrawing={startFreshDrawCanvasSession}
+                onOpenDrawing={(drawingId: string) => {
+                  void openSavedDrawingSession(drawingId, "edit");
+                }}
+              />
+            </Suspense>
+          ) : activeScreen === "analysis-draw-canvas" ? (
+            renderAnalysisDrawCanvas()
+          ) : activeScreen === "analysis-network" ? (
+            <Suspense fallback={<ViewLoadingFallback />}>
+              <PostgresAnalysisNetworkViewLazy />
             </Suspense>
           ) : activeScreen === "annotations" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
@@ -8662,78 +9061,7 @@ export function PostgresProjectHomeView({
             </>
           ) : activeScreen === "free-draw" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
-              <PostgresFreeDrawCanvasViewLazy
-                projectId={project.id}
-                objectTypes={objectTypes}
-                objectAttributeDefinitions={objectAttributeDefinitions}
-                objects={objects}
-                relationships={relationships}
-                relationshipTypes={relationshipTypes}
-                relationshipAttributeDefinitions={relationshipAttributeDefinitions}
-                setRelationships={setRelationships}
-                canvasNodes={canvasNodes}
-                setCanvasNodes={setCanvasNodes}
-                canvasShapes={canvasShapes}
-                setCanvasShapes={setCanvasShapes}
-                hiddenCanvasRelationshipIds={hiddenCanvasRelationshipIds}
-                setHiddenCanvasRelationshipIds={setHiddenCanvasRelationshipIds}
-                canvasTool={canvasTool}
-                setCanvasTool={setCanvasTool}
-                canvasScale={canvasScale}
-                setCanvasScale={setCanvasScale}
-                canvasOffset={canvasOffset}
-                setCanvasOffset={setCanvasOffset}
-                canvasRelationshipTypeId={canvasRelationshipTypeId}
-                setCanvasRelationshipTypeId={setCanvasRelationshipTypeId}
-                freeDrawSaveNotice={freeDrawSaveNotice}
-                freeDrawSaving={freeDrawSaving}
-                canvasSaveError={canvasSaveError}
-                savedCanvasSession={savedCanvasSession}
-                onSaveDrawing={async () => {
-                  openSaveFreeDrawModal();
-                }}
-                onCreateObjectAt={openCreateObjectModal}
-                onOpenCreateObjectType={openCreateObjectTypeModal}
-                onOpenCreateRelationshipType={() => setCreateRelationshipTypeOpen(true)}
-                onEditObject={openEditObjectModal}
-                onDeleteObject={(objectId) => setRemovingObjectId(objectId)}
-                onEditRelationship={openEditRelationshipModal}
-                onDeleteRelationship={(relationshipId) => setRemovingRelationshipId(relationshipId)}
-                ObjectShapeSwatchComponent={ObjectShapeSwatch}
-                getPostgresObjectAppearance={getCanvasPostgresObjectAppearance}
-                getPostgresObjectSurfaceStyle={getPostgresObjectSurfaceStyle}
-                getCanvasNodeDefaultDimensions={getCanvasNodeDefaultDimensions}
-                getCanvasNodeRenderedDimensions={getCanvasNodeRenderedDimensions}
-                getPostgresRelationshipAppearance={getPostgresRelationshipAppearance}
-                getPostgresRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
-                normalizePostgresObjectTypeColor={normalizePostgresObjectTypeColor}
-                normalizePostgresRelationshipLineShape={normalizePostgresRelationshipLineShape}
-                normalizePostgresObjectTypeShape={normalizePostgresObjectTypeShape}
-                normalizePostgresObjectFill={normalizePostgresObjectFill}
-                hexToRgba={hexToRgba}
-                translateCanvasShape={translateCanvasShape}
-                resizeCanvasBoxShape={resizeCanvasBoxShape}
-                isWorldPointInsideCanvasShape={isWorldPointInsideCanvasShape}
-                getCanvasShapeBounds={getCanvasShapeBounds}
-                getCanvasNodeBoundaryPoint={getCanvasNodeBoundaryPoint}
-                renderCanvasSketchShapeElement={renderCanvasSketchShapeElement}
-                getCanvasSketchShapeType={getCanvasSketchShapeType}
-                getCanvasSketchShapeFill={getCanvasSketchShapeFill}
-                getCanvasSketchLineStyle={getCanvasSketchLineStyle}
-                getPostgresRelationshipStrokeDasharray={getPostgresRelationshipStrokeDasharray}
-                formatPostgresObjectShapeLabel={formatPostgresObjectShapeLabel}
-                formatPostgresObjectFillLabel={formatPostgresObjectFillLabel}
-                formatPostgresRelationshipLineShapeLabel={formatPostgresRelationshipLineShapeLabel}
-                formatPostgresRelationshipLineWeightLabel={formatPostgresRelationshipLineWeightLabel}
-                formatPostgresRelationshipArrowheadLabel={formatPostgresRelationshipArrowheadLabel}
-                formatCanvasSketchShapeLabel={formatCanvasSketchShapeLabel}
-                postgreRelationshipLineShapePickerComponent={PostgresRelationshipLineShapePicker}
-                objectTypeShapeOptions={POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS}
-                objectFillOptions={POSTGRES_OBJECT_FILL_OPTIONS}
-                relationshipLineShapeOptions={POSTGRES_RELATIONSHIP_LINE_SHAPE_OPTIONS}
-                relationshipLineWeightOptions={POSTGRES_RELATIONSHIP_LINE_WEIGHT_OPTIONS}
-                formatRelationshipTypeConstraintSummary={formatRelationshipTypeConstraintSummary}
-              />
+              <PostgresFreeDrawCanvasViewLazy />
             </Suspense>
           ) : activeScreen === "explore" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
@@ -9122,6 +9450,8 @@ export function PostgresProjectHomeView({
               onEditItem={editHomeCanvasItem}
               onRemoveFromGroup={(menu) => void handleRemoveHomeTimelineItemFromGroup(menu)}
               onDeleteItem={startHomeCanvasDelete}
+              deleteLabel={activeScreen === "analysis-draw-canvas" ? "Remove from canvas" : "Delete"}
+              deleteDisabledTitle={activeScreen === "analysis-draw-canvas" ? "Coders and viewers cannot edit drawings." : undefined}
             />
           ) : null}
           {projectHelpModal ? (
@@ -9238,6 +9568,56 @@ export function PostgresProjectHomeView({
               }}
               onSave={saveRelationshipTypeAttributeDraft}
             />
+          ) : null}
+          {drawCanvasSaveModalOpen ? (
+            <SettingsModal
+              title="Save drawing"
+              onClose={() => setDrawCanvasSaveModalOpen(false)}
+              closeDisabled={drawCanvasSaving}
+              modalClassName="modal--wide"
+            >
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleSaveGraphDrawCanvas();
+                }}
+              >
+                <div className="app-settings-modal-body">
+                  <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                    Choose a name for this saved drawing.
+                  </p>
+                  <label className="form-field">
+                    <span>Drawing name</span>
+                    <input
+                      className="form-input"
+                      value={saveFreeDrawName}
+                      onChange={(event) => setSaveFreeDrawName(event.target.value)}
+                      placeholder="Enter drawing name"
+                      autoFocus
+                      disabled={drawCanvasSaving}
+                    />
+                  </label>
+                  {canvasSaveError ? <div className="form-error">{canvasSaveError}</div> : null}
+                </div>
+                <div className="app-settings-modal-footer">
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setDrawCanvasSaveModalOpen(false)}
+                    disabled={drawCanvasSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn--primary"
+                    disabled={drawCanvasSaving}
+                  >
+                    {drawCanvasSaving ? "Saving..." : "Save drawing"}
+                  </button>
+                </div>
+              </form>
+            </SettingsModal>
           ) : null}
           {saveFreeDrawModalOpen ? (
             <SettingsModal
@@ -9702,8 +10082,12 @@ export function PostgresProjectHomeView({
           ) : null}
           {homeCanvasDeleteTarget ? (
             <GraphConfirmModal
-              title={`Delete ${homeCanvasDeleteTarget.kind}`}
-              warning={(
+              title={homeCanvasDeleteTarget.canvasOnly ? `Remove ${homeCanvasDeleteTarget.kind} from canvas` : `Delete ${homeCanvasDeleteTarget.kind}`}
+              warning={homeCanvasDeleteTarget.canvasOnly ? (
+                <>
+                  This only removes the {homeCanvasDeleteTarget.kind} from this drawing. The project record and its coding data will not be deleted.
+                </>
+              ) : (
                 <>
                   This permanently removes the {homeCanvasDeleteTarget.kind}
                   {homeCanvasDeleteTarget.kind === "object"
@@ -9716,7 +10100,7 @@ export function PostgresProjectHomeView({
                 </>
               )}
               busy={graphSubmitting}
-              confirmLabel="Delete"
+              confirmLabel={homeCanvasDeleteTarget.canvasOnly ? "Remove from canvas" : "Delete"}
               busyLabel="Deleting..."
               confirmDisabled={!canDeleteHomeCanvasItems}
               onClose={() => setHomeCanvasDeleteTarget(null)}
@@ -9725,7 +10109,7 @@ export function PostgresProjectHomeView({
               }}
             >
                 <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  Delete <strong>{homeCanvasDeleteTarget.label}</strong>?
+                  {homeCanvasDeleteTarget.canvasOnly ? "Remove" : "Delete"} <strong>{homeCanvasDeleteTarget.label}</strong>?
                 </p>
             </GraphConfirmModal>
           ) : null}

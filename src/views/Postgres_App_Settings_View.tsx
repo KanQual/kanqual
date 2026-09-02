@@ -6,7 +6,7 @@ import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
-import { DownloadIcon, HelpIcon } from "../components/AppIcons";
+import { DownloadIcon, EyeIcon, EyeOffIcon, HelpIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
@@ -295,22 +295,6 @@ function snapshotRetentionBucketLabels(status: BackupRetentionStatus): Array<{ l
 
 function snapshotRetentionBadgeClass(kind: SnapshotRetentionBadgeKind): string {
   return `backup-badge backup-badge--retention backup-badge--retention-${kind}`;
-}
-
-function PasswordVisibilityIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
-      <path
-        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
 }
 
 function projectCreationSourceLabel(source: string): string {
@@ -1368,7 +1352,7 @@ function EmbeddedPostgresProjectSettings({
                           onClick={() => setEncryptedBackupPasswordVisible((current) => !current)}
                           disabled={!!exporting}
                         >
-                          <PasswordVisibilityIcon />
+                          {encryptedBackupPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                         </button>
                       </div>
                     </label>
@@ -1391,7 +1375,7 @@ function EmbeddedPostgresProjectSettings({
                           onClick={() => setEncryptedBackupPasswordConfirmVisible((current) => !current)}
                           disabled={!!exporting}
                         >
-                          <PasswordVisibilityIcon />
+                          {encryptedBackupPasswordConfirmVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                         </button>
                       </div>
                     </label>

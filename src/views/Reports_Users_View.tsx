@@ -4,7 +4,7 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
 import type { EChartsCoreOption } from "echarts/core";
-import { DownloadIcon, HelpIcon, SaveIcon } from "../components/AppIcons";
+import { DownloadIcon, HelpIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -97,7 +97,7 @@ interface ComparisonMatrixRow {
   values: number[];
 }
 
-interface CoderReportSnapshot {
+export interface CoderReportSnapshot {
   reportType: "coder-report";
   kind: CoderReportKind;
   settings: CoderReportSettings;
@@ -117,7 +117,7 @@ interface CoderReportSnapshot {
   frozenDocumentColumns?: ComparisonMatrixColumn[];
 }
 
-interface CoderReportRow {
+export interface CoderReportRow {
   id: string;
   name: string;
   createdByName: string;
@@ -1642,13 +1642,6 @@ function CoderReportCreationPage({
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsUsers.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
-          {isFrozen ? (
-            canStartReports ? (
-            <button className="btn btn--primary" onClick={() => onUseSettings?.(frozenSnapshot!.settings)}>
-              {t("reportsUsers.newFromSettings")}
-            </button>
-            ) : null
-          ) : null}
         </div>
       </div>
 
@@ -1695,6 +1688,17 @@ function CoderReportCreationPage({
                 >
                   <DownloadIcon className="project-table-header-icon" />
                 </button>
+                {isFrozen && onUseSettings && canStartReports ? (
+                  <button
+                    type="button"
+                    className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                    onClick={() => onUseSettings(frozenSnapshot!.settings)}
+                    title={t("reportsUsers.newFromSettings")}
+                    aria-label={t("reportsUsers.newFromSettings")}
+                  >
+                    <RestartListIcon className="project-table-header-icon" />
+                  </button>
+                ) : null}
                 {!isFrozen ? (
                   <button
                     type="button"
@@ -1981,11 +1985,12 @@ function CoderReportCreationPage({
 export type ReportsUsersViewProps = {
   initialNewModalOpen?: boolean;
   initialNewReportKind?: CoderReportKind;
+  initialSavedReport?: CoderReportRow | null;
   postgresProjectId?: string;
   onBackToReports?: () => void;
 };
 
-export function ReportsUsersView({ initialNewModalOpen = false, initialNewReportKind, postgresProjectId, onBackToReports }: ReportsUsersViewProps = {}) {
+export function ReportsUsersView({ initialNewModalOpen = false, initialNewReportKind, initialSavedReport = null, postgresProjectId, onBackToReports }: ReportsUsersViewProps = {}) {
   const { t } = useI18n();
   const reportColumns = getReportColumns(t);
   const canCreateReports = true;
@@ -1993,7 +1998,7 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
 
   const [showNewModal, setShowNewModal] = useState(initialNewModalOpen && !initialNewReportKind);
   const [newReportKind, setNewReportKind] = useState<CoderReportKind | null>(initialNewReportKind ?? null);
-  const [openSavedRow, setOpenSavedRow] = useState<CoderReportRow | null>(null);
+  const [openSavedRow, setOpenSavedRow] = useState<CoderReportRow | null>(initialSavedReport);
   const [newFromSettings, setNewFromSettings] = useState<CoderReportSettings | null>(null);
   const [rows, setRows] = useState<CoderReportRow[]>([]);
   const [loading, setLoading] = useState(false);

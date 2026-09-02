@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
-import { HelpIcon } from "../components/AppIcons";
+import { EyeIcon, EyeOffIcon, HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
@@ -56,22 +56,6 @@ function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferenc
     themeState: preferences.themeState,
   });
   initTheme();
-}
-
-function PasswordVisibilityIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
-      <path
-        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
 }
 
 function accountInitials(name: string): string {
@@ -446,7 +430,7 @@ export function PostgresUserSettingsView({
                             onClick={() => setCurrentPasswordVisible((current) => !current)}
                             disabled={submitting === "password"}
                           >
-                            <PasswordVisibilityIcon />
+                            {currentPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                           </button>
                         </div>
                       </label>
@@ -468,7 +452,7 @@ export function PostgresUserSettingsView({
                             onClick={() => setNewPasswordVisible((current) => !current)}
                             disabled={submitting === "password"}
                           >
-                            <PasswordVisibilityIcon />
+                            {newPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                           </button>
                         </div>
                         <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -491,7 +475,7 @@ export function PostgresUserSettingsView({
                             onClick={() => setConfirmPasswordVisible((current) => !current)}
                             disabled={submitting === "password"}
                           >
-                            <PasswordVisibilityIcon />
+                            {confirmPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                           </button>
                         </div>
                       </label>

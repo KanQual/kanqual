@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { HelpIcon } from "../components/AppIcons";
+import { HelpIcon, PauseIcon as ClipPauseIcon, PlayIcon as ClipPlayIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
@@ -191,22 +191,6 @@ function formatMediaMilliseconds(value: number): string {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${minutes}:${String(seconds).padStart(2, "0")}`;
   return `${base}.${String(Math.floor(milliseconds / 100)).padStart(1, "0")}`;
-}
-
-function ClipPlayIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
-      <path d="M5.25 3.6v8.8L12 8 5.25 3.6Z" fill="currentColor" />
-    </svg>
-  );
-}
-
-function ClipPauseIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
-      <path d="M4.5 3.5h2.25v9H4.5v-9Zm4.75 0h2.25v9H9.25v-9Z" fill="currentColor" />
-    </svg>
-  );
 }
 
 function AudioAnnotationClip({

@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { LoadingCard } from "./components/LoadingCard";
+import { EyeIcon, EyeOffIcon } from "./components/AppIcons";
 import { AuthProvider } from "./context/AuthContext";
 import { I18nProvider } from "./i18n";
 import { readAppSettings, saveAppSettings } from "./lib/appSettings";
@@ -110,22 +111,6 @@ function useDisableNativeContextMenu(): void {
   }, []);
 }
 
-function PasswordVisibilityIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="password-visibility-icon">
-      <path
-        d="M2 12s3.5-6 10-6s10 6 10 6s-3.5 6-10 6s-10-6-10-6Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
-}
-
 function PostgresForcePasswordChangeView({
   session,
   currentPassword,
@@ -209,7 +194,7 @@ function PostgresForcePasswordChangeView({
                 onClick={() => setNewPasswordVisible((current) => !current)}
                 disabled={saving}
               >
-                <PasswordVisibilityIcon />
+                {newPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
               </button>
             </div>
             <p className="password-requirement-note">Minimum 8 characters.</p>
@@ -233,7 +218,7 @@ function PostgresForcePasswordChangeView({
                 onClick={() => setConfirmPasswordVisible((current) => !current)}
                 disabled={saving}
               >
-                <PasswordVisibilityIcon />
+                {confirmPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
               </button>
             </div>
           </label>

@@ -1,10 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), nodePolyfills()],
+  plugins: [react()],
   clearScreen: false,
   build: {
     rollupOptions: {
@@ -19,7 +18,6 @@ export default defineConfig({
             || id.includes("elkjs")
             || id.includes("src/lib/postgresCanvasGraph.ts")
             || id.includes("src/views/Postgres_Explore_Canvas_View.tsx")
-            || id.includes("src/components/CanvasRichTextEditor.tsx")
           ) {
             return "canvas-graph";
           }

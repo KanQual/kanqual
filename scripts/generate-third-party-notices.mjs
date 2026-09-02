@@ -215,7 +215,7 @@ Generation details:
 
 ## Bundled Third-Party Components
 
-PostgreSQL is redistributed as a bundled runtime. KanQual fetches the platform-specific PostgreSQL runtime archives from the `theseus-rs/postgresql-binaries` release artifacts during packaging.
+PostgreSQL is redistributed as a bundled runtime. KanQual fetches the platform-specific PostgreSQL runtime archives from the \`theseus-rs/postgresql-binaries\` release artifacts during packaging.
 
 The corresponding license text files included with KanQual releases are kept in the [licenses](./licenses/) folder.
 

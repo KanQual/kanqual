@@ -7,7 +7,7 @@ import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { FilterIcon } from "../components/FilterIcon";
-import { DownloadIcon, HelpIcon, SaveIcon } from "../components/AppIcons";
+import { DownloadIcon, HelpIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -112,7 +112,7 @@ interface CodeTreeNode {
 type RelationshipSortKey = "relationshipType" | "object1Name" | "object2Name";
 type RelationshipSortDir = "asc" | "desc";
 
-interface ReportSnapshot {
+export interface ReportSnapshot {
   reportType?: "annotations";
   filteredAnns: AnnItem[];
   caseItems: CaseItem[];
@@ -215,7 +215,7 @@ interface ReportSettings {
   documentAttributeFilters?: Record<string, AttributeFilterConfig>;
 }
 
-interface ReportRow {
+export interface ReportRow {
   id: string;
   name: string;
   createdByName: string;
@@ -1779,7 +1779,7 @@ function ReportPage({
   async function handleSave() {
     if (!canStartReports) return;
     if (!postgresProjectId || !name.trim()) return;
-    if (selCaseIds.size === 0 || selDocIds.size === 0 || selCodeIds.size === 0 || selUserIds.size === 0) {
+    if (filteredAnns.length === 0) {
       setError(t("reportsAnnotations.errors.selectAtLeastOne"));
       return;
     }
@@ -3273,24 +3273,6 @@ function ReportPage({
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsAnnotations.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
-          {isFrozen && onUseSettings && canStartReports && (
-            <button
-              className="btn btn--primary"
-              onClick={() => onUseSettings({
-                caseIds: row!.caseIds,
-                documentIds: row!.documentIds,
-                codeIds: row!.codeIds,
-                userIds: row!.snapshot?.selectedUserIds ?? [],
-                relationshipIds: row!.snapshot?.selectedRelationshipIds ?? [],
-                caseAttributeIds: row!.snapshot?.selectedCaseAttributeIds ?? [],
-                documentAttributeIds: row!.snapshot?.selectedDocumentAttributeIds ?? [],
-                caseAttributeFilters: row!.snapshot?.caseAttributeFilters ?? {},
-                documentAttributeFilters: row!.snapshot?.documentAttributeFilters ?? {},
-              })}
-            >
-              {t("reportsAnnotations.useSettingsForNewReport")}
-            </button>
-          )}
         </div>
       </div>
 
@@ -3690,6 +3672,27 @@ function ReportPage({
                 >
                   <DownloadIcon className="project-table-header-icon" />
                 </button>
+                {isFrozen && onUseSettings && canStartReports && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                    onClick={() => onUseSettings({
+                      caseIds: row!.caseIds,
+                      documentIds: row!.documentIds,
+                      codeIds: row!.codeIds,
+                      userIds: row!.snapshot?.selectedUserIds ?? [],
+                      relationshipIds: row!.snapshot?.selectedRelationshipIds ?? [],
+                      caseAttributeIds: row!.snapshot?.selectedCaseAttributeIds ?? [],
+                      documentAttributeIds: row!.snapshot?.selectedDocumentAttributeIds ?? [],
+                      caseAttributeFilters: row!.snapshot?.caseAttributeFilters ?? {},
+                      documentAttributeFilters: row!.snapshot?.documentAttributeFilters ?? {},
+                    })}
+                    title={t("reportsAnnotations.useSettingsForNewReport")}
+                    aria-label={t("reportsAnnotations.useSettingsForNewReport")}
+                  >
+                    <RestartListIcon className="project-table-header-icon" />
+                  </button>
+                )}
                 {!isFrozen && (
                   <button
                     type="button"
@@ -4355,12 +4358,13 @@ function ReportPage({
 
 export type CodeReportsViewProps = {
   initialNewReportOpen?: boolean;
+  initialSavedReport?: ReportRow | null;
   postgresProjectId?: string;
   projectStoragePath?: string;
   onBackToReports?: () => void;
 };
 
-export function CodeReportsView({ initialNewReportOpen = false, postgresProjectId, projectStoragePath, onBackToReports }: CodeReportsViewProps = {}) {
+export function CodeReportsView({ initialNewReportOpen = false, initialSavedReport = null, postgresProjectId, projectStoragePath, onBackToReports }: CodeReportsViewProps = {}) {
   const { t } = useI18n();
   const cols = getCols(t);
   const canCreateReports = true;
@@ -4381,7 +4385,7 @@ export function CodeReportsView({ initialNewReportOpen = false, postgresProjectI
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const [openRow,        setOpenRow]        = useState<ReportRow | null>(null);
+  const [openRow,        setOpenRow]        = useState<ReportRow | null>(initialSavedReport);
   const [showNew,        setShowNew]        = useState(initialNewReportOpen);
   const [newFromSettings, setNewFromSettings] = useState<ReportSettings | null>(null);
 
