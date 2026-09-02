@@ -4,6 +4,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { copyFile, readDir, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
+import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
@@ -21,6 +22,7 @@ import {
   type LocalLlmProvider,
 } from "../lib/appSettings";
 import { getAppRuntimeInfo, joinFsPath, type AppRuntimeInfo } from "../lib/dataRoot";
+import { DEFAULT_GETTING_STARTED_STATE, normalizeGettingStartedState, writeGettingStartedHandoff, type GettingStartedState } from "../lib/gettingStartedGuide";
 import { buildPermissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
 import { notifyPostgresEmbeddingModelDownloadChanged } from "./App_Shell_Helpers";
 import { projectLogActionCategory, projectLogActionLabel } from "./Project_Log_View";
@@ -106,6 +108,7 @@ type AppSettingsModalId =
   | "diagnostics"
   | "administratorLog"
   | "permissions"
+  | "gettingStarted"
   | "addProject"
   | "manageProjects"
   | "addUser"
@@ -542,6 +545,8 @@ export function PostgresAdminSettingsView({
   const [fontSize, setFontSize] = useState<FontSize>("normal");
   const [sourceTextSizePx, setSourceTextSizePx] = useState(15);
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
+  const [gettingStartedState, setGettingStartedState] = useState<GettingStartedState>(DEFAULT_GETTING_STARTED_STATE);
+  const [gettingStartedPromptOpen, setGettingStartedPromptOpen] = useState(false);
   const [networkSwitching, setNetworkSwitching] = useState(false);
   const [confirmEnableNetworkMode, setConfirmEnableNetworkMode] = useState(false);
   const [pendingNetworkMode, setPendingNetworkMode] = useState<"network" | "internet">("network");
@@ -723,6 +728,13 @@ export function PostgresAdminSettingsView({
       tone: "default" as const,
     },
     {
+      id: "gettingStarted",
+      title: "Getting Started",
+      description: "Restart or dismiss the first-run guide.",
+      icon: "?",
+      tone: "default" as const,
+    },
+    {
       id: "addProject",
       title: "Add Project",
       description: "Create a project and assign initial project members.",
@@ -739,7 +751,7 @@ export function PostgresAdminSettingsView({
     {
       id: "addUser",
       title: "Add User",
-      description: "Create a PostgreSQL user and assign project roles.",
+      description: "Create a PostgreSQL user account.",
       icon: "+U",
       tone: "admin" as const,
     },
@@ -781,7 +793,7 @@ export function PostgresAdminSettingsView({
     {
       id: "preferences",
       sectionHeading: "Preferences",
-      cardIds: ["appearance", "language"],
+      cardIds: ["appearance", "language", "gettingStarted"],
     },
   ];
   const appSettingsSections = appSettingsSectionSpecs
@@ -1635,10 +1647,60 @@ export function PostgresAdminSettingsView({
     setFontSize(saved.fontSize);
     setSourceTextSizePx(saved.sourceTextSizePx);
     setRecentProjectLimit(saved.recentProjectLimit);
+    setGettingStartedState(normalizeGettingStartedState(saved.gettingStartedState));
     applyPostgresRuntimeThemePreferences(saved);
     if (successMessage) setNotice(successMessage);
     setError("");
   }, []);
+
+  async function persistGettingStartedState(nextState: GettingStartedState) {
+    const normalized = normalizeGettingStartedState(nextState);
+    setNotice("");
+    await persistUserPreferences({
+      theme,
+      density,
+      fontSize,
+      sourceTextSizePx,
+      locale,
+      recentProjectLimit,
+      themeState: getStoredThemeState(),
+      gettingStartedState: normalized,
+    });
+  }
+
+  async function startGettingStartedGuide() {
+    const nextState = normalizeGettingStartedState({
+      ...gettingStartedState,
+      dismissed: false,
+      completed: false,
+      step: gettingStartedState.step || "createProject",
+      adminUserId: authSession.user.id,
+      currentActor: "admin",
+    });
+    await persistGettingStartedState(nextState);
+    setGettingStartedPromptOpen(false);
+  }
+
+  async function dismissGettingStartedGuide() {
+    await persistGettingStartedState({
+      ...gettingStartedState,
+      dismissed: true,
+      completed: false,
+    });
+    setGettingStartedPromptOpen(false);
+    if (activeModal === "gettingStarted") setActiveModal(null);
+  }
+
+  async function restartGettingStartedGuide() {
+    await persistGettingStartedState({
+      ...DEFAULT_GETTING_STARTED_STATE,
+      step: "createProject",
+      adminUserId: authSession.user.id,
+      currentActor: "admin",
+    });
+    setGettingStartedPromptOpen(false);
+    setActiveModal(null);
+  }
 
   const refreshPostgresDetails = useCallback(async () => {
     setLoading(true);
@@ -1676,6 +1738,14 @@ export function PostgresAdminSettingsView({
       setFontSize(nextUserPreferences.fontSize);
       setSourceTextSizePx(nextUserPreferences.sourceTextSizePx);
       setRecentProjectLimit(nextUserPreferences.recentProjectLimit);
+      const normalizedGettingStartedState = normalizeGettingStartedState(nextUserPreferences.gettingStartedState);
+      setGettingStartedState(normalizedGettingStartedState);
+      setGettingStartedPromptOpen(
+        !normalizedGettingStartedState.dismissed
+        && !normalizedGettingStartedState.completed
+        && nextProjects.length === 0
+        && nextAppUsers.length <= 1,
+      );
       applyPostgresRuntimeThemePreferences(nextUserPreferences);
       return { projects: nextProjects };
     } catch (loadError) {
@@ -1874,6 +1944,7 @@ export function PostgresAdminSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     });
   }
@@ -1888,6 +1959,7 @@ export function PostgresAdminSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     });
   }
@@ -1902,6 +1974,7 @@ export function PostgresAdminSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     }, "Theme updated.");
   }
@@ -2093,8 +2166,20 @@ export function PostgresAdminSettingsView({
       }
       setAuthStatus(await getPostgresAuthStatus());
       resetAddProjectModal();
-      setActiveModal(null);
-      setNotice(`Created project ${created.name}.`);
+      if (gettingStartedState.step === "createProject") {
+        await persistGettingStartedState({
+          ...gettingStartedState,
+          step: "createUser",
+          projectId: created.id,
+          adminUserId: gettingStartedState.adminUserId || authSession.user.id,
+          currentActor: "admin",
+        });
+        setAddUserTab("account");
+        setActiveModal(null);
+      } else {
+        setActiveModal(null);
+        setNotice(`Created project ${created.name}.`);
+      }
     } catch (createError) {
       setError(describeUnknownError(createError));
     } finally {
@@ -2207,20 +2292,39 @@ export function PostgresAdminSettingsView({
         password: addUserPassword,
         mustChangePassword: true,
       });
+      const createdMemberships: PostgresProjectUser[] = [];
       for (const [projectId, role] of selectedProjectRoles) {
-        await createPostgresProjectUser({
+        createdMemberships.push(await createPostgresProjectUser({
           projectId,
           appUserId: created.id,
           role,
-        });
+        }));
       }
       setAppUsers((current) => [...current.filter((user) => user.id !== created.id), created]
         .sort((a, b) => a.name.localeCompare(b.name) || a.username.localeCompare(b.username)));
+      if (createdMemberships.length) {
+        setProjectMemberships((current) => [
+          ...current.filter((membership) => !createdMemberships.some((createdMembership) => createdMembership.id === membership.id)),
+          ...createdMemberships,
+        ]);
+      }
       setAuthStatus(await getPostgresAuthStatus());
       await refreshPostgresDetails();
       resetAddUserModal();
-      setActiveModal(null);
-      setNotice(`Created PostgreSQL app user ${created.username}. They will be asked to change their password on first login.`);
+      if (gettingStartedState.step === "createUser") {
+        await persistGettingStartedState({
+          ...gettingStartedState,
+          step: "loginAsUser",
+          userId: created.id,
+          temporaryUsername: created.username,
+          adminUserId: gettingStartedState.adminUserId || authSession.user.id,
+          currentActor: "admin",
+        });
+        setActiveModal(null);
+      } else {
+        setActiveModal(null);
+        setNotice(`Created PostgreSQL app user ${created.username}. They will be asked to change their password on first login.`);
+      }
     } catch (createError) {
       setError(describeUnknownError(createError));
     } finally {
@@ -2428,6 +2532,89 @@ export function PostgresAdminSettingsView({
 
       {notice ? <p className="settings-success">{notice}</p> : null}
       {error ? <p className="auth-error">{error}</p> : null}
+      {gettingStartedState.step === "loginAsUser" && !gettingStartedState.completed && !gettingStartedState.dismissed ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Sign in as the project user"
+            onDismiss={() => {
+              void dismissGettingStartedGuide();
+            }}
+          >
+            <p>
+              Click the sign-out button, then log in as {gettingStartedState.temporaryUsername || "the user you created"}. You will be asked to choose a new password before opening the project.
+            </p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {gettingStartedState.step === "createProject" && !gettingStartedState.completed && !gettingStartedState.dismissed && activeModal !== "addProject" ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <div className="getting-started-admin-callout getting-started-spotlight-target">
+            <GettingStartedGuideCallout
+              title="Create a project"
+              onDismiss={() => {
+                void dismissGettingStartedGuide();
+              }}
+            >
+              <p>Click Add Project to create the workspace you will use for the rest of the walkthrough.</p>
+            </GettingStartedGuideCallout>
+          </div>
+        </>
+      ) : null}
+      {gettingStartedState.step === "createUser" && !gettingStartedState.completed && !gettingStartedState.dismissed && activeModal !== "addUser" ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <div className="getting-started-admin-callout getting-started-spotlight-target">
+            <GettingStartedGuideCallout
+              title="Create a user"
+              onDismiss={() => {
+                void dismissGettingStartedGuide();
+              }}
+            >
+              <p>Click Add User to create the project account that will do the practice coding work.</p>
+            </GettingStartedGuideCallout>
+          </div>
+        </>
+      ) : null}
+
+      {gettingStartedPromptOpen ? (
+        <SettingsModal
+          title="Getting Started"
+          onClose={() => {
+            void dismissGettingStartedGuide();
+          }}
+        >
+          <div className="app-settings-modal-body">
+            <p className="users-guide-copy">
+              Do you need some help getting started?
+            </p>
+            <p className="users-guide-copy">
+              The guide will walk through creating a project, creating a project user, adding a source, making a code, and applying it to text.
+            </p>
+          </div>
+          <div className="app-settings-modal-footer">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                void dismissGettingStartedGuide();
+              }}
+            >
+              No thanks
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => {
+                void startGettingStartedGuide();
+              }}
+            >
+              Yes, guide me
+            </button>
+          </div>
+        </SettingsModal>
+      ) : null}
 
       {helpOpen ? (
         <SettingsModal title="App Settings Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
@@ -2460,7 +2647,10 @@ export function PostgresAdminSettingsView({
                     <button
                       key={card.id}
                       type="button"
-                      className={`app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--${card.tone}`}
+                      className={`app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--${card.tone}${(
+                        (gettingStartedState.step === "createProject" && activeModal !== "addProject" && card.id === "addProject")
+                        || (gettingStartedState.step === "createUser" && activeModal !== "addUser" && card.id === "addUser")
+                      ) && !gettingStartedState.completed && !gettingStartedState.dismissed ? " getting-started-spotlight-target" : ""}`}
                       onClick={() => setActiveModal(card.id)}
                     >
                       <span className="app-settings-overview-card-icon" aria-hidden="true">{card.icon}</span>
@@ -2477,10 +2667,24 @@ export function PostgresAdminSettingsView({
       {onSignOut ? (
         <button
           type="button"
-          className="admin-signout-button"
+          className={`admin-signout-button${gettingStartedState.step === "loginAsUser" && !gettingStartedState.dismissed && !gettingStartedState.completed ? " getting-started-spotlight-target" : ""}`}
           aria-label="Sign out"
           title="Sign out"
-          onClick={() => void onSignOut()}
+          onClick={() => {
+            if (gettingStartedState.step === "loginAsUser" && !gettingStartedState.dismissed && !gettingStartedState.completed) {
+              writeGettingStartedHandoff({
+                projectId: gettingStartedState.projectId,
+                userId: gettingStartedState.userId,
+                sourceId: gettingStartedState.sourceId,
+                codeId: gettingStartedState.codeId,
+                adminUserId: gettingStartedState.adminUserId || authSession.user.id,
+                currentActor: "projectUser",
+                temporaryUsername: gettingStartedState.temporaryUsername,
+                step: "loginAsUser",
+              });
+            }
+            void onSignOut();
+          }}
         >
           <LogoutIcon className="admin-signout-icon" />
         </button>
@@ -2500,6 +2704,7 @@ export function PostgresAdminSettingsView({
               sourceTextSizePx,
               locale: nextLocale,
               recentProjectLimit,
+              gettingStartedState,
               themeState: getStoredThemeState(),
             }, t("appSettings.language.saved"));
           }}
@@ -2509,6 +2714,62 @@ export function PostgresAdminSettingsView({
             setNetworkError("");
           }}
         />
+      ) : null}
+
+      {activeModal === "gettingStarted" ? (
+        <SettingsModal title="Getting Started" onClose={() => setActiveModal(null)}>
+          <div className="app-settings-modal-body">
+            <div className="app-settings-modal-sections">
+              <SettingsModalSection title="Guide">
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">First-run guide</div>
+                    <div className="settings-row-desc">
+                      Walk through project setup, user setup, source upload, code creation, and the first coded annotation.
+                    </div>
+                  </div>
+                  <div className="settings-row-value">
+                    {gettingStartedState.completed
+                      ? "Completed"
+                      : gettingStartedState.dismissed
+                      ? "Dismissed"
+                      : gettingStartedState.step
+                      ? "In progress"
+                      : "Not started"}
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">Current step</div>
+                    <div className="settings-row-desc">
+                      {gettingStartedState.step || "The guide has not started yet."}
+                    </div>
+                  </div>
+                </div>
+              </SettingsModalSection>
+            </div>
+          </div>
+          <div className="app-settings-modal-footer">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                void dismissGettingStartedGuide();
+              }}
+            >
+              Dismiss guide
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => {
+                void restartGettingStartedGuide();
+              }}
+            >
+              Restart guide
+            </button>
+          </div>
+        </SettingsModal>
       ) : null}
 
       {activeModal === "appearance" ? (
@@ -4493,6 +4754,16 @@ export function PostgresAdminSettingsView({
             <form id="postgres-admin-add-project-form" className="app-settings-modal-body" onSubmit={handleCreatePostgresProject}>
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
+                  {gettingStartedState.step === "createProject" ? (
+                    <GettingStartedGuideCallout
+                      title="Project details"
+                      onDismiss={() => {
+                        void dismissGettingStartedGuide();
+                      }}
+                    >
+                      <p>Give the project a name and optional description. You can ignore Members for now; the guide will help you add the project user next.</p>
+                    </GettingStartedGuideCallout>
+                  ) : null}
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default" style={{ alignItems: "center" }}>
                     <div className="segmented-control modal-segmented-control">
                       <button
@@ -4806,6 +5077,23 @@ export function PostgresAdminSettingsView({
             <form id="postgres-admin-add-user-form" className="app-settings-modal-body" onSubmit={handleCreatePostgresUser}>
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
+                  {gettingStartedState.step === "createUser" ? (
+                    <GettingStartedGuideCallout
+                      title={addUserTab === "projects" ? "Assign the project" : "User details"}
+                      onDismiss={() => {
+                        void dismissGettingStartedGuide();
+                      }}
+                    >
+                      {addUserTab === "projects" ? (
+                        <>
+                          <p>Find the project you just created and choose Owner in its Role field, then click Create.</p>
+                          <p>Owner is used for this walkthrough so the guide user can try the full workflow. Editor, Coder, and Viewer are more limited roles for normal project work.</p>
+                        </>
+                      ) : (
+                        <p>Create a project user with a username and temporary password, then click Next.</p>
+                      )}
+                    </GettingStartedGuideCallout>
+                  ) : null}
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default" style={{ alignItems: "center" }}>
                     <div className="segmented-control modal-segmented-control">
                       <button
@@ -4907,7 +5195,10 @@ export function PostgresAdminSettingsView({
                               </thead>
                               <tbody>
                                 {projects.map((project) => (
-                                  <tr key={project.id} className="users-row">
+                                  <tr
+                                    key={project.id}
+                                    className={`users-row${gettingStartedState.step === "createUser" && addUserTab === "projects" && gettingStartedState.projectId === project.id && !gettingStartedState.dismissed && !gettingStartedState.completed ? " getting-started-spotlight-target" : ""}`}
+                                  >
                                     <td className="users-td users-td--name">{project.name}</td>
                                     <td className="users-td users-td--muted">{project.databaseName}</td>
                                     <td className="users-td">

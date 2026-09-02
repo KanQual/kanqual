@@ -105,6 +105,8 @@ import {
   TextSizeControls,
   usePostgresSourceTextSizePreference,
 } from "./Postgres_Source_Coding_Shared";
+import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
+import type { GettingStartedState } from "../lib/gettingStartedGuide";
 import { formatMediaTime } from "./Postgres_Source_Media_Timeline";
 import { PostgresSourceAiTextCodingView } from "./Postgres_Source_AI_Text_Coding_View";
 import { PostgresSourceTextCodingView } from "./Postgres_Source_Text_Coding_View";
@@ -139,6 +141,7 @@ const SOURCE_SHAPE_PICKER_PREVIEW_FILL_TRANSPARENCY = 60;
 type SourceUploadDraft = {
   id: string;
   file: File;
+  reviewed: boolean;
   title: string;
   sourceKind: string;
   notes: string;
@@ -305,7 +308,6 @@ const SOURCE_IMPORT_ACCEPTED_EXTS = new Set([
   "txt",
   "rtf",
   "docx",
-  "csv",
   "pdf",
   "png",
   "jpg",
@@ -327,7 +329,7 @@ const SOURCE_IMPORT_ACCEPTED_EXTS = new Set([
   "webm",
   "m4v",
 ]);
-const SOURCE_IMPORT_TEXT_EXTS = new Set(["txt", "rtf", "docx", "csv"]);
+const SOURCE_IMPORT_TEXT_EXTS = new Set(["txt", "rtf", "docx"]);
 const SOURCE_IMPORT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 const SOURCE_IMPORT_AUDIO_EXTS = new Set(["mp3", "wav", "m4a", "aac", "ogg", "flac"]);
 const SOURCE_IMPORT_VIDEO_EXTS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
@@ -1440,7 +1442,7 @@ async function extractPdfText(file: File): Promise<string> {
 
 async function extractTextFromFile(file: File): Promise<string> {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "txt" || ext === "csv") return file.text();
+  if (ext === "txt") return file.text();
   if (ext === "rtf") return stripRtf(await file.text());
   if (ext === "docx") return extractDocxText(file);
   if (ext === "pdf") return extractPdfText(file);
@@ -1471,7 +1473,7 @@ function describeUploadProcessing(file: File): string {
 }
 
 function uploadTabAcceptValue(tab: SourceUploadTab): string {
-  if (tab === "text") return ".txt,.rtf,.docx,.csv";
+  if (tab === "text") return ".txt,.rtf,.docx";
   if (tab === "pdf") return ".pdf,application/pdf";
   if (tab === "image") return "image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg";
   if (tab === "audio") return "audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac";
@@ -1479,7 +1481,7 @@ function uploadTabAcceptValue(tab: SourceUploadTab): string {
 }
 
 function uploadTabHint(tab: SourceUploadTab): string {
-  if (tab === "text") return "txt / rtf / docx / csv";
+  if (tab === "text") return "txt / rtf / docx";
   if (tab === "pdf") return "pdf";
   if (tab === "image") return "png / jpg / gif / webp / bmp / svg";
   if (tab === "audio") return "mp3 / wav / m4a / aac / ogg / flac";
@@ -2101,6 +2103,8 @@ export function SourceImportModal({
   sourceTypeSettings = [],
   saving,
   error,
+  gettingStartedAddSourceActive = false,
+  onGettingStartedDismiss,
   onCancel,
   onSave,
 }: {
@@ -2115,6 +2119,8 @@ export function SourceImportModal({
   sourceTypeSettings?: PostgresSourceTypeSetting[];
   saving: boolean;
   error: string | null;
+  gettingStartedAddSourceActive?: boolean;
+  onGettingStartedDismiss?: () => void;
   onCancel: () => void;
   onSave: (payload:
     | {
@@ -2226,6 +2232,7 @@ export function SourceImportModal({
         nextDrafts.push({
           id: `${file.name}-${file.size}-${file.lastModified}`,
           file,
+          reviewed: false,
           title: preliminarySourceTitleFromFileName(file.name),
           sourceKind: draftSourceKind,
           notes: "",
@@ -2393,11 +2400,43 @@ export function SourceImportModal({
             pendingImageFile: payload.pendingImageFile,
             removeImage: payload.removeImage,
             attributeValuesByDefinitionId: payload.attributeValuesByDefinitionId,
+            reviewed: true,
           }
         : draft
     )));
     setReviewDraftId(null);
   }
+
+  const gettingStartedReviewPending =
+    gettingStartedAddSourceActive
+    && reviewOpen
+    && !reviewDraftId
+    && uploadDrafts.some((draft) => !draft.reviewed);
+  const gettingStartedApprovalPending =
+    gettingStartedAddSourceActive
+    && reviewOpen
+    && !reviewDraftId
+    && uploadDrafts.length > 0
+    && uploadDrafts.every((draft) => draft.reviewed);
+  const gettingStartedReviewActive =
+    gettingStartedAddSourceActive
+    && !!reviewDraftId;
+  const gettingStartedUploadPending =
+    gettingStartedAddSourceActive
+    && !reviewOpen
+    && !reviewDraftId
+    && mode === "upload"
+    && uploadTab === "text"
+    && uploadDrafts.length === 0;
+  const gettingStartedCreateSourcePending =
+    gettingStartedAddSourceActive
+    && !reviewOpen
+    && !reviewDraftId
+    && mode === "upload"
+    && uploadTab === "text"
+    && uploadDrafts.length > 0;
+  const gettingStartedUploadModalSpotlightActive =
+    gettingStartedUploadPending || gettingStartedCreateSourcePending;
 
   return (
     <>
@@ -2406,6 +2445,7 @@ export function SourceImportModal({
         onClose={onCancel}
         closeDisabled={saving}
         modalClassName={`doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : ""}`}
+        overlayClassName={gettingStartedUploadModalSpotlightActive ? "modal-overlay--getting-started-spotlight" : ""}
       >
         <div className="app-settings-modal-body">
           <div className="doc-upload-modal-title-row">
@@ -2470,7 +2510,7 @@ export function SourceImportModal({
                 }}
               />
               <div
-                className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${uploadDrafts.length > 0 ? " doc-dropzone--filled" : ""}`}
+                className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${uploadDrafts.length > 0 ? " doc-dropzone--filled" : ""}${gettingStartedAddSourceActive && mode === "upload" && uploadTab === "text" && uploadDrafts.length === 0 ? " getting-started-spotlight-target" : ""}`}
                 onClick={() => !uploadDrafts.length && fileInputRef.current?.click()}
                 onDragEnter={handleDragEnter}
                 onDragOver={handleDragOver}
@@ -2536,7 +2576,7 @@ export function SourceImportModal({
         <div className="app-settings-modal-footer">
           <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
           <button
-            className="btn btn--primary"
+            className={`btn btn--primary${gettingStartedCreateSourcePending ? " getting-started-spotlight-target" : ""}`}
             disabled={saving || !canSubmit}
             onClick={() => {
               if (mode === "paste") {
@@ -2558,12 +2598,35 @@ export function SourceImportModal({
           </button>
         </div>
       </SettingsModal>
+      {gettingStartedUploadPending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Create the source"
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>Click the upload box to open the file explorer, then select a text file for the walkthrough.</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {gettingStartedCreateSourcePending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Create the source"
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>Click Create Source to continue.</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
       {reviewOpen ? (
         <SettingsModal
           title="Approve Sources"
           onClose={() => setReviewOpen(false)}
           closeDisabled={saving}
           modalClassName="modal--wide source-import-review-modal"
+          overlayClassName={gettingStartedReviewPending || gettingStartedApprovalPending ? "modal-overlay--getting-started-spotlight" : ""}
         >
           <div className="app-settings-modal-body">
             <p className="users-guide-copy" style={{ marginTop: 0, marginBottom: 16 }}>
@@ -2584,7 +2647,7 @@ export function SourceImportModal({
                       <td className="users-td source-import-review-actions-cell">
                         <button
                           type="button"
-                          className="btn btn--ghost source-import-review-btn"
+                          className={`btn btn--ghost source-import-review-btn${gettingStartedReviewPending && !draft.reviewed ? " getting-started-spotlight-target" : ""}`}
                           onClick={() => setReviewDraftId(draft.id)}
                           disabled={saving || extractingDraftIds.includes(draft.id)}
                         >
@@ -2614,7 +2677,7 @@ export function SourceImportModal({
           <div className="app-settings-modal-footer">
               <button className="btn" onClick={() => setReviewOpen(false)} disabled={saving}>Back</button>
               <button
-                className="btn btn--primary"
+                className={`btn btn--primary${gettingStartedApprovalPending ? " getting-started-spotlight-target" : ""}`}
                 disabled={saving || uploadDrafts.length === 0 || extractingDraftIds.length > 0}
                 onClick={() => {
                   void onSave({
@@ -2644,6 +2707,28 @@ export function SourceImportModal({
           </div>
         </SettingsModal>
       ) : null}
+      {gettingStartedReviewPending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Review the source"
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>Click Review to check the source before creating it.</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {gettingStartedApprovalPending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Create the source"
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>Click Approve and Create to add the reviewed source to the project.</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
       {reviewDraftId ? (() => {
         const reviewDraft = uploadDrafts.find((draft) => draft.id === reviewDraftId) ?? null;
         if (!reviewDraft) return null;
@@ -2657,11 +2742,23 @@ export function SourceImportModal({
             attributeValuesByDefinitionId={reviewDraft.attributeValuesByDefinitionId}
             saving={saving}
             error={null}
+            gettingStartedReviewActive={gettingStartedReviewActive}
             onCancel={() => setReviewDraftId(null)}
             onSave={(payload) => saveReviewedUploadDraft(reviewDraft.id, payload)}
           />
         );
       })() : null}
+      {gettingStartedReviewActive ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Confirm source details"
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>Confirm the name and contents. You can ignore the rest of this modal for now, then click Save.</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
     </>
   );
 }
@@ -2675,6 +2772,7 @@ export function SourceEditorModal({
   attributeValuesByDefinitionId,
   saving,
   error,
+  gettingStartedReviewActive = false,
   onCancel,
   onSave,
 }: {
@@ -2686,6 +2784,7 @@ export function SourceEditorModal({
   attributeValuesByDefinitionId: Record<string, string>;
   saving: boolean;
   error: string | null;
+  gettingStartedReviewActive?: boolean;
   onCancel: () => void;
   onSave: (payload: SourceEditorPayload) => void;
 }) {
@@ -2842,7 +2941,13 @@ export function SourceEditorModal({
   }
 
   return (
-    <SettingsModal title={title} onClose={onCancel} closeDisabled={saving} modalClassName="modal--wide assoc-doc-modal">
+    <SettingsModal
+      title={title}
+      onClose={onCancel}
+      closeDisabled={saving}
+      modalClassName="modal--wide assoc-doc-modal"
+      overlayClassName={gettingStartedReviewActive ? "modal-overlay--getting-started-spotlight" : ""}
+    >
       <div className={`app-settings-modal-body ${activeTab === "graphics" ? "source-editor-modal-body--graphics" : ""}`}>
         <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Source editor tabs">
           <button
@@ -3201,7 +3306,7 @@ export function SourceEditorModal({
       <div className="app-settings-modal-footer">
         <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
         <button
-          className="btn btn--primary"
+          className={`btn btn--primary${gettingStartedReviewActive ? " getting-started-spotlight-target" : ""}`}
           onClick={() => onSave({
             sourceKind,
             name,
@@ -4427,6 +4532,8 @@ export type PostgresSourcesViewProps = {
   initialSourceId?: string | null;
   initialAnnotationId?: string | null;
   initialTextSegment?: { startOffset: number; endOffset: number } | null;
+  gettingStartedState?: GettingStartedState | null;
+  onGettingStartedStateChange?: (state: Partial<GettingStartedState>) => void | Promise<void>;
   onInitialNavigationHandled?: () => void;
   onOpenPostgresMemoDraft: (payload: { sourceIds?: string[]; annotationIds?: string[]; codeIds?: string[] }) => void;
 };
@@ -4446,6 +4553,8 @@ export function PostgresSourcesView({
   initialSourceId,
   initialAnnotationId,
   initialTextSegment,
+  gettingStartedState,
+  onGettingStartedStateChange,
   onInitialNavigationHandled,
   onOpenPostgresMemoDraft,
 }: PostgresSourcesViewProps) {
@@ -5208,8 +5317,9 @@ export function PostgresSourcesView({
     setSubmitting(true);
     setSubmitError(null);
     try {
+      let createdGuideSourceId = "";
       if (payload.mode === "paste") {
-        await createPostgresSource({
+        const created = await createPostgresSource({
           projectId,
           sourceKind: payload.sourceKind,
           title: payload.title,
@@ -5223,6 +5333,7 @@ export function PostgresSourcesView({
             originalFileName: "",
             storagePath: "",
           });
+        createdGuideSourceId = created.id;
       } else {
         const createdUploadItems: Array<{ source: PostgresSource; draft: typeof payload.items[number] }> = [];
         for (const item of payload.items) {
@@ -5265,6 +5376,9 @@ export function PostgresSourcesView({
             });
           }
           createdUploadItems.push({ source: createdSource, draft: item });
+          if (!createdGuideSourceId) {
+            createdGuideSourceId = createdSource.id;
+          }
         }
         for (const definition of sourceAttributeDefinitions) {
           const nextCreatedValues = createdUploadItems
@@ -5295,6 +5409,17 @@ export function PostgresSourcesView({
       }
       setNewSourceOpen(false);
       await loadSources();
+      if (
+        gettingStartedState?.step === "addTextSource"
+        && !gettingStartedState.dismissed
+        && !gettingStartedState.completed
+        && createdGuideSourceId
+      ) {
+        await onGettingStartedStateChange?.({
+          sourceId: createdGuideSourceId,
+          step: "openCodingView",
+        });
+      }
     } catch (saveError) {
       setSubmitError(saveError instanceof Error ? saveError.message : "Failed to create source.");
     } finally {
@@ -5902,6 +6027,27 @@ export function PostgresSourcesView({
   const pageTitle = showAttributesTable
     ? "Source Attributes"
     : pageTitleOverride ?? (codingEnabled ? "Code Sources" : "Sources");
+  const gettingStartedGuideActive =
+    !!gettingStartedState
+    && !gettingStartedState.dismissed
+    && !gettingStartedState.completed;
+  const gettingStartedAddSourceActive =
+    gettingStartedGuideActive
+    && gettingStartedState?.step === "addTextSource";
+  const gettingStartedOpenSourceActive =
+    gettingStartedGuideActive
+    && codingEnabled
+    && gettingStartedState?.step === "openCodingView";
+
+  function handleSourceRowClick(row: SourceRow) {
+    setSelectedRow(row);
+    if (
+      gettingStartedOpenSourceActive
+      && (!gettingStartedState?.sourceId || gettingStartedState.sourceId === row.id)
+    ) {
+      void onGettingStartedStateChange?.({ step: "createCode" });
+    }
+  }
 
   if (codingEnabled && selectedRow) {
     const normalizedSourceType = selectedRow.type.trim().toLowerCase();
@@ -6035,6 +6181,8 @@ export function PostgresSourcesView({
           canCreateCodes={canCreateCodes}
           initialSelectedAnnotationId={initialAnnotationId ?? null}
           initialTextSegment={initialTextSegment ?? null}
+          gettingStartedState={gettingStartedState ?? null}
+          onGettingStartedStateChange={onGettingStartedStateChange}
           saving={submitting}
           error={submitError}
           onCreateAnnotation={handleCreateAnnotation}
@@ -6221,6 +6369,28 @@ export function PostgresSourcesView({
             </button>
           </div>
         </SettingsModal>
+      ) : null}
+      {gettingStartedAddSourceActive && !newSourceOpen ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Add a source"
+            onDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
+          >
+            <p>Click the plus button to add a text source for the walkthrough.</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {gettingStartedGuideActive && gettingStartedState?.step === "openCodingView" ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Open coding"
+            onDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
+          >
+            <p>Click the source you just created to start coding it.</p>
+          </GettingStartedGuideCallout>
+        </>
       ) : null}
 
       {error && <p className="users-error">{error}</p>}
@@ -6667,7 +6837,7 @@ export function PostgresSourcesView({
                 <h2>{pageTitle}</h2>
                 <button
                   type="button"
-                  className="btn btn--primary project-table-header-icon-button"
+                  className={`btn btn--primary project-table-header-icon-button${gettingStartedAddSourceActive && !newSourceOpen ? " getting-started-spotlight-target" : ""}`}
                   aria-label="New source"
                   title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "New source"}
                   onClick={() => {
@@ -6725,8 +6895,8 @@ export function PostgresSourcesView({
                     return (
                       <tr
                         key={row.id}
-                        className="users-row case-list-row"
-                        onClick={() => setSelectedRow(row)}
+                        className={`users-row case-list-row${gettingStartedOpenSourceActive && gettingStartedState?.sourceId === row.id ? " source-row--getting-started" : ""}`}
+                        onClick={() => handleSourceRowClick(row)}
                         onContextMenu={(event) => {
                           if (!canManageSources || showAttributesTable) return;
                           event.preventDefault();
@@ -6824,6 +6994,8 @@ export function PostgresSourcesView({
           sourceTypeSettings={sourceTypeSettings}
           saving={submitting}
           error={submitError}
+          gettingStartedAddSourceActive={gettingStartedAddSourceActive}
+          onGettingStartedDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
           onCancel={() => {
             if (submitting) return;
             setNewSourceOpen(false);

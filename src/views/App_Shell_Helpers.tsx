@@ -25,6 +25,10 @@ import type { ProjectEmbeddingBuildStatus } from "../lib/projectEmbeddings";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  CloseIcon,
+} from "../components/AppIcons";
+import {
+  clearProjectBackupBannerIssue,
   OPEN_PROJECT_SETTINGS_MODAL_EVENT,
   PROJECT_BACKUPS_CHANGED_EVENT,
   readPendingProjectBackupAttempt,
@@ -328,6 +332,15 @@ export function UpdateAvailableBanner({
 
   return (
     <div className="embedding-build-banner embedding-build-banner--completed">
+      <button
+        type="button"
+        className="embedding-build-banner-close"
+        onClick={onDismiss}
+        aria-label={t("common.dismiss")}
+        title={t("common.dismiss")}
+      >
+        <CloseIcon className="embedding-build-banner-close-icon" />
+      </button>
       <div className="embedding-build-banner-copy">
         <strong>{t("app.updateBanner.title")}</strong>
         <span>{t("app.updateBanner.versionBody", { version })}</span>
@@ -337,9 +350,6 @@ export function UpdateAvailableBanner({
         <a className="btn btn--primary" href={releaseUrl} target="_blank" rel="noreferrer">
           {t("app.updateBanner.viewRelease")}
         </a>
-        <button type="button" className="btn" onClick={onDismiss}>
-          {t("common.dismiss")}
-        </button>
       </div>
     </div>
   );
@@ -543,6 +553,20 @@ export function PostgresProjectEmbeddingBuildBanner({
 
   return (
     <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
+      <button
+        type="button"
+        className="embedding-build-banner-close"
+        onClick={() => {
+          if (status && isTerminalProjectEmbeddingBuildPhase(status.phase)) {
+            dismissedProjectEmbeddingBuildStatusKeys.add(getProjectEmbeddingBuildStatusKey(status));
+          }
+          setOpen(false);
+        }}
+        aria-label={t("common.dismiss")}
+        title={t("common.dismiss")}
+      >
+        <CloseIcon className="embedding-build-banner-close-icon" />
+      </button>
       <div className="embedding-build-banner-copy">
         <strong>
           {phase === "running" && t("app.embeddingBuild.runningTitle")}
@@ -577,20 +601,7 @@ export function PostgresProjectEmbeddingBuildBanner({
           <button type="button" className="btn" onClick={() => void handleCancel()} disabled={phase === "cancelling"}>
             {phase === "cancelling" ? t("app.embeddingBuild.cancellingAction") : t("app.embeddingBuild.cancelAction")}
           </button>
-        ) : (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              if (status && isTerminalProjectEmbeddingBuildPhase(status.phase)) {
-                dismissedProjectEmbeddingBuildStatusKeys.add(getProjectEmbeddingBuildStatusKey(status));
-              }
-              setOpen(false);
-            }}
-          >
-            {t("common.dismiss")}
-          </button>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -643,6 +654,7 @@ export function PostgresProjectSnapshotWarningBanner({
 
   if (!activeProject || !issue) return null;
 
+  const activeProjectId = activeProject.id;
   const toneClass = issue.kind === "failed" ? "embedding-build-banner--error" : "embedding-build-banner--warning";
   const title =
     issue.kind === "failed"
@@ -658,8 +670,22 @@ export function PostgresProjectSnapshotWarningBanner({
     window.dispatchEvent(new CustomEvent(OPEN_PROJECT_SETTINGS_MODAL_EVENT));
   }
 
+  function dismissSnapshotWarning() {
+    clearProjectBackupBannerIssue(activeProjectId);
+    setIssue(null);
+  }
+
   return (
     <div className={`embedding-build-banner ${toneClass}`}>
+      <button
+        type="button"
+        className="embedding-build-banner-close"
+        onClick={dismissSnapshotWarning}
+        aria-label="Dismiss"
+        title="Dismiss"
+      >
+        <CloseIcon className="embedding-build-banner-close-icon" />
+      </button>
       <div className="embedding-build-banner-copy">
         <strong>{title}</strong>
         <span>{issue.message}</span>
@@ -865,6 +891,21 @@ export function PostgresEmbeddingModelDownloadBanner() {
 
   return (
     <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
+      <button
+        type="button"
+        className="embedding-build-banner-close"
+        onClick={() => {
+          if (status) {
+            dismissEmbeddingModelDownloadStatus(status);
+          }
+          latestEmbeddingModelDownloadDetail = null;
+          setOpen(false);
+        }}
+        aria-label={t("common.dismiss")}
+        title={t("common.dismiss")}
+      >
+        <CloseIcon className="embedding-build-banner-close-icon" />
+      </button>
       <div className="embedding-build-banner-copy">
         <strong>
           {phase === "downloading" && t("app.embeddingDownload.downloadingTitle")}
@@ -909,38 +950,11 @@ export function PostgresEmbeddingModelDownloadBanner() {
             {phase === "cancelling" ? t("app.embeddingDownload.cancellingAction") : t("app.embeddingDownload.cancelAction")}
           </button>
         ) : phase === "error" && retryRequest ? (
-          <>
-            <button type="button" className="btn btn--primary" onClick={() => void handleRetry()}>
-              Retry
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                if (status) {
-                  dismissEmbeddingModelDownloadStatus(status);
-                }
-                latestEmbeddingModelDownloadDetail = null;
-                setOpen(false);
-              }}
-            >
-              {t("common.dismiss")}
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              if (status) {
-                dismissEmbeddingModelDownloadStatus(status);
-              }
-              latestEmbeddingModelDownloadDetail = null;
-              setOpen(false);
-            }}
-          >
-            {t("common.dismiss")}
+          <button type="button" className="btn btn--primary" onClick={() => void handleRetry()}>
+            Retry
           </button>
+        ) : (
+          null
         )}
       </div>
     </div>
@@ -977,6 +991,15 @@ export function PostgresDocumentProcessingBanner() {
 
   return (
     <div className={`embedding-build-banner embedding-build-banner--${phase}`}>
+      <button
+        type="button"
+        className="embedding-build-banner-close"
+        onClick={() => setOpen(false)}
+        aria-label={t("common.dismiss")}
+        title={t("common.dismiss")}
+      >
+        <CloseIcon className="embedding-build-banner-close-icon" />
+      </button>
       <div className="embedding-build-banner-copy">
         <strong>
           {phase === "running" && t("app.documentProcessing.runningTitle")}
@@ -1004,13 +1027,7 @@ export function PostgresDocumentProcessingBanner() {
           </div>
         )}
       </div>
-      <div className="embedding-build-banner-actions">
-        {!isActive && (
-          <button type="button" className="btn" onClick={() => setOpen(false)}>
-            {t("common.dismiss")}
-          </button>
-        )}
-      </div>
+      <div className="embedding-build-banner-actions" />
     </div>
   );
 }

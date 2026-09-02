@@ -17,12 +17,18 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readFile as readTauriFile, writeFile } from "@tauri-apps/plugin-fs";
 import { HelpIcon, PlusIcon } from "../components/AppIcons";
+import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
 import type { EditableAttributeMatrixValues } from "../components/EditableAttributesMatrix";
 import { SettingsModal } from "../components/SettingsModal";
 import type { SourceEditorPayload, SourceRow } from "./Postgres_Sources_View";
 import { NewCodeModal, type CodeRow } from "../components/NewCodeModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { readAppSettings } from "../lib/appSettings";
+import {
+  DEFAULT_GETTING_STARTED_STATE,
+  normalizeGettingStartedState,
+  type GettingStartedState,
+} from "../lib/gettingStartedGuide";
 import { inferUploadMediaType } from "../lib/sourceUploadMedia";
 import {
   DEFAULT_CANVAS_GRID_DENSITY,
@@ -875,6 +881,7 @@ export function PostgresProjectHomeView({
   const [graphSubmitting, setGraphSubmitting] = useState(false);
   const [graphError, setGraphError] = useState("");
   const [graphNotice, setGraphNotice] = useState("");
+  const [gettingStartedState, setGettingStartedState] = useState<GettingStartedState>(DEFAULT_GETTING_STARTED_STATE);
   const [relationshipAttributeEditorDraft, setRelationshipAttributeEditorDraft] = useState<PostgresRelationshipAttributeDraft | null>(null);
   const [relationshipAttributeEditorError, setRelationshipAttributeEditorError] = useState("");
   const [objectWorkspaceAttributeDraft, setObjectWorkspaceAttributeDraft] = useState<TypeScopedAttributeDraft | null>(null);
@@ -932,6 +939,42 @@ export function PostgresProjectHomeView({
       window.removeEventListener("resize", updateHeight);
     };
   }, [activeScreen, projectHomeTab, annotationSummaries.length, codes.length, memoCount, objects.length, relationships.length, reportCount, sources.length, users.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadGettingStartedState() {
+      try {
+        const preferences = await getPostgresUserPreferences();
+        if (!cancelled) {
+          setGettingStartedState(normalizeGettingStartedState(preferences.gettingStartedState));
+        }
+      } catch (error) {
+        console.warn("Could not load getting started guide state:", error);
+      }
+    }
+    void loadGettingStartedState();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function persistGettingStartedState(nextState: Partial<GettingStartedState>) {
+    const normalized = normalizeGettingStartedState({
+      ...gettingStartedState,
+      ...nextState,
+    });
+    setGettingStartedState(normalized);
+    try {
+      const preferences = await getPostgresUserPreferences();
+      const saved = await savePostgresUserPreferences({
+        ...preferences,
+        gettingStartedState: normalized,
+      });
+      setGettingStartedState(normalizeGettingStartedState(saved.gettingStartedState));
+    } catch (error) {
+      console.warn("Could not save getting started guide state:", error);
+    }
+  }
 
   const [objectAttributeValues, setObjectAttributeValues] = useState<Record<string, string>>({});
   const [draftObjectPendingImage, setDraftObjectPendingImage] = useState<PostgresImageUploadDraft | null>(null);
@@ -2568,6 +2611,18 @@ export function PostgresProjectHomeView({
       }
       setCreateSourceOpen(false);
       setPendingTimelineCreateStart("");
+      if (
+        gettingStartedState.step === "addTextSource"
+        && !gettingStartedState.dismissed
+        && !gettingStartedState.completed
+        && createdSources.length > 0
+      ) {
+        const createdSource = createdSources[0];
+        await persistGettingStartedState({
+          sourceId: createdSource.id,
+          step: "openCodingView",
+        });
+      }
     } catch (saveError) {
       setGraphError(saveError instanceof Error ? saveError.message : "Failed to save source.");
     } finally {
@@ -2700,6 +2755,16 @@ export function PostgresProjectHomeView({
       });
       setCodes((current) => [...current, created]);
       setCreateCodeOpen(false);
+      if (
+        gettingStartedState.step === "createCode"
+        && !gettingStartedState.dismissed
+        && !gettingStartedState.completed
+      ) {
+        await persistGettingStartedState({
+          codeId: created.id,
+          step: "assignCode",
+        });
+      }
     } catch (saveError) {
       setGraphError(saveError instanceof Error ? saveError.message : "Failed to save code.");
       throw saveError;
@@ -3821,6 +3886,46 @@ export function PostgresProjectHomeView({
       : sidebarNetworkMode === "network" || sidebarNetworkMode === "internet"
         ? "active-solo"
         : "idle";
+  const gettingStartedGuideActive =
+    !gettingStartedState.dismissed
+    && !gettingStartedState.completed;
+  const guideSpotlightItemId =
+    gettingStartedGuideActive
+    && (gettingStartedState.step === "projectHomeIntro" || gettingStartedState.step === "addTextSource")
+      ? "sources"
+      : gettingStartedGuideActive && gettingStartedState.step === "openCodingView"
+        ? "code-text"
+        : null;
+  const guideDetailsTourActive =
+    gettingStartedGuideActive && gettingStartedState.step === "projectHomeDetailsIntro";
+  const guideModesTourActive =
+    gettingStartedGuideActive && gettingStartedState.step === "projectHomeModesIntro";
+  const guideCollapsedSidebarTourActive =
+    gettingStartedGuideActive && gettingStartedState.step === "projectHomeSidebarCollapsedIntro";
+  const guideExpandedSidebarTourActive =
+    gettingStartedGuideActive && gettingStartedState.step === "projectHomeSidebarExpandedIntro";
+  const guideForceSidebarExpanded =
+    gettingStartedGuideActive
+    && (
+      gettingStartedState.step === "projectHomeSidebarExpandedIntro"
+      || gettingStartedState.step === "projectHomeIntro"
+      || gettingStartedState.step === "addTextSource"
+      || gettingStartedState.step === "openCodingView"
+    );
+
+  function handleShowProjectSources() {
+    if (
+      gettingStartedGuideActive
+      && gettingStartedState.step === "projectHomeIntro"
+    ) {
+      void persistGettingStartedState({ step: "addTextSource" });
+    }
+    setActiveScreen("sources");
+  }
+
+  function handleShowProjectCodeText() {
+    setActiveScreen("code-text");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -6371,24 +6476,21 @@ export function PostgresProjectHomeView({
         activeScreen={activeScreen}
         activeProject={project}
         authSession={authSession}
-        projectRoleLabel={
-          isProjectAdmin
-            ? "Administrator"
-            : currentProjectUser
-              ? projectRoleLabel(currentProjectUser.role)
-              : "Member"
-        }
         networkMode={sidebarNetworkMode}
         aiStatus={aiAssistAllowed ? sidebarAiStatus : "disabled"}
         aiAssistAllowed={aiAssistAllowed}
         collaborationStatus={sidebarCollaborationStatus}
+        guideSpotlightItemId={guideSpotlightItemId}
+        guideSpotlightSidebar={guideCollapsedSidebarTourActive || guideExpandedSidebarTourActive}
+        forceExpanded={guideForceSidebarExpanded}
+        lockExpandedNavigation={guideExpandedSidebarTourActive}
         onShowProjects={onBack}
         onShowProjectHome={() => setActiveScreen("home")}
         onShowProjectUsers={() => setActiveScreen("users")}
-        onShowProjectSources={() => setActiveScreen("sources")}
+        onShowProjectSources={handleShowProjectSources}
         onShowProjectAnnotations={() => setActiveScreen("annotations")}
         onShowProjectCodebook={() => setActiveScreen("codebook")}
-        onShowProjectCodeText={() => setActiveScreen("code-text")}
+        onShowProjectCodeText={handleShowProjectCodeText}
         onShowProjectMemos={() => setActiveScreen("memos")}
         onShowProjectReports={() => setActiveScreen("reports")}
         onShowProjectObjects={() => setActiveScreen("objects")}
@@ -6421,7 +6523,10 @@ export function PostgresProjectHomeView({
                   </button>
                 </div>
               </header>
-              <div className="ai-assist-home-tabbar" style={{ marginBottom: 18 }}>
+              <div
+                className={`ai-assist-home-tabbar${guideModesTourActive ? " getting-started-spotlight-target" : ""}`}
+                style={{ marginBottom: 18 }}
+              >
                 <div className="segmented-control" role="tablist" aria-label="Project home views">
                   {([
                     ["details", "Details"],
@@ -6441,40 +6546,149 @@ export function PostgresProjectHomeView({
                   ))}
                 </div>
               </div>
+              {guideDetailsTourActive ? (
+                <>
+                  <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+                  <GettingStartedGuideCallout
+                    title="Project summary"
+                    onDismiss={() => void persistGettingStartedState({ dismissed: true })}
+                    actions={(
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void persistGettingStartedState({ step: "projectHomeModesIntro" })}
+                      >
+                        Next
+                      </button>
+                    )}
+                  >
+                    <p>This Details tab gives you an at-a-glance summary of the project.</p>
+                  </GettingStartedGuideCallout>
+                </>
+              ) : null}
+              {guideModesTourActive ? (
+                <>
+                  <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+                  <GettingStartedGuideCallout
+                    title="Project modes"
+                    onDismiss={() => void persistGettingStartedState({ dismissed: true })}
+                    actions={(
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void persistGettingStartedState({ step: "projectHomeSidebarCollapsedIntro" })}
+                      >
+                        Next
+                      </button>
+                    )}
+                  >
+                  <p>Use these modes to interact with and build out the project.</p>
+                </GettingStartedGuideCallout>
+                </>
+              ) : null}
+              {guideCollapsedSidebarTourActive ? (
+                <>
+                  <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+                  <GettingStartedGuideCallout
+                    title="Sidebar navigation"
+                    onDismiss={() => void persistGettingStartedState({ dismissed: true })}
+                    actions={(
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void persistGettingStartedState({ step: "projectHomeSidebarExpandedIntro" })}
+                      >
+                        Next
+                      </button>
+                    )}
+                  >
+                    <p>Move to the collapsed sidebar to see the project navigation options.</p>
+                  </GettingStartedGuideCallout>
+                </>
+              ) : null}
+              {guideExpandedSidebarTourActive ? (
+                <>
+                  <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+                  <GettingStartedGuideCallout
+                    title="Project navigation"
+                    onDismiss={() => void persistGettingStartedState({ dismissed: true })}
+                    actions={(
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void persistGettingStartedState({ step: "projectHomeIntro" })}
+                      >
+                        Next
+                      </button>
+                    )}
+                  >
+                    <p>These links let you build out the project, analyze your work, use AI Assist, and manage settings.</p>
+                  </GettingStartedGuideCallout>
+                </>
+              ) : null}
+              {gettingStartedState.step === "projectHomeIntro" && !gettingStartedState.dismissed && !gettingStartedState.completed ? (
+                <>
+                  <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+                <GettingStartedGuideCallout
+                  title="Open Sources"
+                  onDismiss={() => void persistGettingStartedState({ dismissed: true })}
+                >
+                  <p>Sources is the default way to interact with and build out the project. Click Sources in the sidebar to continue.</p>
+                </GettingStartedGuideCallout>
+                </>
+              ) : null}
+              {gettingStartedState.step === "addTextSource" && !gettingStartedState.dismissed && !gettingStartedState.completed ? (
+                <>
+                  <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+                  <GettingStartedGuideCallout title="Open Sources" onDismiss={() => void persistGettingStartedState({ dismissed: true })}>
+                    <p>Click Sources in the sidebar, then use the plus button to add a text source.</p>
+                  </GettingStartedGuideCallout>
+                </>
+              ) : null}
+              {gettingStartedState.step === "openCodingView" && !gettingStartedState.dismissed && !gettingStartedState.completed ? (
+                <>
+                  <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+                  <GettingStartedGuideCallout title="Open coding" onDismiss={() => void persistGettingStartedState({ dismissed: true })}>
+                    <p>Click Code Sources in the sidebar to go to the page that lets you code the text source you just created.</p>
+                  </GettingStartedGuideCallout>
+                </>
+              ) : null}
               {projectHomeTab === "details" ? (
-                <Suspense fallback={<ViewLoadingFallback />}>
-                  <PostgresProjectHomeDetailsViewLazy
-                    project={project}
-                    users={users}
-                    currentProjectUser={currentProjectUser}
-                    isProjectAdmin={isProjectAdmin}
-                    lastProjectActivityAt={lastProjectActivityAt}
-                    sourceCount={sources.length}
-                    sourceStats={homeCanvasSourceKindSummaries.map((summary) => ({
-                      label: summary.label,
-                      value: summary.count,
-                    }))}
-                    objectCount={objects.length}
-                    objectTypeCount={objectTypeSummaries.length}
-                    relationshipCount={relationships.length}
-                    relationshipTypeCount={new Set(relationships.map((relationship) => relationship.relationshipType.trim()).filter(Boolean)).size}
-                    codeCount={codes.length}
-                    annotationCount={annotationSummaries.length}
-                    memoCount={memoCount}
-                    reportCount={reportCount}
-                    statsRef={projectHomeDetailsStatsRef}
-                    statsHeight={projectHomeDetailsStatsHeight}
-                    formatDateTime={formatPostgresDateTime}
-                    onShowUsers={() => setActiveScreen("users")}
-                    onShowSources={() => setActiveScreen("sources")}
-                    onShowObjects={() => setActiveScreen("objects")}
-                    onShowRelationships={() => setActiveScreen("relationships")}
-                    onShowCodebook={() => setActiveScreen("codebook")}
-                    onShowAnnotations={() => setActiveScreen("annotations")}
-                    onShowMemos={() => setActiveScreen("memos")}
-                    onShowReports={() => setActiveScreen("reports")}
-                  />
-                </Suspense>
+                <div className={guideDetailsTourActive ? "getting-started-spotlight-target" : undefined}>
+                  <Suspense fallback={<ViewLoadingFallback />}>
+                    <PostgresProjectHomeDetailsViewLazy
+                      project={project}
+                      users={users}
+                      currentProjectUser={currentProjectUser}
+                      isProjectAdmin={isProjectAdmin}
+                      lastProjectActivityAt={lastProjectActivityAt}
+                      sourceCount={sources.length}
+                      sourceStats={homeCanvasSourceKindSummaries.map((summary) => ({
+                        label: summary.label,
+                        value: summary.count,
+                      }))}
+                      objectCount={objects.length}
+                      objectTypeCount={objectTypeSummaries.length}
+                      relationshipCount={relationships.length}
+                      relationshipTypeCount={new Set(relationships.map((relationship) => relationship.relationshipType.trim()).filter(Boolean)).size}
+                      codeCount={codes.length}
+                      annotationCount={annotationSummaries.length}
+                      memoCount={memoCount}
+                      reportCount={reportCount}
+                      statsRef={projectHomeDetailsStatsRef}
+                      statsHeight={projectHomeDetailsStatsHeight}
+                      formatDateTime={formatPostgresDateTime}
+                      onShowUsers={() => setActiveScreen("users")}
+                      onShowSources={() => setActiveScreen("sources")}
+                      onShowObjects={() => setActiveScreen("objects")}
+                      onShowRelationships={() => setActiveScreen("relationships")}
+                      onShowCodebook={() => setActiveScreen("codebook")}
+                      onShowAnnotations={() => setActiveScreen("annotations")}
+                      onShowMemos={() => setActiveScreen("memos")}
+                      onShowReports={() => setActiveScreen("reports")}
+                    />
+                  </Suspense>
+                </div>
               ) : projectHomeTab === "timeline" ? (
                 <div className="project-home-timeline-tab">
                   <Suspense fallback={<ViewLoadingFallback />}>
@@ -6908,6 +7122,8 @@ export function PostgresProjectHomeView({
                 initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
                 initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
                 initialTextSegment={null}
+                gettingStartedState={gettingStartedState}
+                onGettingStartedStateChange={persistGettingStartedState}
                 onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
                 onOpenPostgresMemoDraft={(payload) => {
                   setPostgresMemoDraftTarget(payload);
@@ -6928,6 +7144,8 @@ export function PostgresProjectHomeView({
                 initialSourceId={postgresSourceNavigationTarget?.sourceId ?? null}
                 initialAnnotationId={postgresSourceNavigationTarget?.annotationId ?? null}
                 initialTextSegment={postgresSourceNavigationTarget?.textSegment ?? null}
+                gettingStartedState={gettingStartedState}
+                onGettingStartedStateChange={persistGettingStartedState}
                 onInitialNavigationHandled={() => setPostgresSourceNavigationTarget(null)}
                 onOpenPostgresMemoDraft={(payload) => {
                   setPostgresMemoDraftTarget(payload);

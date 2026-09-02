@@ -7,6 +7,7 @@ type SettingsModalProps = {
   closeDisabled?: boolean;
   subtitle?: ReactNode;
   modalClassName?: string;
+  overlayClassName?: string;
   overlayStyle?: CSSProperties;
 };
 
@@ -37,12 +38,14 @@ export function SettingsModal({
   closeDisabled = false,
   subtitle,
   modalClassName = "",
+  overlayClassName = "",
   overlayStyle,
 }: SettingsModalProps) {
   const modalClasses = `modal app-settings-modal${modalClassName ? ` ${modalClassName}` : ""}`;
+  const overlayClasses = `modal-overlay${overlayClassName ? ` ${overlayClassName}` : ""}`;
 
   return (
-    <div className="modal-overlay" style={overlayStyle} onClick={() => !closeDisabled && onClose()}>
+    <div className={overlayClasses} style={overlayStyle} onClick={() => !closeDisabled && onClose()}>
       <div className={modalClasses} onClick={(event) => event.stopPropagation()}>
         <SettingsModalCloseButton onClick={onClose} disabled={closeDisabled} />
         <div className="settings-section-header">

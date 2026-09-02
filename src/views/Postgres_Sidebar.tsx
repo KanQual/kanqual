@@ -12,11 +12,14 @@ type PostgresSidebarProps = {
   activeScreen: string;
   activeProject: PostgresProject | null;
   authSession: PostgresAuthSession;
-  projectRoleLabel: string;
   networkMode?: PostgresSidebarNetworkMode;
   aiStatus?: PostgresSidebarAiStatus;
   aiAssistAllowed?: boolean;
   collaborationStatus?: PostgresSidebarCollaborationStatus;
+  guideSpotlightItemId?: string | null;
+  guideSpotlightSidebar?: boolean;
+  forceExpanded?: boolean;
+  lockExpandedNavigation?: boolean;
   onShowProjects?: () => void;
   onShowProjectHome?: () => void;
   onShowProjectUsers?: () => void;
@@ -43,11 +46,14 @@ export function PostgresSidebar({
   activeScreen,
   activeProject,
   authSession,
-  projectRoleLabel,
   networkMode = "unknown",
   aiStatus = "unavailable",
   aiAssistAllowed = true,
   collaborationStatus = "disabled",
+  guideSpotlightItemId = null,
+  guideSpotlightSidebar = false,
+  forceExpanded = false,
+  lockExpandedNavigation = false,
   onShowProjects,
   onShowProjectHome,
   onShowProjectUsers,
@@ -69,7 +75,11 @@ export function PostgresSidebar({
   onSignOut,
 }: PostgresSidebarProps) {
   const [collapsedSidebarSections, setCollapsedSidebarSections] = useState<Set<string>>(() => new Set());
+  const isSidebarSectionCollapsed = (sectionId: string) => (
+    forceExpanded && lockExpandedNavigation ? false : collapsedSidebarSections.has(sectionId)
+  );
   const toggleSidebarSection = (sectionId: string) => {
+    if (forceExpanded && lockExpandedNavigation) return;
     setCollapsedSidebarSections((current) => {
       const next = new Set(current);
       if (next.has(sectionId)) {
@@ -136,7 +146,7 @@ export function PostgresSidebar({
           : "AI Assist is not ready for this project.";
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${forceExpanded ? " sidebar--expanded" : ""}${guideSpotlightSidebar ? " getting-started-spotlight-target sidebar--getting-started" : ""}`}>
       <div className="sidebar-brand">
         <img src={sidebarLogo} alt="Kanqual" className="brand-logo" />
         <div className="brand-collapsed-lockup" aria-hidden="true">
@@ -190,20 +200,20 @@ export function PostgresSidebar({
           <button
             type="button"
             className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("project")}
+            aria-expanded={!isSidebarSectionCollapsed("project")}
             onClick={() => toggleSidebarSection("project")}
           >
             <span>Project</span>
             <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("project") ? "\u25b8" : "\u25be"}
+              {isSidebarSectionCollapsed("project") ? "\u25b8" : "\u25be"}
             </span>
           </button>
-          <div className={`sidebar-section-items ${collapsedSidebarSections.has("project") ? "sidebar-section-items--collapsed" : ""}`}>
+          <div className={`sidebar-section-items ${isSidebarSectionCollapsed("project") ? "sidebar-section-items--collapsed" : ""}`}>
             {projectItems.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
+                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}${guideSpotlightItemId === item.id ? " getting-started-spotlight-target" : ""}`}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
                 title={undefined}
@@ -218,20 +228,20 @@ export function PostgresSidebar({
           <button
             type="button"
             className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("analysis")}
+            aria-expanded={!isSidebarSectionCollapsed("analysis")}
             onClick={() => toggleSidebarSection("analysis")}
           >
             <span>Analysis</span>
             <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("analysis") ? "\u25b8" : "\u25be"}
+              {isSidebarSectionCollapsed("analysis") ? "\u25b8" : "\u25be"}
             </span>
           </button>
-          <div className={`sidebar-section-items ${collapsedSidebarSections.has("analysis") ? "sidebar-section-items--collapsed" : ""}`}>
+          <div className={`sidebar-section-items ${isSidebarSectionCollapsed("analysis") ? "sidebar-section-items--collapsed" : ""}`}>
             {analysisItems.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
+                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}${guideSpotlightItemId === item.id ? " getting-started-spotlight-target" : ""}`}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
                 title={undefined}
@@ -246,20 +256,20 @@ export function PostgresSidebar({
           <button
             type="button"
             className="sidebar-section-header"
-            aria-expanded={!collapsedSidebarSections.has("ai-assist")}
+            aria-expanded={!isSidebarSectionCollapsed("ai-assist")}
             onClick={() => toggleSidebarSection("ai-assist")}
           >
             <span>AI Assist</span>
             <span className="sidebar-section-chevron">
-              {collapsedSidebarSections.has("ai-assist") ? "\u25b8" : "\u25be"}
+              {isSidebarSectionCollapsed("ai-assist") ? "\u25b8" : "\u25be"}
             </span>
           </button>
-          <div className={`sidebar-section-items ${collapsedSidebarSections.has("ai-assist") ? "sidebar-section-items--collapsed" : ""}`}>
+          <div className={`sidebar-section-items ${isSidebarSectionCollapsed("ai-assist") ? "sidebar-section-items--collapsed" : ""}`}>
             {aiAssistItems.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}`}
+                className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}${guideSpotlightItemId === item.id ? " getting-started-spotlight-target" : ""}`}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
                 title={item.disabled ? "Open a PostgreSQL project first." : undefined}
@@ -299,7 +309,6 @@ export function PostgresSidebar({
               </button>
             ) : null}
           </div>
-          {authSession.authKind !== "postgres_admin" ? <div className="sidebar-user-email">{projectRoleLabel}</div> : null}
         </div>
       </div>
     </aside>

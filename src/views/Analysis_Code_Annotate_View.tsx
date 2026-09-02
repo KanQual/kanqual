@@ -74,9 +74,12 @@ function colorDistance(hex1: string, hex2: string): number {
   } catch { return 0; }
 }
 
+const DEFAULT_CODE_COLOR = "#2C3E50";
+
 const TOP_LEVEL_PALETTE = [
+  DEFAULT_CODE_COLOR,
   "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e",
-  "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6",
+  "#14b8a6", "#06b6d4", "#3b82f6", "#8b5cf6",
   "#ec4899", "#f43f5e", "#10b981", "#0ea5e9", "#a855f7",
   "#64748b",
 ];
@@ -166,7 +169,7 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
   const { activeProject, codes, addCode } = useStore();
   const [label,    setLabel]    = useState("");
   const [desc,     setDesc]     = useState("");
-  const [color,    setColor]    = useState("#6366f1");
+  const [color,    setColor]    = useState(() => getTopLevelSuggestions(codes.filter((c) => !c.parentId).map((c) => c.color))[0] || DEFAULT_CODE_COLOR);
   const [parentId, setParentId] = useState("");
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState<string | null>(null);
@@ -257,11 +260,6 @@ function NewCodeModal({ onClose }: { onClose: () => void }) {
               <span className="code-color-hex">{color}</span>
             </div>
             <ColorSuggestions suggestions={colorSuggestions} selected={color} onSelect={setColor} />
-            <p className="code-color-hint">
-              {parentId
-                ? t("analysisCodeAnnotate.codebook.newCode.parentColorHint")
-                : t("analysisCodeAnnotate.codebook.newCode.distinctColorHint")}
-            </p>
           </label>
           {error && <p className="auth-error">{error}</p>}
           <div className="form-actions">
@@ -282,7 +280,7 @@ function EditCodeModal({ code, onClose }: { code: Code; onClose: () => void }) {
   const { t } = useI18n();
   const { codes, updateCode } = useStore();
   const [label,   setLabel]   = useState(code.label);
-  const [color,   setColor]   = useState(code.color || "#6366f1");
+  const [color,   setColor]   = useState(code.color || DEFAULT_CODE_COLOR);
   const [desc,    setDesc]    = useState(code.description);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);

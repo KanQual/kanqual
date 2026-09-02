@@ -60,9 +60,12 @@ function colorDistance(hex1: string, hex2: string): number {
   } catch { return 0; }
 }
 
+export const DEFAULT_CODE_COLOR = "#2C3E50";
+
 const TOP_LEVEL_PALETTE = [
+  DEFAULT_CODE_COLOR,
   "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e",
-  "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6",
+  "#14b8a6", "#06b6d4", "#3b82f6", "#8b5cf6",
   "#ec4899", "#f43f5e", "#10b981", "#0ea5e9", "#a855f7",
   "#64748b",
 ];
@@ -127,9 +130,10 @@ export function NewCodeModal({
   submitLabel,
   initialLabel = "",
   initialDescription = "",
-  initialColor = "#6366f1",
+  initialColor,
   initialParentId = "",
   excludeCodeId,
+  gettingStartedActive = false,
   onSubmit,
   onDone,
   onClose,
@@ -142,6 +146,7 @@ export function NewCodeModal({
   initialColor?: string;
   initialParentId?: string;
   excludeCodeId?: string;
+  gettingStartedActive?: boolean;
   onSubmit: (payload: { label: string; color: string; description: string; parentId?: string }) => Promise<void>;
   onDone: () => void;
   onClose: () => void;
@@ -149,14 +154,19 @@ export function NewCodeModal({
   const { t } = useI18n();
   const resolvedTitle = title ?? t("projectCodebook.modal.newTitle");
   const resolvedSubmitLabel = submitLabel ?? t("projectCodebook.modal.createCode");
+  const availableCodes = allCodes.filter((code) => code.id !== excludeCodeId);
+  const initialParentCode = allCodes.find((code) => code.id === initialParentId);
+  const initialColorSuggestions = initialParentId && initialParentCode
+    ? getChildSuggestions(initialParentCode.color)
+    : getTopLevelSuggestions(availableCodes.filter((code) => !code.parentId).map((code) => code.color));
+  const resolvedInitialColor = initialColor || initialColorSuggestions[0] || DEFAULT_CODE_COLOR;
   const [label, setLabel] = useState(initialLabel);
   const [desc, setDesc] = useState(initialDescription);
-  const [color, setColor] = useState(initialColor);
+  const [color, setColor] = useState(resolvedInitialColor);
   const [parentId, setParentId] = useState(initialParentId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const availableCodes = allCodes.filter((code) => code.id !== excludeCodeId);
   const sortedParentCodeOptions = useMemo(() => (
     [...availableCodes].sort((left, right) => {
       const leftLabel = left.parentLabel ? `${left.parentLabel} > ${left.label}` : left.label;
@@ -213,7 +223,13 @@ export function NewCodeModal({
   }
 
   return (
-    <SettingsModal title={resolvedTitle} onClose={onClose} closeDisabled={loading}>
+    <SettingsModal
+      title={resolvedTitle}
+      onClose={onClose}
+      closeDisabled={loading}
+      modalClassName={gettingStartedActive ? "getting-started-spotlight-target" : ""}
+      overlayClassName={gettingStartedActive ? "modal-overlay--getting-started-spotlight" : ""}
+    >
       <form className="form" onSubmit={handleSubmit}>
         <div className="app-settings-modal-body">
           <label className="form-label">
@@ -271,11 +287,6 @@ export function NewCodeModal({
               selected={color}
               onSelect={setColor}
             />
-            <p className="code-color-hint">
-              {parentId
-                ? t("projectCodebook.modal.parentColorHint")
-                : t("projectCodebook.modal.distinctColorHint")}
-            </p>
           </label>
 
           {error && <p className="auth-error">{error}</p>}

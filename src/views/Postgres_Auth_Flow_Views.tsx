@@ -22,7 +22,9 @@ import {
   savePostgresAccount as savePostgresAccountHistory,
 } from "../lib/authHistory";
 import { ComputerIcon, EyeIcon, EyeOffIcon, NetworkIcon } from "../components/AppIcons";
+import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
 import { LoadingCard } from "../components/LoadingCard";
+import { clearGettingStartedHandoff, readGettingStartedHandoff, updateGettingStartedHandoff } from "../lib/gettingStartedGuide";
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -137,6 +139,7 @@ export type PostgresLaunchViewProps = {
   status: PostgresStatus | null;
   loading: boolean;
   onBootstrap: (superuserPassword: string) => Promise<void>;
+  onInitialized?: () => Promise<void> | void;
   onRestored?: () => Promise<void> | void;
   onAuthenticated: (session: PostgresAuthSession) => void | Promise<void>;
   onFirstAccountCreated?: (session: PostgresAuthSession) => void | Promise<void>;
@@ -147,6 +150,7 @@ export function PostgresLaunchView({
   status,
   loading,
   onBootstrap,
+  onInitialized,
   onRestored,
   onAuthenticated,
   onFirstAccountCreated,
@@ -234,12 +238,13 @@ export function PostgresLaunchView({
     setSubmitting(true);
     try {
       await initializeBundledPostgresCluster(initialAdminPassword);
-      setShowFirstAccountSetup(true);
+      setShowFirstAccountSetup(false);
       setInitialAdminPassword("");
       setConfirmInitialAdminPassword("");
       const nextPreflight = await getBundledPostgresInitPreflight();
       setBundledPreflight(nextPreflight);
       setNotice("");
+      await onInitialized?.();
     } catch (initializeError) {
       setError(describeUnknownError(initializeError));
     } finally {
@@ -828,6 +833,7 @@ export function PostgresAuthView({
   onAuthenticated,
   onFirstAccountCreated,
 }: PostgresAuthViewProps) {
+  const [gettingStartedHandoff, setGettingStartedHandoff] = useState(() => readGettingStartedHandoff());
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [signInStep, setSignInStep] = useState<"username" | "password">("username");
   const [email, setEmail] = useState("");
@@ -871,6 +877,17 @@ export function PostgresAuthView({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!gettingStartedHandoff || gettingStartedHandoff.step !== "loginAsUser") return;
+    if (!gettingStartedHandoff.temporaryUsername) return;
+    setEmail((current) => current || gettingStartedHandoff.temporaryUsername);
+  }, [gettingStartedHandoff]);
+
+  function exitGettingStartedHandoff() {
+    clearGettingStartedHandoff();
+    setGettingStartedHandoff(null);
+  }
 
   async function handleFirstAccountSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -996,6 +1013,13 @@ export function PostgresAuthView({
       }
       const submittedPassword = password;
       setPassword("");
+      if (
+        gettingStartedHandoff
+        && (gettingStartedHandoff.userId === session.user.id || gettingStartedHandoff.temporaryUsername === session.user.username)
+      ) {
+        const nextStep = session.user.mustChangePassword ? "changePassword" : "chooseLocalWorkspace";
+        setGettingStartedHandoff(updateGettingStartedHandoff({ step: nextStep, currentActor: "projectUser" }));
+      }
       onAuthenticated(session, submittedPassword);
     } catch (authError) {
       setError(describeUnknownError(authError));
@@ -1165,13 +1189,29 @@ export function PostgresAuthView({
   }
 
   return (
-    <div className="auth-screen">
-      <div className="auth-card" style={{ maxWidth: 720 }}>
+    <div className={`auth-screen${gettingStartedHandoff ? " auth-screen--getting-started-login" : ""}`}>
+      {gettingStartedHandoff ? <div className="getting-started-spotlight-overlay" aria-hidden="true" /> : null}
+      <div
+        className={`auth-card${gettingStartedHandoff ? " getting-started-spotlight-target" : ""}`}
+        style={{ maxWidth: 720 }}
+      >
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
           <div className="auth-brand">KanQual</div>
         </div>
         <form onSubmit={handleSubmit} className="form">
+          {gettingStartedHandoff ? (
+            <>
+              <GettingStartedGuideCallout title="Continue the guide" onDismiss={exitGettingStartedHandoff}>
+                {signInStep === "username" ? (
+                  <p>Enter the username you just created: {gettingStartedHandoff.temporaryUsername || "the new project user"}.</p>
+                ) : (
+                  <p>Enter the temporary password you set for {gettingStartedHandoff.temporaryUsername || "the new project user"}.</p>
+                )}
+              </GettingStartedGuideCallout>
+            </>
+          ) : null}
+
           {signInStep === "username" && recentAccounts.length > 0 ? (
             <div className="auth-recent-accounts">
               <div className="auth-recent-accounts-title">Recent accounts</div>
@@ -1304,9 +1344,24 @@ export function PostgresWorkspaceModeChoiceView({
 }: PostgresWorkspaceModeChoiceViewProps) {
   const [showRemoteForm, setShowRemoteForm] = useState(false);
   const [remoteAddress, setRemoteAddress] = useState("");
+  const [gettingStartedHandoff, setGettingStartedHandoff] = useState(() => readGettingStartedHandoff());
+
+  function exitGettingStartedHandoff() {
+    clearGettingStartedHandoff();
+    setGettingStartedHandoff(null);
+  }
+
+  function handleUseLocal() {
+    if (gettingStartedHandoff) {
+      setGettingStartedHandoff(updateGettingStartedHandoff({ step: "chooseProject", currentActor: "projectUser" }));
+    }
+    onUseLocal();
+  }
+
+  const guideChoosingLocal = !!gettingStartedHandoff && gettingStartedHandoff.step === "chooseLocalWorkspace";
 
   return (
-    <div className="auth-screen">
+    <div className={`auth-screen${guideChoosingLocal && !showRemoteForm ? " auth-screen--getting-started-spotlight" : ""}`}>
       <AuthSlideCard stage={showRemoteForm ? "remote-connection" : "workspace-mode"}>
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
@@ -1314,8 +1369,17 @@ export function PostgresWorkspaceModeChoiceView({
         </div>
         {!showRemoteForm ? (
           <div className="form">
+            {gettingStartedHandoff ? (
+              <GettingStartedGuideCallout title="Continue the guide" onDismiss={exitGettingStartedHandoff}>
+                <p>Choose Local so you can open the project that was just created on this machine.</p>
+              </GettingStartedGuideCallout>
+            ) : null}
             <div className="mode-options mode-options--auth-card">
-              <button type="button" className="mode-option" onClick={onUseLocal}>
+              <button
+                type="button"
+                className={`mode-option${guideChoosingLocal ? " getting-started-spotlight-target" : ""}`}
+                onClick={handleUseLocal}
+              >
                 <ComputerIcon className="mode-option-icon" />
                 <span className="mode-option-title">Local</span>
                 <span className="mode-option-desc">Work with projects stored on this machine.</span>

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftIcon, HelpIcon, ZoomIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
+import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
 import { SettingsModal } from "../components/SettingsModal";
 import {
   ProcessedTranscriptView,
@@ -73,6 +74,8 @@ export function PostgresSourceTextCodingView({
   initialTextSegment,
   saving,
   error,
+  gettingStartedState,
+  onGettingStartedStateChange,
   onCreateCode,
   onUpdateCode,
   onDeleteCode,
@@ -123,6 +126,23 @@ export function PostgresSourceTextCodingView({
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const annotationContextMenuStyle = useViewportContextMenuStyle(annotationContextMenu, annotationContextMenuRef);
   const codeContextMenuStyle = useViewportContextMenuStyle(codeContextMenu, codeContextMenuRef);
+  const gettingStartedActive =
+    !!gettingStartedState
+    && !gettingStartedState.dismissed
+    && !gettingStartedState.completed
+    && (!gettingStartedState.sourceId || gettingStartedState.sourceId === row.id);
+  const gettingStartedCreateCodeActive =
+    gettingStartedActive && gettingStartedState?.step === "createCode";
+  const gettingStartedCreateCodeModalActive =
+    gettingStartedCreateCodeActive && newCodeOpen;
+  const gettingStartedAssignCodeActive =
+    gettingStartedActive && gettingStartedState?.step === "assignCode";
+  const gettingStartedAssignCodeId = gettingStartedState?.codeId ?? "";
+  const gettingStartedCompletedActive =
+    !!gettingStartedState
+    && !gettingStartedState.dismissed
+    && !gettingStartedState.completed
+    && gettingStartedState.step === "completed";
 
   const normalizedSourceType = row.type.trim().toLowerCase().replace(/_/g, " ");
   const isProcessedTranscriptSource = normalizedSourceType === "processed transcript"
@@ -166,6 +186,13 @@ export function PostgresSourceTextCodingView({
   const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
   const codeTree = useMemo(() => orderedCodesWithDepth(codes), [codes]);
   const visibleCodes = useMemo(() => visibleCodeNodes(codeTree, collapsedCodeIds), [collapsedCodeIds, codeTree]);
+  const gettingStartedAssignTargetCodeId = useMemo(() => {
+    if (!gettingStartedAssignCodeActive) return "";
+    if (gettingStartedAssignCodeId && visibleCodes.some(({ code }) => code.id === gettingStartedAssignCodeId)) {
+      return gettingStartedAssignCodeId;
+    }
+    return visibleCodes.length === 1 ? visibleCodes[0].code.id : "";
+  }, [gettingStartedAssignCodeActive, gettingStartedAssignCodeId, visibleCodes]);
   const codesById = useMemo(() => new Map(codes.map((code) => [code.id, code])), [codes]);
   const codebookRows = useMemo<CodeRow[]>(() => codes.map((code) => {
     const parentCode = code.parentCodeId ? codesById.get(code.parentCodeId) : null;
@@ -451,6 +478,12 @@ export function PostgresSourceTextCodingView({
   async function handleQuickCode(codeId: string) {
     if (!pendingSelection || !canEditAnnotations || saving) return;
     await onCreateAnnotation(row.id, pendingSelection, { codeIds: [codeId], note: "" });
+    if (gettingStartedActive && gettingStartedState?.step === "assignCode") {
+      await onGettingStartedStateChange?.({
+        codeId,
+        step: "completed",
+      });
+    }
     setPendingSelection(null);
   }
 
@@ -695,6 +728,59 @@ export function PostgresSourceTextCodingView({
         </div>
       </header>
 
+      {gettingStartedCreateCodeActive ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout title="Create a code">
+            {newCodeOpen ? (
+              <p>
+                Give the code a name. For now, you can ignore the description, parent code, and color. Click Create Code
+                when you are ready.
+              </p>
+            ) : (
+              <p>Click the plus button in the Codebook panel to create your first code for this project.</p>
+            )}
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+
+      {gettingStartedAssignCodeActive ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout title="Assign the code">
+            {pendingSelection ? (
+              <p>Click the new code in the Codebook panel to apply it to the selected text.</p>
+            ) : (
+              <p>Select a short text segment in the source.</p>
+            )}
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+
+      {gettingStartedCompletedActive ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title="Basic guide complete"
+            spotlight
+            actions={(
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => void onGettingStartedStateChange?.({ completed: true, step: "completed" })}
+              >
+                Finish guide
+              </button>
+            )}
+          >
+            <p>
+              That completes this basic guide. Explore how to build out your projects, generate reports, and use AI
+              Assist when you are ready.
+            </p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+
       <div className="annotate-layout code-text-annotate-layout" style={{ minHeight: 0 }}>
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
           <div className="annotate-card" style={{ flexShrink: 0 }}>
@@ -702,7 +788,7 @@ export function PostgresSourceTextCodingView({
               <span className="annotate-card-title">Codebook</span>
               <button
                 type="button"
-                className="codebook-icon-action"
+                className={`codebook-icon-action${gettingStartedCreateCodeActive && !newCodeOpen ? " getting-started-spotlight-target codebook-icon-action--getting-started" : ""}`}
                 onClick={() => {
                   setNewCodeOpen(true);
                 }}
@@ -725,7 +811,7 @@ export function PostgresSourceTextCodingView({
                 visibleCodes.map(({ code, depth, hasChildren }) => (
                   <li
                     key={code.id}
-                    className={`code-item${pendingSelection && canEditAnnotations ? " code-item--annotatable" : ""}`}
+                    className={`code-item${pendingSelection && canEditAnnotations ? " code-item--annotatable" : ""}${gettingStartedAssignCodeActive && pendingSelection && code.id === gettingStartedAssignTargetCodeId ? " getting-started-spotlight-target code-item--getting-started" : ""}`}
                     style={{ paddingLeft: 6 + depth * 16 }}
                     onMouseDown={(event) => {
                       if (pendingSelection) event.preventDefault();
@@ -781,7 +867,7 @@ export function PostgresSourceTextCodingView({
         </div>
 
         <div className="annotate-main">
-          <div className="annotate-card annotate-card--grow">
+          <div className={`annotate-card annotate-card--grow${gettingStartedAssignCodeActive && !pendingSelection ? " getting-started-spotlight-target annotate-card--getting-started" : ""}`}>
             <div className="doc-viewer-toolbar">
               <span className="doc-name">
                 {row.name}
@@ -1088,15 +1174,22 @@ export function PostgresSourceTextCodingView({
           allCodes={codebookRows}
           onSubmit={async (payload) => {
             if (!onCreateCode || !canCreateCodes) return;
-            await onCreateCode({
+            const createdCode = await onCreateCode({
               label: payload.label,
               color: payload.color,
               description: payload.description,
               parentCodeId: payload.parentId ?? null,
             });
+            if (gettingStartedActive && gettingStartedState?.step === "createCode") {
+              await onGettingStartedStateChange?.({
+                codeId: createdCode.id,
+                step: "assignCode",
+              });
+            }
           }}
           onDone={() => setNewCodeOpen(false)}
           onClose={() => setNewCodeOpen(false)}
+          gettingStartedActive={gettingStartedCreateCodeModalActive}
         />
       ) : null}
 

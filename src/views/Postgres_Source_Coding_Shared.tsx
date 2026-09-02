@@ -15,6 +15,7 @@ import type {
   SourceAnnotationRow,
   SourceRow,
 } from "./Postgres_Sources_View";
+import type { GettingStartedState } from "../lib/gettingStartedGuide";
 
 export type CodeTreeNode = {
   code: PostgresCode;
@@ -143,6 +144,8 @@ export type PostgresSourceCodingViewProps = {
   initialTextSegment: { startOffset: number; endOffset: number } | null;
   saving: boolean;
   error: string | null;
+  gettingStartedState?: GettingStartedState | null;
+  onGettingStartedStateChange?: (state: Partial<GettingStartedState>) => void | Promise<void>;
   onCreateCode?: (payload: { label: string; color: string; description: string; parentCodeId?: string | null }) => Promise<PostgresCode>;
   onUpdateCode?: (codeId: string, payload: { label: string; color: string; description: string; parentCodeId?: string | null }) => Promise<PostgresCode>;
   onDeleteCode?: (codeId: string) => Promise<void>;

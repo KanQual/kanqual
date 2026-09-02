@@ -330,6 +330,18 @@ export type PostgresUserPreferences = {
   sourceTextSizePx: number;
   locale: "en";
   recentProjectLimit: number;
+  gettingStartedState: {
+    dismissed: boolean;
+    completed: boolean;
+    step: string;
+    projectId: string;
+    userId: string;
+    sourceId: string;
+    codeId: string;
+    adminUserId: string;
+    currentActor: string;
+    temporaryUsername: string;
+  };
   themeState: {
     lightOverrides: Record<string, string>;
     darkOverrides: Record<string, string>;

@@ -2,16 +2,26 @@ import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } 
 import { listen } from "@tauri-apps/api/event";
 import {
   getPostgresInstallationSettings,
+  getPostgresUserPreferences,
   getPostgresUserProjectState,
   listPostgresProjects,
   POSTGRES_PROJECT_CHANGED_EVENT,
   rememberPostgresProjectClosed,
   rememberPostgresProjectOpened,
+  savePostgresUserPreferences,
   type PostgresProject,
   type PostgresProjectChangeEvent,
   type PostgresRecentProject,
 } from "../lib/postgres";
 import { LogoutIcon } from "../components/AppIcons";
+import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
+import {
+  clearGettingStartedHandoff,
+  normalizeGettingStartedState,
+  readGettingStartedHandoff,
+  updateGettingStartedHandoff,
+  type GettingStartedHandoffState,
+} from "../lib/gettingStartedGuide";
 
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -93,6 +103,7 @@ export function PostgresProjectsView({
   const [error, setError] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [openedProjectId, setOpenedProjectId] = useState<string | null>(null);
+  const [gettingStartedHandoff, setGettingStartedHandoff] = useState<GettingStartedHandoffState | null>(() => readGettingStartedHandoff());
 
   const recordProjectOpened = useCallback(async (project: PostgresProject) => {
     const recentProject: PostgresRecentProject = {
@@ -120,6 +131,40 @@ export function PostgresProjectsView({
     }
   }, []);
 
+  const completeGettingStartedProjectOpen = useCallback(async (project: PostgresProject) => {
+    if (!gettingStartedHandoff || gettingStartedHandoff.step !== "chooseProject") return;
+    if (gettingStartedHandoff.projectId && gettingStartedHandoff.projectId !== project.id) return;
+
+    try {
+      const preferences = await getPostgresUserPreferences();
+      await savePostgresUserPreferences({
+        ...preferences,
+        gettingStartedState: normalizeGettingStartedState({
+          ...preferences.gettingStartedState,
+          ...gettingStartedHandoff,
+          projectId: project.id,
+          currentActor: "projectUser",
+          dismissed: false,
+          completed: false,
+          step: "projectHomeDetailsIntro",
+        }),
+      });
+      clearGettingStartedHandoff();
+      setGettingStartedHandoff(null);
+    } catch (guideError) {
+      console.warn("Could not persist getting started project handoff:", describeUnknownError(guideError));
+    }
+  }, [gettingStartedHandoff]);
+
+  const openProject = useCallback(async (project: PostgresProject) => {
+    setSelectedProjectId(project.id);
+    setOpenedProjectId(project.id);
+    await Promise.all([
+      recordProjectOpened(project),
+      completeGettingStartedProjectOpen(project),
+    ]);
+  }, [completeGettingStartedProjectOpen, recordProjectOpened]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -133,15 +178,24 @@ export function PostgresProjectsView({
           getPostgresUserProjectState(),
         ]);
         if (!cancelled) {
+          const storedHandoff = readGettingStartedHandoff();
+          const nextHandoff = storedHandoff?.step === "chooseLocalWorkspace"
+            ? updateGettingStartedHandoff({ step: "chooseProject", currentActor: "projectUser" }) ?? storedHandoff
+            : storedHandoff;
+          setGettingStartedHandoff(nextHandoff);
           setProjects(nextProjects);
           setRecentProjects(projectState.recentProjects);
-          const reopenProjectId = installationSettings.startupReopenLastProject
+          const guideChoosingProject = nextHandoff?.step === "chooseProject";
+          const reopenProjectId = installationSettings.startupReopenLastProject && !guideChoosingProject
             ? projectState.lastOpenedProjectId
             : null;
           const reopenProject = reopenProjectId
             ? nextProjects.find((project) => project.id === reopenProjectId) ?? null
             : null;
-          setSelectedProjectId((current) => current ?? reopenProject?.id ?? nextProjects[0]?.id ?? null);
+          const guideProject = guideChoosingProject && nextHandoff.projectId
+            ? nextProjects.find((project) => project.id === nextHandoff.projectId) ?? null
+            : null;
+          setSelectedProjectId((current) => current ?? guideProject?.id ?? reopenProject?.id ?? nextProjects[0]?.id ?? null);
           setOpenedProjectId((current) => current ?? reopenProject?.id ?? null);
         }
       } catch (loadError) {
@@ -240,14 +294,15 @@ export function PostgresProjectsView({
         });
         setSelectedProjectId(project.id);
         setOpenedProjectId(project.id);
-        await recordProjectOpened(project);
+        await openProject(project);
       },
     });
   }
 
   return (
-    <div className="auth-screen projects-auth-screen">
-      <div className="auth-card projects-auth-card">
+    <div className={`auth-screen projects-auth-screen${gettingStartedHandoff?.step === "chooseProject" ? " projects-auth-screen--getting-started" : ""}`}>
+      {gettingStartedHandoff?.step === "chooseProject" ? <div className="getting-started-spotlight-overlay" aria-hidden="true" /> : null}
+      <div className={`auth-card projects-auth-card${gettingStartedHandoff?.step === "chooseProject" ? " getting-started-spotlight-target" : ""}`}>
         <button
           type="button"
           className="projects-logout-button"
@@ -265,6 +320,18 @@ export function PostgresProjectsView({
           </header>
 
           {error ? <p className="auth-error">{error}</p> : null}
+
+          {gettingStartedHandoff?.step === "chooseProject" ? (
+            <GettingStartedGuideCallout
+              title="Continue the guide"
+              onDismiss={() => {
+                clearGettingStartedHandoff();
+                setGettingStartedHandoff(null);
+              }}
+            >
+              <p>Click the project you created as the administrator.</p>
+            </GettingStartedGuideCallout>
+          ) : null}
 
           {loading ? (
             <div className="empty-state">
@@ -285,11 +352,7 @@ export function PostgresProjectsView({
                     type="button"
                     className={`project-selection-card${selectedProjectId === project.id ? " project-selection-card--selected" : ""}`}
                     style={getProjectAccentStyle(project)}
-                    onClick={() => {
-                      setSelectedProjectId(project.id);
-                      setOpenedProjectId(project.id);
-                      void recordProjectOpened(project);
-                    }}
+                    onClick={() => void openProject(project)}
                   >
                     <span className="project-selection-card-accent" aria-hidden="true">
                       {getProjectInitials(project.name)}

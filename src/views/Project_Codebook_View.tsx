@@ -3,7 +3,7 @@ import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { HelpIcon, PlusIcon } from "../components/AppIcons";
-import { NewCodeModal, type CodeRow } from "../components/NewCodeModal";
+import { DEFAULT_CODE_COLOR, NewCodeModal, type CodeRow } from "../components/NewCodeModal";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -909,7 +909,7 @@ export function CodebookView({
           submitLabel={t("projectCodebook.modal.saveChanges")}
           initialLabel={editingRow.label}
           initialDescription={editingRow.description}
-          initialColor={editingRow.color || "#6366f1"}
+          initialColor={editingRow.color || DEFAULT_CODE_COLOR}
           initialParentId={editingRow.parentId}
           excludeCodeId={editingRow.id}
           onSubmit={handlePostgresCodeSave}
@@ -1157,7 +1157,7 @@ function PostgresCodeDetail({
           submitLabel={t("projectCodebook.modal.saveChanges")}
           initialLabel={row.label}
           initialDescription={row.description}
-          initialColor={row.color || "#6366f1"}
+          initialColor={row.color || DEFAULT_CODE_COLOR}
           initialParentId={row.parentId}
           excludeCodeId={row.id}
           onSubmit={handleSaveFromModal}

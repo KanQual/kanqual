@@ -52,6 +52,20 @@ const POSTGRES_PROJECT_DATABASE_PREFIX: &str = "kq_proj_";
 const POSTGRES_PROJECT_SNAPSHOT_DATABASE_PREFIX: &str = "kq_snap_";
 const POSTGRES_EXPERIMENT_CONTROL_SCHEMA_VERSION: i32 = 10;
 const POSTGRES_EXPERIMENT_PROJECT_SCHEMA_VERSION: i32 = 9;
+const POSTGRES_EXPERIMENT_PROJECT_MIGRATIONS: &[(i32, &str)] = &[
+    (1_i32, "project_users_schema"),
+    (2_i32, "dynamic_objects_and_relationships_schema"),
+    (3_i32, "project_users_app_user_binding"),
+    (
+        4_i32,
+        "project_settings_ai_assist_and_document_import_schema",
+    ),
+    (5_i32, "object_types_schema"),
+    (6_i32, "relationship_types_schema"),
+    (7_i32, "qualitative_core_and_event_objects_schema"),
+    (8_i32, "cases_and_case_source_links_schema"),
+    (9_i32, "source_backed_objects_schema"),
+];
 const APP_METADATA_COLLECTION: &str = "app_metadata";
 const BACKEND_IDENTIFIER_KEY: &str = "backend_identifier";
 const USERS_TABLE_IDENTIFIER_KEY: &str = "users_table_identifier";
@@ -1727,7 +1741,23 @@ fn default_postgres_experiment_user_preferences() -> PostgresExperimentUserPrefe
         locale: "en".to_string(),
         recent_project_limit: 10,
         theme_state: default_postgres_experiment_theme_state(),
+        getting_started_state: default_postgres_experiment_getting_started_state(),
     }
+}
+
+fn default_postgres_experiment_getting_started_state() -> Value {
+    serde_json::json!({
+        "dismissed": false,
+        "completed": false,
+        "step": "",
+        "projectId": "",
+        "userId": "",
+        "sourceId": "",
+        "codeId": "",
+        "adminUserId": "",
+        "currentActor": "",
+        "temporaryUsername": ""
+    })
 }
 
 fn default_postgres_experiment_theme_state() -> PostgresExperimentThemeState {
@@ -2061,6 +2091,54 @@ fn normalize_postgres_experiment_theme_state(
     }
 }
 
+fn normalize_postgres_experiment_getting_started_state(value: Value) -> Value {
+    let mut state = default_postgres_experiment_getting_started_state();
+    let Some(target) = state.as_object_mut() else {
+        return default_postgres_experiment_getting_started_state();
+    };
+    if let Some(source) = value.as_object() {
+        for key in [
+            "dismissed",
+            "completed",
+            "step",
+            "projectId",
+            "userId",
+            "sourceId",
+            "codeId",
+            "adminUserId",
+            "currentActor",
+            "temporaryUsername",
+        ] {
+            if let Some(next_value) = source.get(key) {
+                target.insert(key.to_string(), next_value.clone());
+            }
+        }
+    }
+    for key in ["dismissed", "completed"] {
+        let next = target.get(key).and_then(Value::as_bool).unwrap_or(false);
+        target.insert(key.to_string(), Value::Bool(next));
+    }
+    for key in [
+        "step",
+        "projectId",
+        "userId",
+        "sourceId",
+        "codeId",
+        "adminUserId",
+        "currentActor",
+        "temporaryUsername",
+    ] {
+        let next = target
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        target.insert(key.to_string(), Value::String(next));
+    }
+    state
+}
+
 fn normalize_postgres_experiment_document_import_default_mode(value: &str) -> String {
     match value.trim() {
         "paste" => "paste".to_string(),
@@ -2376,7 +2454,7 @@ async fn ensure_postgres_experiment_control_schema(
             "CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'standard', active BOOLEAN NOT NULL DEFAULT TRUE, disabled_at TIMESTAMPTZ, must_change_password BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ)",
             "CREATE TABLE IF NOT EXISTS installation_settings (id TEXT PRIMARY KEY, startup_reopen_last_project BOOLEAN NOT NULL DEFAULT FALSE, document_import_default_mode TEXT NOT NULL DEFAULT 'upload', document_import_auto_name_from_file BOOLEAN NOT NULL DEFAULT TRUE, document_import_trim_imported_text BOOLEAN NOT NULL DEFAULT TRUE, document_import_warn_before_empty_import BOOLEAN NOT NULL DEFAULT TRUE, privacy_mask_file_paths BOOLEAN NOT NULL DEFAULT FALSE, privacy_clear_recent_projects_on_sign_out BOOLEAN NOT NULL DEFAULT FALSE, updates_auto_check BOOLEAN NOT NULL DEFAULT TRUE, updates_banner_enabled BOOLEAN NOT NULL DEFAULT TRUE, llm_settings_json TEXT NOT NULL DEFAULT '{}', ai_assist_policy_json TEXT NOT NULL DEFAULT '{\"mode\":\"disabled\",\"serverEnabled\":false,\"projectOverrides\":{}}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS ai_llm_catalog (scope TEXT NOT NULL, provider_id TEXT NOT NULL, provider_label TEXT NOT NULL, model_id TEXT NOT NULL, model_label TEXT NOT NULL, model_publisher TEXT, endpoint TEXT, protocol TEXT, host TEXT, port INTEGER, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (scope, provider_id, model_id))",
-            "CREATE TABLE IF NOT EXISTS user_preferences (subject_key TEXT PRIMARY KEY, theme TEXT NOT NULL DEFAULT 'light', density TEXT NOT NULL DEFAULT 'comfortable', font_size TEXT NOT NULL DEFAULT 'normal', source_text_size_px INTEGER NOT NULL DEFAULT 15, locale TEXT NOT NULL DEFAULT 'en', recent_project_limit INTEGER NOT NULL DEFAULT 10, theme_state_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+            "CREATE TABLE IF NOT EXISTS user_preferences (subject_key TEXT PRIMARY KEY, theme TEXT NOT NULL DEFAULT 'light', density TEXT NOT NULL DEFAULT 'comfortable', font_size TEXT NOT NULL DEFAULT 'normal', source_text_size_px INTEGER NOT NULL DEFAULT 15, locale TEXT NOT NULL DEFAULT 'en', recent_project_limit INTEGER NOT NULL DEFAULT 10, theme_state_json TEXT NOT NULL DEFAULT '{}', getting_started_state_json TEXT NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS device_state (id TEXT PRIMARY KEY, dismissed_update_version TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS remembered_accounts (email TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS user_project_state (subject_key TEXT PRIMARY KEY, last_opened_project_id TEXT, recent_projects_json TEXT NOT NULL DEFAULT '[]', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
@@ -2400,6 +2478,7 @@ async fn ensure_postgres_experiment_control_schema(
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS locale TEXT",
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS recent_project_limit INTEGER",
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS theme_state_json TEXT",
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS getting_started_state_json TEXT",
             "ALTER TABLE user_project_state ADD COLUMN IF NOT EXISTS last_opened_project_id TEXT",
             "ALTER TABLE user_project_state ADD COLUMN IF NOT EXISTS recent_projects_json TEXT",
             "ALTER TABLE device_state ADD COLUMN IF NOT EXISTS dismissed_update_version TEXT",
@@ -2500,6 +2579,9 @@ async fn ensure_postgres_experiment_control_schema(
             "ALTER TABLE user_preferences ALTER COLUMN theme_state_json SET DEFAULT '{}'",
             "UPDATE user_preferences SET theme_state_json = '{}' WHERE theme_state_json IS NULL OR TRIM(theme_state_json) = ''",
             "ALTER TABLE user_preferences ALTER COLUMN theme_state_json SET NOT NULL",
+            "ALTER TABLE user_preferences ALTER COLUMN getting_started_state_json SET DEFAULT '{}'",
+            "UPDATE user_preferences SET getting_started_state_json = '{}' WHERE getting_started_state_json IS NULL OR TRIM(getting_started_state_json) = ''",
+            "ALTER TABLE user_preferences ALTER COLUMN getting_started_state_json SET NOT NULL",
         ],
         "Could not backfill PostgreSQL experiment control schema columns",
     )
@@ -2849,6 +2931,59 @@ async fn verify_postgres_experiment_control_schema(
     })
 }
 
+async fn verify_postgres_experiment_project_schema_for_client(
+    client: &tokio_postgres::Client,
+) -> Result<PostgresSchemaMigrationResult, String> {
+    let schema_exists = client
+        .query_one(
+            "SELECT to_regclass('public.app_schema_migrations')::text",
+            &[],
+        )
+        .await
+        .map_err(|e| format!("Could not inspect PostgreSQL project schema: {e}"))?
+        .get::<_, Option<String>>(0)
+        .is_some();
+    if !schema_exists {
+        return Err(
+            "PostgreSQL project schema has not been initialized. Sign in as the administrator to finish project setup."
+                .to_string(),
+        );
+    }
+
+    let rows = client
+        .query(
+            "SELECT version FROM app_schema_migrations ORDER BY version",
+            &[],
+        )
+        .await
+        .map_err(|e| format!("Could not verify PostgreSQL project schema: {e}"))?;
+    let applied_versions = rows
+        .into_iter()
+        .map(|row| row.get::<_, i32>(0))
+        .collect::<Vec<_>>();
+    let applied_set = applied_versions.iter().copied().collect::<HashSet<_>>();
+    let missing_versions = POSTGRES_EXPERIMENT_PROJECT_MIGRATIONS
+        .iter()
+        .map(|(version, _)| *version)
+        .filter(|version| !applied_set.contains(version))
+        .collect::<Vec<_>>();
+    if !missing_versions.is_empty() {
+        return Err(format!(
+            "PostgreSQL project schema needs administrator migration before this project can be opened. Missing migration version(s): {}.",
+            missing_versions
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    Ok(PostgresSchemaMigrationResult {
+        ready: true,
+        applied_versions,
+    })
+}
+
 async fn ensure_postgres_experiment_project_schema(
     app: &tauri::AppHandle,
     database_name: &str,
@@ -2869,8 +3004,26 @@ async fn ensure_postgres_experiment_project_schema(
         }
     }
 
+    let auth_state = app.state::<PostgresExperimentAuthState>();
+    let session = get_postgres_runtime_auth_session(&auth_state)
+        .ok_or_else(|| "Sign in to PostgreSQL before opening a project database.".to_string())?;
+
     let (client, connection_task) =
         connect_postgres_database(app, &normalized_database_name).await?;
+    if session.auth_kind != "postgres_admin" {
+        let verify_result =
+            verify_postgres_experiment_project_schema_for_client(&client).await;
+        connection_task.abort();
+        match verify_result {
+            Ok(result) => {
+                let mut cached_databases = schema_cache.0.lock().unwrap();
+                cached_databases.insert(normalized_database_name);
+                return Ok(result);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
     let lock_key = normalized_database_name.clone();
     client
         .execute(
@@ -2896,7 +3049,7 @@ async fn ensure_postgres_experiment_project_schema(
                     app_user_id TEXT NOT NULL,
                     name TEXT NOT NULL,
                     email TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'member',
+                    role TEXT NOT NULL DEFAULT 'viewer',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     UNIQUE (email),
@@ -3454,6 +3607,7 @@ async fn ensure_postgres_experiment_project_schema(
             .batch_execute(
                 "
                 ALTER TABLE project_users ADD COLUMN IF NOT EXISTS app_user_id TEXT;
+                ALTER TABLE project_users ALTER COLUMN role SET DEFAULT 'viewer';
                 ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS project_name TEXT NOT NULL DEFAULT '';
                 ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS project_description TEXT NOT NULL DEFAULT '';
                 ALTER TABLE timeline_groups ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'rounded';
@@ -3657,6 +3811,11 @@ async fn ensure_postgres_experiment_project_schema(
                 ALTER TABLE object_relationships ALTER COLUMN to_entity_id SET NOT NULL;
                 CREATE INDEX IF NOT EXISTS idx_object_relationships_from_entity ON object_relationships(from_entity_type, from_entity_id);
                 CREATE INDEX IF NOT EXISTS idx_object_relationships_to_entity ON object_relationships(to_entity_type, to_entity_id);
+
+                UPDATE project_users
+                SET role = 'viewer',
+                    updated_at = NOW()
+                WHERE LOWER(TRIM(role)) = 'member';
                 ",
             )
             .await
@@ -4022,17 +4181,7 @@ async fn ensure_postgres_experiment_project_schema(
         .await
         .map_err(|e| format!("Could not create PostgreSQL experiment relationship type index: {e}"))?;
 
-    for (version, name) in [
-        (1_i32, "project_users_schema"),
-        (2_i32, "dynamic_objects_and_relationships_schema"),
-        (3_i32, "project_users_app_user_binding"),
-        (4_i32, "project_settings_ai_assist_and_document_import_schema"),
-        (5_i32, "object_types_schema"),
-        (6_i32, "relationship_types_schema"),
-        (7_i32, "qualitative_core_and_event_objects_schema"),
-        (8_i32, "cases_and_case_source_links_schema"),
-        (9_i32, "source_backed_objects_schema"),
-    ] {
+    for (version, name) in POSTGRES_EXPERIMENT_PROJECT_MIGRATIONS {
         client
             .execute(
                 "
@@ -4139,6 +4288,37 @@ async fn ensure_postgres_experiment_project_snapshot_schema(
     project_id: &str,
 ) -> Result<String, String> {
     let snapshot_database_name = postgres_project_snapshot_database_name(project_id);
+    if let Ok((client, connection_task)) =
+        connect_postgres_database(app, &snapshot_database_name).await
+    {
+        let schema_ready = client
+            .query_one(
+                "
+                SELECT
+                    to_regclass('public.project_snapshots') IS NOT NULL
+                    AND to_regclass('public.project_snapshot_settings') IS NOT NULL
+                    AND to_regclass('public.snapshot_files') IS NOT NULL
+                ",
+                &[],
+            )
+            .await
+            .map(|row| row.get::<_, bool>(0))
+            .unwrap_or(false);
+        connection_task.abort();
+        if schema_ready {
+            return Ok(snapshot_database_name);
+        }
+    }
+    let auth_state = app.state::<PostgresExperimentAuthState>();
+    let is_postgres_admin = get_postgres_runtime_auth_session(&auth_state)
+        .map(|session| session.auth_kind == "postgres_admin")
+        .unwrap_or(false);
+    if !is_postgres_admin {
+        return Err(
+            "The PostgreSQL snapshot database for this project has not been prepared. Sign in as the PostgreSQL administrator and open the project once to repair it."
+                .to_string(),
+        );
+    }
     create_postgres_database_if_missing(app, &snapshot_database_name).await?;
     let (client, connection_task) = connect_postgres_database(app, &snapshot_database_name).await?;
     client
@@ -5527,7 +5707,7 @@ async fn revoke_postgres_project_database_access_for_role_across_projects_best_e
         return vec!["Could not connect to the PostgreSQL control database.".to_string()];
     };
     let rows = client
-        .query("SELECT database_name FROM projects", &[])
+        .query("SELECT id, database_name FROM projects", &[])
         .await;
     connection_task.abort();
     let rows = match rows {
@@ -5540,12 +5720,20 @@ async fn revoke_postgres_project_database_access_for_role_across_projects_best_e
     };
 
     for row in rows {
-        let database_name: String = row.get(0);
+        let project_id: String = row.get(0);
+        let database_name: String = row.get(1);
         if let Err(error) =
             revoke_postgres_project_database_access_for_role(app, &database_name, role_name).await
         {
             errors.push(format!("{database_name}: {error}"));
         }
+        let snapshot_database_name = postgres_project_snapshot_database_name(&project_id);
+        let _ = revoke_postgres_project_database_access_for_role(
+            app,
+            &snapshot_database_name,
+            role_name,
+        )
+        .await;
     }
 
     errors
@@ -5598,6 +5786,20 @@ async fn grant_postgres_project_database_access_for_app_user_best_effort(
                         .await
                 {
                     errors.push(format!("{project_id}/{database_name}: {error}"));
+                }
+                match ensure_postgres_experiment_project_snapshot_schema(app, &project_id).await {
+                    Ok(snapshot_database_name) => {
+                        if let Err(error) = grant_postgres_project_database_access_for_role(
+                            app,
+                            &snapshot_database_name,
+                            role_name,
+                        )
+                        .await
+                        {
+                            errors.push(format!("{project_id}/{snapshot_database_name}: {error}"));
+                        }
+                    }
+                    Err(error) => errors.push(format!("{project_id}/snapshot: {error}")),
                 }
             }
             Ok(false) => {}
@@ -6324,6 +6526,8 @@ struct PostgresExperimentUserPreferences {
     locale: String,
     recent_project_limit: i32,
     theme_state: PostgresExperimentThemeState,
+    #[serde(default = "default_postgres_experiment_getting_started_state")]
+    getting_started_state: Value,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -10603,6 +10807,7 @@ async fn get_postgres_experiment_user_preferences_command(
                  , locale
                  , recent_project_limit
                  , theme_state_json
+                 , getting_started_state_json
             FROM user_preferences
             WHERE subject_key = $1
             ",
@@ -10633,6 +10838,10 @@ async fn get_postgres_experiment_user_preferences_command(
                 )
                 .unwrap_or_else(|_| default_postgres_experiment_theme_state()),
             ),
+            getting_started_state: normalize_postgres_experiment_getting_started_state(
+                serde_json::from_str::<Value>(row.get::<_, String>(7).as_str())
+                    .unwrap_or_else(|_| default_postgres_experiment_getting_started_state()),
+            ),
         })
         .unwrap_or_else(default_postgres_experiment_user_preferences))
 }
@@ -10658,10 +10867,17 @@ async fn save_postgres_experiment_user_preferences_command(
             preferences.recent_project_limit,
         ),
         theme_state: normalize_postgres_experiment_theme_state(preferences.theme_state),
+        getting_started_state: normalize_postgres_experiment_getting_started_state(
+            preferences.getting_started_state,
+        ),
     };
     let subject_key = postgres_experiment_preference_subject_key(&session);
     let theme_state_json = serde_json::to_string(&next.theme_state)
         .map_err(|e| format!("Could not serialize PostgreSQL experiment theme state: {e}"))?;
+    let getting_started_state_json =
+        serde_json::to_string(&next.getting_started_state).map_err(|e| {
+            format!("Could not serialize PostgreSQL experiment getting started state: {e}")
+        })?;
 
     let (client, connection_task) = connect_postgres_runtime(&app).await?;
     client
@@ -10676,9 +10892,10 @@ async fn save_postgres_experiment_user_preferences_command(
                 locale,
                 recent_project_limit,
                 theme_state_json,
+                getting_started_state_json,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
             ON CONFLICT (subject_key) DO UPDATE
             SET theme = EXCLUDED.theme,
                 density = EXCLUDED.density,
@@ -10687,6 +10904,7 @@ async fn save_postgres_experiment_user_preferences_command(
                 locale = EXCLUDED.locale,
                 recent_project_limit = EXCLUDED.recent_project_limit,
                 theme_state_json = EXCLUDED.theme_state_json,
+                getting_started_state_json = EXCLUDED.getting_started_state_json,
                 updated_at = NOW()
             ",
             &[
@@ -10698,6 +10916,7 @@ async fn save_postgres_experiment_user_preferences_command(
                 &next.locale,
                 &next.recent_project_limit,
                 &theme_state_json,
+                &getting_started_state_json,
             ],
         )
         .await
@@ -12084,7 +12303,7 @@ async fn change_postgres_experiment_app_user_password_command(
         .map_err(|e| format!("Could not change PostgreSQL experiment user password: {e}"))?;
     connection_task.abort();
 
-    let _updated_user = PostgresExperimentAppUser {
+    let updated_user = PostgresExperimentAppUser {
         id: row.get(0),
         name: row.get(1),
         username: row.get(2),
@@ -12100,11 +12319,28 @@ async fn change_postgres_experiment_app_user_password_command(
         last_login_at: row.get(9),
     };
 
+    let next_session = PostgresExperimentAuthSession {
+        auth_kind: session.auth_kind.clone(),
+        user: updated_user.clone(),
+        started_at_ms: session.started_at_ms,
+    };
+    set_postgres_runtime_auth_session(
+        &runtime_auth_state,
+        Some(StoredPostgresExperimentAuthSession {
+            auth_kind: next_session.auth_kind.clone(),
+            user_id: next_session.user.id.clone(),
+            postgres_username: stored_session.postgres_username.clone(),
+            postgres_password: new_password.clone(),
+            started_at_ms: next_session.started_at_ms,
+        }),
+    );
+    clear_postgres_connection_cache(&app);
+
     append_postgres_experiment_auth_diagnostics_best_effort(
         &app,
-        "postgres.auth.logout",
+        "postgres.auth.password_change",
         "success",
-        "PostgreSQL user session ended after password change.",
+        "PostgreSQL user password changed.",
         serde_json::json!({
             "authKind": session.auth_kind.clone(),
             "userId": session.user.id.clone(),
@@ -12116,8 +12352,8 @@ async fn change_postgres_experiment_app_user_password_command(
     append_postgres_experiment_last_opened_project_log_best_effort(
         &app,
         &session,
-        "auth.logout",
-        "Signed out after password change",
+        "auth.password_change",
+        "Changed password",
         Some(&session.user.id),
         Some(serde_json::json!({
             "authKind": session.auth_kind.clone(),
@@ -12127,8 +12363,6 @@ async fn change_postgres_experiment_app_user_password_command(
         })),
     )
     .await;
-    set_postgres_runtime_auth_session(&runtime_auth_state, None);
-    clear_postgres_connection_cache(&app);
     get_postgres_experiment_auth_status_command(app, runtime_auth_state).await
 }
 
@@ -12610,6 +12844,16 @@ async fn create_postgres_experiment_project_command(
         connection_task.abort();
         return Err(error);
     }
+
+    if let Err(error) = ensure_postgres_experiment_project_snapshot_schema(&app, &project_id).await
+    {
+        let snapshot_database_name = postgres_project_snapshot_database_name(&project_id);
+        let _ = drop_postgres_database_if_exists(&app, &snapshot_database_name).await;
+        let _ = drop_postgres_database_if_exists(&app, &database_name).await;
+        let _ = fs::remove_dir_all(&storage_path);
+        connection_task.abort();
+        return Err(error);
+    }
     let default_llm_settings = client
         .query_opt(
             "SELECT llm_settings_json FROM installation_settings WHERE id = 'singleton'",
@@ -12700,11 +12944,23 @@ async fn create_postgres_experiment_project_command(
             .map_err(|e| {
                 format!("Could not grant the project creator PostgreSQL database access: {e}")
             })?;
+        let snapshot_database_name = postgres_project_snapshot_database_name(&project_id);
+        grant_postgres_project_database_access_for_role(
+            &app,
+            &snapshot_database_name,
+            &creator_email,
+        )
+        .await
+        .map_err(|e| {
+            format!("Could not grant the project creator PostgreSQL snapshot access: {e}")
+        })?;
         project_connection_task.abort();
         Ok::<(), String>(())
     })
     .await
     {
+        let snapshot_database_name = postgres_project_snapshot_database_name(&project_id);
+        let _ = drop_postgres_database_if_exists(&app, &snapshot_database_name).await;
         let _ = drop_postgres_database_if_exists(&app, &database_name).await;
         let _ = fs::remove_dir_all(&storage_path);
         let (cleanup_client, cleanup_connection_task) = connect_postgres_runtime(&app).await?;
@@ -13341,6 +13597,12 @@ async fn import_postgres_experiment_project_snapshot_as_project_command(
         &source_project,
     )
     .await?;
+    if session.auth_kind != "postgres_admin" {
+        return Err(
+            "Only the local PostgreSQL administrator can import a snapshot as a new project."
+                .to_string(),
+        );
+    }
     let stored_session = get_postgres_runtime_auth_session(&runtime_auth_state)
         .ok_or_else(|| "Sign in to PostgreSQL before importing a project snapshot.".to_string())?;
     let snapshot_database_name =
@@ -13403,6 +13665,19 @@ async fn import_postgres_experiment_project_snapshot_as_project_command(
         control_connection_task.abort();
         return Err(error);
     }
+    let new_snapshot_database_name =
+        match ensure_postgres_experiment_project_snapshot_schema(&app, &new_project_id).await {
+            Ok(database_name) => database_name,
+            Err(error) => {
+                let snapshot_database_name =
+                    postgres_project_snapshot_database_name(&new_project_id);
+                let _ = drop_postgres_database_if_exists(&app, &snapshot_database_name).await;
+                let _ = drop_postgres_database_if_exists(&app, &new_database_name).await;
+                let _ = fs::remove_dir_all(&new_storage_path);
+                control_connection_task.abort();
+                return Err(error);
+            }
+        };
 
     let restore_result: Result<(), String> = async {
         let config = load_postgres_runtime_config(&app)?;
@@ -13521,11 +13796,18 @@ async fn import_postgres_experiment_project_snapshot_as_project_command(
             &session.user.username.trim().to_lowercase(),
         )
         .await?;
+        grant_postgres_project_database_access_for_role(
+            &app,
+            &new_snapshot_database_name,
+            &session.user.username.trim().to_lowercase(),
+        )
+        .await?;
         Ok(())
     }
     .await;
 
     if let Err(error) = restore_result {
+        let _ = drop_postgres_database_if_exists(&app, &new_snapshot_database_name).await;
         let _ = drop_postgres_database_if_exists(&app, &new_database_name).await;
         let _ = fs::remove_dir_all(&new_storage_path);
         control_connection_task.abort();
@@ -13658,6 +13940,8 @@ async fn create_postgres_experiment_project_user_command(
         return Err("Reactivate this user before adding them to a project.".to_string());
     }
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
+    let snapshot_database_name =
+        ensure_postgres_experiment_project_snapshot_schema(&app, &project_id).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
     let user_id = generate_identifier();
     let insert_result = client
@@ -13704,6 +13988,27 @@ async fn create_postgres_experiment_project_user_command(
         connection_task.abort();
         return Err(format!(
             "Could not grant PostgreSQL project database access for the new member: {error}"
+        ));
+    }
+    if let Err(error) = grant_postgres_project_database_access_for_role(
+        &app,
+        &snapshot_database_name,
+        &app_user.user.username,
+    )
+    .await
+    {
+        let _ = client
+            .execute("DELETE FROM project_users WHERE id = $1", &[&user_id])
+            .await;
+        let _ = revoke_postgres_project_database_access_for_role(
+            &app,
+            &project.database_name,
+            &app_user.user.username,
+        )
+        .await;
+        connection_task.abort();
+        return Err(format!(
+            "Could not grant PostgreSQL snapshot access for the new member: {error}"
         ));
     }
     let created = PostgresExperimentProjectUser {
@@ -13916,6 +14221,13 @@ async fn delete_postgres_experiment_project_user_command(
     });
     revoke_postgres_project_database_access_for_role(&app, &project.database_name, &existing_email)
         .await?;
+    let snapshot_database_name = postgres_project_snapshot_database_name(&project_id);
+    let _ = revoke_postgres_project_database_access_for_role(
+        &app,
+        &snapshot_database_name,
+        &existing_email,
+    )
+    .await;
     let delete_result = client
         .execute(
             "DELETE FROM project_users WHERE id = $1",
@@ -14741,42 +15053,10 @@ async fn load_postgres_experiment_sources_for_client(
         .collect())
 }
 
-async fn ensure_postgres_experiment_source_type_settings_table_for_client(
-    client: &impl GenericClient,
-) -> Result<(), String> {
-    client
-        .batch_execute(
-            "
-            CREATE TABLE IF NOT EXISTS source_type_settings (
-                source_kind TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                shape TEXT NOT NULL DEFAULT 'rounded',
-                color TEXT NOT NULL DEFAULT '#355070',
-                outline_color TEXT NOT NULL DEFAULT '',
-                fill TEXT NOT NULL DEFAULT 'outline',
-                fill_transparency INTEGER NOT NULL DEFAULT 0,
-                outline_width INTEGER NOT NULL DEFAULT 2,
-                image_storage_path TEXT NOT NULL DEFAULT '',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            ALTER TABLE source_type_settings ADD COLUMN IF NOT EXISTS fill_transparency INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE source_type_settings ADD COLUMN IF NOT EXISTS outline_width INTEGER NOT NULL DEFAULT 2;
-            ",
-        )
-        .await
-        .map_err(|e| {
-            format!("Could not create PostgreSQL experiment source type settings table: {e}")
-        })?;
-    Ok(())
-}
-
 async fn load_postgres_experiment_source_type_settings_for_client(
     client: &tokio_postgres::Client,
     project_id: &str,
 ) -> Result<Vec<PostgresExperimentSourceTypeSetting>, String> {
-    ensure_postgres_experiment_source_type_settings_table_for_client(client).await?;
     let rows = client
         .query(
             "
@@ -16672,7 +16952,6 @@ async fn save_postgres_experiment_source_type_setting_command(
     .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    ensure_postgres_experiment_source_type_settings_table_for_client(&*client).await?;
     let row = client
         .query_one(
             "
@@ -16750,7 +17029,6 @@ async fn import_postgres_experiment_source_type_image_command(
     .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    ensure_postgres_experiment_source_type_settings_table_for_client(&*client).await?;
     let current = load_postgres_experiment_source_type_settings_for_client(&client, &project_id)
         .await?
         .into_iter()
@@ -16843,7 +17121,6 @@ async fn remove_postgres_experiment_source_type_image_command(
     .await?;
     ensure_postgres_experiment_project_schema(&app, &project.database_name).await?;
     let (client, connection_task) = connect_postgres_database(&app, &project.database_name).await?;
-    ensure_postgres_experiment_source_type_settings_table_for_client(&*client).await?;
     let current = load_postgres_experiment_source_type_settings_for_client(&client, &project_id)
         .await?
         .into_iter()

@@ -11,6 +11,7 @@ import { FilterIcon } from "../components/FilterIcon";
 import { SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
 import { getAppRuntimeInfo, type AppRuntimeInfo } from "../lib/dataRoot";
+import { DEFAULT_GETTING_STARTED_STATE, normalizeGettingStartedState, type GettingStartedState } from "../lib/gettingStartedGuide";
 import { buildPermissionMatrixRows } from "../lib/permissionMatrix";
 import {
   deletePostgresProject,
@@ -1651,6 +1652,7 @@ export function PostgresAppSettingsView({
   const [fontSize, setFontSize] = useState<FontSize>("normal");
   const [sourceTextSizePx, setSourceTextSizePx] = useState(15);
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
+  const [gettingStartedState, setGettingStartedState] = useState<GettingStartedState>(DEFAULT_GETTING_STARTED_STATE);
   const permissionMatrixRows = useMemo(() => buildPermissionMatrixRows(t), [t]);
 
   const refreshDetails = useCallback(async () => {
@@ -1666,6 +1668,7 @@ export function PostgresAppSettingsView({
       setFontSize(nextUserPreferences.fontSize);
       setSourceTextSizePx(nextUserPreferences.sourceTextSizePx);
       setRecentProjectLimit(nextUserPreferences.recentProjectLimit);
+      setGettingStartedState(normalizeGettingStartedState(nextUserPreferences.gettingStartedState));
       if (nextUserPreferences.locale !== locale) setLocale(nextUserPreferences.locale);
       applyPostgresRuntimeThemePreferences(nextUserPreferences);
       setActivePresetId(null);
@@ -1686,6 +1689,7 @@ export function PostgresAppSettingsView({
       setFontSize(saved.fontSize);
       setSourceTextSizePx(saved.sourceTextSizePx);
       setRecentProjectLimit(saved.recentProjectLimit);
+      setGettingStartedState(normalizeGettingStartedState(saved.gettingStartedState));
       applyPostgresRuntimeThemePreferences(saved);
       if (successMessage) setNotice(successMessage);
       setError("");
@@ -1702,6 +1706,7 @@ export function PostgresAppSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
       ...next,
     });
@@ -1713,9 +1718,10 @@ export function PostgresAppSettingsView({
       theme,
         density,
         fontSize,
-        sourceTextSizePx,
-        locale: nextLocale,
+      sourceTextSizePx,
+      locale: nextLocale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     }, "Language updated.");
   }
@@ -1730,6 +1736,7 @@ export function PostgresAppSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     }, "Theme updated.");
   }

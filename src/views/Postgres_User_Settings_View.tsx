@@ -5,6 +5,7 @@ import { SettingsModal } from "../components/SettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
+import { DEFAULT_GETTING_STARTED_STATE, normalizeGettingStartedState, type GettingStartedState } from "../lib/gettingStartedGuide";
 import {
   changePostgresAppUserPassword,
   getPostgresUserPreferences,
@@ -91,6 +92,7 @@ export function PostgresUserSettingsView({
   const [fontSize, setFontSize] = useState<FontSize>("normal");
   const [sourceTextSizePx, setSourceTextSizePx] = useState(15);
   const [recentProjectLimit, setRecentProjectLimit] = useState(10);
+  const [gettingStartedState, setGettingStartedState] = useState<GettingStartedState>(DEFAULT_GETTING_STARTED_STATE);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +106,7 @@ export function PostgresUserSettingsView({
         setFontSize(nextPreferences.fontSize);
         setSourceTextSizePx(normalizeSourceTextSizePx(nextPreferences.sourceTextSizePx));
         setRecentProjectLimit(nextPreferences.recentProjectLimit);
+        setGettingStartedState(normalizeGettingStartedState(nextPreferences.gettingStartedState));
         if (nextPreferences.locale !== locale) {
           setLocale(nextPreferences.locale);
         }
@@ -132,6 +135,7 @@ export function PostgresUserSettingsView({
     setFontSize(saved.fontSize);
     setSourceTextSizePx(normalizeSourceTextSizePx(saved.sourceTextSizePx));
     setRecentProjectLimit(saved.recentProjectLimit);
+    setGettingStartedState(normalizeGettingStartedState(saved.gettingStartedState));
     applyPostgresRuntimeThemePreferences(saved);
     if (successMessage) setNotice(successMessage);
     setError("");
@@ -204,6 +208,7 @@ export function PostgresUserSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     });
   }
@@ -218,6 +223,7 @@ export function PostgresUserSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     });
   }
@@ -232,6 +238,7 @@ export function PostgresUserSettingsView({
         sourceTextSizePx,
         locale: nextLocale,
         recentProjectLimit,
+        gettingStartedState,
         themeState: getStoredThemeState(),
       }, "Language updated.");
     } catch (changeError) {
@@ -249,6 +256,7 @@ export function PostgresUserSettingsView({
       sourceTextSizePx,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     }, "Theme updated.");
   }
@@ -263,6 +271,7 @@ export function PostgresUserSettingsView({
       sourceTextSizePx: normalized,
       locale,
       recentProjectLimit,
+      gettingStartedState,
       themeState: getStoredThemeState(),
     });
   }

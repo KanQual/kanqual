@@ -7,9 +7,11 @@ import {
 } from "react";
 import { LoadingCard } from "./components/LoadingCard";
 import { EyeIcon, EyeOffIcon } from "./components/AppIcons";
+import { GettingStartedGuideCallout } from "./components/GettingStartedGuideCallout";
 import { AuthProvider } from "./context/AuthContext";
 import { I18nProvider } from "./i18n";
 import { readAppSettings, saveAppSettings } from "./lib/appSettings";
+import { clearGettingStartedHandoff, readGettingStartedHandoff, updateGettingStartedHandoff } from "./lib/gettingStartedGuide";
 import {
   bootstrapPostgres,
   changePostgresAppUserPassword,
@@ -126,7 +128,13 @@ function PostgresForcePasswordChangeView({
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [gettingStartedHandoff, setGettingStartedHandoff] = useState(() => readGettingStartedHandoff());
   const passwordMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
+  function exitGettingStartedGuide() {
+    clearGettingStartedHandoff();
+    setGettingStartedHandoff(null);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -153,6 +161,12 @@ function PostgresForcePasswordChangeView({
         currentPassword,
         newPassword,
       });
+      if (
+        gettingStartedHandoff
+        && (gettingStartedHandoff.userId === session.user.id || gettingStartedHandoff.temporaryUsername === session.user.username)
+      ) {
+        setGettingStartedHandoff(updateGettingStartedHandoff({ step: "chooseLocalWorkspace", currentActor: "projectUser" }));
+      }
       onPasswordChanged(nextStatus);
     } catch (changeError) {
       setError(describeUnknownError(changeError));
@@ -162,14 +176,25 @@ function PostgresForcePasswordChangeView({
   }
 
   return (
-    <div className="auth-screen">
-      <div className="auth-card" style={{ maxWidth: 720 }}>
+    <div className={`auth-screen${gettingStartedHandoff?.step === "changePassword" ? " auth-screen--getting-started-login" : ""}`}>
+      {gettingStartedHandoff?.step === "changePassword" ? <div className="getting-started-spotlight-overlay" aria-hidden="true" /> : null}
+      <div
+        className={`auth-card${gettingStartedHandoff?.step === "changePassword" ? " getting-started-spotlight-target" : ""}`}
+        style={{ maxWidth: 720 }}
+      >
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
           <div className="auth-brand">KanQual</div>
         </div>
         <form className="form" onSubmit={handleSubmit}>
           <h2 className="auth-panel-title">Change Password</h2>
+          {gettingStartedHandoff ? (
+            <>
+              <GettingStartedGuideCallout title="Continue the guide" onDismiss={exitGettingStartedGuide}>
+                <p>Replace the temporary password with one you will use for this project account.</p>
+              </GettingStartedGuideCallout>
+            </>
+          ) : null}
           <p className="auth-hint">
             This account was created with a temporary password. Choose a new password before continuing.
           </p>
@@ -615,50 +640,6 @@ function AuthGate() {
 
   if (
     postgresAuthReady
-    && postgresAuthStatus?.requiresAccountSetup
-    && postgresAuthStatus.currentSession?.authKind === "postgres_admin"
-  ) {
-    return (
-      <Suspense fallback={<AuthLoadingFallback />}>
-        <PostgresAuthViewLazy
-          authStatus={postgresAuthStatus}
-          onRefresh={refreshPostgresStatus}
-          onFirstAccountCreated={async (session) => {
-            setPendingFirstRunSession(session);
-          }}
-          onAuthenticated={async (session) => {
-            if (session.authKind === "postgres_admin") {
-              setPendingPasswordResetCurrentPassword("");
-              await refreshPostgresStatus();
-              return;
-            }
-            setPendingPasswordResetCurrentPassword("");
-            await refreshPostgresInstallationSettings();
-            setWorkspaceModeSelected(true);
-            setPostgresAuthStatus((current) => current
-              ? {
-                  ...current,
-                  currentSession: session,
-                  requiresAccountSetup: false,
-                  registeredUserCount: Math.max(current.registeredUserCount, 1),
-                }
-              : {
-                  bootstrapApplied: true,
-                  adminHandoffCompleted: true,
-                  ready: true,
-                  registeredUserCount: 1,
-                  localAdminName: "",
-                  requiresAccountSetup: false,
-                  currentSession: session,
-                });
-          }}
-        />
-      </Suspense>
-    );
-  }
-
-  if (
-    postgresAuthReady
     && postgresAuthStatus?.currentSession?.authKind === "postgres_admin"
   ) {
     if (adminOpenedProject) {
@@ -880,6 +861,12 @@ function AuthGate() {
         status={postgresStatus}
         loading={!postgresStatusLoaded}
         onBootstrap={handleBootstrapPostgres}
+        onInitialized={async () => {
+          await refreshPostgresStatus();
+          setWorkspaceModeSelected(false);
+          setPendingFirstRunSession(null);
+          setPendingPasswordResetCurrentPassword("");
+        }}
         onRestored={async () => {
           await refreshPostgresStatus();
           setWorkspaceModeSelected(false);
