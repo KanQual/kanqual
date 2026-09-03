@@ -23,6 +23,8 @@ import { SettingsModal } from "../components/SettingsModal";
 import type { SourceEditorPayload, SourceRow } from "./Postgres_Sources_View";
 import { NewCodeModal, type CodeRow } from "../components/NewCodeModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
+import type { TranslationKey } from "../i18n/types";
 import { readAppSettings } from "../lib/appSettings";
 import {
   DEFAULT_GETTING_STARTED_STATE,
@@ -384,6 +386,7 @@ function PostgresAiAssistPortPlaceholderView({
   title: string;
   detail: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="view home-view ai-assist-home-view">
       <header className="view-header">
@@ -394,10 +397,10 @@ function PostgresAiAssistPortPlaceholderView({
       </header>
       <section className="home-project-card ai-assist-home-card">
         <div className="home-project-card-header">
-          <h2>PostgreSQL Port</h2>
+          <h2>{t("projectCore.homeShell.postgresPort")}</h2>
         </div>
         <p className="home-project-description">
-          This destination is available in the PostgreSQL project shell and is ready for the next AI Assist view port.
+          {t("projectCore.homeShell.postgresPortDescription")}
         </p>
       </section>
     </div>
@@ -417,47 +420,47 @@ type PostgresProjectHelpModalId =
   | "construct"
   | "view";
 
-const POSTGRES_PROJECT_HELP_COPY: Record<PostgresProjectHelpModalId, { title: string; lines: string[] }> = {
+const POSTGRES_PROJECT_HELP_COPY: Record<PostgresProjectHelpModalId, { titleKey: TranslationKey; lineKeys: TranslationKey[] }> = {
   home: {
-    title: "Project Home Help",
-    lines: [
-      "Use Project Home to review project totals, inspect the graph, and arrange dated project material on the timeline.",
-      "The Details tab summarizes project activity. The Graph tab shows sources, objects, codes, annotations, and relationships as a canvas. The Timeline tab shows items with timeline fields and group assignments.",
+    titleKey: "projectCore.homeShell.help.homeTitle",
+    lineKeys: [
+      "projectCore.homeShell.help.homeLine1",
+      "projectCore.homeShell.help.homeLine2",
     ],
   },
   users: {
-    title: "Project Users Help",
-    lines: [
-      "Review project members, their roles, and account status. Project owners and administrators can use this view to manage collaboration access.",
-      "Role counts in the left column filter the user list without changing the project.",
+    titleKey: "projectCore.homeShell.help.usersTitle",
+    lineKeys: [
+      "projectCore.homeShell.help.usersLine1",
+      "projectCore.homeShell.help.usersLine2",
     ],
   },
   objects: {
-    title: "Objects Help",
-    lines: [
-      "Create and edit project objects, manage object type defaults, define object attributes, and review object details from one workspace.",
-      "The left column filters by object type or switches to the attributes table. Select an object to inspect details, attributes, relationships, annotations, and timeline data.",
+    titleKey: "projectCore.homeShell.help.objectsTitle",
+    lineKeys: [
+      "projectCore.homeShell.help.objectsLine1",
+      "projectCore.homeShell.help.objectsLine2",
     ],
   },
   relationships: {
-    title: "Relationships Help",
-    lines: [
-      "Create and edit relationships between sources and objects, manage relationship type defaults, and define relationship attributes.",
-      "The left column filters by relationship type or switches to the attributes table. Select a relationship to review endpoints, graphics, attributes, and timeline fields.",
+    titleKey: "projectCore.homeShell.help.relationshipsTitle",
+    lineKeys: [
+      "projectCore.homeShell.help.relationshipsLine1",
+      "projectCore.homeShell.help.relationshipsLine2",
     ],
   },
   construct: {
-    title: "Construct Help",
-    lines: [
-      "Construct is reserved for assembling structured visual models from research objects and relationships.",
-      "This mode is currently a placeholder and does not save project changes yet.",
+    titleKey: "projectCore.homeShell.help.constructTitle",
+    lineKeys: [
+      "projectCore.homeShell.help.constructLine1",
+      "projectCore.homeShell.help.constructLine2",
     ],
   },
   view: {
-    title: "View Help",
-    lines: [
-      "Browse saved canvases by mode, open a saved canvas, export it, or delete it if your role allows.",
-      "Saved canvases preserve visual arrangements separately from the underlying project objects and relationships.",
+    titleKey: "projectCore.homeShell.help.viewTitle",
+    lineKeys: [
+      "projectCore.homeShell.help.viewLine1",
+      "projectCore.homeShell.help.viewLine2",
     ],
   },
 };
@@ -728,9 +731,23 @@ function formatCanvasKindLabel(kind: string): string {
   }
 }
 
-function formatPostgresSourceKindLabel(kind: string): string {
-  return POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.id === kind)?.label
-    ?? (kind ? kind.split(/[_\s-]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") : "Source");
+function formatPostgresSourceKindLabel(kind: string, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (normalizePostgresSourceKind(kind)) {
+    case "text":
+      return t("projectCore.sourceKinds.text");
+    case "transcript":
+      return t("projectCore.sourceKinds.transcript");
+    case "pdf":
+      return t("projectCore.sourceKinds.pdf");
+    case "image":
+      return t("projectCore.sourceKinds.image");
+    case "audio":
+      return t("projectCore.sourceKinds.audio");
+    case "video":
+      return t("projectCore.sourceKinds.video");
+    default:
+      return kind ? kind.split(/[_\s-]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") : t("projectCore.entities.source");
+  }
 }
 
 function getPostgresSourceKindOption(kind: string | null | undefined) {
@@ -792,6 +809,7 @@ export function PostgresProjectHomeView({
   onProjectOpened,
   onSignOut,
 }: PostgresProjectHomeViewProps) {
+  const { t } = useI18n();
   const PROJECT_ROLE_OPTIONS = ["owner", "editor", "coder", "viewer"] as const;
   const [activeScreen, setActiveScreen] = useState<PostgresProjectScreen>("home");
   const [projectHomeTab, setProjectHomeTab] = useState<PostgresProjectHomeTab>("details");
@@ -1360,7 +1378,7 @@ export function PostgresProjectHomeView({
   const handleSaveFreeDrawCanvas = useCallback(async () => {
     const trimmedName = saveFreeDrawName.trim();
     if (!trimmedName) {
-      setCanvasSaveError("Enter a name for the saved canvas.");
+      setCanvasSaveError(t("projectCore.homeShell.savedCanvasNameRequired"));
       return;
     }
     setFreeDrawSaving(true);
@@ -1400,7 +1418,7 @@ export function PostgresProjectHomeView({
     } finally {
       setFreeDrawSaving(false);
     }
-  }, [canvasNodes, canvasOffset.x, canvasOffset.y, canvasScale, canvasShapes, freeDrawSavedDrawingId, hiddenCanvasRelationshipIds, project.id, saveFreeDrawName]);
+  }, [canvasNodes, canvasOffset.x, canvasOffset.y, canvasScale, canvasShapes, freeDrawSavedDrawingId, hiddenCanvasRelationshipIds, project.id, saveFreeDrawName, t]);
   const openSaveGraphDrawModal = useCallback(() => {
     setCanvasSaveError("");
     setDrawCanvasSaveNotice("");
@@ -1410,7 +1428,7 @@ export function PostgresProjectHomeView({
   const handleSaveGraphDrawCanvas = useCallback(async () => {
     const trimmedName = saveFreeDrawName.trim();
     if (!trimmedName) {
-      setCanvasSaveError("Enter a name for the saved drawing.");
+      setCanvasSaveError(t("projectCore.homeShell.savedDrawingNameRequired"));
       return;
     }
     setDrawCanvasSaving(true);
@@ -1441,7 +1459,7 @@ export function PostgresProjectHomeView({
         return [saved, ...next];
       });
       setDrawCanvasSaveModalOpen(false);
-      setDrawCanvasSaveNotice(`Saved ${saved.name}.`);
+      setDrawCanvasSaveNotice(t("projectCore.homeShell.savedDrawingNotice", { name: saved.name }));
     } catch (error) {
       setCanvasSaveError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1454,6 +1472,7 @@ export function PostgresProjectHomeView({
     drawSavedDrawingId,
     project.id,
     saveFreeDrawName,
+    t,
   ]);
   const filteredObjects =
     selectedObjectTypeFilter === "all"
@@ -1809,10 +1828,10 @@ export function PostgresProjectHomeView({
           entityType: "source" as const,
           entityId: source.id,
           name: source.title,
-          type: POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.id === source.sourceKind)?.label ?? (source.sourceKind || "Source"),
+          type: formatPostgresSourceKindLabel(source.sourceKind, t),
         })),
     ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
-  }, [objects, selectedRelationshipType, sources]);
+  }, [objects, selectedRelationshipType, sources, t]);
   const availableToEndpointOptions = useMemo<PostgresRelationshipEndpointOption[]>(() => {
     if (!selectedRelationshipType) return [];
     return [
@@ -1832,10 +1851,10 @@ export function PostgresProjectHomeView({
           entityType: "source" as const,
           entityId: source.id,
           name: source.title,
-          type: POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.id === source.sourceKind)?.label ?? (source.sourceKind || "Source"),
+          type: formatPostgresSourceKindLabel(source.sourceKind, t),
         })),
     ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
-  }, [objects, selectedRelationshipType, sources]);
+  }, [objects, selectedRelationshipType, sources, t]);
   const availableEditingFromEndpointOptions = useMemo<PostgresRelationshipEndpointOption[]>(() => {
     if (!editingRelationshipTypeRecord) return [];
     return [
@@ -1855,10 +1874,10 @@ export function PostgresProjectHomeView({
           entityType: "source" as const,
           entityId: source.id,
           name: source.title,
-          type: POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.id === source.sourceKind)?.label ?? (source.sourceKind || "Source"),
+          type: formatPostgresSourceKindLabel(source.sourceKind, t),
         })),
     ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
-  }, [editingRelationshipTypeRecord, objects, sources]);
+  }, [editingRelationshipTypeRecord, objects, sources, t]);
   const availableEditingToEndpointOptions = useMemo<PostgresRelationshipEndpointOption[]>(() => {
     if (!editingRelationshipTypeRecord) return [];
     return [
@@ -1878,10 +1897,10 @@ export function PostgresProjectHomeView({
           entityType: "source" as const,
           entityId: source.id,
           name: source.title,
-          type: POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.id === source.sourceKind)?.label ?? (source.sourceKind || "Source"),
+          type: formatPostgresSourceKindLabel(source.sourceKind, t),
         })),
     ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
-  }, [editingRelationshipTypeRecord, objects, sources]);
+  }, [editingRelationshipTypeRecord, objects, sources, t]);
 
   const codeRowsForModal = useMemo<CodeRow[]>(
     () => codes.map((code) => ({
@@ -1902,7 +1921,7 @@ export function PostgresProjectHomeView({
       id: source.id,
       name: source.title,
       type: source.sourceKind,
-      sourceObjectType: formatPostgresSourceKindLabel(source.sourceKind),
+      sourceObjectType: formatPostgresSourceKindLabel(source.sourceKind, t),
       sourceObjectTypeSystemKey: getPostgresSourceKindOption(source.sourceKind)?.sourceVisualKey ?? null,
       notes: source.notes,
       content: source.textContent,
@@ -1923,7 +1942,7 @@ export function PostgresProjectHomeView({
       objectCount: 0,
       createdAt: source.createdAt,
     })),
-    [annotationSummaries, sources],
+    [annotationSummaries, sources, t],
   );
   const editingHomeCanvasSource = editingHomeCanvasSourceId
     ? sourceRowsForEditor.find((source) => source.id === editingHomeCanvasSourceId) ?? null
@@ -2228,7 +2247,7 @@ export function PostgresProjectHomeView({
       !isPostgresHomeCanvasHexColor(homeCanvasAppearanceDraft.backgroundColor)
       || !isPostgresHomeCanvasHexColor(homeCanvasAppearanceDraft.gridColor)
     ) {
-      setHomeCanvasAppearanceError("Use valid hex colors before closing.");
+    setHomeCanvasAppearanceError(t("projectCore.homeShell.validHexColorsRequired"));
       return;
     }
 
@@ -3103,9 +3122,9 @@ export function PostgresProjectHomeView({
     const counts = new Map<string, number>();
     sources.forEach((source) => counts.set(source.sourceKind || "unknown", (counts.get(source.sourceKind || "unknown") ?? 0) + 1));
     return Array.from(counts.entries())
-      .map(([id, count]) => ({ id, label: formatPostgresSourceKindLabel(id), count }))
+      .map(([id, count]) => ({ id, label: formatPostgresSourceKindLabel(id, t), count }))
       .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
-  }, [sources]);
+  }, [sources, t]);
   const homeCanvasCodeSummaries = useMemo(
     () => codes
       .map((code) => ({
@@ -3151,7 +3170,7 @@ export function PostgresProjectHomeView({
         id: `__home_canvas_source:${option.sourceVisualKey}`,
         projectId: project.id,
         systemKey: option.sourceVisualKey,
-        name: setting?.name || option.label,
+        name: setting?.name || formatPostgresSourceKindLabel(option.id, t),
         description: setting?.description || "",
         shape: setting ? normalizePostgresObjectTypeShape(setting.shape) : "rectangle",
         color: setting ? normalizePostgresObjectTypeColor(setting.color || option.color) : option.color,
@@ -3170,7 +3189,7 @@ export function PostgresProjectHomeView({
       id: "__home_canvas_source",
       projectId: project.id,
       systemKey: "home_canvas_source",
-      name: "Source",
+      name: t("projectCore.entities.source"),
       description: "",
       shape: "rectangle",
       color: "#2f6f73",
@@ -3186,7 +3205,7 @@ export function PostgresProjectHomeView({
       id: "__home_canvas_code",
       projectId: project.id,
       systemKey: "home_canvas_code",
-      name: "Code",
+      name: t("projectCore.entities.code"),
       description: "",
       shape: "tag",
       color: "#8a5a44",
@@ -3198,7 +3217,7 @@ export function PostgresProjectHomeView({
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
     },
-  ], [project.createdAt, project.id, project.updatedAt, sourceTypeSettings]);
+  ], [project.createdAt, project.id, project.updatedAt, sourceTypeSettings, t]);
   const homeCanvasObjects = useMemo<PostgresObject[]>(() => {
     const nextObjects: PostgresObject[] = [];
     if (homeCanvasSectionEnabled("objects")) {
@@ -3211,7 +3230,7 @@ export function PostgresProjectHomeView({
           id: source.id,
           projectId: source.projectId,
           objectTypeId: getHomeCanvasSourceObjectTypeId(source.sourceKind),
-          objectType: formatPostgresSourceKindLabel(source.sourceKind),
+          objectType: formatPostgresSourceKindLabel(source.sourceKind, t),
           objectTypeSystemKey: getPostgresSourceKindOption(source.sourceKind)?.sourceVisualKey ?? "home_canvas_source",
           title: source.title || source.originalFileName || "Untitled source",
           description: source.notes || "",
@@ -3239,7 +3258,7 @@ export function PostgresProjectHomeView({
           id: code.id,
           projectId: code.projectId,
           objectTypeId: "__home_canvas_code",
-          objectType: "Code",
+          objectType: t("projectCore.entities.code"),
           objectTypeSystemKey: "home_canvas_code",
           title: code.label || "Untitled code",
           description: code.description || "",
@@ -3261,14 +3280,14 @@ export function PostgresProjectHomeView({
         })));
     }
     return nextObjects;
-  }, [codes, homeCanvasSectionEnabled, objects, sources, visibleHomeCanvasCodeIds, visibleHomeCanvasObjectTypeIds, visibleHomeCanvasSourceKinds]);
+  }, [codes, homeCanvasSectionEnabled, objects, sources, t, visibleHomeCanvasCodeIds, visibleHomeCanvasObjectTypeIds, visibleHomeCanvasSourceKinds]);
   const drawCanvasObjects = useMemo<PostgresObject[]>(() => [
     ...objects,
     ...sources.map((source) => ({
       id: source.id,
       projectId: source.projectId,
       objectTypeId: getHomeCanvasSourceObjectTypeId(source.sourceKind),
-      objectType: formatPostgresSourceKindLabel(source.sourceKind),
+      objectType: formatPostgresSourceKindLabel(source.sourceKind, t),
       objectTypeSystemKey: getPostgresSourceKindOption(source.sourceKind)?.sourceVisualKey ?? "home_canvas_source",
       title: source.title || source.originalFileName || "Untitled source",
       description: source.notes || "",
@@ -3292,7 +3311,7 @@ export function PostgresProjectHomeView({
       id: code.id,
       projectId: code.projectId,
       objectTypeId: "__home_canvas_code",
-      objectType: "Code",
+      objectType: t("projectCore.entities.code"),
       objectTypeSystemKey: "home_canvas_code",
       title: code.label || "Untitled code",
       description: code.description || "",
@@ -3312,7 +3331,7 @@ export function PostgresProjectHomeView({
       createdAt: code.createdAt,
       updatedAt: code.updatedAt,
     })),
-  ], [codes, objects, sources]);
+  ], [codes, objects, sources, t]);
   const canvasObjectImageStoragePaths = useMemo(
     () => Array.from(new Set([
       ...objects.map((object) => object.imageStoragePath ?? ""),
@@ -4471,14 +4490,14 @@ export function PostgresProjectHomeView({
       const image = await new Promise<HTMLImageElement>((resolve, reject) => {
         const nextImage = new Image();
         nextImage.onload = () => resolve(nextImage);
-        nextImage.onerror = () => reject(new Error("Could not render saved canvas image."));
+        nextImage.onerror = () => reject(new Error(t("projectCore.homeShell.renderSavedCanvasImageFailed")));
         nextImage.src = url;
       });
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(width);
       canvas.height = Math.ceil(height);
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Could not create export canvas context.");
+      if (!context) throw new Error(t("projectCore.homeShell.createExportCanvasContextFailed"));
       context.fillStyle = "#f8fbff";
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
@@ -4497,7 +4516,7 @@ export function PostgresProjectHomeView({
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((nextBlob) => {
         if (nextBlob) resolve(nextBlob);
-        else reject(new Error("Could not encode saved canvas PNG."));
+        else reject(new Error(t("projectCore.homeShell.encodeSavedCanvasPngFailed")));
       }, "image/png");
     });
     return new Uint8Array(await blob.arrayBuffer());
@@ -4531,7 +4550,7 @@ export function PostgresProjectHomeView({
         const svgDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
         const svgElement = svgDocument.documentElement;
         if (!svgElement || svgElement.tagName.toLowerCase() !== "svg") {
-          throw new Error("Could not prepare saved canvas SVG for PDF export.");
+          throw new Error(t("projectCore.homeShell.prepareSavedCanvasSvgPdfFailed"));
         }
         const pdf = new jsPDF({
           orientation: width >= height ? "landscape" : "portrait",
@@ -4927,7 +4946,7 @@ export function PostgresProjectHomeView({
     valuesByRelationshipId: Record<string, string>,
   ) {
     if (!editingRelationshipAttributeTypeId) {
-      setRelationshipAttributeEditorError("Choose a relationship type first.");
+      setRelationshipAttributeEditorError(t("projectCore.homeShell.chooseRelationshipTypeFirst"));
       return;
     }
     setGraphSubmitting(true);
@@ -5174,7 +5193,7 @@ export function PostgresProjectHomeView({
     setGraphError("");
     setGraphNotice("");
     if (!objectTypeId || !objectTitle.trim()) {
-      setGraphError("Enter an object type and title.");
+      setGraphError(t("projectCore.homeShell.objectTypeAndTitleRequired"));
       return;
     }
 
@@ -5269,7 +5288,7 @@ export function PostgresProjectHomeView({
     setGraphError("");
     setGraphNotice("");
     if (!nextType) {
-      setGraphError("Enter an object type name.");
+      setGraphError(t("projectCore.homeShell.objectTypeNameRequired"));
       return;
     }
 
@@ -5428,6 +5447,10 @@ export function PostgresProjectHomeView({
         imageCropDraft.sizePercent,
         imageCropDraft.xPercent,
         imageCropDraft.yPercent,
+        {
+          loadFailed: t("sharedModals.imageCrop.loadFailed"),
+          prepareFailed: t("sharedModals.imageCrop.prepareFailed"),
+        },
       );
       if (cropped.fileSizeBytes > POSTGRES_IMAGE_MAX_BYTES) {
         URL.revokeObjectURL(cropped.previewUrl);
@@ -5662,7 +5685,7 @@ export function PostgresProjectHomeView({
     setGraphError("");
     setGraphNotice("");
     if (!nextType) {
-      setGraphError("Enter an object type name.");
+      setGraphError(t("projectCore.homeShell.objectTypeNameRequired"));
       return;
     }
 
@@ -5784,7 +5807,7 @@ export function PostgresProjectHomeView({
   async function handleSaveObject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editingObjectId || !editingObjectTypeId || !editingObjectTitle.trim()) {
-      setGraphError("Enter an object type and title.");
+      setGraphError(t("projectCore.homeShell.objectTypeAndTitleRequired"));
       return;
     }
 
@@ -5952,7 +5975,7 @@ export function PostgresProjectHomeView({
     setGraphError("");
     setGraphNotice("");
     if (!nextType) {
-      setGraphError("Enter a relationship type name.");
+      setGraphError(t("projectCore.homeShell.relationshipTypeNameRequired"));
       return;
     }
 
@@ -6036,7 +6059,7 @@ export function PostgresProjectHomeView({
     setGraphError("");
     setGraphNotice("");
     if (!nextType) {
-      setGraphError("Enter a relationship type name.");
+      setGraphError(t("projectCore.homeShell.relationshipTypeNameRequired"));
       return;
     }
 
@@ -6159,7 +6182,7 @@ export function PostgresProjectHomeView({
     const fromEndpoint = parsePostgresRelationshipEndpointKey(fromObjectId);
     const toEndpoint = parsePostgresRelationshipEndpointKey(toObjectId);
     if (!fromEndpoint || !toEndpoint || !relationshipTypeId) {
-      setGraphError("Choose two endpoints and a relationship type.");
+      setGraphError(t("projectCore.homeShell.relationshipEndpointsRequired"));
       return;
     }
 
@@ -6208,7 +6231,7 @@ export function PostgresProjectHomeView({
       || !toEndpoint
       || !editingRelationshipTypeId
     ) {
-      setGraphError("Choose two endpoints and a relationship type.");
+      setGraphError(t("projectCore.homeShell.relationshipEndpointsRequired"));
       return;
     }
 
@@ -6328,9 +6351,9 @@ export function PostgresProjectHomeView({
                   );
 
                   return {
-                    title: annotation ? `Annotation A${String(annotation.displayId).padStart(2, "0")}` : "Annotation",
-                    itemType: "Annotation",
-                    typeDetail: codeLabel ? `Code: ${codeLabel}` : "",
+                    title: annotation ? t("projectCore.graph.annotationTitle", { id: `A${String(annotation.displayId).padStart(2, "0")}` }) : t("projectCore.graph.annotation"),
+                    itemType: t("projectCore.entities.annotation"),
+                    typeDetail: codeLabel ? t("projectCore.graph.codeDetail", { code: codeLabel }) : "",
                     preview:
                       annotation?.imageRegion && source?.storagePath ? (
                         <PostgresHomeAnnotationImagePreview
@@ -6349,8 +6372,8 @@ export function PostgresProjectHomeView({
                 }
 
                 return {
-                  title: selection.relationship.relationshipType.trim() || "Relationship",
-                  itemType: "Relationship",
+                  title: selection.relationship.relationshipType.trim() || t("projectCore.graph.relationship"),
+                  itemType: t("projectCore.entities.relationship"),
                   typeDetail: selection.relationship.relationshipType.trim() || selection.relationshipTypeRecord?.name || "",
                   attributes: selection.relationship.attributeValues
                     .filter((value) => value.value.trim())
@@ -6363,8 +6386,8 @@ export function PostgresProjectHomeView({
               const sourceVisualKey = getPostgresSourceObjectVisualKey(systemKey);
               if (sourceVisualKey || systemKey === "home_canvas_source") {
                 return {
-                  title: selection.object.title.trim() || "Untitled source",
-                  itemType: "Source",
+                  title: selection.object.title.trim() || t("projectCore.graph.untitledSource"),
+                  itemType: t("projectCore.entities.source"),
                   typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
                   attributes: sourceAttributeValues
                     .filter((value) => value.sourceId === selection.object.id && value.value.trim())
@@ -6381,20 +6404,20 @@ export function PostgresProjectHomeView({
                   visitedParentCodeIds.add(parentCodeId);
                   const parentCode = codes.find((code) => code.id === parentCodeId);
                   if (!parentCode) break;
-                  parentLabels.unshift(parentCode.label || "Untitled code");
+                  parentLabels.unshift(parentCode.label || t("projectCore.graph.untitledCode"));
                   parentCodeId = parentCode.parentCodeId;
                 }
                 return {
-                  title: selection.object.title.trim() || "Untitled code",
-                  itemType: "Code",
-                  typeDetail: parentLabels.length > 0 ? parentLabels.join(" > ") : "Top-level code",
+                  title: selection.object.title.trim() || t("projectCore.graph.untitledCode"),
+                  itemType: t("projectCore.entities.code"),
+                  typeDetail: parentLabels.length > 0 ? parentLabels.join(" > ") : t("projectCore.graph.topLevelCode"),
                   attributes: [],
                 };
               }
 
               return {
-                title: selection.object.title.trim() || "Untitled object",
-                itemType: "Object",
+                title: selection.object.title.trim() || t("projectCore.graph.untitledObject"),
+                itemType: t("projectCore.entities.object"),
                 typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
                 attributes: selection.object.attributeValues
                   .filter((value) => value.value.trim())
@@ -6453,12 +6476,12 @@ export function PostgresProjectHomeView({
                   onClick={openSaveGraphDrawModal}
                   disabled={drawCanvasSaving}
                 >
-                  {drawCanvasSaving ? "Saving..." : "Save"}
+                  {drawCanvasSaving ? t("projectCore.sources.saving") : t("projectCore.sources.save")}
                 </button>
                 {drawSavedDrawingName ? (
                   <span className="home-restricted-value">{drawSavedDrawingName}</span>
                 ) : (
-                  <span className="home-restricted-value">Unsaved drawing</span>
+                  <span className="home-restricted-value">{t("projectCore.homeShell.savedCanvases.unsavedDrawing")}</span>
                 )}
                 {drawCanvasSaveNotice ? <span className="settings-success">{drawCanvasSaveNotice}</span> : null}
                 {canvasSaveError ? <span className="auth-error">{canvasSaveError}</span> : null}
@@ -6511,13 +6534,13 @@ export function PostgresProjectHomeView({
             <div className="view users-view postgres-experiment-home-view" style={{ minHeight: "100%" }}>
               <header className="view-header">
                 <div className="users-title-wrap">
-                  <h1>{project.name || "Untitled project"}</h1>
+                  <h1>{project.name || t("projectCore.home.untitledProject")}</h1>
                   <button
                     type="button"
                     className="users-help-icon-btn"
                     onClick={() => setProjectHelpModal("home")}
-                    title="Open project home help"
-                    aria-label="Open project home help"
+                    title={t("projectCore.home.openHelp")}
+                    aria-label={t("projectCore.home.openHelp")}
                   >
                     <HelpIcon className="users-help-icon" />
                   </button>
@@ -6527,11 +6550,11 @@ export function PostgresProjectHomeView({
                 className={`ai-assist-home-tabbar${guideModesTourActive ? " getting-started-spotlight-target" : ""}`}
                 style={{ marginBottom: 18 }}
               >
-                <div className="segmented-control" role="tablist" aria-label="Project home views">
+                <div className="segmented-control" role="tablist" aria-label={t("projectCore.home.viewTabsAria")}>
                   {([
-                    ["details", "Details"],
-                    ["graph", "Graph"],
-                    ["timeline", "Timeline"],
+                    ["details", t("projectCore.home.tabs.details")],
+                    ["graph", t("projectCore.home.tabs.graph")],
+                    ["timeline", t("projectCore.home.tabs.timeline")],
                   ] as const).map(([tabValue, tabLabel]) => (
                     <button
                       key={tabValue}
@@ -6550,7 +6573,7 @@ export function PostgresProjectHomeView({
                 <>
                   <div className="getting-started-spotlight-overlay" aria-hidden="true" />
                   <GettingStartedGuideCallout
-                    title="Project summary"
+                    title={t("app.gettingStarted.projectSummaryTitle")}
                     onDismiss={() => void persistGettingStartedState({ dismissed: true })}
                     actions={(
                       <button
@@ -6558,11 +6581,11 @@ export function PostgresProjectHomeView({
                         className="btn btn--primary"
                         onClick={() => void persistGettingStartedState({ step: "projectHomeModesIntro" })}
                       >
-                        Next
+                        {t("app.gettingStarted.next")}
                       </button>
                     )}
                   >
-                    <p>This Details tab gives you an at-a-glance summary of the project.</p>
+                    <p>{t("app.gettingStarted.projectSummaryBody")}</p>
                   </GettingStartedGuideCallout>
                 </>
               ) : null}
@@ -6570,7 +6593,7 @@ export function PostgresProjectHomeView({
                 <>
                   <div className="getting-started-spotlight-overlay" aria-hidden="true" />
                   <GettingStartedGuideCallout
-                    title="Project modes"
+                    title={t("app.gettingStarted.projectModesTitle")}
                     onDismiss={() => void persistGettingStartedState({ dismissed: true })}
                     actions={(
                       <button
@@ -6578,11 +6601,11 @@ export function PostgresProjectHomeView({
                         className="btn btn--primary"
                         onClick={() => void persistGettingStartedState({ step: "projectHomeSidebarCollapsedIntro" })}
                       >
-                        Next
+                        {t("app.gettingStarted.next")}
                       </button>
                     )}
                   >
-                  <p>Use these modes to interact with and build out the project.</p>
+                  <p>{t("app.gettingStarted.projectModesBody")}</p>
                 </GettingStartedGuideCallout>
                 </>
               ) : null}
@@ -6590,7 +6613,7 @@ export function PostgresProjectHomeView({
                 <>
                   <div className="getting-started-spotlight-overlay" aria-hidden="true" />
                   <GettingStartedGuideCallout
-                    title="Sidebar navigation"
+                    title={t("app.gettingStarted.sidebarCollapsedTitle")}
                     onDismiss={() => void persistGettingStartedState({ dismissed: true })}
                     actions={(
                       <button
@@ -6598,11 +6621,11 @@ export function PostgresProjectHomeView({
                         className="btn btn--primary"
                         onClick={() => void persistGettingStartedState({ step: "projectHomeSidebarExpandedIntro" })}
                       >
-                        Next
+                        {t("app.gettingStarted.next")}
                       </button>
                     )}
                   >
-                    <p>Move to the collapsed sidebar to see the project navigation options.</p>
+                    <p>{t("app.gettingStarted.sidebarCollapsedBody")}</p>
                   </GettingStartedGuideCallout>
                 </>
               ) : null}
@@ -6610,7 +6633,7 @@ export function PostgresProjectHomeView({
                 <>
                   <div className="getting-started-spotlight-overlay" aria-hidden="true" />
                   <GettingStartedGuideCallout
-                    title="Project navigation"
+                    title={t("app.gettingStarted.sidebarExpandedTitle")}
                     onDismiss={() => void persistGettingStartedState({ dismissed: true })}
                     actions={(
                       <button
@@ -6618,11 +6641,11 @@ export function PostgresProjectHomeView({
                         className="btn btn--primary"
                         onClick={() => void persistGettingStartedState({ step: "projectHomeIntro" })}
                       >
-                        Next
+                        {t("app.gettingStarted.next")}
                       </button>
                     )}
                   >
-                    <p>These links let you build out the project, analyze your work, use AI Assist, and manage settings.</p>
+                    <p>{t("app.gettingStarted.sidebarExpandedBody")}</p>
                   </GettingStartedGuideCallout>
                 </>
               ) : null}
@@ -6630,26 +6653,26 @@ export function PostgresProjectHomeView({
                 <>
                   <div className="getting-started-spotlight-overlay" aria-hidden="true" />
                 <GettingStartedGuideCallout
-                  title="Open Sources"
+                  title={t("app.gettingStarted.openSourcesTitle")}
                   onDismiss={() => void persistGettingStartedState({ dismissed: true })}
                 >
-                  <p>Sources is the default way to interact with and build out the project. Click Sources in the sidebar to continue.</p>
+                  <p>{t("app.gettingStarted.openSourcesBody")}</p>
                 </GettingStartedGuideCallout>
                 </>
               ) : null}
               {gettingStartedState.step === "addTextSource" && !gettingStartedState.dismissed && !gettingStartedState.completed ? (
                 <>
                   <div className="getting-started-spotlight-overlay" aria-hidden="true" />
-                  <GettingStartedGuideCallout title="Open Sources" onDismiss={() => void persistGettingStartedState({ dismissed: true })}>
-                    <p>Click Sources in the sidebar, then use the plus button to add a text source.</p>
+                  <GettingStartedGuideCallout title={t("app.gettingStarted.openSourcesTitle")} onDismiss={() => void persistGettingStartedState({ dismissed: true })}>
+                    <p>{t("app.gettingStarted.addTextSourceFromHomeBody")}</p>
                   </GettingStartedGuideCallout>
                 </>
               ) : null}
               {gettingStartedState.step === "openCodingView" && !gettingStartedState.dismissed && !gettingStartedState.completed ? (
                 <>
                   <div className="getting-started-spotlight-overlay" aria-hidden="true" />
-                  <GettingStartedGuideCallout title="Open coding" onDismiss={() => void persistGettingStartedState({ dismissed: true })}>
-                    <p>Click Code Sources in the sidebar to go to the page that lets you code the text source you just created.</p>
+                  <GettingStartedGuideCallout title={t("app.gettingStarted.openCodingTitle")} onDismiss={() => void persistGettingStartedState({ dismissed: true })}>
+                    <p>{t("app.gettingStarted.openCodingFromHomeBody")}</p>
                   </GettingStartedGuideCallout>
                 </>
               ) : null}
@@ -6781,9 +6804,9 @@ export function PostgresProjectHomeView({
                         );
 
                         return {
-                          title: annotation ? `Annotation A${String(annotation.displayId).padStart(2, "0")}` : "Annotation",
-                          itemType: "Annotation",
-                          typeDetail: codeLabel ? `Code: ${codeLabel}` : "",
+                          title: annotation ? t("projectCore.graph.annotationTitle", { id: `A${String(annotation.displayId).padStart(2, "0")}` }) : t("projectCore.graph.annotation"),
+                          itemType: t("projectCore.entities.annotation"),
+                          typeDetail: codeLabel ? t("projectCore.graph.codeDetail", { code: codeLabel }) : "",
                           preview:
                             annotation?.imageRegion && source?.storagePath ? (
                               <PostgresHomeAnnotationImagePreview
@@ -6802,8 +6825,8 @@ export function PostgresProjectHomeView({
                       }
 
                       return {
-                        title: selection.relationship.relationshipType.trim() || "Relationship",
-                        itemType: "Relationship",
+                        title: selection.relationship.relationshipType.trim() || t("projectCore.graph.relationship"),
+                        itemType: t("projectCore.entities.relationship"),
                         typeDetail: selection.relationship.relationshipType.trim() || selection.relationshipTypeRecord?.name || "",
                         attributes: selection.relationship.attributeValues
                           .filter((value) => value.value.trim())
@@ -6816,8 +6839,8 @@ export function PostgresProjectHomeView({
                     const sourceVisualKey = getPostgresSourceObjectVisualKey(systemKey);
                     if (sourceVisualKey || systemKey === "home_canvas_source") {
                       return {
-                        title: selection.object.title.trim() || "Untitled source",
-                        itemType: "Source",
+                        title: selection.object.title.trim() || t("projectCore.graph.untitledSource"),
+                        itemType: t("projectCore.entities.source"),
                         typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
                         attributes: sourceAttributeValues
                           .filter((value) => value.sourceId === selection.object.id && value.value.trim())
@@ -6834,20 +6857,20 @@ export function PostgresProjectHomeView({
                         visitedParentCodeIds.add(parentCodeId);
                         const parentCode = codes.find((code) => code.id === parentCodeId);
                         if (!parentCode) break;
-                        parentLabels.unshift(parentCode.label || "Untitled code");
+                        parentLabels.unshift(parentCode.label || t("projectCore.graph.untitledCode"));
                         parentCodeId = parentCode.parentCodeId;
                       }
                       return {
-                        title: selection.object.title.trim() || "Untitled code",
-                        itemType: "Code",
-                        typeDetail: parentLabels.length > 0 ? parentLabels.join(" > ") : "Top-level code",
+                        title: selection.object.title.trim() || t("projectCore.graph.untitledCode"),
+                        itemType: t("projectCore.entities.code"),
+                        typeDetail: parentLabels.length > 0 ? parentLabels.join(" > ") : t("projectCore.graph.topLevelCode"),
                         attributes: [],
                       };
                     }
 
                     return {
-                      title: selection.object.title.trim() || "Untitled object",
-                      itemType: "Object",
+                      title: selection.object.title.trim() || t("projectCore.graph.untitledObject"),
+                      itemType: t("projectCore.entities.object"),
                       typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
                       attributes: selection.object.attributeValues
                         .filter((value) => value.value.trim())
@@ -6905,13 +6928,13 @@ export function PostgresProjectHomeView({
               <div className="view users-view postgres-users-view">
                 <header className="view-header">
                   <div className="users-title-wrap">
-                    <h1>Project Users</h1>
+                    <h1>{t("projectCore.homeShell.usersTitle")}</h1>
                     <button
                       type="button"
                       className="users-help-icon-btn"
                       onClick={() => setProjectHelpModal("users")}
-                      title="Open project users help"
-                      aria-label="Open project users help"
+                      title={t("projectCore.homeShell.openUsersHelp")}
+                      aria-label={t("projectCore.homeShell.openUsersHelp")}
                     >
                       <HelpIcon className="users-help-icon" />
                     </button>
@@ -6956,7 +6979,7 @@ export function PostgresProjectHomeView({
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                            <h2 style={{ margin: 0, fontSize: 18 }}>User roles</h2>
+                            <h2 style={{ margin: 0, fontSize: 18 }}>{t("projectCore.homeShell.userRoles")}</h2>
                           </div>
                         </div>
                         <div>
@@ -6968,7 +6991,7 @@ export function PostgresProjectHomeView({
                                   style={{ width: "76%" }}
                                   onClick={() => handleUserRoleSort("role")}
                                 >
-                                  Role
+                                  {t("projectCore.homeShell.role")}
                                   <span className="users-sort-icon">
                                     {userRoleSortCol === "role" ? (userRoleSortDir === "asc" ? " ?" : " ?") : " ?"}
                                   </span>
@@ -6978,7 +7001,7 @@ export function PostgresProjectHomeView({
                                   style={{ width: "24%" }}
                                   onClick={() => handleUserRoleSort("count")}
                                 >
-                                  Count
+                                  {t("projectCore.homeShell.count")}
                                   <span className="users-sort-icon">
                                     {userRoleSortCol === "count" ? (userRoleSortDir === "asc" ? " ?" : " ?") : " ?"}
                                   </span>
@@ -7004,7 +7027,7 @@ export function PostgresProjectHomeView({
                                     }
                                   }}
                                 >
-                                  All users
+                                  {t("projectCore.homeShell.allUsers")}
                                 </td>
                                 <td className="users-td users-td--muted">{users.length}</td>
                               </tr>
@@ -7056,25 +7079,25 @@ export function PostgresProjectHomeView({
                     >
                       {usersLoading ? (
                         <div className="empty-state postgres-users-empty-state">
-                          <p>Loading PostgreSQL project users...</p>
+                          <p>{t("projectCore.homeShell.loadingUsers")}</p>
                         </div>
                       ) : users.length === 0 ? (
                         <div className="empty-state postgres-users-empty-state">
-                          <p>No users have been added to this PostgreSQL project yet.</p>
+                          <p>{t("projectCore.homeShell.noUsers")}</p>
                         </div>
                       ) : filteredProjectUsers.length === 0 ? (
                         <div className="empty-state postgres-users-empty-state">
-                          <p>No users match this role.</p>
+                          <p>{t("projectCore.homeShell.noUsersMatchRole")}</p>
                         </div>
                       ) : (
                         <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 520 }}>
                           <table className="users-table">
                             <thead>
                               <tr>
-                                <th className="users-th" style={{ width: "28%" }}>User</th>
-                                <th className="users-th" style={{ width: "18%" }}>Role</th>
-                                <th className="users-th" style={{ width: "27%" }}>Created</th>
-                                <th className="users-th" style={{ width: "27%" }}>Last active</th>
+                                <th className="users-th" style={{ width: "28%" }}>{t("projectCore.homeShell.user")}</th>
+                                <th className="users-th" style={{ width: "18%" }}>{t("projectCore.homeShell.role")}</th>
+                                <th className="users-th" style={{ width: "27%" }}>{t("projectCore.entities.created")}</th>
+                                <th className="users-th" style={{ width: "27%" }}>{t("projectCore.homeShell.lastActive")}</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -7321,8 +7344,8 @@ export function PostgresProjectHomeView({
             </Suspense>
           ) : activeScreen === "ai-assist-object-attributes" ? (
             <PostgresAiAssistPortPlaceholderView
-              title="Object Attributes"
-              detail="AI attribute suggestions for PostgreSQL objects will mount here."
+              title={t("projectCore.homeShell.objectAttributes")}
+              detail={t("projectCore.homeShell.objectAttributesPortDescription")}
             />
           ) : activeScreen === "ai-assist-process-documents" ? (
             <Suspense fallback={<ViewLoadingFallback />}>
@@ -7344,7 +7367,7 @@ export function PostgresProjectHomeView({
                       className="btn"
                       onClick={() => setSelectedObjectDetailsId(null)}
                     >
-                      Back
+                      {t("projectCore.homeShell.objects.back")}
                     </button>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <button
@@ -7352,14 +7375,14 @@ export function PostgresProjectHomeView({
                         className="btn"
                         onClick={() => openEditObjectModal(selectedObjectDetails)}
                       >
-                        Edit Object
+                        {t("projectCore.homeShell.objects.editObject")}
                       </button>
                       <button
                         type="button"
                         className="btn btn--danger"
                         onClick={() => setRemovingObjectId(selectedObjectDetails.id)}
                       >
-                        Delete Object
+                        {t("projectCore.homeShell.objects.deleteObject")}
                       </button>
                     </div>
                   </div>
@@ -7367,7 +7390,7 @@ export function PostgresProjectHomeView({
                   <div className="doc-detail-layout">
                     <div className="doc-detail-left">
                       <div className="case-card">
-                        <h3 className="case-card-title">Graphics</h3>
+                        <h3 className="case-card-title">{t("projectCore.homeShell.objects.graphics")}</h3>
                         <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
                           <ObjectShapeSwatch
                             shape={resolvePostgresObjectShape(selectedObjectDetails, selectedObjectDetailsType)}
@@ -7381,11 +7404,11 @@ export function PostgresProjectHomeView({
                             minHeight={40}
                           />
                           <p className="case-card-value" style={{ margin: 0 }}>
-                            {selectedObjectDetails.objectType || "Object"}
+                            {selectedObjectDetails.objectType || t("projectCore.entities.object")}
                           </p>
                         </div>
                         <dl className="user-detail-meta case-detail-meta">
-                          <dt>Color</dt>
+                          <dt>{t("projectCore.homeShell.objects.color")}</dt>
                           <dd>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                               <span
@@ -7398,10 +7421,10 @@ export function PostgresProjectHomeView({
                                   background: resolvePostgresObjectColor(selectedObjectDetails, selectedObjectDetailsType),
                                 }}
                               />
-                              {selectedObjectDetails.colorOverride?.trim() || "Inherited"}
+                              {selectedObjectDetails.colorOverride?.trim() || t("projectCore.homeShell.objects.inherited")}
                             </span>
                           </dd>
-                          <dt>Outline</dt>
+                          <dt>{t("projectCore.homeShell.objects.outline")}</dt>
                           <dd>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                               <span
@@ -7414,33 +7437,33 @@ export function PostgresProjectHomeView({
                                   background: resolvePostgresObjectOutlineColor(selectedObjectDetails, selectedObjectDetailsType),
                                 }}
                               />
-                              {selectedObjectDetails.outlineColorOverride?.trim() || "Inherited"}
+                              {selectedObjectDetails.outlineColorOverride?.trim() || t("projectCore.homeShell.objects.inherited")}
                             </span>
                           </dd>
-                          <dt>Shape</dt>
+                          <dt>{t("projectCore.homeShell.objects.shape")}</dt>
                           <dd>
                             {selectedObjectDetails.shapeOverride?.trim()
                               ? formatPostgresObjectShapeLabel(resolvePostgresObjectShape(selectedObjectDetails, selectedObjectDetailsType))
-                              : "Inherited"}
+                              : t("projectCore.homeShell.objects.inherited")}
                           </dd>
-                          <dt>Fill</dt>
+                          <dt>{t("projectCore.homeShell.objects.fill")}</dt>
                           <dd>
                             {selectedObjectDetails.fillOverride?.trim()
                               ? formatPostgresObjectFillLabel(resolvePostgresObjectFill(selectedObjectDetails, selectedObjectDetailsType))
-                              : "Inherited"}
+                              : t("projectCore.homeShell.objects.inherited")}
                           </dd>
                         </dl>
                       </div>
 
                       <div className="case-card">
-                        <h3 className="case-card-title">Attributes</h3>
+                        <h3 className="case-card-title">{t("projectCore.homeShell.objects.attributes")}</h3>
                         {selectedObjectDetailsAttributeDefinitions.length > 0 ? (
                           <div className="case-detail-attributes-table-wrap">
                             <table className="case-detail-attributes-table">
                               <thead>
                                 <tr>
-                                  <th className="case-detail-attributes-label" scope="col">Attribute</th>
-                                  <th className="case-detail-attributes-value" scope="col">Value</th>
+                                  <th className="case-detail-attributes-label" scope="col">{t("projectCore.homeShell.objects.attribute")}</th>
+                                  <th className="case-detail-attributes-value" scope="col">{t("projectCore.homeShell.objects.value")}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -7459,11 +7482,11 @@ export function PostgresProjectHomeView({
                                             projectId: project.id,
                                             ownerKind: "object",
                                             ownerId: selectedObjectDetails.id,
-                                            ownerName: selectedObjectDetails.title || "Untitled object",
+                                            ownerName: selectedObjectDetails.title || t("projectCore.homeShell.objects.untitledObject"),
                                             attributeDefinitionId: definition.id,
                                             attributeName: definition.name,
                                           })}
-                                          title="View attribute value history"
+                                          title={t("projectCore.homeShell.objects.viewAttributeHistory")}
                                         >
                                           {rawValue ? formatPostgresAttributeDisplay(rawValue, definition.dataType) : "-"}
                                         </button>
@@ -7475,18 +7498,18 @@ export function PostgresProjectHomeView({
                             </table>
                           </div>
                         ) : (
-                          <p className="case-card-empty">No shared attributes for this object type yet.</p>
+                          <p className="case-card-empty">{t("projectCore.homeShell.objects.noSharedAttributes")}</p>
                         )}
                       </div>
                     </div>
 
                     <div className="doc-detail-right doc-detail-right--annotation">
                       <div className="case-card">
-                        <h3 className="case-card-title">Details</h3>
-                        <p className="case-card-value">{selectedObjectDetails.title || "Untitled object"}</p>
+                        <h3 className="case-card-title">{t("projectCore.homeShell.objects.details")}</h3>
+                        <p className="case-card-value">{selectedObjectDetails.title || t("projectCore.homeShell.objects.untitledObject")}</p>
                         <dl className="user-detail-meta case-detail-meta" style={{ marginTop: 16 }}>
-                          <dt>Object type</dt> <dd>{selectedObjectDetails.objectType || "-"}</dd>
-                          <dt>Created</dt>
+                          <dt>{t("projectCore.homeShell.objects.objectType")}</dt> <dd>{selectedObjectDetails.objectType || "-"}</dd>
+                          <dt>{t("projectCore.homeShell.objects.created")}</dt>
                           <dd>
                             {formatCurrentDateTime(selectedObjectDetails.createdAt, {
                               year: "numeric",
@@ -7497,7 +7520,7 @@ export function PostgresProjectHomeView({
                               second: "2-digit",
                             })}
                           </dd>
-                          <dt>Updated</dt>
+                          <dt>{t("projectCore.homeShell.objects.updated")}</dt>
                           <dd>
                             {formatCurrentDateTime(selectedObjectDetails.updatedAt, {
                               year: "numeric",
@@ -7510,27 +7533,27 @@ export function PostgresProjectHomeView({
                           </dd>
                         </dl>
                         <div style={{ marginTop: 18 }}>
-                          <h3 className="case-card-title">Description</h3>
+                          <h3 className="case-card-title">{t("projectCore.homeShell.objects.description")}</h3>
                           {selectedObjectDetails.description.trim() ? (
                             <p style={{ margin: 0, lineHeight: 1.6, overflowWrap: "anywhere" }}>
                               {selectedObjectDetails.description}
                             </p>
                           ) : (
-                            <p className="case-card-empty">No description yet.</p>
+                            <p className="case-card-empty">{t("projectCore.homeShell.objects.noDescription")}</p>
                           )}
                         </div>
                       </div>
 
                       <div className="case-card" style={{ marginTop: 16 }}>
-                        <h3 className="case-card-title">Relationships</h3>
+                        <h3 className="case-card-title">{t("projectCore.homeShell.objects.relationships")}</h3>
                         {selectedObjectRelationshipRows.length > 0 ? (
                           <div className="case-detail-attributes-table-wrap">
                             <table className="users-table" style={{ tableLayout: "fixed" }}>
                               <thead>
                                 <tr>
-                                  <th className="users-th" style={{ width: "42%" }}>Other object</th>
-                                  <th className="users-th" style={{ width: "24%" }}>Object type</th>
-                                  <th className="users-th" style={{ width: "34%" }}>Relationship</th>
+                                  <th className="users-th" style={{ width: "42%" }}>{t("projectCore.homeShell.objects.otherObject")}</th>
+                                  <th className="users-th" style={{ width: "24%" }}>{t("projectCore.homeShell.objects.objectType")}</th>
+                                  <th className="users-th" style={{ width: "34%" }}>{t("projectCore.homeShell.objects.relationship")}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -7573,7 +7596,7 @@ export function PostgresProjectHomeView({
                             </table>
                           </div>
                         ) : (
-                          <p className="case-card-empty">No relationships for this object yet.</p>
+                          <p className="case-card-empty">{t("projectCore.homeShell.objects.noRelationships")}</p>
                         )}
                       </div>
                     </div>
@@ -7585,16 +7608,16 @@ export function PostgresProjectHomeView({
                     if (!object) return null;
                     return (
                       <GraphConfirmModal
-                        title="Delete object"
-                        warning="This permanently removes the object and any relationships connected to it."
+                        title={t("projectCore.homeShell.objects.deleteObject")}
+                        warning={t("projectCore.homeShell.objects.deleteWarning")}
                         busy={graphSubmitting}
-                        confirmLabel="Delete object"
-                        busyLabel="Deleting..."
+                        confirmLabel={t("projectCore.homeShell.objects.deleteObject")}
+                        busyLabel={t("projectCore.sources.deleting")}
                         onClose={() => setRemovingObjectId(null)}
                         onConfirm={() => void handleDeleteObject(object.id)}
                       >
                         <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                          Delete <strong>{object.title}</strong>?
+                          {t("projectCore.homeShell.objects.deletePrompt", { name: object.title })}
                         </p>
                       </GraphConfirmModal>
                     );
@@ -7613,13 +7636,13 @@ export function PostgresProjectHomeView({
               <div className="view users-view">
                 <header className="view-header">
                   <div className="users-title-wrap">
-                    <h1>Objects</h1>
+                    <h1>{t("projectCore.homeShell.objects.title")}</h1>
                     <button
                       type="button"
                       className="users-help-icon-btn"
                       onClick={() => setProjectHelpModal("objects")}
-                      title="Open objects help"
-                      aria-label="Open objects help"
+                      title={t("projectCore.homeShell.objects.openHelp")}
+                      aria-label={t("projectCore.homeShell.objects.openHelp")}
                     >
                       <HelpIcon className="users-help-icon" />
                     </button>
@@ -7653,10 +7676,10 @@ export function PostgresProjectHomeView({
                     <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
                       <div className="segmented-control" role="presentation">
                         <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
-                          Details
+                          {t("projectCore.homeShell.objects.details")}
                         </button>
                         <button type="button" className="segmented-control-option" tabIndex={-1}>
-                          Attributes
+                          {t("projectCore.homeShell.objects.attributes")}
                         </button>
                       </div>
                     </div>
@@ -7677,13 +7700,13 @@ export function PostgresProjectHomeView({
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                          <h2 style={{ margin: 0, fontSize: 18 }}>Object types</h2>
+                          <h2 style={{ margin: 0, fontSize: 18 }}>{t("projectCore.homeShell.objects.objectTypes")}</h2>
                           {!showObjectAttributesTable ? (
                             <button
                               type="button"
                               className="btn project-create-icon-button"
-                              aria-label="Add object type"
-                              title="Add object type"
+                              aria-label={t("projectCore.homeShell.objects.addObjectType")}
+                              title={t("projectCore.homeShell.objects.addObjectType")}
                               onClick={openCreateObjectTypeModal}
                             >
                               <PlusIcon className="project-create-icon" />
@@ -7701,7 +7724,7 @@ export function PostgresProjectHomeView({
                                 style={{ width: "76%" }}
                                 onClick={() => handleObjectTypeSort("objectType")}
                               >
-                                Type
+                                {t("projectCore.homeShell.objects.typeColumn")}
                                 <span className="users-sort-icon">
                                   {objectTypeSortCol === "objectType" ? (objectTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
@@ -7711,7 +7734,7 @@ export function PostgresProjectHomeView({
                                 style={{ width: "24%" }}
                                 onClick={() => handleObjectTypeSort("count")}
                               >
-                                Count
+                                {t("projectCore.homeShell.count")}
                                 <span className="users-sort-icon">
                                   {objectTypeSortCol === "count" ? (objectTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
@@ -7737,7 +7760,7 @@ export function PostgresProjectHomeView({
                                   }
                                 }}
                               >
-                                <span>All objects</span>
+                                <span>{t("projectCore.homeShell.objects.allObjects")}</span>
                               </td>
                               <td className="users-td users-td--muted">{customObjects.length}</td>
                             </tr>
@@ -7801,7 +7824,7 @@ export function PostgresProjectHomeView({
                         </table>
                         {objectTypeSummaries.length === 0 ? (
                           <div className="empty-state" style={{ minHeight: 140 }}>
-                            <p>No object types yet.</p>
+                            <p>{t("projectCore.homeShell.objects.noObjectTypes")}</p>
                           </div>
                         ) : null}
                         {openObjectTypeActionsMenu ? (
@@ -7842,7 +7865,7 @@ export function PostgresProjectHomeView({
                                 setOpenObjectTypeActionsMenu(null);
                               }}
                             >
-                              Edit
+                              {t("projectCore.sources.detail.edit")}
                             </button>
                             <button
                               type="button"
@@ -7865,7 +7888,7 @@ export function PostgresProjectHomeView({
                                 setOpenObjectTypeActionsMenu(null);
                               }}
                             >
-                              Delete
+                              {t("common.delete")}
                             </button>
                           </div>
                         ) : null}
@@ -7893,7 +7916,7 @@ export function PostgresProjectHomeView({
                     {graphError ? <p className="auth-error">{graphError}</p> : null}
                     <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
                       <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
-                        <div className="segmented-control" role="tablist" aria-label="Object workspace views">
+                        <div className="segmented-control" role="tablist" aria-label={t("projectCore.homeShell.objects.workspaceViews")}>
                           <button
                             type="button"
                             className={showObjectAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
@@ -7901,7 +7924,7 @@ export function PostgresProjectHomeView({
                             aria-selected={!showObjectAttributesTable}
                             onClick={() => setShowObjectAttributesTable(false)}
                           >
-                            Details
+                            {t("projectCore.homeShell.objects.details")}
                           </button>
                           <button
                             type="button"
@@ -7910,32 +7933,32 @@ export function PostgresProjectHomeView({
                             aria-selected={showObjectAttributesTable}
                             onClick={() => setShowObjectAttributesTable(true)}
                           >
-                            Attributes
+                            {t("projectCore.homeShell.objects.attributes")}
                           </button>
                         </div>
                       </div>
                     </div>
                     {graphLoading ? (
                       <div className="empty-state postgres-users-empty-state">
-                        <p>Loading objects...</p>
+                        <p>{t("projectCore.homeShell.objects.loadingObjects")}</p>
                       </div>
                     ) : showObjectAttributesTable ? (
                       <>
                         {selectedObjectTypeFilter === "all" ? (
                           <div className="empty-state postgres-users-empty-state">
-                            <p>Select an object type in the left column to view its attributes.</p>
+                            <p>{t("projectCore.homeShell.objects.selectTypeForAttributes")}</p>
                           </div>
                         ) : (
                           <div className="home-project-card project-table-card">
                             <div className="project-table-card-header">
-                              <h2>Attributes</h2>
+                              <h2>{t("projectCore.homeShell.objects.attributes")}</h2>
                               <button
                                 type="button"
                                 className="btn btn--primary project-table-header-icon-button"
                                 onClick={openObjectWorkspaceAttributeModal}
                                 disabled={graphSubmitting || objectWorkspaceAttributeTypeOptions.length === 0}
-                                title="Add attribute"
-                                aria-label="Add attribute"
+                                title={t("projectCore.homeShell.objects.addAttribute")}
+                                aria-label={t("projectCore.homeShell.objects.addAttribute")}
                               >
                                 <PlusIcon className="project-table-header-icon" />
                               </button>
@@ -7948,7 +7971,7 @@ export function PostgresProjectHomeView({
                                     className={`users-th case-attributes-case-col${objectAttributeSortCol === "name" ? " users-th--sorted" : ""}`}
                                     onClick={() => handleObjectAttributeSort("name")}
                                   >
-                                    Object
+                                    {t("projectCore.entities.object")}
                                     <span className="users-sort-icon">
                                       {objectAttributeSortCol === "name" ? (objectAttributeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                     </span>
@@ -7965,7 +7988,7 @@ export function PostgresProjectHomeView({
                                         setGraphError("");
                                         setGraphNotice("");
                                       }}
-                                      title={canManageSources ? "Edit values for this attribute" : "Only project owners, administrators, or editors can edit object attributes."}
+                                      title={canManageSources ? t("projectCore.sources.editValuesForAttribute") : t("projectCore.sources.cannotManageSources")}
                                     >
                                       {definition.name}
                                       <span className="users-sort-icon">
@@ -8000,7 +8023,7 @@ export function PostgresProjectHomeView({
                                             projectId: project.id,
                                             ownerKind: "object",
                                             ownerId: row.id,
-                                            ownerName: row.name || "Untitled object",
+                                            ownerName: row.name || t("projectCore.homeShell.objects.untitledObject"),
                                             attributeDefinitionId: definition.id,
                                             attributeName: definition.name,
                                           });
@@ -8011,7 +8034,7 @@ export function PostgresProjectHomeView({
                                             className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}${hoveredObjectAttributeColumnId === definition.id ? " case-attributes-col--hovered" : ""}`}
                                             role="button"
                                             tabIndex={0}
-                                            title="View attribute value history"
+                                            title={t("projectCore.homeShell.objects.viewAttributeHistory")}
                                             onClick={openHistory}
                                             onKeyDown={(event) => {
                                               if (event.key !== "Enter" && event.key !== " ") return;
@@ -8037,12 +8060,12 @@ export function PostgresProjectHomeView({
                     ) : (
                       <div className="home-project-card project-table-card">
                         <div className="project-table-card-header">
-                          <h2>Objects</h2>
+                          <h2>{t("projectCore.homeShell.objects.title")}</h2>
                           <button
                             type="button"
                             className="btn btn--primary project-table-header-icon-button"
-                            aria-label="New object"
-                            title="New object"
+                            aria-label={t("projectCore.homeShell.objects.newObject")}
+                            title={t("projectCore.homeShell.objects.newObject")}
                             onClick={() => openCreateObjectModal()}
                           >
                             <PlusIcon className="project-table-header-icon" />
@@ -8052,9 +8075,9 @@ export function PostgresProjectHomeView({
                         <table className="users-table">
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "42%" }}>Title</th>
-                              <th className="users-th" style={{ width: "30%" }}>Type</th>
-                              <th className="users-th" style={{ width: "28%" }}>Updated</th>
+                              <th className="users-th" style={{ width: "42%" }}>{t("projectCore.homeShell.objects.titleColumn")}</th>
+                              <th className="users-th" style={{ width: "30%" }}>{t("projectCore.homeShell.objects.typeColumn")}</th>
+                              <th className="users-th" style={{ width: "28%" }}>{t("projectCore.homeShell.objects.updated")}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -8062,8 +8085,10 @@ export function PostgresProjectHomeView({
                               <tr>
                                 <td colSpan={3} className="users-td-msg">
                                   {selectedObjectTypeFilter === "all"
-                                    ? "No objects yet."
-                                    : `No ${objectTypeById.get(selectedObjectTypeFilter)?.name ?? "selected"} objects yet.`}
+                                    ? t("projectCore.homeShell.objects.noObjects")
+                                    : t("projectCore.homeShell.objects.noObjectsForType", {
+                                        type: objectTypeById.get(selectedObjectTypeFilter)?.name ?? t("projectCore.homeShell.objects.selectedTypeFallback"),
+                                      })}
                                 </td>
                               </tr>
                             ) : (
@@ -8155,7 +8180,7 @@ export function PostgresProjectHomeView({
                                 setOpenObjectActionsMenu(null);
                               }}
                             >
-                              Edit object
+                              {t("projectCore.homeShell.objects.editObjectLower")}
                             </button>
                             <button
                               type="button"
@@ -8178,7 +8203,7 @@ export function PostgresProjectHomeView({
                                 setOpenObjectActionsMenu(null);
                               }}
                             >
-                              Delete object
+                              {t("projectCore.homeShell.objects.deleteObjectLower")}
                             </button>
                           </div>
                         ) : null}
@@ -8194,19 +8219,19 @@ export function PostgresProjectHomeView({
                     const affectedObjectCount = customObjects.filter((object) => object.objectTypeId === objectTypeRecord.id).length;
                     return (
                       <GraphConfirmModal
-                        title="Delete object type"
-                        warning={`This will delete the object type and all ${affectedObjectCount} objects of this type. This cannot be undone.`}
+                        title={t("projectCore.homeShell.objects.deleteObjectType")}
+                        warning={t("projectCore.homeShell.objects.objectTypeDeleteCascadeWarning", { count: affectedObjectCount })}
                         busy={graphSubmitting}
-                        confirmLabel="Delete object type"
-                        busyLabel="Deleting..."
+                        confirmLabel={t("projectCore.homeShell.objects.deleteObjectType")}
+                        busyLabel={t("projectCore.sources.deleting")}
                         onClose={() => setRemovingObjectTypeId(null)}
                         onConfirm={() => void handleDeleteObjectType(objectTypeRecord.id)}
                       >
                           <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                            Delete <strong>{objectTypeRecord.name}</strong>?
+                            {t("projectCore.homeShell.objects.deletePrompt", { name: objectTypeRecord.name })}
                           </p>
                           <p className="users-guide-copy" style={{ marginTop: 10, marginBottom: 0 }}>
-                            Confirm that you want to permanently delete this object type and its objects.
+                            {t("projectCore.homeShell.objects.objectTypeDeleteWarning")}
                           </p>
                       </GraphConfirmModal>
                     );
@@ -8214,11 +8239,11 @@ export function PostgresProjectHomeView({
                 ) : null}
                 {editingObjectTypeModalId ? (
                   <PostgresObjectTypeModal
-                    title="Edit object type"
-                    ariaLabel="Edit object type tabs"
+                    title={t("projectCore.homeShell.objects.editObjectType")}
+                    ariaLabel={t("projectCore.homeShell.objects.editObjectTypeTabs")}
                     tab={objectTypeModalTab}
                     setTab={setObjectTypeModalTab}
-                    submitLabel="Save changes"
+                    submitLabel={t("projectCore.homeShell.objects.saveChanges")}
                     projectStoragePath={project.storagePath}
                     submitting={graphSubmitting}
                     imageUploadSubmitting={imageUploadSubmitting}
@@ -8235,10 +8260,10 @@ export function PostgresProjectHomeView({
                     attributeDrafts={objectTypeAttributeDrafts}
                     attributeRows={objects
                       .filter((object) => object.objectTypeId === editingObjectTypeModalId)
-                      .map((object) => ({ id: object.id, name: object.title || "Untitled object" }))
+                      .map((object) => ({ id: object.id, name: object.title || t("projectCore.homeShell.objects.untitledObject") }))
                       .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))}
                     attributeValues={objectTypeAttributeValuesByDraftId}
-                    emptyRowsLabel="No objects of this type yet."
+                    emptyRowsLabel={t("projectCore.homeShell.objects.noObjectsOfType")}
                     onClose={() => setEditingObjectTypeModalId(null)}
                     onSubmit={handleSaveObjectType}
                     setName={setDraftObjectTypeName}
@@ -8274,8 +8299,8 @@ export function PostgresProjectHomeView({
                   <TypeScopedAttributeModal
                     draft={objectWorkspaceAttributeDraft}
                     typeOptions={objectWorkspaceAttributeTypeOptions}
-                    title="Create object attribute"
-                    typeLabel="Object"
+                    title={t("projectCore.homeShell.objects.createObjectAttribute")}
+                    typeLabel={t("projectCore.entities.object")}
                     saving={graphSubmitting}
                     error={objectWorkspaceAttributeError}
                     onCancel={() => {
@@ -8308,7 +8333,7 @@ export function PostgresProjectHomeView({
                     onSave={(_, valuesByOwner) => {
                       void handleSaveBulkObjectAttributeValues(bulkObjectAttributeDefinition, valuesByOwner);
                     }}
-                    emptyStateLabel="Create an object first to start assigning attribute values."
+                    emptyStateLabel={t("projectCore.homeShell.objects.createObjectFirst")}
                   />
                 ) : null}
                 {removingObjectId ? (
@@ -8317,16 +8342,16 @@ export function PostgresProjectHomeView({
                     if (!object) return null;
                     return (
                       <GraphConfirmModal
-                        title="Delete object"
-                        warning="This permanently removes the object and any relationships connected to it."
+                        title={t("projectCore.homeShell.objects.deleteObjectLower")}
+                        warning={t("projectCore.homeShell.objects.deleteWarning")}
                         busy={graphSubmitting}
-                        confirmLabel="Delete object"
-                        busyLabel="Deleting..."
+                        confirmLabel={t("projectCore.homeShell.objects.deleteObjectLower")}
+                        busyLabel={t("projectCore.sources.deleting")}
                         onClose={() => setRemovingObjectId(null)}
                         onConfirm={() => void handleDeleteObject(object.id)}
                       >
                         <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                          Delete <strong>{object.title}</strong>?
+                          {t("projectCore.homeShell.objects.deletePrompt", { name: object.title })}
                         </p>
                       </GraphConfirmModal>
                     );
@@ -8359,7 +8384,7 @@ export function PostgresProjectHomeView({
                         className="btn"
                         onClick={() => setSelectedRelationshipDetailsId(null)}
                       >
-                        Back
+                        {t("projectCore.homeShell.objects.back")}
                       </button>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <button
@@ -8367,14 +8392,14 @@ export function PostgresProjectHomeView({
                           className="btn"
                           onClick={() => openEditRelationshipModal(selectedRelationshipDetails)}
                         >
-                          Edit Relationship
+                          {t("projectCore.homeShell.relationships.editRelationship")}
                         </button>
                         <button
                           type="button"
                           className="btn btn--danger"
                           onClick={() => setRemovingRelationshipId(selectedRelationshipDetails.id)}
                         >
-                          Delete Relationship
+                          {t("projectCore.homeShell.relationships.deleteRelationship")}
                         </button>
                       </div>
                     </div>
@@ -8382,7 +8407,7 @@ export function PostgresProjectHomeView({
                     <div className="doc-detail-layout">
                       <div className="doc-detail-left">
                         <div className="case-card">
-                          <h3 className="case-card-title">Appearance</h3>
+                          <h3 className="case-card-title">{t("projectCore.homeShell.relationships.appearance")}</h3>
                           {selectedRelationshipDetailsAppearance ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
                               <RelationshipTypeLinePreview
@@ -8392,21 +8417,21 @@ export function PostgresProjectHomeView({
                                 color={selectedRelationshipDetailsAppearance.color}
                               />
                               <p className="case-card-value" style={{ margin: 0 }}>
-                                {selectedRelationshipDetails.relationshipType || "Relationship"}
+                                {selectedRelationshipDetails.relationshipType || t("projectCore.entities.relationship")}
                               </p>
                             </div>
                           ) : null}
                         </div>
 
                         <div className="case-card">
-                          <h3 className="case-card-title">Attributes</h3>
+                          <h3 className="case-card-title">{t("projectCore.homeShell.relationships.attributes")}</h3>
                           {selectedRelationshipDetailsAttributeDefinitions.length > 0 ? (
                             <div className="case-detail-attributes-table-wrap">
                               <table className="case-detail-attributes-table">
                                 <thead>
                                   <tr>
-                                    <th className="case-detail-attributes-label" scope="col">Attribute</th>
-                                    <th className="case-detail-attributes-value" scope="col">Value</th>
+                                    <th className="case-detail-attributes-label" scope="col">{t("projectCore.homeShell.relationships.attribute")}</th>
+                                    <th className="case-detail-attributes-value" scope="col">{t("projectCore.homeShell.relationships.value")}</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -8425,11 +8450,11 @@ export function PostgresProjectHomeView({
                                               projectId: project.id,
                                               ownerKind: "relationship",
                                               ownerId: selectedRelationshipDetails.id,
-                                              ownerName: selectedRelationshipDetails.relationshipType || "Relationship",
+                                              ownerName: selectedRelationshipDetails.relationshipType || t("projectCore.entities.relationship"),
                                               attributeDefinitionId: definition.id,
                                               attributeName: definition.name,
                                             })}
-                                            title="View attribute value history"
+                                            title={t("projectCore.homeShell.relationships.viewAttributeHistory")}
                                           >
                                             {rawValue ? formatPostgresAttributeDisplay(rawValue, definition.dataType) : "-"}
                                           </button>
@@ -8441,23 +8466,23 @@ export function PostgresProjectHomeView({
                               </table>
                             </div>
                           ) : (
-                            <p className="case-card-empty">No shared attributes for this relationship type yet.</p>
+                            <p className="case-card-empty">{t("projectCore.homeShell.relationships.noSharedAttributes")}</p>
                           )}
                         </div>
                       </div>
 
                       <div className="doc-detail-right doc-detail-right--annotation">
                         <div className="case-card">
-                          <h3 className="case-card-title">Details</h3>
-                          <p className="case-card-value">{selectedRelationshipDetails.relationshipType || "Relationship"}</p>
+                          <h3 className="case-card-title">{t("projectCore.homeShell.relationships.details")}</h3>
+                          <p className="case-card-value">{selectedRelationshipDetails.relationshipType || t("projectCore.entities.relationship")}</p>
                           <dl className="user-detail-meta case-detail-meta" style={{ marginTop: 16 }}>
-                            <dt>From</dt>
+                            <dt>{t("projectCore.homeShell.relationships.from")}</dt>
                             <dd>{fromObject ? `${fromObject.title} (${fromObject.objectType})` : selectedRelationshipDetails.fromEntityName || selectedRelationshipDetails.fromObjectId}</dd>
-                            <dt>To</dt>
+                            <dt>{t("projectCore.homeShell.relationships.to")}</dt>
                             <dd>{toObject ? `${toObject.title} (${toObject.objectType})` : selectedRelationshipDetails.toEntityName || selectedRelationshipDetails.toObjectId}</dd>
-                            <dt>Relationship type</dt>
+                            <dt>{t("projectCore.homeShell.relationships.relationshipType")}</dt>
                             <dd>{selectedRelationshipDetailsType?.name ?? selectedRelationshipDetails.relationshipType ?? "-"}</dd>
-                            <dt>Created</dt>
+                            <dt>{t("projectCore.homeShell.relationships.created")}</dt>
                             <dd>
                               {formatCurrentDateTime(selectedRelationshipDetails.createdAt, {
                                 year: "numeric",
@@ -8468,7 +8493,7 @@ export function PostgresProjectHomeView({
                                 second: "2-digit",
                               })}
                             </dd>
-                            <dt>Updated</dt>
+                            <dt>{t("projectCore.homeShell.relationships.updated")}</dt>
                             <dd>
                               {formatCurrentDateTime(selectedRelationshipDetails.updatedAt, {
                                 year: "numeric",
@@ -8481,13 +8506,13 @@ export function PostgresProjectHomeView({
                             </dd>
                           </dl>
                           <div style={{ marginTop: 18 }}>
-                            <h3 className="case-card-title">Description</h3>
+                            <h3 className="case-card-title">{t("projectCore.homeShell.relationships.description")}</h3>
                             {selectedRelationshipDetails.description.trim() ? (
                               <p style={{ margin: 0, lineHeight: 1.6, overflowWrap: "anywhere" }}>
                                 {selectedRelationshipDetails.description}
                               </p>
                             ) : (
-                              <p className="case-card-empty">No description yet.</p>
+                              <p className="case-card-empty">{t("projectCore.homeShell.relationships.noDescription")}</p>
                             )}
                           </div>
                         </div>
@@ -8512,13 +8537,13 @@ export function PostgresProjectHomeView({
               <div className="view users-view">
                 <header className="view-header">
                   <div className="users-title-wrap">
-                    <h1>Relationships</h1>
+                    <h1>{t("projectCore.homeShell.relationships.title")}</h1>
                     <button
                       type="button"
                       className="users-help-icon-btn"
                       onClick={() => setProjectHelpModal("relationships")}
-                      title="Open relationships help"
-                      aria-label="Open relationships help"
+                      title={t("projectCore.homeShell.relationships.openHelp")}
+                      aria-label={t("projectCore.homeShell.relationships.openHelp")}
                     >
                       <HelpIcon className="users-help-icon" />
                     </button>
@@ -8552,10 +8577,10 @@ export function PostgresProjectHomeView({
                     <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
                       <div className="segmented-control" role="presentation">
                         <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
-                          Details
+                          {t("projectCore.homeShell.relationships.details")}
                         </button>
                         <button type="button" className="segmented-control-option" tabIndex={-1}>
-                          Attributes
+                          {t("projectCore.homeShell.relationships.attributes")}
                         </button>
                       </div>
                     </div>
@@ -8570,13 +8595,13 @@ export function PostgresProjectHomeView({
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                          <h2 style={{ margin: 0, fontSize: 18 }}>Relationship types</h2>
+                          <h2 style={{ margin: 0, fontSize: 18 }}>{t("projectCore.homeShell.relationships.relationshipTypes")}</h2>
                           {!showRelationshipAttributesTable ? (
                             <button
                               type="button"
                               className="btn project-create-icon-button"
-                              aria-label="Add relationship type"
-                              title="Add relationship type"
+                              aria-label={t("projectCore.homeShell.relationships.addRelationshipType")}
+                              title={t("projectCore.homeShell.relationships.addRelationshipType")}
                               onClick={openCreateRelationshipTypeModal}
                             >
                               <PlusIcon className="project-create-icon" />
@@ -8594,7 +8619,7 @@ export function PostgresProjectHomeView({
                                 style={{ width: "76%" }}
                                 onClick={() => handleRelationshipTypeSort("relationshipType")}
                               >
-                                Type
+                                {t("projectCore.homeShell.relationships.typeColumn")}
                                 <span className="users-sort-icon">
                                   {relationshipTypeSortCol === "relationshipType" ? (relationshipTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
@@ -8604,7 +8629,7 @@ export function PostgresProjectHomeView({
                                 style={{ width: "24%" }}
                                 onClick={() => handleRelationshipTypeSort("count")}
                               >
-                                Count
+                                {t("projectCore.homeShell.count")}
                                 <span className="users-sort-icon">
                                   {relationshipTypeSortCol === "count" ? (relationshipTypeSortDir === "asc" ? " ?" : " ?") : " ?"}
                                 </span>
@@ -8634,7 +8659,7 @@ export function PostgresProjectHomeView({
                                   }
                                 }}
                               >
-                                <span>All relationships</span>
+                                <span>{t("projectCore.homeShell.relationships.allRelationships")}</span>
                               </td>
                               <td className="users-td users-td--muted">{relationships.length}</td>
                             </tr>
@@ -8747,7 +8772,7 @@ export function PostgresProjectHomeView({
                                 setOpenRelationshipTypeActionsMenu(null);
                               }}
                             >
-                              Edit
+                              {t("projectCore.sources.detail.edit")}
                             </button>
                             <button
                               type="button"
@@ -8771,13 +8796,13 @@ export function PostgresProjectHomeView({
                                 setGraphError("");
                               }}
                             >
-                              Delete
+                              {t("common.delete")}
                             </button>
                           </div>
                         ) : null}
                         {relationshipTypeSummaries.length === 0 ? (
                           <div className="empty-state" style={{ minHeight: 140 }}>
-                            <p>No relationship types yet.</p>
+                            <p>{t("projectCore.homeShell.relationships.noRelationshipTypes")}</p>
                           </div>
                         ) : null}
                       </div>
@@ -8805,7 +8830,7 @@ export function PostgresProjectHomeView({
 
                     <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
                       <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
-                        <div className="segmented-control" role="tablist" aria-label="Relationship workspace views">
+                        <div className="segmented-control" role="tablist" aria-label={t("projectCore.homeShell.relationships.workspaceViews")}>
                           <button
                             type="button"
                             className={showRelationshipAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
@@ -8813,7 +8838,7 @@ export function PostgresProjectHomeView({
                             aria-selected={!showRelationshipAttributesTable}
                             onClick={() => setShowRelationshipAttributesTable(false)}
                           >
-                            Details
+                            {t("projectCore.homeShell.relationships.details")}
                           </button>
                           <button
                             type="button"
@@ -8822,7 +8847,7 @@ export function PostgresProjectHomeView({
                             aria-selected={showRelationshipAttributesTable}
                             onClick={() => setShowRelationshipAttributesTable(true)}
                           >
-                            Attributes
+                            {t("projectCore.homeShell.relationships.attributes")}
                           </button>
                         </div>
                       </div>
@@ -8830,31 +8855,33 @@ export function PostgresProjectHomeView({
 
                     {graphLoading ? (
                       <div className="empty-state postgres-users-empty-state">
-                        <p>Loading relationships...</p>
+                        <p>{t("projectCore.homeShell.relationships.loadingRelationships")}</p>
                       </div>
                     ) : showRelationshipAttributesTable ? (
                       <>
                         {selectedRelationshipTypeFilter === "all" ? (
                           <div className="empty-state postgres-users-empty-state">
-                            <p>Select a relationship type in the left column to view its attributes.</p>
+                            <p>{t("projectCore.homeShell.relationships.selectTypeForAttributes")}</p>
                           </div>
                         ) : relationshipAttributeDefinitionsForWorkspace.length === 0 ? (
                           <div className="empty-state postgres-users-empty-state">
                             <p>
-                              {`${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "Selected relationship type"} has no attributes.`}
+                              {t("projectCore.homeShell.relationships.noAttributesForType", {
+                                type: relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? t("projectCore.homeShell.relationships.selectedRelationshipType"),
+                              })}
                             </p>
                           </div>
                         ) : (
                           <div className="home-project-card project-table-card">
                             <div className="project-table-card-header">
-                              <h2>Attributes</h2>
+                              <h2>{t("projectCore.homeShell.relationships.attributes")}</h2>
                               <button
                                 type="button"
                                 className="btn btn--primary project-table-header-icon-button"
                                 onClick={openRelationshipWorkspaceAttributeModal}
                                 disabled={graphSubmitting || relationshipWorkspaceAttributeTypeOptions.length === 0}
-                                title="Add attribute"
-                                aria-label="Add attribute"
+                                title={t("projectCore.homeShell.relationships.addAttribute")}
+                                aria-label={t("projectCore.homeShell.relationships.addAttribute")}
                               >
                                 <PlusIcon className="project-table-header-icon" />
                               </button>
@@ -8867,7 +8894,7 @@ export function PostgresProjectHomeView({
                                     className={`users-th case-attributes-case-col${relationshipAttributeSortCol === "name" ? " users-th--sorted" : ""}`}
                                     onClick={() => handleRelationshipAttributeSort("name")}
                                   >
-                                    Relationship
+                                    {t("projectCore.entities.relationship")}
                                     <span className="users-sort-icon">
                                       {relationshipAttributeSortCol === "name" ? (relationshipAttributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                                     </span>
@@ -8884,7 +8911,7 @@ export function PostgresProjectHomeView({
                                         setGraphError("");
                                         setGraphNotice("");
                                       }}
-                                      title={canManageSources ? "Edit values for this attribute" : "Only project owners, administrators, or editors can edit relationship attributes."}
+                                      title={canManageSources ? t("projectCore.sources.editValuesForAttribute") : t("projectCore.homeShell.relationships.cannotEditAttributes")}
                                     >
                                       {definition.name}
                                       <span className="users-sort-icon">
@@ -8899,7 +8926,9 @@ export function PostgresProjectHomeView({
                                 {sortedRelationshipAttributeRows.length === 0 ? (
                                   <tr>
                                     <td colSpan={Math.max(relationshipAttributeDefinitionsForWorkspace.length + 1, 1)} className="users-td-msg">
-                                      {`No ${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "selected"} relationships yet.`}
+                                      {t("projectCore.homeShell.relationships.noRelationshipsForType", {
+                                        type: relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? t("projectCore.homeShell.relationships.selectedTypeFallback"),
+                                      })}
                                     </td>
                                   </tr>
                                 ) : (
@@ -8919,7 +8948,7 @@ export function PostgresProjectHomeView({
                                             projectId: project.id,
                                             ownerKind: "relationship",
                                             ownerId: row.id,
-                                            ownerName: row.name || "Relationship",
+                                            ownerName: row.name || t("projectCore.entities.relationship"),
                                             attributeDefinitionId: definition.id,
                                             attributeName: definition.name,
                                           });
@@ -8930,7 +8959,7 @@ export function PostgresProjectHomeView({
                                             className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}${hoveredRelationshipAttributeColumnId === definition.id ? " case-attributes-col--hovered" : ""}`}
                                             role="button"
                                             tabIndex={0}
-                                            title="View attribute value history"
+                                            title={t("projectCore.homeShell.relationships.viewAttributeHistory")}
                                             onClick={openHistory}
                                             onKeyDown={(event) => {
                                               if (event.key !== "Enter" && event.key !== " ") return;
@@ -8956,12 +8985,12 @@ export function PostgresProjectHomeView({
                     ) : (
                       <div className="home-project-card project-table-card">
                         <div className="project-table-card-header">
-                          <h2>Relationships</h2>
+                          <h2>{t("projectCore.homeShell.relationships.title")}</h2>
                           <button
                             type="button"
                             className="btn btn--primary project-table-header-icon-button"
-                            aria-label="New relationship"
-                            title="New relationship"
+                            aria-label={t("projectCore.homeShell.relationships.newRelationship")}
+                            title={t("projectCore.homeShell.relationships.newRelationship")}
                             onClick={() => openCreateRelationshipModal()}
                           >
                             <PlusIcon className="project-table-header-icon" />
@@ -8971,10 +9000,10 @@ export function PostgresProjectHomeView({
                         <table className="users-table">
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "28%" }}>Type</th>
-                              <th className="users-th" style={{ width: "28%" }}>From</th>
-                              <th className="users-th" style={{ width: "28%" }}>To</th>
-                              <th className="users-th" style={{ width: "16%" }}>Updated</th>
+                              <th className="users-th" style={{ width: "28%" }}>{t("projectCore.homeShell.relationships.typeColumn")}</th>
+                              <th className="users-th" style={{ width: "28%" }}>{t("projectCore.homeShell.relationships.from")}</th>
+                              <th className="users-th" style={{ width: "28%" }}>{t("projectCore.homeShell.relationships.to")}</th>
+                              <th className="users-th" style={{ width: "16%" }}>{t("projectCore.homeShell.relationships.updated")}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -8982,8 +9011,10 @@ export function PostgresProjectHomeView({
                               <tr>
                                 <td colSpan={4} className="users-td-msg">
                                   {selectedRelationshipTypeFilter === "all"
-                                    ? "No relationships yet."
-                                    : `No ${relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? "selected"} relationships yet.`}
+                                    ? t("projectCore.homeShell.relationships.noRelationships")
+                                    : t("projectCore.homeShell.relationships.noRelationshipsForType", {
+                                        type: relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? t("projectCore.homeShell.relationships.selectedTypeFallback"),
+                                      })}
                                 </td>
                               </tr>
                             ) : filteredRelationships.map((relationship) => {
@@ -9046,7 +9077,7 @@ export function PostgresProjectHomeView({
                                             setOpenRelationshipActionsMenu(null);
                                           }}
                                         >
-                                          Edit
+                                          {t("projectCore.sources.detail.edit")}
                                         </button>
                                         <button
                                           type="button"
@@ -9069,7 +9100,7 @@ export function PostgresProjectHomeView({
                                             setOpenRelationshipActionsMenu(null);
                                           }}
                                         >
-                                          Delete
+                                          {t("common.delete")}
                                         </button>
                                       </div>
                                     ) : null}
@@ -9103,9 +9134,9 @@ export function PostgresProjectHomeView({
               </div>
               {editingRelationshipTypeModalId ? (
                 <PostgresRelationshipTypeModal
-                  title="Edit relationship type"
-                  submitLabel="Save changes"
-                  ariaLabel="Edit relationship type tabs"
+                  title={t("projectCore.homeShell.relationships.editRelationshipType")}
+                  submitLabel={t("projectCore.homeShell.relationships.saveChanges")}
+                  ariaLabel={t("projectCore.homeShell.relationships.editRelationshipTypeTabs")}
                   tab={relationshipTypeModalTab}
                   setTab={setRelationshipTypeModalTab}
                   projectStoragePath={project.storagePath}
@@ -9124,7 +9155,7 @@ export function PostgresProjectHomeView({
                   attributeDrafts={relationshipTypeAttributeDrafts}
                   attributeRows={getRelationshipTypeMatrixRows(editingRelationshipTypeModalId)}
                   attributeValues={relationshipTypeAttributeValuesByDraftId}
-                  emptyRowsLabel="No relationships of this type yet."
+                  emptyRowsLabel={t("projectCore.homeShell.relationships.noRelationshipsOfType")}
                   onClose={() => setEditingRelationshipTypeModalId(null)}
                   onSubmit={handleSaveRelationshipType}
                   setName={setDraftRelationshipTypeName}
@@ -9163,16 +9194,16 @@ export function PostgresProjectHomeView({
                   ).length;
                   return (
                     <GraphConfirmModal
-                      title="Delete relationship type"
-                      warning={`This will delete the relationship type, its shared attribute definitions, and all ${affectedRelationshipCount} relationships of this type. This cannot be undone.`}
+                      title={t("projectCore.homeShell.relationships.deleteRelationshipType")}
+                      warning={t("projectCore.homeShell.relationships.relationshipTypeDeleteWarning", { count: affectedRelationshipCount })}
                       busy={graphSubmitting}
-                      confirmLabel="Delete relationship type"
-                      busyLabel="Deleting..."
+                      confirmLabel={t("projectCore.homeShell.relationships.deleteRelationshipType")}
+                      busyLabel={t("projectCore.sources.deleting")}
                       onClose={() => setRemovingRelationshipTypeId(null)}
                       onConfirm={() => void handleDeleteRelationshipType(relationshipTypeRecord.id)}
                     >
                         <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                          Delete <strong>{relationshipTypeRecord.name}</strong>?
+                          {t("projectCore.homeShell.relationships.deletePrompt", { name: relationshipTypeRecord.name })}
                         </p>
                     </GraphConfirmModal>
                   );
@@ -9184,16 +9215,16 @@ export function PostgresProjectHomeView({
                   if (!relationship) return null;
                   return (
                     <GraphConfirmModal
-                      title="Delete relationship"
-                      warning="This permanently removes the link between the connected objects."
+                      title={t("projectCore.homeShell.relationships.deleteRelationshipLower")}
+                      warning={t("projectCore.homeShell.relationships.deleteRelationshipWarning")}
                       busy={graphSubmitting}
-                      confirmLabel="Delete relationship"
-                      busyLabel="Deleting..."
+                      confirmLabel={t("projectCore.homeShell.relationships.deleteRelationshipLower")}
+                      busyLabel={t("projectCore.sources.deleting")}
                       onClose={() => setRemovingRelationshipId(null)}
                       onConfirm={() => void handleDeleteRelationship(relationship.id)}
                     >
                         <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                          Delete <strong>{relationship.relationshipType}</strong>?
+                          {t("projectCore.homeShell.relationships.deletePrompt", { name: relationship.relationshipType })}
                         </p>
                     </GraphConfirmModal>
                   );
@@ -9222,15 +9253,15 @@ export function PostgresProjectHomeView({
                   onSave={(draft, valuesByOwner) => {
                     void handleSaveRelationshipAttributeDefinition(draft, valuesByOwner);
                   }}
-                  emptyStateLabel="Create a relationship first to start assigning attribute values."
+                  emptyStateLabel={t("projectCore.homeShell.relationships.createRelationshipFirst")}
                 />
               ) : null}
               {relationshipWorkspaceAttributeDraft ? (
                 <TypeScopedAttributeModal
                   draft={relationshipWorkspaceAttributeDraft}
                   typeOptions={relationshipWorkspaceAttributeTypeOptions}
-                  title="Create relationship attribute"
-                  typeLabel="Relationship"
+                  title={t("projectCore.homeShell.relationships.createRelationshipAttribute")}
+                  typeLabel={t("projectCore.entities.relationship")}
                   saving={graphSubmitting}
                   error={relationshipWorkspaceAttributeError}
                   onCancel={() => {
@@ -9263,7 +9294,7 @@ export function PostgresProjectHomeView({
                   onSave={(_, valuesByOwner) => {
                     void handleSaveBulkRelationshipAttributeValues(bulkRelationshipAttributeDefinition, valuesByOwner);
                   }}
-                  emptyStateLabel="Create a relationship first to start assigning attribute values."
+                  emptyStateLabel={t("projectCore.homeShell.relationships.createRelationshipFirst")}
                 />
               ) : null}
               {attributeHistoryTarget ? (
@@ -9314,24 +9345,24 @@ export function PostgresProjectHomeView({
               <header className="view-header">
                 <div>
                   <div className="users-title-wrap">
-                    <h1>Construct</h1>
+                    <h1>{t("projectCore.homeShell.savedCanvases.construct")}</h1>
                     <button
                       type="button"
                       className="users-help-icon-btn"
                       onClick={() => setProjectHelpModal("construct")}
-                      title="Open construct help"
-                      aria-label="Open construct help"
+                      title={t("projectCore.homeShell.savedCanvases.openConstructHelp")}
+                      aria-label={t("projectCore.homeShell.savedCanvases.openConstructHelp")}
                     >
                       <HelpIcon className="users-help-icon" />
                     </button>
                   </div>
                   <p className="auth-hint" style={{ margin: "6px 0 0" }}>
-                    This canvas mode will focus on assembling structured visual models from research objects and relationships.
+                    {t("projectCore.homeShell.savedCanvases.constructDescription")}
                   </p>
                 </div>
               </header>
               <div className="empty-state postgres-users-empty-state" style={{ minHeight: 420 }}>
-                <p>Construct mode is not wired yet.</p>
+                <p>{t("projectCore.homeShell.savedCanvases.constructPlaceholder")}</p>
               </div>
             </div>
           ) : activeScreen === "view" ? (
@@ -9339,19 +9370,19 @@ export function PostgresProjectHomeView({
               <header className="view-header">
                 <div>
                   <div className="users-title-wrap">
-                    <h1>View</h1>
+                    <h1>{t("projectCore.homeShell.savedCanvases.view")}</h1>
                     <button
                       type="button"
                       className="users-help-icon-btn"
                       onClick={() => setProjectHelpModal("view")}
-                      title="Open view help"
-                      aria-label="Open view help"
+                      title={t("projectCore.homeShell.savedCanvases.openViewHelp")}
+                      aria-label={t("projectCore.homeShell.savedCanvases.openViewHelp")}
                     >
                       <HelpIcon className="users-help-icon" />
                     </button>
                   </div>
                   <p className="auth-hint" style={{ margin: "6px 0 0" }}>
-                    Browse saved canvases by mode.
+                    {t("projectCore.homeShell.savedCanvases.browseSaved")}
                   </p>
                 </div>
               </header>
@@ -9384,7 +9415,7 @@ export function PostgresProjectHomeView({
                         borderBottom: "1px solid rgba(53, 80, 112, 0.08)",
                       }}
                     >
-                      <h2 style={{ margin: 0, fontSize: 18 }}>Canvas modes</h2>
+                      <h2 style={{ margin: 0, fontSize: 18 }}>{t("projectCore.homeShell.savedCanvases.canvasModes")}</h2>
                       <span className="home-restricted-value">3</span>
                     </div>
 
@@ -9392,15 +9423,15 @@ export function PostgresProjectHomeView({
                       <table className="users-table" style={{ tableLayout: "fixed" }}>
                         <thead>
                           <tr>
-                            <th className="users-th" style={{ width: "62%" }}>Mode</th>
-                            <th className="users-th" style={{ width: "38%" }}>Saved</th>
+                            <th className="users-th" style={{ width: "62%" }}>{t("projectCore.homeShell.savedCanvases.mode")}</th>
+                            <th className="users-th" style={{ width: "38%" }}>{t("projectCore.homeShell.savedCanvases.saved")}</th>
                           </tr>
                         </thead>
                         <tbody>
                           {[
-                            { id: "free_draw", label: "Free Draw" },
-                            { id: "explore", label: "Explore" },
-                            { id: "construct", label: "Construct" },
+                            { id: "free_draw", label: t("projectCore.homeShell.savedCanvases.freeDraw") },
+                            { id: "explore", label: t("projectCore.homeShell.savedCanvases.explore") },
+                            { id: "construct", label: t("projectCore.homeShell.savedCanvases.construct") },
                           ].map((canvasKind) => {
                             const count = savedDrawings.filter((drawing) => drawing.canvasKind === canvasKind.id).length;
                             return (
@@ -9440,22 +9471,22 @@ export function PostgresProjectHomeView({
                   {graphError ? <p className="auth-error">{graphError}</p> : null}
                   {graphLoading ? (
                     <div className="empty-state postgres-users-empty-state">
-                      <p>Loading saved canvases...</p>
+                      <p>{t("projectCore.homeShell.savedCanvases.loading")}</p>
                     </div>
                   ) : filteredSavedDrawings.length === 0 ? (
                     <div className="empty-state postgres-users-empty-state">
-                      <p>No saved {formatCanvasKindLabel(selectedCanvasViewKind).toLowerCase()} canvases yet.</p>
+                      <p>{t("projectCore.homeShell.savedCanvases.noSavedPrefix")} {formatCanvasKindLabel(selectedCanvasViewKind).toLowerCase()} {t("projectCore.homeShell.savedCanvases.noSavedSuffix")}</p>
                     </div>
                   ) : (
                     <div className="users-table-wrap postgres-users-table-wrap">
                       <table className="users-table">
                         <thead>
                           <tr>
-                            <th className="users-th" style={{ width: "30%" }}>Name</th>
-                            <th className="users-th" style={{ width: "16%" }}>Mode</th>
-                            <th className="users-th" style={{ width: "18%" }}>Created</th>
-                            <th className="users-th" style={{ width: "18%" }}>Updated</th>
-                            <th className="users-th" style={{ width: "18%" }}>Actions</th>
+                            <th className="users-th" style={{ width: "30%" }}>{t("projectCore.homeShell.savedCanvases.name")}</th>
+                            <th className="users-th" style={{ width: "16%" }}>{t("projectCore.homeShell.savedCanvases.mode")}</th>
+                            <th className="users-th" style={{ width: "18%" }}>{t("projectCore.entities.created")}</th>
+                            <th className="users-th" style={{ width: "18%" }}>{t("projectCore.entities.updated")}</th>
+                            <th className="users-th" style={{ width: "18%" }}>{t("projectCore.homeShell.savedCanvases.actions")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -9501,7 +9532,7 @@ export function PostgresProjectHomeView({
                                     );
                                   }}
                                 >
-                                  Actions
+                                  {t("projectCore.homeShell.savedCanvases.actions")}
                                 </button>
                                 {openSavedDrawingActionsMenu?.id === drawing.id ? (
                                   <div
@@ -9541,7 +9572,7 @@ export function PostgresProjectHomeView({
                                         void openSavedDrawingSession(drawing.id, "view");
                                       }}
                                     >
-                                      View
+                                      {t("projectCore.homeShell.savedCanvases.view")}
                                     </button>
                                     <button
                                       type="button"
@@ -9564,7 +9595,7 @@ export function PostgresProjectHomeView({
                                         void openSavedDrawingSession(drawing.id, "edit");
                                       }}
                                     >
-                                      Edit
+                                      {t("projectCore.sources.detail.edit")}
                                     </button>
                                     <button
                                       type="button"
@@ -9587,7 +9618,7 @@ export function PostgresProjectHomeView({
                                         setOpenSavedDrawingActionsMenu(null);
                                       }}
                                     >
-                                      Export
+                                      {t("projectCore.homeShell.savedCanvases.export")}
                                     </button>
                                     <button
                                       type="button"
@@ -9610,7 +9641,7 @@ export function PostgresProjectHomeView({
                                         setOpenSavedDrawingActionsMenu(null);
                                       }}
                                     >
-                                      Delete
+                                      {t("common.delete")}
                                     </button>
                                   </div>
                                 ) : null}
@@ -9668,26 +9699,26 @@ export function PostgresProjectHomeView({
               onEditItem={editHomeCanvasItem}
               onRemoveFromGroup={(menu) => void handleRemoveHomeTimelineItemFromGroup(menu)}
               onDeleteItem={startHomeCanvasDelete}
-              deleteLabel={activeScreen === "analysis-draw-canvas" ? "Remove from canvas" : "Delete"}
-              deleteDisabledTitle={activeScreen === "analysis-draw-canvas" ? "Coders and viewers cannot edit drawings." : undefined}
+              deleteLabel={activeScreen === "analysis-draw-canvas" ? t("projectCore.homeShell.savedCanvases.removeFromCanvas") : t("common.delete")}
+              deleteDisabledTitle={activeScreen === "analysis-draw-canvas" ? t("projectCore.homeShell.savedCanvases.cannotEditDrawings") : undefined}
             />
           ) : null}
           {projectHelpModal ? (
             <SettingsModal
-              title={POSTGRES_PROJECT_HELP_COPY[projectHelpModal].title}
+              title={t(POSTGRES_PROJECT_HELP_COPY[projectHelpModal].titleKey)}
               onClose={() => setProjectHelpModal(null)}
               modalClassName="modal--help"
             >
               <div className="app-settings-modal-body">
-                {POSTGRES_PROJECT_HELP_COPY[projectHelpModal].lines.map((line) => (
-                  <p key={line} className="users-guide-copy">
-                    {line}
+                {POSTGRES_PROJECT_HELP_COPY[projectHelpModal].lineKeys.map((lineKey) => (
+                  <p key={lineKey} className="users-guide-copy">
+                    {t(lineKey)}
                   </p>
                 ))}
               </div>
               <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
                 <button type="button" className="btn btn--primary" onClick={() => setProjectHelpModal(null)}>
-                  Close
+                  {t("common.close")}
                 </button>
               </div>
             </SettingsModal>
@@ -9706,9 +9737,9 @@ export function PostgresProjectHomeView({
           ) : null}
           {createRelationshipTypeOpen ? (
             <PostgresRelationshipTypeModal
-              title="Add relationship type"
-              submitLabel="Add relationship type"
-              ariaLabel="Add relationship type tabs"
+              title={t("projectCore.homeShell.relationships.addRelationshipType")}
+              submitLabel={t("projectCore.homeShell.relationships.addRelationshipType")}
+              ariaLabel={t("projectCore.homeShell.relationships.addRelationshipType")}
               tab={relationshipTypeModalTab}
               setTab={setRelationshipTypeModalTab}
               projectStoragePath={project.storagePath}
@@ -9727,7 +9758,7 @@ export function PostgresProjectHomeView({
               attributeDrafts={relationshipTypeAttributeDrafts}
               attributeRows={[]}
               attributeValues={relationshipTypeAttributeValuesByDraftId}
-              emptyRowsLabel="No relationships of this type yet."
+              emptyRowsLabel={t("projectCore.homeShell.relationships.noRelationshipsOfType")}
               onClose={() => setCreateRelationshipTypeOpen(false)}
               onSubmit={handleCreateRelationshipType}
               setName={setDraftRelationshipTypeName}
@@ -9762,7 +9793,7 @@ export function PostgresProjectHomeView({
               draft={objectTypeAttributeModalDraft}
               saving={graphSubmitting}
               error={typeAttributeModalError}
-              title={objectTypeAttributeModalDraft.id ? "Edit object attribute" : "Create object attribute"}
+              title={objectTypeAttributeModalDraft.id ? t("projectCore.homeShell.objects.editObjectAttribute") : t("projectCore.homeShell.objects.createObjectAttribute")}
               overlayStyle={{ zIndex: 300 }}
               onCancel={() => {
                 if (graphSubmitting) return;
@@ -9777,7 +9808,7 @@ export function PostgresProjectHomeView({
               draft={relationshipTypeAttributeModalDraft}
               saving={graphSubmitting}
               error={typeAttributeModalError}
-              title={relationshipTypeAttributeModalDraft.id ? "Edit relationship attribute" : "Create relationship attribute"}
+              title={relationshipTypeAttributeModalDraft.id ? t("projectCore.homeShell.relationships.editRelationshipAttribute") : t("projectCore.homeShell.relationships.createRelationshipAttribute")}
               overlayStyle={{ zIndex: 300 }}
               onCancel={() => {
                 if (graphSubmitting) return;
@@ -9789,7 +9820,7 @@ export function PostgresProjectHomeView({
           ) : null}
           {drawCanvasSaveModalOpen ? (
             <SettingsModal
-              title="Save drawing"
+              title={t("projectCore.homeShell.savedCanvases.saveDrawing")}
               onClose={() => setDrawCanvasSaveModalOpen(false)}
               closeDisabled={drawCanvasSaving}
               modalClassName="modal--wide"
@@ -9802,15 +9833,15 @@ export function PostgresProjectHomeView({
               >
                 <div className="app-settings-modal-body">
                   <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                    Choose a name for this saved drawing.
+                    {t("projectCore.homeShell.savedCanvases.chooseDrawingName")}
                   </p>
                   <label className="form-field">
-                    <span>Drawing name</span>
+                    <span>{t("projectCore.homeShell.savedCanvases.drawingName")}</span>
                     <input
                       className="form-input"
                       value={saveFreeDrawName}
                       onChange={(event) => setSaveFreeDrawName(event.target.value)}
-                      placeholder="Enter drawing name"
+                      placeholder={t("projectCore.homeShell.savedCanvases.enterDrawingName")}
                       autoFocus
                       disabled={drawCanvasSaving}
                     />
@@ -9824,14 +9855,14 @@ export function PostgresProjectHomeView({
                     onClick={() => setDrawCanvasSaveModalOpen(false)}
                     disabled={drawCanvasSaving}
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="submit"
                     className="btn btn--primary"
                     disabled={drawCanvasSaving}
                   >
-                    {drawCanvasSaving ? "Saving..." : "Save drawing"}
+                    {drawCanvasSaving ? t("projectCore.sources.saving") : t("projectCore.homeShell.savedCanvases.saveDrawing")}
                   </button>
                 </div>
               </form>
@@ -9839,7 +9870,7 @@ export function PostgresProjectHomeView({
           ) : null}
           {saveFreeDrawModalOpen ? (
             <SettingsModal
-              title="Save canvas"
+              title={t("projectCore.homeShell.savedCanvases.saveCanvas")}
               onClose={() => setSaveFreeDrawModalOpen(false)}
               closeDisabled={freeDrawSaving}
               modalClassName="modal--wide"
@@ -9852,15 +9883,15 @@ export function PostgresProjectHomeView({
                 >
                   <div className="app-settings-modal-body">
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                      Choose a name for this saved canvas.
+                      {t("projectCore.homeShell.savedCanvases.chooseCanvasName")}
                     </p>
                     <label className="form-field">
-                      <span>Canvas name</span>
+                      <span>{t("projectCore.homeShell.savedCanvases.canvasName")}</span>
                       <input
                         className="form-input"
                         value={saveFreeDrawName}
                         onChange={(event) => setSaveFreeDrawName(event.target.value)}
-                        placeholder="Enter canvas name"
+                        placeholder={t("projectCore.homeShell.savedCanvases.enterCanvasName")}
                         autoFocus
                         disabled={freeDrawSaving}
                       />
@@ -9873,14 +9904,14 @@ export function PostgresProjectHomeView({
                       onClick={() => setSaveFreeDrawModalOpen(false)}
                       disabled={freeDrawSaving}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                     <button
                       type="submit"
                       className="btn btn--primary"
                       disabled={freeDrawSaving}
                     >
-                      {freeDrawSaving ? "Saving..." : "Save canvas"}
+                      {freeDrawSaving ? t("projectCore.sources.saving") : t("projectCore.homeShell.savedCanvases.saveCanvas")}
                     </button>
                   </div>
                 </form>
@@ -9892,14 +9923,14 @@ export function PostgresProjectHomeView({
               if (!drawing) return null;
               return (
                 <SettingsModal
-                  title="Export saved canvas"
+                  title={t("projectCore.homeShell.savedCanvases.exportCanvas")}
                   onClose={() => setExportingSavedDrawingId(null)}
                   closeDisabled={savedDrawingExportBusyFormat !== null}
                   modalClassName="modal--wide"
                 >
                   <div className="app-settings-modal-body">
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                      Export <strong>{drawing.name}</strong>.
+                      {t("projectCore.homeShell.savedCanvases.exportPrompt", { name: drawing.name })}
                     </p>
                     <div className="form" style={{ gap: 12 }}>
                       <button
@@ -9908,7 +9939,7 @@ export function PostgresProjectHomeView({
                         onClick={() => void handleExportSavedDrawing("png")}
                         disabled={savedDrawingExportBusyFormat !== null}
                       >
-                        {savedDrawingExportBusyFormat === "png" ? "Exporting PNG..." : "Export as PNG"}
+                        {savedDrawingExportBusyFormat === "png" ? t("projectCore.homeShell.savedCanvases.exportingPng") : t("projectCore.homeShell.savedCanvases.exportAsPng")}
                       </button>
                       <button
                         type="button"
@@ -9916,7 +9947,7 @@ export function PostgresProjectHomeView({
                         onClick={() => void handleExportSavedDrawing("pdf")}
                         disabled={savedDrawingExportBusyFormat !== null}
                       >
-                        {savedDrawingExportBusyFormat === "pdf" ? "Exporting PDF..." : "Export as PDF"}
+                        {savedDrawingExportBusyFormat === "pdf" ? t("projectCore.homeShell.savedCanvases.exportingPdf") : t("projectCore.homeShell.savedCanvases.exportAsPdf")}
                       </button>
                     </div>
                   </div>
@@ -9927,7 +9958,7 @@ export function PostgresProjectHomeView({
                         onClick={() => setExportingSavedDrawingId(null)}
                         disabled={savedDrawingExportBusyFormat !== null}
                       >
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                     </div>
                 </SettingsModal>
@@ -9940,16 +9971,16 @@ export function PostgresProjectHomeView({
               if (!drawing) return null;
               return (
                 <GraphConfirmModal
-                  title="Delete saved canvas"
-                  warning="This permanently removes the saved canvas from this project."
+                  title={t("projectCore.homeShell.savedCanvases.deleteCanvas")}
+                  warning={t("projectCore.homeShell.savedCanvases.deleteCanvasWarning")}
                   busy={graphSubmitting}
-                  confirmLabel="Delete saved canvas"
-                  busyLabel="Deleting..."
+                  confirmLabel={t("projectCore.homeShell.savedCanvases.deleteCanvas")}
+                  busyLabel={t("projectCore.sources.deleting")}
                   onClose={() => setRemovingSavedDrawingId(null)}
                   onConfirm={() => void handleDeleteSavedDrawing(drawing.id)}
                 >
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                      Delete <strong>{drawing.name}</strong>?
+                      {t("projectCore.homeShell.savedCanvases.deletePrompt", { name: drawing.name })}
                     </p>
                 </GraphConfirmModal>
               );
@@ -9986,7 +10017,7 @@ export function PostgresProjectHomeView({
           {editingHomeCanvasSource ? (
             <Suspense fallback={null}>
               <SourceEditorModalLazy
-                title="Edit Source"
+                title={t("projectCore.sources.editSource")}
                 initialRow={editingHomeCanvasSource}
                 projectStoragePath={project.storagePath}
                 sourceTypeSettings={sourceTypeSettings}
@@ -10006,7 +10037,7 @@ export function PostgresProjectHomeView({
           {createCodeOpen ? (
             <NewCodeModal
               allCodes={codeRowsForModal}
-              title="New Code"
+              title={t("projectCodebook.modal.newTitle")}
               submitLabel="Create"
               onSubmit={handleCreateCode}
               onDone={() => setCreateCodeOpen(false)}
@@ -10020,7 +10051,7 @@ export function PostgresProjectHomeView({
           {editingHomeCanvasCode ? (
             <NewCodeModal
               allCodes={codeRowsForModal}
-              title="Edit Code"
+              title={t("projectCodebook.modal.editTitle")}
               submitLabel="Save"
               initialLabel={editingHomeCanvasCode.label}
               initialDescription={editingHomeCanvasCode.description}
@@ -10038,11 +10069,11 @@ export function PostgresProjectHomeView({
           ) : null}
           {createObjectOpen ? (
             <PostgresObjectModal
-              title="Create object"
-              ariaLabel="Create object tabs"
+              title={t("projectCore.homeShell.objects.createObject")}
+              ariaLabel={t("projectCore.homeShell.objects.createObjectTabs")}
               tab={createObjectModalTab}
               setTab={setCreateObjectModalTab}
-              submitLabel="Add object"
+              submitLabel={t("projectCore.homeShell.objects.addObject")}
               objectTypes={objectTypes}
               projectStoragePath={project.storagePath}
               submitting={graphSubmitting}
@@ -10085,12 +10116,12 @@ export function PostgresProjectHomeView({
           ) : null}
           {createObjectTypeOpen ? (
             <PostgresObjectTypeModal
-              title="Add object type"
-              subtitle="Create a project-specific object type now, then add objects to it whenever you are ready."
-              ariaLabel="Add object type tabs"
+              title={t("projectCore.homeShell.objects.addObjectType")}
+              subtitle={t("projectCore.homeShell.objects.createObjectTypeSubtitle")}
+              ariaLabel={t("projectCore.homeShell.objects.createObjectTypeTabs")}
               tab={objectTypeModalTab}
               setTab={setObjectTypeModalTab}
-              submitLabel="Create object type"
+              submitLabel={t("projectCore.homeShell.objects.createObjectType")}
               projectStoragePath={project.storagePath}
               submitting={graphSubmitting}
               imageUploadSubmitting={imageUploadSubmitting}
@@ -10108,7 +10139,7 @@ export function PostgresProjectHomeView({
               attributeDrafts={objectTypeAttributeDrafts}
               attributeRows={[]}
               attributeValues={objectTypeAttributeValuesByDraftId}
-              emptyRowsLabel="Create the object type before assigning values."
+              emptyRowsLabel={t("projectCore.homeShell.objects.createObjectTypeBeforeValues")}
               onClose={() => setCreateObjectTypeOpen(false)}
               onSubmit={handleCreateObjectType}
               setName={setDraftObjectTypeName}
@@ -10142,11 +10173,11 @@ export function PostgresProjectHomeView({
           ) : null}
           {editingObjectId ? (
             <PostgresObjectModal
-              title="Edit object"
-              ariaLabel="Edit object tabs"
+              title={t("projectCore.homeShell.objects.editObjectLower")}
+              ariaLabel={t("projectCore.homeShell.objects.editObjectTabs")}
               tab={editObjectModalTab}
               setTab={setEditObjectModalTab}
-              submitLabel="Save changes"
+              submitLabel={t("projectCore.homeShell.objects.saveChanges")}
               objectTypes={objectTypes}
               projectStoragePath={project.storagePath}
               submitting={graphSubmitting}
@@ -10262,16 +10293,16 @@ export function PostgresProjectHomeView({
               if (!object) return null;
               return (
                 <GraphConfirmModal
-                  title="Delete object"
-                  warning="This permanently removes the object and any relationships connected to it."
+                  title={t("projectCore.homeShell.objects.deleteObjectLower")}
+                  warning={t("projectCore.homeShell.objects.deleteWarning")}
                   busy={graphSubmitting}
-                  confirmLabel="Delete object"
-                  busyLabel="Deleting..."
+                  confirmLabel={t("projectCore.homeShell.objects.deleteObjectLower")}
+                  busyLabel={t("projectCore.sources.deleting")}
                   onClose={() => setRemovingObjectId(null)}
                   onConfirm={() => void handleDeleteObject(object.id)}
                 >
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                      Delete <strong>{object.title}</strong>?
+                      {t("projectCore.homeShell.objects.deletePrompt", { name: object.title })}
                     </p>
                 </GraphConfirmModal>
               );
@@ -10283,16 +10314,16 @@ export function PostgresProjectHomeView({
               if (!relationship) return null;
               return (
                 <GraphConfirmModal
-                  title="Delete relationship"
-                  warning="This permanently removes the link between the connected objects."
+                  title={t("projectCore.homeShell.relationships.deleteRelationshipLower")}
+                  warning={t("projectCore.homeShell.relationships.deleteRelationshipWarning")}
                   busy={graphSubmitting}
-                  confirmLabel="Delete relationship"
-                  busyLabel="Deleting..."
+                  confirmLabel={t("projectCore.homeShell.relationships.deleteRelationshipLower")}
+                  busyLabel={t("projectCore.sources.deleting")}
                   onClose={() => setRemovingRelationshipId(null)}
                   onConfirm={() => void handleDeleteRelationship(relationship.id)}
                 >
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                      Delete <strong>{relationship.relationshipType}</strong>?
+                      {t("projectCore.homeShell.relationships.deletePrompt", { name: relationship.relationshipType })}
                     </p>
                 </GraphConfirmModal>
               );
@@ -10300,26 +10331,21 @@ export function PostgresProjectHomeView({
           ) : null}
           {homeCanvasDeleteTarget ? (
             <GraphConfirmModal
-              title={homeCanvasDeleteTarget.canvasOnly ? `Remove ${homeCanvasDeleteTarget.kind} from canvas` : `Delete ${homeCanvasDeleteTarget.kind}`}
-              warning={homeCanvasDeleteTarget.canvasOnly ? (
-                <>
-                  This only removes the {homeCanvasDeleteTarget.kind} from this drawing. The project record and its coding data will not be deleted.
-                </>
-              ) : (
-                <>
-                  This permanently removes the {homeCanvasDeleteTarget.kind}
-                  {homeCanvasDeleteTarget.kind === "object"
-                    ? " and any relationships connected to it."
-                    : homeCanvasDeleteTarget.kind === "source"
-                      ? " and its related project records."
-                      : homeCanvasDeleteTarget.kind === "code"
-                        ? " and its coding assignments."
-                        : "."}
-                </>
-              )}
+              title={homeCanvasDeleteTarget.canvasOnly
+                ? t("projectCore.homeShell.savedCanvases.removeItemFromCanvasTitle", { kind: homeCanvasDeleteTarget.kind })
+                : t("projectCore.homeShell.savedCanvases.deleteItemTitle", { kind: homeCanvasDeleteTarget.kind })}
+              warning={homeCanvasDeleteTarget.canvasOnly
+                ? t("projectCore.homeShell.savedCanvases.removeFromDrawingBody", { itemType: homeCanvasDeleteTarget.kind })
+                : homeCanvasDeleteTarget.kind === "object"
+                  ? t("projectCore.homeShell.savedCanvases.permanentDeleteObjectBody", { itemType: homeCanvasDeleteTarget.kind })
+                  : homeCanvasDeleteTarget.kind === "source"
+                    ? t("projectCore.homeShell.savedCanvases.permanentDeleteSourceBody", { itemType: homeCanvasDeleteTarget.kind })
+                    : homeCanvasDeleteTarget.kind === "code"
+                      ? t("projectCore.homeShell.savedCanvases.permanentDeleteCodeBody", { itemType: homeCanvasDeleteTarget.kind })
+                      : t("projectCore.homeShell.savedCanvases.permanentDeleteBody", { itemType: homeCanvasDeleteTarget.kind })}
               busy={graphSubmitting}
-              confirmLabel={homeCanvasDeleteTarget.canvasOnly ? "Remove from canvas" : "Delete"}
-              busyLabel="Deleting..."
+              confirmLabel={homeCanvasDeleteTarget.canvasOnly ? t("projectCore.homeShell.savedCanvases.removeFromCanvas") : t("common.delete")}
+              busyLabel={t("projectCore.sources.deleting")}
               confirmDisabled={!canDeleteHomeCanvasItems}
               onClose={() => setHomeCanvasDeleteTarget(null)}
               onConfirm={() => {
@@ -10327,7 +10353,9 @@ export function PostgresProjectHomeView({
               }}
             >
                 <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                  {homeCanvasDeleteTarget.canvasOnly ? "Remove" : "Delete"} <strong>{homeCanvasDeleteTarget.label}</strong>?
+                  {homeCanvasDeleteTarget.canvasOnly
+                    ? t("projectCore.homeShell.savedCanvases.removePrompt", { name: homeCanvasDeleteTarget.label })
+                    : t("projectCore.homeShell.savedCanvases.deletePrompt", { name: homeCanvasDeleteTarget.label })}
                 </p>
             </GraphConfirmModal>
           ) : null}

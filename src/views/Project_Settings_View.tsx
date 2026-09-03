@@ -437,11 +437,11 @@ export function ProjectSettingsView() {
     setUploadedFileDeleteBusy(true);
     try {
       await deleteProjectUploadedFile(uploadedFileDeleteTarget.id, uploadedFileDeleteTarget.originalFileName);
-      setUploadedFilesNotice(`Deleted retained source file "${uploadedFileDeleteTarget.originalFileName}".`);
+      setUploadedFilesNotice(t("projectSettings.modal.retainedSourceFileDeleted", { fileName: uploadedFileDeleteTarget.originalFileName }));
       setUploadedFileDeleteTarget(null);
     } catch (error) {
       console.error("Failed to delete retained source file:", error);
-      setUploadedFilesError("Could not delete the retained source file.");
+      setUploadedFilesError(t("projectSettings.errors.retainedSourceFileDeleteFailed"));
     } finally {
       setUploadedFileDeleteBusy(false);
     }
@@ -1205,10 +1205,10 @@ export function ProjectSettingsView() {
           ? "Enabled original filename storage for imported documents"
           : "Disabled original filename storage for imported documents",
       );
-      setDocumentImportNotice("Document import defaults saved.");
+      setDocumentImportNotice(t("projectSettings.modal.documentImportDefaultsSaved"));
     } catch (error) {
       console.error("Failed to update project document import defaults:", error);
-      setDocumentImportError("Could not save document import defaults.");
+      setDocumentImportError(t("projectSettings.errors.documentImportDefaultsSaveFailed"));
     }
   }
 
@@ -1326,16 +1326,19 @@ export function ProjectSettingsView() {
                   : t("projectSettings.modal.notBuilt");
           const embeddingStatusDetail =
             isProjectBuildRunning
-              ? `${projectEmbeddingBuildStatus?.completedItems ?? 0} of ${projectEmbeddingBuildStatus?.totalItems ?? 0} items indexed`
+              ? t("projectSettings.modal.buildProgress", {
+                  completed: projectEmbeddingBuildStatus?.completedItems ?? 0,
+                  total: projectEmbeddingBuildStatus?.totalItems ?? 0,
+                })
               : isProjectBuildCancelling
                 ? t("projectSettings.modal.stoppingBuild")
                 : aiAssistIndexStatus?.exists
                   ? [
                       aiAssistIndexStatus.itemCount
-                        ? `${aiAssistIndexStatus.itemCount} embedded items`
-                        : "Indexed items available",
+                        ? t("projectSettings.modal.embeddedItemsCount", { count: aiAssistIndexStatus.itemCount })
+                        : t("projectSettings.modal.indexedItemsAvailable"),
                       aiAssistIndexStatus.generatedAtMs
-                        ? `Last generated ${formatCurrentDateTime(aiAssistIndexStatus.generatedAtMs)}`
+                        ? t("projectSettings.modal.lastGenerated", { date: formatCurrentDateTime(aiAssistIndexStatus.generatedAtMs) })
                         : "",
                     ].filter(Boolean).join(" • ")
                   : isLocalWorkspace
@@ -1380,16 +1383,19 @@ export function ProjectSettingsView() {
 
               {aiAssistBuildPreflight && (
                 <div className="users-permission-note" style={{ marginTop: 12 }}>
-                  <strong>Best-guess duration:</strong> {aiAssistBuildPreflight.estimateLabel}
+                  <strong>{t("projectSettings.modal.bestGuessDuration")}</strong> {aiAssistBuildPreflight.estimateLabel}
                   <br />
-                  {formatEstimateRange(
-                    aiAssistBuildPreflight.estimatedSecondsLow,
-                    aiAssistBuildPreflight.estimatedSecondsHigh,
-                  )} for {formatCount(aiAssistBuildPreflight.pendingItems)} new items
+                  {t("projectSettings.modal.estimateNewItems", {
+                    estimate: formatEstimateRange(
+                      aiAssistBuildPreflight.estimatedSecondsLow,
+                      aiAssistBuildPreflight.estimatedSecondsHigh,
+                    ),
+                    count: formatCount(aiAssistBuildPreflight.pendingItems),
+                  })}
                   {aiAssistBuildPreflight.reusedItems > 0
-                    ? `, with ${formatCount(aiAssistBuildPreflight.reusedItems)} likely reused`
+                    ? t("projectSettings.modal.likelyReusedInline", { count: formatCount(aiAssistBuildPreflight.reusedItems) })
                     : ""}
-                  . This estimate is based on current project contents and recent conservative assumptions for local CPU embedding speed.
+                  {t("projectSettings.modal.estimateBasis")}
                 </div>
               )}
 
@@ -1399,7 +1405,7 @@ export function ProjectSettingsView() {
                   className="btn btn--primary"
                   onClick={() => void handleAiAssistBuildRun()}
                   disabled={aiAssistBuildBusy || !canBuildProjectEmbeddings}
-                  title={canBuildProjectEmbeddings ? undefined : "You do not have permission to build project embeddings."}
+                  title={canBuildProjectEmbeddings ? undefined : t("projectSettings.modal.noPermissionBuildEmbeddings")}
                 >
                   {isProjectBuildRunning
                     ? t("projectSettings.modal.building")
@@ -1414,9 +1420,9 @@ export function ProjectSettingsView() {
                   disabled={aiAssistBuildBusy || aiAssistDeletingIndex || !aiAssistIndexStatus?.exists || !canDeleteProjectEmbeddings}
                   title={
                     !canDeleteProjectEmbeddings
-                      ? "You do not have permission to delete project embeddings."
+                      ? t("projectSettings.modal.noPermissionDeleteEmbeddings")
                       : !aiAssistIndexStatus?.exists
-                        ? "No project embeddings are available to delete."
+                        ? t("projectSettings.modal.noEmbeddingsToDelete")
                         : undefined
                   }
                 >
@@ -1426,7 +1432,7 @@ export function ProjectSettingsView() {
 
               {!canBuildProjectEmbeddings && !canDeleteProjectEmbeddings && (
                 <div className="users-permission-note" style={{ marginTop: 12 }}>
-                  You can view project embedding status, but you do not have permission to rebuild or delete embeddings.
+                  {t("projectSettings.modal.noPermissionManageEmbeddings")}
                 </div>
               )}
             </SettingsModalSection>
@@ -2043,7 +2049,7 @@ export function ProjectSettingsView() {
                     {formatEstimateRange(
                       aiAssistBuildPreflight.estimatedSecondsLow,
                       aiAssistBuildPreflight.estimatedSecondsHigh,
-                    )} for {formatCount(aiAssistBuildPreflight.pendingItems)} new items
+                    )} {t("projectSettings.modal.forNewItems", { count: formatCount(aiAssistBuildPreflight.pendingItems) })}
                     {aiAssistBuildPreflight.reusedItems > 0
                       ? t("projectSettings.shell.likelyReused", { count: formatCount(aiAssistBuildPreflight.reusedItems) })
                       : ""}

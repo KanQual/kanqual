@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HelpIcon, PlusIcon } from "../components/AppIcons";
 import { parseProcessedTranscriptSegments } from "../components/ProcessedTranscriptView";
 import { SettingsModal } from "../components/SettingsModal";
+import { useI18n } from "../i18n/provider";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { buildLlmInvokeRequestFields } from "../lib/llmRuntime";
 import {
@@ -254,6 +255,7 @@ export function PostgresAIAssistAttributesView({
   projectId: string;
   canUseAiAttributeTools: boolean;
 }) {
+  const { t } = useI18n();
   const [sources, setSources] = useState<PostgresSource[]>([]);
   const [objects, setObjects] = useState<PostgresObject[]>([]);
   const [relationships, setRelationships] = useState<PostgresRelationship[]>([]);
@@ -894,7 +896,7 @@ export function PostgresAIAssistAttributesView({
       selectedAttribute.dataType === "categorical"
       && !selectedAttribute.options.includes(valueToAccept)
     ) {
-      setError(`"${valueToAccept}" is not one of the allowed values for ${selectedAttribute.name}.`);
+      setError(t("aiAssist.attributes.landing.valueNotAllowed", { value: valueToAccept, attribute: selectedAttribute.name }));
       return;
     }
     const ownerRow = attributeOwnerRows.find((item) => item.ownerId === row.ownerId);
@@ -1017,49 +1019,49 @@ export function PostgresAIAssistAttributesView({
       setSavedRuns((current) => current.filter((item) => item.id !== row.id));
       if (loadedRun?.id === row.id) setLoadedRun(null);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Could not delete saved attribute suggestions.");
+      setError(deleteError instanceof Error ? deleteError.message : t("aiAssist.attributes.landing.couldNotDeleteSavedSuggestions"));
     } finally {
       setDeleteBusyId(null);
     }
   }
 
   if (!canUseAiAttributeTools) {
-    return <div className="view"><div className="empty-state"><p>You do not have permission to use AI attribute tools.</p></div></div>;
+    return <div className="view"><div className="empty-state"><p>{t("aiAssist.attributes.noPermission")}</p></div></div>;
   }
 
   if (!aiAssistEnabled) {
-    return <div className="view"><div className="empty-state"><p>Enable AI Assist in project settings before identifying attributes.</p></div></div>;
+    return <div className="view"><div className="empty-state"><p>{t("aiAssist.attributes.enableAiAssist")}</p></div></div>;
   }
 
   return (
     <div className="view users-view ai-attribute-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Attributes</h1>
-          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} title="About Attributes" aria-label="About Attributes">
+          <h1>{t("aiAssist.attributes.title")}</h1>
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} title={t("aiAssist.attributes.about")} aria-label={t("aiAssist.attributes.about")}>
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </header>
 
       {helpOpen ? (
-        <SettingsModal title="Identify Attributes" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("aiAssist.attributes.helpTitle")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
-            <p className="users-guide-copy">Generate suggested values for selected attributes, review the evidence, and accept values back into the project.</p>
+            <p className="users-guide-copy">{t("aiAssist.attributes.helpBody")}</p>
           </div>
         </SettingsModal>
       ) : null}
 
       {evidenceModal ? (
         <SettingsModal
-          title="Suggestion Evidence"
+          title={t("aiAssist.attributes.modals.evidence.title")}
           subtitle={evidenceModal.sourceName}
           onClose={() => setEvidenceModal(null)}
           modalClassName="modal--wide ai-attribute-evidence-modal"
         >
           <div className="app-settings-modal-body">
             <div className="ai-attribute-evidence-summary">
-              <span>Suggested value</span>
+              <span>{t("aiAssist.attributes.labels.suggestedValueLower")}</span>
               <strong>{evidenceModal.suggestedValue}</strong>
             </div>
             <div className="ai-attribute-evidence-text">
@@ -1073,13 +1075,13 @@ export function PostgresAIAssistAttributesView({
 
       {editSuggestionModal ? (
         <SettingsModal
-          title="Edit Suggestion"
+          title={t("aiAssist.attributes.modals.evidence.editTitle")}
           subtitle={editSuggestionModal.row.ownerName}
           onClose={() => setEditSuggestionModal(null)}
           modalClassName="modal--wide ai-attribute-edit-modal"
         >
           <div className="app-settings-modal-body">
-            <label className="form-label" htmlFor="edit-attribute-suggestion-value">Suggested value</label>
+            <label className="form-label" htmlFor="edit-attribute-suggestion-value">{t("aiAssist.attributes.labels.suggestedValueLower")}</label>
             <textarea
               id="edit-attribute-suggestion-value"
               className="form-control ai-attribute-edit-textarea"
@@ -1089,29 +1091,29 @@ export function PostgresAIAssistAttributesView({
             />
             {editSuggestionModal.row.evidenceText.trim() ? (
               <div className="ai-attribute-evidence-summary">
-                <span>Evidence</span>
+                <span>{t("aiAssist.attributes.labels.evidence")}</span>
                 <strong>{editSuggestionModal.row.evidenceText}</strong>
               </div>
             ) : null}
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={handleSaveEditedSuggestion}>
-              Save Edit
+              {t("aiAssist.attributes.actions.saveEdit")}
             </button>
           </div>
         </SettingsModal>
       ) : null}
 
       {error ? <p className="users-error">{error}</p> : null}
-      {loading ? <p className="users-guide-copy">Loading attributes...</p> : null}
+      {loading ? <p className="users-guide-copy">{t("aiAssist.attributes.loadingAttributes")}</p> : null}
 
       <div className="annotate-layout ai-assisted-coding-annotate-layout ai-assisted-coding-analyze-layout">
         <div className="annotate-left">
           <div className="annotate-card">
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Attributes</span>
+              <span className="annotate-card-title">{t("aiAssist.attributes.title")}</span>
             </div>
-            <div className="segmented-control ai-attribute-kind-tabs" role="tablist" aria-label="Attribute target">
+            <div className="segmented-control ai-attribute-kind-tabs" role="tablist" aria-label={t("aiAssist.attributes.labels.attributeTarget")}>
               <button
                 type="button"
                 role="tab"
@@ -1119,7 +1121,7 @@ export function PostgresAIAssistAttributesView({
                 className={attributeKind === "source" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => handleSelectAttributeKind("source")}
               >
-                Source
+                {t("aiAssist.attributes.labels.source")}
               </button>
               <button
                 type="button"
@@ -1128,7 +1130,7 @@ export function PostgresAIAssistAttributesView({
                 className={attributeKind === "object" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => handleSelectAttributeKind("object")}
               >
-                Object
+                {t("aiAssist.attributes.labels.object")}
               </button>
               <button
                 type="button"
@@ -1137,7 +1139,7 @@ export function PostgresAIAssistAttributesView({
                 className={attributeKind === "relationship" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => handleSelectAttributeKind("relationship")}
               >
-                Relationship
+                {t("aiAssist.attributes.labels.relationship")}
               </button>
             </div>
             <div className="users-table-wrap ai-attribute-picker-table-wrap">
@@ -1145,9 +1147,9 @@ export function PostgresAIAssistAttributesView({
                 <thead>
                   <tr>
                     {([
-                      { key: "name", label: "Name", className: "ai-attribute-picker-name-col" },
-                      { key: "type", label: "Type", className: "ai-attribute-picker-type-col" },
-                      { key: "missing", label: "Missing", className: "ai-attribute-picker-missing-col" },
+                      { key: "name", label: t("aiAssist.attributes.landing.table.name"), className: "ai-attribute-picker-name-col" },
+                      { key: "type", label: t("aiAssist.chat.type"), className: "ai-attribute-picker-type-col" },
+                      { key: "missing", label: t("aiAssist.attributes.labels.missing"), className: "ai-attribute-picker-missing-col" },
                     ] as Array<{ key: AttributeSortColumn; label: string; className: string }>).map((column) => (
                       <th
                         key={column.key}
@@ -1175,7 +1177,7 @@ export function PostgresAIAssistAttributesView({
                   {sortedAttributeTableRows.length === 0 ? (
                     <tr>
                       <td className="users-td users-td--muted" colSpan={3}>
-                        No {attributeKind} attributes yet.
+                        {t("aiAssist.attributes.landing.noAttributesYet", { kind: attributeKind })}
                       </td>
                     </tr>
                   ) : sortedAttributeTableRows.map((row) => (
@@ -1215,12 +1217,12 @@ export function PostgresAIAssistAttributesView({
 
           <div className="annotate-card" style={{ marginTop: 16 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Saved Suggestions</span>
+              <span className="annotate-card-title">{t("aiAssist.attributes.landing.savedSuggestions")}</span>
               <button
                 type="button"
                 className="btn btn--small ai-saved-new-icon-button"
-                aria-label="New suggestion"
-                title="New suggestion"
+                aria-label={t("aiAssist.attributes.actions.newSuggestion")}
+                title={t("aiAssist.attributes.actions.newSuggestion")}
                 onClick={clearSuggestionDraft}
               >
                 <PlusIcon className="ai-saved-new-icon" />
@@ -1228,7 +1230,7 @@ export function PostgresAIAssistAttributesView({
             </div>
             <div className="ai-chat-list">
               {savedRuns.length === 0 ? (
-                <div className="empty-state ai-chat-empty-state"><p>No saved suggestions.</p></div>
+                <div className="empty-state ai-chat-empty-state"><p>{t("aiAssist.attributes.landing.noSavedSuggestions")}</p></div>
               ) : savedRuns.map((row) => (
                 <button
                   key={row.id}
@@ -1257,7 +1259,7 @@ export function PostgresAIAssistAttributesView({
                 }}
                 disabled={deleteBusyId === savedRunContextMenu.runId}
               >
-                Delete suggestions
+                {t("aiAssist.attributes.actions.deleteSuggestions")}
               </button>
             </div>
           ) : null}
@@ -1272,7 +1274,7 @@ export function PostgresAIAssistAttributesView({
                   className="form-input"
                   value={saveName}
                   onChange={(event) => setSaveName(event.target.value)}
-                  placeholder={selectedAttribute ? `${selectedAttribute.name} Suggestions` : "Suggestion run name"}
+                  placeholder={selectedAttribute ? t("aiAssist.attributes.labels.defaultSuggestionTitle", { attribute: selectedAttribute.name }) : t("aiAssist.attributes.labels.suggestionRunName")}
                   disabled={!hasGeneratedSuggestions || saving}
                 />
                 <button
@@ -1281,7 +1283,7 @@ export function PostgresAIAssistAttributesView({
                   onClick={() => void handleSaveSuggestions()}
                   disabled={!hasGeneratedSuggestions || saving || suggestionBusy}
                 >
-                  {saving ? "Saving..." : loadedRun ? "Save Copy" : "Save"}
+                  {saving ? t("aiAssist.attributes.statuses.saving") : loadedRun ? t("aiAssist.attributes.actions.saveCopy") : t("common.save")}
                 </button>
               </div>
             </div>
@@ -1292,7 +1294,7 @@ export function PostgresAIAssistAttributesView({
                   <div className="ai-attribute-selected-summary-main">
                     <div className="ai-attribute-selected-summary-badges">
                       <span className="ai-attribute-selected-summary-kind">
-                        {attributeKind === "source" ? "Source Attribute" : attributeKind === "object" ? "Object Attribute" : "Relationship Attribute"}
+                        {attributeKind === "source" ? t("aiAssist.attributes.labels.sourceAttribute") : attributeKind === "object" ? t("aiAssist.attributes.labels.objectAttribute") : t("aiAssist.attributes.labels.relationshipAttribute")}
                       </span>
                       <span className="ai-attribute-selected-summary-type">{formatAttributeTypeLabel(selectedAttribute.dataType)}</span>
                     </div>
@@ -1304,7 +1306,7 @@ export function PostgresAIAssistAttributesView({
                     onClick={() => void handleGenerateSuggestions()}
                     disabled={!canUseAiAttributeTools || selectedOwnerRows.length === 0 || suggestionBusy}
                   >
-                    {suggestionBusy ? "Running..." : "Run"}
+                    {suggestionBusy ? t("aiAssist.attributes.statuses.running") : t("aiAssist.attributes.actions.run")}
                   </button>
                 </div>
                 {selectedAttribute.description.trim() ? (
@@ -1319,18 +1321,22 @@ export function PostgresAIAssistAttributesView({
                   <span className="ai-segments-progress-bar" />
                 </div>
                 <div className="ai-segments-search-copy">
-                  {attributeKind === "source" ? "Source" : attributeKind === "object" ? "Object" : "Relationship"} {suggestionRunState.completedItems} of {suggestionRunState.totalItems}
+                  {t("aiAssist.attributes.landing.ownerProgress", {
+                    kind: attributeKind === "source" ? t("aiAssist.attributes.labels.source") : attributeKind === "object" ? t("aiAssist.attributes.labels.object") : t("aiAssist.attributes.labels.relationship"),
+                    completed: suggestionRunState.completedItems,
+                    total: suggestionRunState.totalItems,
+                  })}
                 </div>
               </div>
             ) : null}
 
             {!selectedAttribute ? (
-              <div className="ai-attribute-placeholder"><p>Select an attribute to generate suggestions.</p></div>
+              <div className="ai-attribute-placeholder"><p>{t("aiAssist.attributes.landing.selectAttribute")}</p></div>
             ) : attributeOwnerRows.length === 0 ? (
-              <div className="ai-attribute-placeholder"><p>No {attributeKind}s are available for this attribute.</p></div>
+              <div className="ai-attribute-placeholder"><p>{t("aiAssist.attributes.landing.noAvailableOwners", { kind: attributeKind })}</p></div>
             ) : (
               <div className="ai-attribute-table-wrap">
-                {suggestionModel ? <p className="backup-field-hint ai-attribute-suggestion-meta">Generated with {suggestionModel}</p> : null}
+                {suggestionModel ? <p className="backup-field-hint ai-attribute-suggestion-meta">{t("aiAssist.attributes.landing.generatedWith", { model: suggestionModel })}</p> : null}
                 <div className="ai-attribute-table-selection-toolbar">
                   <button
                     type="button"
@@ -1345,7 +1351,7 @@ export function PostgresAIAssistAttributesView({
                     }}
                     disabled={allOwnersSelected}
                   >
-                    All
+                    {t("aiAssist.attributes.actions.all")}
                   </button>
                   <button
                     type="button"
@@ -1360,20 +1366,20 @@ export function PostgresAIAssistAttributesView({
                     }}
                     disabled={selectedOwnerIds.length === 0}
                   >
-                    Clear
+                    {t("aiAssist.attributes.actions.clear")}
                   </button>
                 </div>
                 <table className="users-table ai-attribute-table">
                   <thead>
                     <tr>
-                      <th className="users-th ai-attribute-table-select-col" aria-label="Include" />
+                      <th className="users-th ai-attribute-table-select-col" aria-label={t("common.include")} />
                       <th className="users-th ai-attribute-table-owner-col">
-                        {attributeKind === "source" ? "Source" : attributeKind === "object" ? "Object" : "Relationship"}
+                        {attributeKind === "source" ? t("aiAssist.attributes.labels.source") : attributeKind === "object" ? t("aiAssist.attributes.labels.object") : t("aiAssist.attributes.labels.relationship")}
                       </th>
-                      <th className="users-th ai-attribute-table-type-col">Type</th>
-                      <th className="users-th ai-attribute-table-value-col">Current Value</th>
-                      <th className="users-th ai-attribute-table-value-col">Suggested Value</th>
-                      <th className="users-th ai-attribute-table-action-col">Review</th>
+                      <th className="users-th ai-attribute-table-type-col">{t("aiAssist.chat.type")}</th>
+                      <th className="users-th ai-attribute-table-value-col">{t("aiAssist.attributes.labels.currentValue")}</th>
+                      <th className="users-th ai-attribute-table-value-col">{t("aiAssist.attributes.labels.suggestedValue")}</th>
+                      <th className="users-th ai-attribute-table-action-col">{t("aiAssist.attributes.labels.review")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1404,31 +1410,31 @@ export function PostgresAIAssistAttributesView({
                               <div className="ai-attribute-review-actions">
                                 {suggestionRow.reviewStatus === "accepted" ? (
                                   <>
-                                    <span className="ai-attribute-review-status ai-attribute-review-status--accepted">Accepted</span>
+                                    <span className="ai-attribute-review-status ai-attribute-review-status--accepted">{t("aiAssist.attributes.statuses.accepted")}</span>
                                     <button
                                       type="button"
                                       className="btn btn--small"
                                       onClick={() => handleUndoSuggestion(suggestionRow)}
                                       disabled={acceptingOwnerId === suggestionRow.ownerId}
                                     >
-                                      Undo
+                                      {t("aiAssist.attributes.actions.undo")}
                                     </button>
                                   </>
                                 ) : suggestionRow.reviewStatus === "rejected" ? (
                                   <>
-                                    <span className="ai-attribute-review-status ai-attribute-review-status--rejected">Rejected</span>
+                                    <span className="ai-attribute-review-status ai-attribute-review-status--rejected">{t("aiAssist.attributes.statuses.rejected")}</span>
                                     <button
                                       type="button"
                                       className="btn btn--small"
                                       onClick={() => handleUndoSuggestion(suggestionRow)}
                                     >
-                                      Undo
+                                      {t("aiAssist.attributes.actions.undo")}
                                     </button>
                                   </>
                                 ) : (
                                   <>
                                     {suggestionRow.reviewStatus === "edited" ? (
-                                      <span className="ai-attribute-review-status ai-attribute-review-status--edited">Edited</span>
+                                      <span className="ai-attribute-review-status ai-attribute-review-status--edited">{t("aiAssist.attributes.statuses.edited")}</span>
                                     ) : null}
                                     <button
                                       type="button"
@@ -1436,7 +1442,7 @@ export function PostgresAIAssistAttributesView({
                                       onClick={() => void handleAcceptSuggestion(suggestionRow)}
                                       disabled={acceptingOwnerId === suggestionRow.ownerId}
                                     >
-                                      {acceptingOwnerId === suggestionRow.ownerId ? "Saving..." : "Accept"}
+                                      {acceptingOwnerId === suggestionRow.ownerId ? t("aiAssist.attributes.statuses.saving") : t("aiAssist.attributes.actions.accept")}
                                     </button>
                                     <button
                                       type="button"
@@ -1444,7 +1450,7 @@ export function PostgresAIAssistAttributesView({
                                       onClick={() => setEditSuggestionModal({ row: suggestionRow, value: suggestionRow.suggestedValue })}
                                       disabled={acceptingOwnerId === suggestionRow.ownerId}
                                     >
-                                      Edit
+                                      {t("aiAssist.attributes.actions.edit")}
                                     </button>
                                     <button
                                       type="button"
@@ -1452,7 +1458,7 @@ export function PostgresAIAssistAttributesView({
                                       onClick={() => handleRejectSuggestion(suggestionRow)}
                                       disabled={acceptingOwnerId === suggestionRow.ownerId}
                                     >
-                                      Reject
+                                      {t("aiAssist.attributes.actions.reject")}
                                     </button>
                                   </>
                                 )}
@@ -1466,7 +1472,7 @@ export function PostgresAIAssistAttributesView({
                 </table>
                 {suggestionRows.length === 0 ? (
                   <div className="ai-attribute-placeholder" style={{ marginTop: 16 }}>
-                    <p>Select rows, then generate suggestions to fill this attribute.</p>
+                    <p>{t("aiAssist.attributes.landing.selectRowsThenGenerate")}</p>
                   </div>
                 ) : null}
               </div>

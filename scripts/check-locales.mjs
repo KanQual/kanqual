@@ -10,6 +10,7 @@ const tempDir = path.join(rootDir, ".tmp", "i18n-check");
 
 const localeFiles = [
   { code: "en", file: path.join(localesDir, "en.ts"), exportName: "en" },
+  { code: "asterisk", formatterLocale: "en", file: path.join(localesDir, "asterisk.ts"), exportName: "asterisk" },
 ];
 
 async function loadTsModule(filePath) {
@@ -104,7 +105,7 @@ async function main() {
     const messages = collectMessages(locale.dictionary);
     for (const { key, message } of messages) {
       try {
-        new IntlMessageFormat(message, locale.code);
+        new IntlMessageFormat(message, locale.formatterLocale ?? locale.code);
       } catch (error) {
         problems.push(`Invalid ICU message for ${locale.code}.${key}: ${error instanceof Error ? error.message : String(error)}`);
       }

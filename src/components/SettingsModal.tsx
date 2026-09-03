@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { useI18n } from "../i18n/provider";
 
 type SettingsModalProps = {
   title: ReactNode;
@@ -18,11 +19,13 @@ export function SettingsModalCloseButton({
   onClick: () => void;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
+
   return (
     <button
       type="button"
       className="modal-close-icon"
-      aria-label="Close"
+      aria-label={t("common.close")}
       onClick={onClick}
       disabled={disabled}
     >

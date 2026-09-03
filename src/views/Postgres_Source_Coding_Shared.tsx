@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { SettingsModal } from "../components/SettingsModal";
+import { useI18n } from "../i18n/provider";
 import type {
   PostgresCode,
   PostgresSourceLock,
@@ -182,15 +183,16 @@ export function TextSizeControls({
   onDecrease: () => void;
   onIncrease: () => void;
 }) {
+  const { t } = useI18n();
   return (
-    <div className="text-size-controls" aria-label="Text size">
+    <div className="text-size-controls" aria-label={t("sourceCoding.common.textSize")}>
       <button
         type="button"
         className="text-size-control-btn text-size-control-btn--decrease"
         onClick={onDecrease}
         disabled={fontSizePx <= SOURCE_TEXT_SIZE_MIN_PX}
-        aria-label="Decrease text size"
-        title="Decrease text size"
+        aria-label={t("sourceCoding.common.decreaseTextSize")}
+        title={t("sourceCoding.common.decreaseTextSize")}
       >
         A
       </button>
@@ -202,8 +204,8 @@ export function TextSizeControls({
         className="text-size-control-btn text-size-control-btn--increase"
         onClick={onIncrease}
         disabled={fontSizePx >= SOURCE_TEXT_SIZE_MAX_PX}
-        aria-label="Increase text size"
-        title="Increase text size"
+        aria-label={t("sourceCoding.common.increaseTextSize")}
+        title={t("sourceCoding.common.increaseTextSize")}
       >
         A
       </button>
@@ -308,6 +310,7 @@ export function PostgresSourceCodebookCard({
   onDeleteCode?: (codeId: string) => void;
   onOpenMemoDraft?: (payload: { codeIds?: string[] }) => void;
 }) {
+  const { t } = useI18n();
   const [collapsedCodeIds, setCollapsedCodeIds] = useState<Set<string>>(new Set());
   const [codeContextMenu, setCodeContextMenu] = useState<{ x: number; y: number; code: PostgresCode } | null>(null);
   const codeContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -346,15 +349,15 @@ export function PostgresSourceCodebookCard({
     <>
       <div className={className} style={style}>
         <div className="annotate-card-header">
-          <span className="annotate-card-title">Codebook</span>
+          <span className="annotate-card-title">{t("sourceCoding.common.codebook")}</span>
           {onNewCode ? (
             <button
               type="button"
               className="codebook-icon-action"
               onClick={onNewCode}
               disabled={!canCreateCodes || saving}
-              aria-label="New code"
-              title={canCreateCodes ? "New code" : "You do not have permission to create codes."}
+              aria-label={t("sourceCoding.common.newCode")}
+              title={canCreateCodes ? t("sourceCoding.common.newCode") : t("sourceCoding.common.noCodeCreatePermission")}
             >
               +
             </button>
@@ -363,7 +366,7 @@ export function PostgresSourceCodebookCard({
         {selectionHint ? <div className="codebook-selection-hint">{selectionHint}</div> : null}
         <ul className="code-list">
           {codes.length === 0 ? (
-            <li className="code-list-empty">No codes yet.</li>
+            <li className="code-list-empty">{t("sourceCoding.common.noCodesYet")}</li>
           ) : (
             visibleCodes.map(({ code, depth, hasChildren }) => (
               <li
@@ -391,7 +394,7 @@ export function PostgresSourceCodebookCard({
                       event.stopPropagation();
                       toggleCollapsedCode(code.id);
                     }}
-                    title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
+                    title={collapsedCodeIds.has(code.id) ? t("sourceCoding.common.expand") : t("sourceCoding.common.collapse")}
                   >
                     {collapsedCodeIds.has(code.id) ? "\u25b6" : "\u25bc"}
                   </button>
@@ -417,7 +420,7 @@ export function PostgresSourceCodebookCard({
                 setCodeContextMenu(null);
               }}
             >
-              Edit code
+              {t("sourceCoding.common.editCode")}
             </button>
           ) : null}
           {canManageMemos && onOpenMemoDraft ? (
@@ -428,7 +431,7 @@ export function PostgresSourceCodebookCard({
                 setCodeContextMenu(null);
               }}
             >
-              Memo about code
+              {t("sourceCoding.common.memoAboutCode")}
             </button>
           ) : null}
           {canCreateCodes && onAddChildCode ? (
@@ -439,7 +442,7 @@ export function PostgresSourceCodebookCard({
                 setCodeContextMenu(null);
               }}
             >
-              Add child code
+              {t("sourceCoding.common.addChildCode")}
             </button>
           ) : null}
           {canCreateCodes && onDeleteCode ? (
@@ -450,7 +453,7 @@ export function PostgresSourceCodebookCard({
                 setCodeContextMenu(null);
               }}
             >
-              Delete code
+              {t("sourceCoding.common.deleteCode")}
             </button>
           ) : null}
         </div>
@@ -512,6 +515,7 @@ export function AnnotationEditorModal({
   onSave: (payload: { codeIds: string[]; note: string }) => void;
   onDelete?: () => void;
 }) {
+  const { t } = useI18n();
   const [selectedCodeIds, setSelectedCodeIds] = useState<string[]>(initialAnnotation?.codeIds ?? []);
   const [note, setNote] = useState(initialAnnotation?.note ?? "");
 
@@ -536,7 +540,7 @@ export function AnnotationEditorModal({
         ) : null}
         <div className="form">
           <label className="form-label">
-            Codes
+            {t("sourceCoding.common.codes")}
             <div
               style={{
                 maxHeight: 240,
@@ -548,7 +552,7 @@ export function AnnotationEditorModal({
               }}
             >
               {codeOptions.length === 0 ? (
-                <p className="users-guide-copy" style={{ margin: 0 }}>Create a code before annotating this source.</p>
+                <p className="users-guide-copy" style={{ margin: 0 }}>{t("sourceCoding.common.createCodeBeforeAnnotating")}</p>
               ) : (
                 codeOptions.map((code) => (
                   <label
@@ -576,7 +580,7 @@ export function AnnotationEditorModal({
             </div>
           </label>
           <label className="form-label">
-            Note
+            {t("sourceCoding.common.note")}
             <textarea className="form-input" rows={4} value={note} onChange={(event) => setNote(event.target.value)} />
           </label>
         </div>
@@ -585,16 +589,16 @@ export function AnnotationEditorModal({
       <div className="app-settings-modal-footer">
           {initialAnnotation && onDelete ? (
             <button className="btn btn--danger" onClick={onDelete} disabled={saving}>
-              {saving ? "Deleting..." : "Delete"}
+              {saving ? t("sourceCoding.common.deleting") : t("sourceCoding.common.delete")}
             </button>
           ) : null}
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
           <button
             className="btn btn--primary"
             onClick={() => onSave({ codeIds: selectedCodeIds, note })}
             disabled={saving || selectedCodeIds.length === 0}
           >
-            {saving ? "Saving..." : "Save Annotation"}
+            {saving ? t("common.saving") : t("sourceCoding.common.saveAnnotation")}
           </button>
       </div>
     </SettingsModal>
@@ -626,16 +630,17 @@ export function PostgresSourceCodingFiltersModal({
   onClearCodes: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const users = useMemo(() => {
     const counts = new Map<string, number>();
     for (const annotation of annotations) {
-      const key = annotation.createdByName || "Unknown";
+      const key = annotation.createdByName || t("sourceCoding.common.unknown");
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return [...counts.entries()]
       .map(([id, count]) => ({ id, name: id, count }))
       .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
-  }, [annotations]);
+  }, [annotations, t]);
 
   const codeCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -653,22 +658,22 @@ export function PostgresSourceCodingFiltersModal({
   );
 
   return (
-    <SettingsModal title="Filters" onClose={onClose} modalClassName="modal--wide annotation-filter-modal">
+    <SettingsModal title={t("sourceCoding.common.filters")} onClose={onClose} modalClassName="modal--wide annotation-filter-modal">
       <div className="app-settings-modal-body">
         <p style={{ marginBottom: 16, lineHeight: 1.5 }}>
-          Choose which coded annotations stay visible in this workspace.
+          {t("sourceCoding.common.filterDescription")}
         </p>
         <div className="annotation-filter-modal-grid">
           <div className="annotation-filter-group">
             <div className="annotation-filter-title-row">
-              <div className="annotation-filter-title">Codes</div>
+              <div className="annotation-filter-title">{t("sourceCoding.common.codes")}</div>
               <div className="annotation-filter-actions">
-                <button type="button" className="btn btn--small" onClick={onSelectAllCodes}>Select All</button>
-                <button type="button" className="btn btn--small" onClick={onClearCodes}>Clear</button>
+                <button type="button" className="btn btn--small" onClick={onSelectAllCodes}>{t("sourceCoding.common.selectAll")}</button>
+                <button type="button" className="btn btn--small" onClick={onClearCodes}>{t("sourceCoding.common.clear")}</button>
               </div>
             </div>
             {visibleCodes.length === 0 ? (
-              <p className="annotation-filter-empty">No coded annotations yet.</p>
+              <p className="annotation-filter-empty">{t("sourceCoding.common.noCodedAnnotationsYet")}</p>
             ) : (
               <ul className="annotation-filter-list">
                 {visibleCodes.map(({ code, depth }) => (
@@ -693,14 +698,14 @@ export function PostgresSourceCodingFiltersModal({
           </div>
           <div className="annotation-filter-group">
             <div className="annotation-filter-title-row">
-              <div className="annotation-filter-title">Users</div>
+              <div className="annotation-filter-title">{t("sourceCoding.common.users")}</div>
               <div className="annotation-filter-actions">
-                <button type="button" className="btn btn--small" onClick={onSelectAllUsers}>Select All</button>
-                <button type="button" className="btn btn--small" onClick={onClearUsers}>Clear</button>
+                <button type="button" className="btn btn--small" onClick={onSelectAllUsers}>{t("sourceCoding.common.selectAll")}</button>
+                <button type="button" className="btn btn--small" onClick={onClearUsers}>{t("sourceCoding.common.clear")}</button>
               </div>
             </div>
             {users.length === 0 ? (
-              <p className="annotation-filter-empty">No annotators yet.</p>
+              <p className="annotation-filter-empty">{t("sourceCoding.common.noAnnotatorsYet")}</p>
             ) : (
               <ul className="annotation-filter-list">
                 {users.map((user) => (
@@ -723,7 +728,7 @@ export function PostgresSourceCodingFiltersModal({
         </div>
       </div>
       <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-          <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
+          <button type="button" className="btn btn--primary" onClick={onClose}>{t("common.done")}</button>
       </div>
     </SettingsModal>
   );
@@ -750,6 +755,7 @@ export function PostgresSourceAnnotationPanel({
   canManageMemos: boolean;
   canDeleteAnnotations: boolean;
 }) {
+  const { t } = useI18n();
   const selectedItemRef = useRef<HTMLLIElement | null>(null);
   const [contextMenu, setContextMenu] = useState<AnnotationContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -781,11 +787,11 @@ export function PostgresSourceAnnotationPanel({
   return (
     <div className="annotate-card annotate-card--grow">
       <div className="annotate-card-header">
-        <span className="annotate-card-title">Annotations ({annotations.length})</span>
+        <span className="annotate-card-title">{t("sourceCoding.common.annotationsTitle", { count: annotations.length })}</span>
       </div>
       <ul className="annotation-list">
         {annotations.length === 0 ? (
-          <li className="annotation-list-empty">No annotations yet.</li>
+          <li className="annotation-list-empty">{t("sourceCoding.common.noAnnotationsYet")}</li>
         ) : (
           annotations.map((annotation) => {
             const selected = annotation.id === selectedAnnotationId;
@@ -816,7 +822,7 @@ export function PostgresSourceAnnotationPanel({
                 {renderAnnotationExcerpt ? renderAnnotationExcerpt(annotation) : null}
                 {annotation.note ? <p className="annotation-note">{annotation.note}</p> : null}
                 <p className="annotation-meta">
-                  <span>{annotation.createdByName || "Unknown"}</span>
+                  <span>{annotation.createdByName || t("sourceCoding.common.unknown")}</span>
                   <span className="annotation-meta-sep">·</span>
                   <span>{fmtDate(annotation.createdAt)}</span>
                 </p>
@@ -858,6 +864,7 @@ export function PostgresSourceAnnotationContextMenu({
   canManageMemos: boolean;
   canDeleteAnnotations: boolean;
 }) {
+  const { t } = useI18n();
   if (!contextMenu) return null;
 
   return (
@@ -870,7 +877,7 @@ export function PostgresSourceAnnotationContextMenu({
             onClose();
           }}
         >
-          Memo about annotation
+          {t("sourceCoding.common.memoAboutAnnotation")}
         </button>
       ) : null}
       {canDeleteAnnotations ? (
@@ -881,7 +888,7 @@ export function PostgresSourceAnnotationContextMenu({
             onClose();
           }}
         >
-          Delete annotation
+          {t("sourceCoding.common.deleteAnnotation")}
         </button>
       ) : null}
     </div>

@@ -675,6 +675,7 @@ function SourceTypeEditModal({
   onUploadImage: (sourceKind: string, file: File) => Promise<PostgresSourceTypeSetting>;
   onRemoveImage: (sourceKind: string) => Promise<PostgresSourceTypeSetting>;
 }) {
+  const { t } = useI18n();
   const [tab, setTab] = useState<"details" | "graphics" | "attributes" | "timeline">(initialTab);
   const defaultSourceVisualKey = sourceObjectTypeSystemKeyFromKind(sourceType.sourceKind);
   const defaultSourceVisual = getSourceKindVisual(sourceType.sourceKind);
@@ -870,7 +871,7 @@ function SourceTypeEditModal({
   function renderTimelineFieldMappings() {
     return (
       <div className="postgres-attribute-modal-section">
-        <div className="postgres-attribute-modal-title">Timeline Fields</div>
+        <div className="postgres-attribute-modal-title">{t("sharedModals.tabs.timelineFields")}</div>
         <div className="case-detail-attributes-table-wrap">
           <table className="case-detail-attributes-table">
             <tbody>
@@ -888,11 +889,11 @@ function SourceTypeEditModal({
                         value={selectedDraft?.localId ?? ""}
                         onChange={(event) => updateTimelineField(field.role, event.target.value)}
                       >
-                        <option value="">None</option>
+                        <option value="">{t("sharedModals.attributes.none")}</option>
                         {eligibleDrafts.map((draft) => (
-                          <option key={draft.localId} value={draft.localId}>{draft.name || "Untitled attribute"}</option>
+                          <option key={draft.localId} value={draft.localId}>{draft.name || t("sharedModals.attributes.untitledAttribute")}</option>
                         ))}
-                        <option value="__create__">Create new attribute...</option>
+                        <option value="__create__">{t("sharedModals.attributes.createNewAttribute")}</option>
                       </select>
                     </td>
                   </tr>
@@ -911,7 +912,7 @@ function SourceTypeEditModal({
     return (
       <>
         <label className="form-label">
-          Outline
+          {t("sharedModals.graphics.outline")}
           <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
             <input
               className="form-input form-input--color"
@@ -929,7 +930,7 @@ function SourceTypeEditModal({
           </div>
         </label>
         <label className="form-label timeline-group-opacity-control">
-          Outline Width
+          {t("sharedModals.graphics.outlineWidth")}
           <div className="timeline-group-slider-row">
             <input
               className="form-range"
@@ -953,8 +954,8 @@ function SourceTypeEditModal({
     return (
       <>
         <label className="form-label">
-          Shape
-          <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Source type shape">
+          {t("sharedModals.graphics.shape")}
+          <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label={t("projectCore.sources.sourceTypeShape")}>
             {SOURCE_OBJECT_SHAPE_OPTIONS.map((option) => {
               const previewSize = getSourceShapePickerPreviewSize(option.value);
               return (
@@ -985,8 +986,8 @@ function SourceTypeEditModal({
           </div>
         </label>
         <div className="source-graphics-setting-row">
-          <span className="form-label">Fill Style</span>
-          <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label="Source type fill style">
+          <span className="form-label">{t("sharedModals.graphics.fillStyle")}</span>
+          <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label={t("projectCore.sources.sourceTypeFillStyle")}>
             {(["outline", "filled"] as const).map((option) => (
               <button
                 key={option}
@@ -995,7 +996,7 @@ function SourceTypeEditModal({
                 onClick={() => setFill(option)}
                 aria-pressed={fill === option}
               >
-                {option === "outline" ? "Outline" : "Filled"}
+                {option === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
               </button>
             ))}
           </div>
@@ -1003,7 +1004,7 @@ function SourceTypeEditModal({
         {fill === "filled" ? (
           <>
             <label className="form-label">
-              Fill
+              {t("sharedModals.graphics.fill")}
               <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                 <input
                   className="form-input form-input--color"
@@ -1021,7 +1022,7 @@ function SourceTypeEditModal({
               </div>
             </label>
             <label className="form-label timeline-group-opacity-control">
-              Fill Transparency
+              {t("sharedModals.graphics.fillTransparency")}
               <div className="timeline-group-slider-row">
                 <input
                   className="form-range"
@@ -1038,7 +1039,7 @@ function SourceTypeEditModal({
           </>
         ) : null}
         <label className="form-label">
-          Outline
+          {t("sharedModals.graphics.outline")}
           <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
             <input
               className="form-input form-input--color"
@@ -1056,7 +1057,7 @@ function SourceTypeEditModal({
           </div>
         </label>
         <label className="form-label timeline-group-opacity-control">
-          Outline Width
+          {t("sharedModals.graphics.outlineWidth")}
           <div className="timeline-group-slider-row">
             <input
               className="form-range"
@@ -1122,13 +1123,13 @@ function SourceTypeEditModal({
 
   return (
     <SettingsModal
-      title="Edit source type"
+      title={t("projectCore.sources.editSourceType")}
       onClose={onCancel}
       closeDisabled={saving || uploading}
       modalClassName="modal--wide"
     >
       <form className={`form ${tab === "graphics" ? "source-editor-modal-body--graphics source-editor-form--graphics" : ""}`} onSubmit={submit}>
-        <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Edit source type tabs">
+        <div className="segmented-control modal-segmented-control" role="tablist" aria-label={t("projectCore.sources.editSourceTypeTabs")}>
           {(["details", "graphics", "attributes", "timeline"] as const).map((tabId) => (
             <button
               key={tabId}
@@ -1136,7 +1137,7 @@ function SourceTypeEditModal({
               className={`segmented-control-option ${tab === tabId ? "segmented-control-option--active" : ""}`}
               onClick={() => setTab(tabId)}
             >
-              {tabId.slice(0, 1).toUpperCase() + tabId.slice(1)}
+              {tabId === "details" ? t("sharedModals.tabs.details") : tabId === "graphics" ? t("sharedModals.tabs.graphics") : tabId === "attributes" ? t("sharedModals.tabs.attributes") : t("sharedModals.tabs.timeline")}
             </button>
           ))}
         </div>
@@ -1144,7 +1145,7 @@ function SourceTypeEditModal({
         {tab === "details" ? (
           <>
             <label className="form-label">
-              Source type name
+              {t("projectCore.sources.sourceTypeName")}
               <input
                 className="form-input"
                 value={name}
@@ -1153,7 +1154,7 @@ function SourceTypeEditModal({
               />
             </label>
             <label className="form-label">
-              Description
+              {t("common.description")}
               <textarea
                 className="form-input form-textarea"
                 rows={4}
@@ -1172,7 +1173,7 @@ function SourceTypeEditModal({
                         defaultSourceVisualKey ? "modal-secondary-segmented-control--three" : "modal-secondary-segmented-control--two"
                       }`}
                       role="tablist"
-                      aria-label="Source type graphics tabs"
+                      aria-label={t("projectCore.sources.sourceTypeGraphicsTabs")}
                     >
                     {([
                       ...(defaultSourceVisualKey ? ["default"] as const : []),
@@ -1188,7 +1189,7 @@ function SourceTypeEditModal({
                         onClick={() => setGraphicMode(mode)}
                         disabled={saving || uploading}
                       >
-                        {mode === "default" ? "Default" : mode.slice(0, 1).toUpperCase() + mode.slice(1)}
+                        {mode === "default" ? t("projectCore.sources.defaultTab") : mode === "select" ? t("common.select") : t("common.upload")}
                       </button>
                     ))}
                     </div>
@@ -1212,11 +1213,11 @@ function SourceTypeEditModal({
                         onClick={() => uploadInputRef.current?.click()}
                         disabled={saving || uploading}
                       >
-                        {uploading ? "Uploading..." : imageStoragePath || imagePreviewUrl ? "Replace image" : "Upload Image"}
+                        {uploading ? t("projectCore.sources.uploading") : imageStoragePath || imagePreviewUrl ? t("projectCore.sources.replaceImage") : t("projectCore.sources.uploadImage")}
                       </button>
                       {imageStoragePath ? (
                         <button type="button" className="btn" onClick={() => void handleRemoveImage()} disabled={saving || uploading}>
-                          Clear
+                          {t("common.clear")}
                         </button>
                       ) : null}
                     </div>
@@ -1224,8 +1225,8 @@ function SourceTypeEditModal({
                   </>
                 )}
               </div>
-              <div className="source-graphics-preview-card" aria-label="Source type graphic preview">
-                <span className="form-label">Preview</span>
+              <div className="source-graphics-preview-card" aria-label={t("projectCore.sources.sourceTypePreview")}>
+                <span className="form-label">{t("common.preview")}</span>
                 <div className="source-graphics-preview-stage">
                   {renderSourceTypeGraphicPreview()}
                 </div>
@@ -1238,7 +1239,7 @@ function SourceTypeEditModal({
           <EditableAttributesMatrix
             definitions={attributeDrafts.map((draft) => ({
               id: draft.localId,
-              name: draft.name || "Untitled attribute",
+              name: draft.name || t("sharedModals.attributes.untitledAttribute"),
               dataType: draft.dataType,
               description: draft.description,
               options: draft.options,
@@ -1246,8 +1247,8 @@ function SourceTypeEditModal({
             rows={matrixRows}
             values={attributeValuesByDraftId}
             disabled={saving || uploading}
-            emptyDefinitionsLabel="No attributes for this source type yet."
-            emptyRowsLabel="No sources of this type yet."
+            emptyDefinitionsLabel={t("projectCore.sources.noTypeAttributes")}
+            emptyRowsLabel={t("projectCore.sources.noSourcesOfType")}
             onAddAttribute={openNewAttributeDraft}
             onEditAttribute={(localId) => {
               const draft = attributeDrafts.find((entry) => entry.localId === localId);
@@ -1260,9 +1261,9 @@ function SourceTypeEditModal({
 
         {error ? <p className="auth-error">{error}</p> : null}
         <div className="app-settings-modal-footer">
-          <button type="button" className="btn" onClick={onCancel} disabled={saving || uploading}>Cancel</button>
+          <button type="button" className="btn" onClick={onCancel} disabled={saving || uploading}>{t("common.cancel")}</button>
           <button type="submit" className="btn btn--primary" disabled={saving || uploading || !name.trim()}>
-            {saving ? "Saving..." : "Save"}
+            {saving ? t("common.saving") : t("common.save")}
           </button>
         </div>
       </form>
@@ -1766,7 +1767,7 @@ function SourceAttributeTypesModal({
         </div>
         <div className="attribute-values-list">
           {sourceTypeOptions.length === 0 ? (
-            <p className="case-card-empty">No source types yet.</p>
+            <p className="case-card-empty">{t("projectCore.sources.noSourceTypes")}</p>
           ) : (
             sourceTypeOptions.map((option) => (
               <label key={option.kind} className="attribute-value-row">
@@ -1823,6 +1824,7 @@ function BulkSourceAttributeValuesModal({
   onCancel: () => void;
   onSave: (valuesBySourceId: Record<string, string>) => void;
 }) {
+  const { t } = useI18n();
   const [draftValues, setDraftValues] = useState<Record<string, string>>(() => (
     Object.fromEntries(
       target.rows.map((row) => [
@@ -1903,13 +1905,13 @@ function BulkSourceAttributeValuesModal({
           <table className="users-table bulk-attribute-values-table">
             <thead>
               <tr>
-                <th className="users-th" style={{ width: "42%" }}>Source</th>
-                <th className="users-th">Value</th>
+                <th className="users-th" style={{ width: "42%" }}>{t("projectCore.sources.source")}</th>
+                <th className="users-th">{t("projectCore.sources.value")}</th>
               </tr>
             </thead>
             <tbody>
               {target.rows.length === 0 ? (
-                <tr><td className="users-td-msg" colSpan={2}>No sources to edit.</td></tr>
+                <tr><td className="users-td-msg" colSpan={2}>{t("projectCore.sources.noSourcesOfType")}</td></tr>
               ) : target.rows.map((row) => (
                 <tr key={row.id} className="users-row">
                   <td className="users-td users-td--name">{row.name}</td>
@@ -1921,14 +1923,14 @@ function BulkSourceAttributeValuesModal({
         </div>
       </div>
       <div className="app-settings-modal-footer">
-        <button type="button" className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button type="button" className="btn" onClick={onCancel} disabled={saving}>{t("projectCore.sources.cancel")}</button>
         <button
           type="button"
           className="btn btn--primary"
           onClick={() => onSave(draftValues)}
           disabled={saving}
         >
-          {saving ? "Saving..." : "Save"}
+          {saving ? t("projectCore.sources.saving") : t("projectCore.sources.save")}
         </button>
       </div>
     </SettingsModal>
@@ -2152,6 +2154,7 @@ export function SourceImportModal({
       }
   ) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"upload" | "paste">(importSettings.defaultMode);
   const [uploadTab, setUploadTab] = useState<SourceUploadTab>("text");
   const [title, setTitle] = useState("");
@@ -2256,7 +2259,7 @@ export function SourceImportModal({
         setExtractError(`Some files were skipped because they do not match the ${uploadTab.toUpperCase()} tab.`);
       }
     } catch {
-      setExtractError("Could not read one or more file contents.");
+      setExtractError(t("projectCore.sources.import.readFailed"));
       setUploadDrafts([]);
     } finally {
       setExtracting(false);
@@ -2441,7 +2444,7 @@ export function SourceImportModal({
   return (
     <>
       <SettingsModal
-        title="New Source"
+        title={t("projectCore.sources.newSource")}
         onClose={onCancel}
         closeDisabled={saving}
         modalClassName={`doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : ""}`}
@@ -2455,42 +2458,42 @@ export function SourceImportModal({
               className={`segmented-control-option${mode === "upload" && uploadTab === "text" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("text")}
             >
-              Text
+              {t("projectCore.sources.sourceKinds.text")}
             </button>
             <button
               type="button"
               className={`segmented-control-option${mode === "upload" && uploadTab === "pdf" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("pdf")}
             >
-              PDF
+              {t("projectCore.sources.sourceKinds.pdf")}
             </button>
             <button
               type="button"
               className={`segmented-control-option${mode === "upload" && uploadTab === "image" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("image")}
             >
-              Image
+              {t("projectCore.sources.sourceKinds.image")}
             </button>
             <button
               type="button"
               className={`segmented-control-option${mode === "upload" && uploadTab === "audio" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("audio")}
             >
-              Audio
+              {t("projectCore.sources.sourceKinds.audio")}
             </button>
             <button
               type="button"
               className={`segmented-control-option${mode === "upload" && uploadTab === "video" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("video")}
             >
-              Video
+              {t("projectCore.sources.sourceKinds.video")}
             </button>
             <button
               type="button"
               className={`segmented-control-option${mode === "paste" ? " segmented-control-option--active" : ""}`}
               onClick={() => setCreateMode("paste")}
             >
-              Text Entry
+              {t("projectCore.sources.sourceKinds.textEntry")}
             </button>
           </div>
           </div>
@@ -2518,16 +2521,16 @@ export function SourceImportModal({
                 onDrop={onDrop}
               >
                 {extracting ? (
-                  <span className="doc-dropzone-primary">Reading files...</span>
+                  <span className="doc-dropzone-primary">{t("projectCore.sources.import.readingFiles")}</span>
                 ) : uploadDrafts.length === 0 ? (
                   <>
                     <span className="doc-dropzone-icon">^</span>
-                    <span className="doc-dropzone-primary">Click to browse or drag and drop files</span>
+                    <span className="doc-dropzone-primary">{t("projectCore.sources.import.browseDrop")}</span>
                     <span className="doc-dropzone-hint">{uploadTabHint(uploadTab)}</span>
                   </>
                 ) : (
                   <>
-                    <span className="doc-dropzone-filename">{formatCurrentNumber(uploadDrafts.length)} file(s) ready</span>
+                    <span className="doc-dropzone-filename">{t("projectCore.sources.import.filesReady", { count: formatCurrentNumber(uploadDrafts.length) })}</span>
                     {extractError
                       ? <span className="doc-dropzone-warn">{extractError}</span>
                       : <span className="doc-dropzone-hint">{uploadDrafts[0] ? describeUploadProcessing(uploadDrafts[0].file) : uploadTabHint(uploadTab)}</span>}
@@ -2540,7 +2543,7 @@ export function SourceImportModal({
                         fileInputRef.current?.click();
                       }}
                     >
-                      Change Files
+                      {t("projectCore.sources.import.changeFiles")}
                     </button>
                   </>
                 )}
@@ -2549,7 +2552,7 @@ export function SourceImportModal({
           ) : (
             <>
               <label className="form-label">
-                Title
+                {t("projectCore.sources.title")}
                 <input
                   className="form-input"
                   value={title}
@@ -2558,7 +2561,7 @@ export function SourceImportModal({
                 />
               </label>
               <label className="form-label">
-                Notes
+                {t("projectCore.sources.notes")}
                 <textarea className="form-input" rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} />
               </label>
               <RichTextEditor
@@ -2574,7 +2577,7 @@ export function SourceImportModal({
         </div>
         </div>
         <div className="app-settings-modal-footer">
-          <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button className="btn" onClick={onCancel} disabled={saving}>{t("projectCore.sources.cancel")}</button>
           <button
             className={`btn btn--primary${gettingStartedCreateSourcePending ? " getting-started-spotlight-target" : ""}`}
             disabled={saving || !canSubmit}
@@ -2594,7 +2597,7 @@ export function SourceImportModal({
               setReviewOpen(true);
             }}
           >
-            {saving ? "Saving..." : "Create Source"}
+            {saving ? t("projectCore.sources.saving") : t("projectCore.sources.createSource")}
           </button>
         </div>
       </SettingsModal>
@@ -2602,10 +2605,10 @@ export function SourceImportModal({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Create the source"
+            title={t("app.gettingStarted.createSourceTitle")}
             onDismiss={onGettingStartedDismiss}
           >
-            <p>Click the upload box to open the file explorer, then select a text file for the walkthrough.</p>
+            <p>{t("app.gettingStarted.uploadSourceBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
@@ -2613,16 +2616,16 @@ export function SourceImportModal({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Create the source"
+            title={t("app.gettingStarted.createSourceTitle")}
             onDismiss={onGettingStartedDismiss}
           >
-            <p>Click Create Source to continue.</p>
+            <p>{t("app.gettingStarted.createSourceButtonBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
       {reviewOpen ? (
         <SettingsModal
-          title="Approve Sources"
+          title={t("projectCore.sources.approveSources")}
           onClose={() => setReviewOpen(false)}
           closeDisabled={saving}
           modalClassName="modal--wide source-import-review-modal"
@@ -2630,14 +2633,14 @@ export function SourceImportModal({
         >
           <div className="app-settings-modal-body">
             <p className="users-guide-copy" style={{ marginTop: 0, marginBottom: 16 }}>
-              Review these files before creating sources.
+              {t("projectCore.sources.reviewFilesBeforeCreating")}
             </p>
             <div className="users-table-wrap source-import-review-table-wrap">
               <table className="users-table">
                 <thead>
                     <tr>
-                    <th className="users-th" style={{ width: "70%", cursor: "default" }}>Original Filename</th>
-                    <th className="users-th" style={{ width: "30%", cursor: "default" }} aria-label="Actions" />
+                    <th className="users-th" style={{ width: "70%", cursor: "default" }}>{t("projectCore.sources.originalFilename")}</th>
+                    <th className="users-th" style={{ width: "30%", cursor: "default" }} aria-label={t("projectCore.sources.actions")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -2651,18 +2654,18 @@ export function SourceImportModal({
                           onClick={() => setReviewDraftId(draft.id)}
                           disabled={saving || extractingDraftIds.includes(draft.id)}
                         >
-                          Review
+                          {t("projectCore.sources.review")}
                         </button>
                         {uploadTab === "pdf" && extractingDraftIds.includes(draft.id) ? (
-                          <div className="postgres-users-meta" style={{ marginTop: 6 }}>Extracting text...</div>
+                          <div className="postgres-users-meta" style={{ marginTop: 6 }}>{t("projectCore.sources.extractingText")}</div>
                         ) : null}
                         <button
                           type="button"
                           className="source-import-review-remove-btn"
                           onClick={() => removeUploadDraft(draft.id)}
                           disabled={saving}
-                          aria-label={`Remove source ${draft.file.name}`}
-                          title="Remove source"
+                          aria-label={t("projectCore.sources.removeSourceName", { name: draft.file.name })}
+                          title={t("projectCore.sources.removeSource")}
                         >
                           <CloseIcon className="source-import-review-remove-icon" />
                         </button>
@@ -2675,7 +2678,7 @@ export function SourceImportModal({
             {(error || extractError) && <p className="auth-error">{error ?? extractError}</p>}
           </div>
           <div className="app-settings-modal-footer">
-              <button className="btn" onClick={() => setReviewOpen(false)} disabled={saving}>Back</button>
+              <button className="btn" onClick={() => setReviewOpen(false)} disabled={saving}>{t("projectCore.sources.back")}</button>
               <button
                 className={`btn btn--primary${gettingStartedApprovalPending ? " getting-started-spotlight-target" : ""}`}
                 disabled={saving || uploadDrafts.length === 0 || extractingDraftIds.length > 0}
@@ -2702,7 +2705,7 @@ export function SourceImportModal({
                   });
                 }}
               >
-                {saving ? "Creating..." : "Approve and Create"}
+                {saving ? t("projectSettings.modal.creating") : t("projectCore.sources.approveAndCreate")}
               </button>
           </div>
         </SettingsModal>
@@ -2711,10 +2714,10 @@ export function SourceImportModal({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Review the source"
+            title={t("app.gettingStarted.reviewSourceTitle")}
             onDismiss={onGettingStartedDismiss}
           >
-            <p>Click Review to check the source before creating it.</p>
+            <p>{t("app.gettingStarted.reviewSourceBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
@@ -2722,10 +2725,10 @@ export function SourceImportModal({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Create the source"
+            title={t("app.gettingStarted.createSourceTitle")}
             onDismiss={onGettingStartedDismiss}
           >
-            <p>Click Approve and Create to add the reviewed source to the project.</p>
+            <p>{t("app.gettingStarted.approveSourceBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
@@ -2734,7 +2737,7 @@ export function SourceImportModal({
         if (!reviewDraft) return null;
         return (
           <SourceEditorModal
-            title="Review Source"
+            title={t("projectCore.sources.reviewSource")}
             initialRow={sourceRowForUploadDraft(reviewDraft)}
             projectStoragePath=""
             sourceTypeSettings={sourceTypeSettings}
@@ -2752,10 +2755,10 @@ export function SourceImportModal({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Confirm source details"
+            title={t("app.gettingStarted.confirmSourceTitle")}
             onDismiss={onGettingStartedDismiss}
           >
-            <p>Confirm the name and contents. You can ignore the rest of this modal for now, then click Save.</p>
+            <p>{t("app.gettingStarted.confirmSourceBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
@@ -2788,6 +2791,7 @@ export function SourceEditorModal({
   onCancel: () => void;
   onSave: (payload: SourceEditorPayload) => void;
 }) {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
   const [graphicMode, setGraphicMode] = useState<SourceGraphicMode>(() => {
     if (initialRow?.imageStoragePath) return "upload";
@@ -2949,41 +2953,41 @@ export function SourceEditorModal({
       overlayClassName={gettingStartedReviewActive ? "modal-overlay--getting-started-spotlight" : ""}
     >
       <div className={`app-settings-modal-body ${activeTab === "graphics" ? "source-editor-modal-body--graphics" : ""}`}>
-        <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Source editor tabs">
+        <div className="segmented-control modal-segmented-control" role="tablist" aria-label={t("projectCore.sources.sourceEditorTabs")}>
           <button
             type="button"
             className={activeTab === "details" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             onClick={() => setActiveTab("details")}
           >
-            Details
+            {t("sharedModals.tabs.details")}
           </button>
           <button
             type="button"
             className={activeTab === "graphics" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             onClick={() => setActiveTab("graphics")}
           >
-            Graphics
+            {t("sharedModals.tabs.graphics")}
           </button>
           <button
             type="button"
             className={activeTab === "attributes" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             onClick={() => setActiveTab("attributes")}
           >
-            Attributes
+            {t("sharedModals.tabs.attributes")}
           </button>
           <button
             type="button"
             className={activeTab === "timeline" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
             onClick={() => setActiveTab("timeline")}
           >
-            Timeline
+            {t("sharedModals.tabs.timeline")}
           </button>
         </div>
         <div className={`form ${activeTab === "graphics" ? "source-editor-form--graphics" : ""}`}>
           {activeTab === "details" ? (
             <>
               <label className="form-label">
-                Source Type
+                {t("projectCore.sources.sourceType")}
                 <select className="form-input" value={sourceKind} onChange={(event) => setSourceKind(event.target.value)}>
                   {POSTGRES_SOURCE_KIND_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -2993,15 +2997,15 @@ export function SourceEditorModal({
                 </select>
               </label>
               <label className="form-label">
-                Title
+                {t("projectCore.sources.title")}
                 <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
               </label>
               <label className="form-label">
-                Notes
+                {t("projectCore.sources.notes")}
                 <textarea className="form-input" rows={5} value={notes} onChange={(event) => setNotes(event.target.value)} />
               </label>
               <label className="form-label">
-                Content
+                {t("projectCore.sources.content")}
                 <textarea className="form-input" rows={14} value={content} onChange={(event) => setContent(event.target.value)} />
               </label>
             </>
@@ -3009,7 +3013,7 @@ export function SourceEditorModal({
             <>
               <div className="source-graphics-layout">
                 <div className="source-graphics-controls">
-                  <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label="Source graphic source">
+                  <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label={t("projectCore.sources.sourceGraphicSource")}>
                     {(["inherit", "select", "upload"] as const).map((mode) => (
                       <button
                         key={mode}
@@ -3020,13 +3024,13 @@ export function SourceEditorModal({
                         onClick={() => setSourceGraphicMode(mode)}
                         disabled={saving}
                       >
-                        {mode.slice(0, 1).toUpperCase() + mode.slice(1)}
+                        {mode === "inherit" ? t("common.inherit") : mode === "select" ? t("common.select") : t("common.upload")}
                       </button>
                     ))}
                   </div>
                   {graphicMode === "inherit" ? (
                     <p className="auth-hint source-graphics-hint">
-                      This source will inherit its graphical elements from its source type.
+                      {t("projectCore.sources.inheritHelp")}
                     </p>
                   ) : graphicMode === "upload" ? (
                     <>
@@ -3044,18 +3048,18 @@ export function SourceEditorModal({
                           onClick={() => imageInputRef.current?.click()}
                           disabled={saving}
                         >
-                          {imageStoragePath || imagePreviewUrl ? "Replace image" : "Upload Image"}
+                          {imageStoragePath || imagePreviewUrl ? t("projectCore.sources.replaceImage") : t("projectCore.sources.uploadImage")}
                         </button>
                         {imageStoragePath || imagePreviewUrl ? (
                           <button type="button" className="btn" onClick={clearSourceImage} disabled={saving}>
-                            Clear
+                            {t("common.clear")}
                           </button>
                         ) : null}
                       </div>
                       {imageStoragePath || imagePreviewUrl ? (
                         <>
                           <label className="form-label">
-                            Outline
+                            {t("sharedModals.graphics.outline")}
                             <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                               <input
                                 className="form-input form-input--color"
@@ -3073,7 +3077,7 @@ export function SourceEditorModal({
                             </div>
                           </label>
                           <label className="form-label timeline-group-opacity-control">
-                            Outline Width
+                            {t("sharedModals.graphics.outlineWidth")}
                             <div className="timeline-group-slider-row">
                               <input
                                 className="form-range"
@@ -3093,8 +3097,8 @@ export function SourceEditorModal({
                   ) : (
                     <>
                       <label className="form-label">
-                        Shape
-                        <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Source shape">
+                        {t("sharedModals.graphics.shape")}
+                        <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label={t("projectCore.sources.sourceShape")}>
                           {SOURCE_OBJECT_SHAPE_OPTIONS.map((option) => {
                             const previewSize = getSourceShapePickerPreviewSize(option.value);
                             return (
@@ -3125,8 +3129,8 @@ export function SourceEditorModal({
                         </div>
                       </label>
                       <div className="source-graphics-setting-row">
-                        <span className="form-label">Fill Style</span>
-                        <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label="Source fill style">
+                        <span className="form-label">{t("sharedModals.graphics.fillStyle")}</span>
+                        <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label={t("projectCore.sources.sourceFillStyle")}>
                           {(["outline", "filled"] as const).map((option) => (
                             <button
                               key={option}
@@ -3135,7 +3139,7 @@ export function SourceEditorModal({
                               onClick={() => setFillOverride(option)}
                               aria-pressed={effectiveFill === option}
                             >
-                              {option === "outline" ? "Outline" : "Filled"}
+                              {option === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
                             </button>
                           ))}
                         </div>
@@ -3143,7 +3147,7 @@ export function SourceEditorModal({
                       {effectiveFill === "filled" ? (
                         <>
                           <label className="form-label">
-                            Fill
+                            {t("sharedModals.graphics.fill")}
                             <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                               <input
                                 className="form-input form-input--color"
@@ -3161,7 +3165,7 @@ export function SourceEditorModal({
                             </div>
                           </label>
                           <label className="form-label timeline-group-opacity-control">
-                            Fill Transparency
+                            {t("sharedModals.graphics.fillTransparency")}
                             <div className="timeline-group-slider-row">
                               <input
                                 className="form-range"
@@ -3178,7 +3182,7 @@ export function SourceEditorModal({
                         </>
                       ) : null}
                       <label className="form-label">
-                        Outline
+                        {t("sharedModals.graphics.outline")}
                         <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                           <input
                             className="form-input form-input--color"
@@ -3196,7 +3200,7 @@ export function SourceEditorModal({
                         </div>
                       </label>
                       <label className="form-label timeline-group-opacity-control">
-                        Outline Width
+                        {t("sharedModals.graphics.outlineWidth")}
                         <div className="timeline-group-slider-row">
                           <input
                             className="form-range"
@@ -3213,8 +3217,8 @@ export function SourceEditorModal({
                     </>
                   )}
                 </div>
-                <div className="source-graphics-preview-card" aria-label="Source graphic preview">
-                  <span className="form-label">Preview</span>
+                <div className="source-graphics-preview-card" aria-label={t("projectCore.sources.sourcePreview")}>
+                  <span className="form-label">{t("common.preview")}</span>
                   <div className="source-graphics-preview-stage">
                     {renderSourceGraphicPreview()}
                   </div>
@@ -3223,7 +3227,7 @@ export function SourceEditorModal({
             </>
           ) : activeTab === "timeline" ? (
             displayedTimelineDefinitions.length === 0 ? (
-              <p className="case-card-empty">No timeline fields have been configured for this source type yet.</p>
+              <p className="case-card-empty">{t("projectCore.sources.noTimelineFields")}</p>
             ) : (
               <div className="case-detail-attributes-table-wrap">
                 <table className="case-detail-attributes-table">
@@ -3264,7 +3268,7 @@ export function SourceEditorModal({
               </div>
             )
           ) : displayedAttributeDefinitions.length === 0 ? (
-            <p className="case-card-empty">No source attributes have been created yet.</p>
+            <p className="case-card-empty">{t("projectCore.sources.noSourceAttributes")}</p>
           ) : (
             <div className="case-detail-attributes-table-wrap">
               <table className="case-detail-attributes-table">
@@ -3304,7 +3308,7 @@ export function SourceEditorModal({
         {error && <p className="auth-error">{error}</p>}
       </div>
       <div className="app-settings-modal-footer">
-        <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
         <button
           className={`btn btn--primary${gettingStartedReviewActive ? " getting-started-spotlight-target" : ""}`}
           onClick={() => onSave({
@@ -3325,7 +3329,7 @@ export function SourceEditorModal({
           })}
           disabled={saving || !name.trim()}
         >
-          {saving ? "Saving..." : "Save"}
+          {saving ? t("projectCore.sources.saving") : t("projectCore.sources.save")}
         </button>
       </div>
     </SettingsModal>
@@ -3375,6 +3379,7 @@ function CreateSourceRelationshipModal({
     attributeValues: Array<{ attributeDefinitionId: string; value: string }>;
   }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const availableRelationshipTypes = useMemo(
     () => [...relationshipTypes].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
     [relationshipTypes],
@@ -3503,7 +3508,7 @@ function CreateSourceRelationshipModal({
     const nextName = newTypeName.trim();
     setNewTypeError("");
     if (!nextName) {
-      setNewTypeError("Enter a relationship type name.");
+      setNewTypeError(t("projectCore.sources.errors.relationshipTypeNameRequired"));
       return;
     }
     const existingType = relationshipTypes.find((relationshipType) => relationshipType.name.toLowerCase() === nextName.toLowerCase());
@@ -3593,11 +3598,11 @@ function CreateSourceRelationshipModal({
         setAttributeValues={setAttributeValues}
         submitting={saving}
         error={availableRelationshipTypes.length === 0
-          ? "No relationship types are available."
+          ? t("projectCore.sources.errors.noRelationshipTypes")
           : fromEndpointOptions.length === 0 && relationshipTypeId
-            ? "No from endpoints match this relationship type."
+            ? t("projectCore.sources.errors.noFromEndpoints")
             : toEndpointOptions.length === 0 && relationshipTypeId
-              ? "No endpoints match this relationship type."
+              ? t("projectCore.sources.errors.noEndpoints")
               : error}
         submitDisabled={!relationshipTypeId || !fromEntityId || !toEntityId}
         onClose={onCancel}
@@ -3609,7 +3614,7 @@ function CreateSourceRelationshipModal({
       />
       {newTypeOpen ? (
         <SettingsModal
-          title="Add relationship type"
+          title={t("projectCore.sources.relationship.addType")}
           onClose={() => setNewTypeOpen(false)}
           closeDisabled={newTypeSaving}
           overlayStyle={{ zIndex: 120 }}
@@ -3617,7 +3622,7 @@ function CreateSourceRelationshipModal({
           <form className="form app-settings-modal-form" onSubmit={handleCreateRelationshipType}>
             <div className="app-settings-modal-body">
               <label className="form-label">
-                Relationship type name
+                {t("projectCore.sources.relationship.typeName")}
                 <input
                   className="form-input"
                   value={newTypeName}
@@ -3629,10 +3634,10 @@ function CreateSourceRelationshipModal({
             </div>
             <div className="app-settings-modal-footer">
               <button type="button" className="btn" onClick={() => setNewTypeOpen(false)} disabled={newTypeSaving}>
-                Cancel
+                {t("projectCore.sources.cancel")}
               </button>
               <button type="submit" className="btn btn--primary" disabled={newTypeSaving || !newTypeName.trim()}>
-                {newTypeSaving ? "Saving..." : "Add relationship type"}
+                {newTypeSaving ? t("projectCore.sources.saving") : t("projectCore.sources.relationship.addType")}
               </button>
             </div>
           </form>
@@ -3825,7 +3830,7 @@ function PostgresSourceDetail({
       })
       .catch((loadError) => {
         if (cancelled) return;
-        setPdfPreviewError(loadError instanceof Error ? loadError.message : "Failed to load PDF preview.");
+        setPdfPreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadPdfPreviewFailed"));
         setPdfPreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
           return null;
@@ -3839,7 +3844,7 @@ function PostgresSourceDetail({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isPdfSource, resolvedFilePath]);
+  }, [isPdfSource, resolvedFilePath, t]);
 
   useEffect(() => {
     if (!isImageSource || !resolvedFilePath) {
@@ -3869,7 +3874,7 @@ function PostgresSourceDetail({
       })
       .catch((loadError) => {
         if (cancelled) return;
-        setImagePreviewError(loadError instanceof Error ? loadError.message : "Failed to load image preview.");
+        setImagePreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadImagePreviewFailed"));
         setImagePreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
           return null;
@@ -3883,7 +3888,7 @@ function PostgresSourceDetail({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isImageSource, resolvedFilePath]);
+  }, [isImageSource, resolvedFilePath, t]);
 
   useEffect(() => {
     if (!isAudioSource || !resolvedFilePath) {
@@ -3913,7 +3918,7 @@ function PostgresSourceDetail({
       })
       .catch((loadError) => {
         if (cancelled) return;
-        setAudioPreviewError(loadError instanceof Error ? loadError.message : "Failed to load audio preview.");
+        setAudioPreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadAudioPreviewFailed"));
         setAudioPreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
           return null;
@@ -3927,7 +3932,7 @@ function PostgresSourceDetail({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [fileExt, isAudioSource, resolvedFilePath]);
+  }, [fileExt, isAudioSource, resolvedFilePath, t]);
 
   useEffect(() => {
     if (!isVideoSource || !resolvedFilePath) {
@@ -3957,7 +3962,7 @@ function PostgresSourceDetail({
       })
       .catch((loadError) => {
         if (cancelled) return;
-        setVideoPreviewError(loadError instanceof Error ? loadError.message : "Failed to load video preview.");
+        setVideoPreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadVideoPreviewFailed"));
         setVideoPreviewUrl((current) => {
           if (current) URL.revokeObjectURL(current);
           return null;
@@ -3971,7 +3976,7 @@ function PostgresSourceDetail({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [fileExt, isVideoSource, resolvedFilePath]);
+  }, [fileExt, isVideoSource, resolvedFilePath, t]);
 
   function handleMouseUp() {
     if (!canEditAnnotations || !contentSelectionRef.current) return;
@@ -4047,10 +4052,10 @@ function PostgresSourceDetail({
           {canManageSourceRecord ? (
             <>
               <button type="button" className="btn" onClick={onEditSource}>
-                Edit Source
+                {t("projectCore.sources.editSource")}
               </button>
               <button type="button" className="btn btn--danger" onClick={onDeleteSource}>
-                Delete Source
+                {t("projectCore.sources.deleteSource")}
               </button>
             </>
           ) : null}
@@ -4060,25 +4065,25 @@ function PostgresSourceDetail({
       <div className="doc-detail-layout">
         <div className="doc-detail-left">
           <div className="case-card">
-            <h3 className="case-card-title">Source</h3>
+            <h3 className="case-card-title">{t("projectCore.sources.source")}</h3>
             <p className="case-card-value">{row.name}</p>
             <p className="users-guide-copy" style={{ marginTop: 8, marginBottom: 0 }} title={lockStatus.title}>
-              Lock: {lockStatus.label}
+              {t("projectAnnotations.detail.lockValue", { value: lockStatus.label })}
             </p>
           </div>
 
           <dl className="user-detail-meta case-detail-meta">
             <dt>{t("projectDocuments.columns.type")}</dt> <dd>{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType)}</dd>
             <dt>{t("projectDocuments.columns.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
-            <dt>File Name</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
-            <dt>Extension</dt> <dd>{fileExt ? `.${fileExt}` : "\u2014"}</dd>
+            <dt>{t("projectCore.sources.detail.fileName")}</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
+            <dt>{t("projectCore.sources.detail.extension")}</dt> <dd>{fileExt ? `.${fileExt}` : "\u2014"}</dd>
             {isImageSource && row.extractedFromVideoSourceId ? (
               <>
-                <dt>Extracted From Video</dt> <dd>{row.extractedFromVideoSourceId}</dd>
-                <dt>Extracted Timestamp</dt> <dd>{row.extractedFromVideoTimeMs != null ? formatMediaTime(row.extractedFromVideoTimeMs) : "N/A"}</dd>
+                <dt>{t("projectCore.sources.detail.extractedFromVideo")}</dt> <dd>{row.extractedFromVideoSourceId}</dd>
+                <dt>{t("projectCore.sources.detail.extractedTimestamp")}</dt> <dd>{row.extractedFromVideoTimeMs != null ? formatMediaTime(row.extractedFromVideoTimeMs) : "N/A"}</dd>
               </>
             ) : null}
-            <dt>Objects</dt> <dd>{formatCurrentNumber(row.objectCount)}</dd>
+            <dt>{t("projectCore.sources.detail.objects")}</dt> <dd>{formatCurrentNumber(row.objectCount)}</dd>
             <dt>{t("projectCodebook.detail.annotations")}</dt> <dd>{formatCurrentNumber(row.annotationCount)}</dd>
           </dl>
 
@@ -4092,16 +4097,16 @@ function PostgresSourceDetail({
           </div>
 
           <div className="case-card">
-            <h3 className="case-card-title">Attributes</h3>
+            <h3 className="case-card-title">{t("projectCore.sources.detail.attributes")}</h3>
             {attributeValues.length === 0 ? (
-              <p className="case-card-empty">No source attributes are set for this source yet.</p>
+              <p className="case-card-empty">{t("projectCore.sources.detail.noAttributes")}</p>
             ) : (
               <div className="case-detail-attributes-table-wrap">
                 <table className="case-detail-attributes-table">
                   <thead>
                     <tr>
-                      <th className="case-detail-attributes-label" scope="col">Attribute</th>
-                      <th className="case-detail-attributes-value" scope="col">Value</th>
+                      <th className="case-detail-attributes-label" scope="col">{t("projectCore.sources.detail.attribute")}</th>
+                      <th className="case-detail-attributes-value" scope="col">{t("projectCore.sources.detail.value")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4113,7 +4118,7 @@ function PostgresSourceDetail({
                         type="button"
                         className="case-detail-attribute-value-button"
                         onClick={() => onOpenAttributeHistory(attribute)}
-                        title="View attribute value history"
+                        title={t("projectCore.sources.detail.viewAttributeHistory")}
                       >
                         {formatAttributeDisplay(attribute.value, attribute.dataType) || "-"}
                       </button>
@@ -4131,21 +4136,21 @@ function PostgresSourceDetail({
 
           <div className="case-card">
             <div className="case-card-header">
-              <h3 className="case-card-title">Relationships</h3>
+              <h3 className="case-card-title">{t("projectCore.sources.detail.relationships")}</h3>
               {canManageSourceRecord ? (
                 <button
                   type="button"
                   className="codebook-icon-action"
                   onClick={onCreateRelationship}
-                  aria-label="Create relationship from this source"
-                  title="Create relationship"
+                  aria-label={t("projectCore.sources.detail.createRelationshipFromSource")}
+                  title={t("projectCore.sources.detail.createRelationship")}
                 >
                   +
                 </button>
               ) : null}
             </div>
             {relationships.length === 0 ? (
-              <p className="case-card-empty">No relationships are connected to this source yet.</p>
+              <p className="case-card-empty">{t("projectCore.sources.detail.noRelationships")}</p>
             ) : (
               <ul className="code-ann-list">
                 {relationships.map((relationship) => (
@@ -4159,7 +4164,7 @@ function PostgresSourceDetail({
                           style={{ padding: "2px 8px", fontSize: 12 }}
                           onClick={() => onEditRelationship(relationship.relationship)}
                         >
-                          Edit
+                          {t("projectCore.sources.detail.edit")}
                         </button>
                       ) : null}
                     </div>
@@ -4183,13 +4188,13 @@ function PostgresSourceDetail({
             <div className="case-card-header">
               <div className="doc-content-header-title">
                 <div className="processed-transcript-title-row">
-                  <h3 className="case-card-title">Contents</h3>
+                  <h3 className="case-card-title">{t("projectCore.sources.detail.contents")}</h3>
                   {questionOutline.length > 0 && (
                     <div className="processed-transcript-outline-wrap">
                       <button
                         type="button"
                         className="processed-transcript-outline-btn"
-                        aria-label="Show transcript outline"
+                        aria-label={t("projectCore.sources.detail.showTranscriptOutline")}
                         aria-expanded={outlineOpen}
                         onClick={() => setOutlineOpen((open) => !open)}
                       >
@@ -4227,8 +4232,8 @@ function PostgresSourceDetail({
                           className="source-content-search-input"
                           value={textSearchQuery}
                           onChange={(event) => setTextSearchQuery(event.target.value)}
-                          placeholder="Search text"
-                          aria-label="Search source text"
+                          placeholder={t("projectCore.sources.detail.searchText")}
+                          aria-label={t("projectCore.sources.detail.searchSourceText")}
                         />
                         <span className="source-content-search-count">
                           {activeTextSearchQuery
@@ -4242,8 +4247,8 @@ function PostgresSourceDetail({
                           className="btn btn--small source-content-search-nav"
                           onClick={goToPreviousTextSearchMatch}
                           disabled={textSearchMatches.length === 0}
-                          aria-label="Previous search match"
-                          title="Previous"
+                          aria-label={t("projectCore.sources.detail.previousSearchMatch")}
+                          title={t("projectCore.sources.detail.previous")}
                         >
                           {"\u2191"}
                         </button>
@@ -4252,8 +4257,8 @@ function PostgresSourceDetail({
                           className="btn btn--small source-content-search-nav"
                           onClick={goToNextTextSearchMatch}
                           disabled={textSearchMatches.length === 0}
-                          aria-label="Next search match"
-                          title="Next"
+                          aria-label={t("projectCore.sources.detail.nextSearchMatch")}
+                          title={t("projectCore.sources.detail.next")}
                         >
                           {"\u2193"}
                         </button>
@@ -4263,8 +4268,8 @@ function PostgresSourceDetail({
                       type="button"
                       className="btn btn--small source-content-search-toggle"
                       onClick={() => setTextSearchOpen((open) => !open)}
-                      aria-label={textSearchOpen ? "Close text search" : "Search source text"}
-                      title={textSearchOpen ? "Close search" : "Search"}
+                      aria-label={textSearchOpen ? t("projectCore.sources.detail.closeTextSearch") : t("projectCore.sources.detail.searchSourceText")}
+                      title={textSearchOpen ? t("projectCore.sources.detail.closeSearch") : t("projectCore.sources.detail.search")}
                     >
                       <ZoomIcon />
                     </button>
@@ -4281,12 +4286,12 @@ function PostgresSourceDetail({
             </div>
             {isPdfSource ? (
               pdfPreviewLoading ? (
-                <p className="users-guide-copy" style={{ margin: 0 }}>Loading PDF preview...</p>
+                <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingPdfPreview")}</p>
               ) : pdfPreviewError ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="auth-error" style={{ margin: 0 }}>{pdfPreviewError}</p>
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    The PDF file is stored with this source, but its preview could not be opened.
+                    {t("projectCore.sources.detail.pdfPreviewFailed")}
                   </p>
                 </div>
               ) : pdfPreviewUrl ? (
@@ -4298,16 +4303,16 @@ function PostgresSourceDetail({
                   />
                 </div>
               ) : (
-                <p className="case-card-empty">No PDF preview is available for this source.</p>
+                <p className="case-card-empty">{t("projectCore.sources.detail.noPdfPreview")}</p>
               )
             ) : isImageSource ? (
               imagePreviewLoading ? (
-                <p className="users-guide-copy" style={{ margin: 0 }}>Loading image preview...</p>
+                <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingImagePreview")}</p>
               ) : imagePreviewError ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="auth-error" style={{ margin: 0 }}>{imagePreviewError}</p>
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    The image file is stored with this source, but its preview could not be opened.
+                    {t("projectCore.sources.detail.imagePreviewFailed")}
                   </p>
                 </div>
               ) : imagePreviewUrl ? (
@@ -4319,19 +4324,19 @@ function PostgresSourceDetail({
                   />
                 </div>
               ) : (
-                <p className="case-card-empty">No image preview is available for this source.</p>
+                <p className="case-card-empty">{t("projectCore.sources.detail.noImagePreview")}</p>
               )
             ) : isAudioSource ? (
               audioPreviewLoading ? (
                 <div className="source-preview-busy-state" aria-live="polite">
                   <span className="source-preview-busy-spinner" aria-hidden="true" />
-                  <p className="users-guide-copy" style={{ margin: 0 }}>Loading audio preview...</p>
+                  <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingAudioPreview")}</p>
                 </div>
               ) : audioPreviewError ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="auth-error" style={{ margin: 0 }}>{audioPreviewError}</p>
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    The audio file is stored with this source, but its preview could not be opened.
+                    {t("projectCore.sources.detail.audioPreviewFailed")}
                   </p>
                 </div>
               ) : audioPreviewUrl ? (
@@ -4343,19 +4348,19 @@ function PostgresSourceDetail({
                   />
                 </div>
               ) : (
-                <p className="case-card-empty">No audio preview is available for this source.</p>
+                <p className="case-card-empty">{t("projectCore.sources.detail.noAudioPreview")}</p>
               )
             ) : isVideoSource ? (
               videoPreviewLoading ? (
                 <div className="source-preview-busy-state" aria-live="polite">
                   <span className="source-preview-busy-spinner" aria-hidden="true" />
-                  <p className="users-guide-copy" style={{ margin: 0 }}>Loading video preview...</p>
+                  <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingVideoPreview")}</p>
                 </div>
               ) : videoPreviewError ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="auth-error" style={{ margin: 0 }}>{videoPreviewError}</p>
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    The video file is stored with this source, but its preview could not be opened.
+                    {t("projectCore.sources.detail.videoPreviewFailed")}
                   </p>
                 </div>
               ) : videoPreviewUrl ? (
@@ -4367,7 +4372,7 @@ function PostgresSourceDetail({
                   />
                 </div>
               ) : (
-                <p className="case-card-empty">No video preview is available for this source.</p>
+                <p className="case-card-empty">{t("projectCore.sources.detail.noVideoPreview")}</p>
               )
             ) : row.content ? (
               normalizedSourceType === "transcript" && processedTranscriptSegments.length > 0 ? (
@@ -4407,12 +4412,12 @@ function PostgresSourceDetail({
               <div style={{ marginTop: 12 }}>
                 {sourceLockConflict?.reason === "kicked" ? (
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    {sourceLockConflict.userName || "A project editor"} removed your source lock. Return to the source list or reacquire access before annotating again.
+                    {t("projectCore.sources.detail.lockRemoved", { name: sourceLockConflict.userName || t("projectCore.sources.detail.projectEditorFallback") })}
                   </p>
                 ) : sourceLockConflict?.reason === "locked" ? (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                     <p className="users-guide-copy" style={{ margin: 0 }}>
-                      {sourceLockConflict.userName || "Another user"} is currently annotating this source.
+                      {t("projectCore.sources.detail.lockHeld", { name: sourceLockConflict.userName || t("projectCore.sources.detail.anotherUser") })}
                     </p>
                     {canKickSourceLocks ? (
                       <button
@@ -4421,21 +4426,21 @@ function PostgresSourceDetail({
                         onClick={() => void onKickSourceLock(sourceLockConflict)}
                         disabled={saving || lockSyncing}
                       >
-                        {lockSyncing ? "Updating..." : "Take Lock"}
+                        {lockSyncing ? t("projectCore.sources.detail.updating") : t("projectCore.sources.detail.takeLock")}
                       </button>
                     ) : null}
                   </div>
                 ) : canEditAnnotations ? (
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    Select text in the source contents to create a PostgreSQL annotation.
+                    {t("projectCore.sources.detail.selectTextToAnnotate")}
                   </p>
                 ) : (
                   <p className="users-guide-copy" style={{ margin: 0 }}>
                     {lockSyncing
-                      ? "Claiming the source lock for annotation..."
+                      ? t("projectCore.sources.detail.claimingLock")
                       : isPdfSource || isImageSource || isAudioSource || isVideoSource
-                        ? `This ${isPdfSource ? "PDF" : isImageSource ? "image" : isAudioSource ? "audio" : "video"} source is currently available as a read-only preview.`
-                        : "This source is currently read-only in the coding workspace."}
+                        ? t("projectCore.sources.detail.readOnlyMediaPreview", { kind: isPdfSource ? "PDF" : isImageSource ? "image" : isAudioSource ? "audio" : "video" })
+                        : t("projectCore.sources.detail.readOnlyWorkspace")}
                   </p>
                 )}
               </div>
@@ -4446,7 +4451,7 @@ function PostgresSourceDetail({
 
       {pendingSelection && canEditAnnotations ? (
         <AnnotationEditorModal
-          title="New Annotation"
+          title={t("projectCore.sources.detail.newAnnotation")}
           codeOptions={codeOptions}
           selection={pendingSelection}
           saving={saving}
@@ -4464,7 +4469,7 @@ function PostgresSourceDetail({
 
       {editingAnnotation && canEditAnnotations ? (
         <AnnotationEditorModal
-          title="Edit Annotation"
+          title={t("projectCore.sources.detail.editAnnotation")}
           codeOptions={codeOptions}
           selection={{
             startOffset: editingAnnotation.startOffset ?? 0,
@@ -4487,7 +4492,7 @@ function PostgresSourceDetail({
 
       {removingAnnotation && canEditAnnotations ? (
         <SettingsModal
-          title="Delete Annotation"
+          title={t("projectCore.sources.detail.deleteAnnotation")}
           onClose={() => setRemovingAnnotation(null)}
           closeDisabled={saving}
         >
@@ -4498,7 +4503,7 @@ function PostgresSourceDetail({
             {error ? <p className="auth-error">{error}</p> : null}
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button className="btn" onClick={() => setRemovingAnnotation(null)} disabled={saving}>Cancel</button>
+            <button className="btn" onClick={() => setRemovingAnnotation(null)} disabled={saving}>{t("projectCore.sources.cancel")}</button>
             <button
               className="btn btn--danger"
               onClick={async () => {
@@ -4507,7 +4512,7 @@ function PostgresSourceDetail({
               }}
               disabled={saving}
             >
-              {saving ? "Deleting..." : "Delete"}
+              {saving ? t("projectCore.sources.deleting") : t("common.delete")}
             </button>
           </div>
         </SettingsModal>
@@ -5449,7 +5454,7 @@ export function PostgresSourcesView({
       });
       await loadSources();
     } catch (saveError) {
-      setSubmitError(saveError instanceof Error ? saveError.message : "Failed to create frame source.");
+      setSubmitError(saveError instanceof Error ? saveError.message : t("projectCore.sources.errors.createFrameSourceFailed"));
       throw saveError;
     } finally {
       setSubmitting(false);
@@ -5466,7 +5471,7 @@ export function PostgresSourcesView({
       setDeleteRow(null);
       await loadSources();
     } catch (deleteError) {
-      setSubmitError(deleteError instanceof Error ? deleteError.message : "Failed to delete source.");
+      setSubmitError(deleteError instanceof Error ? deleteError.message : t("projectCore.sources.errors.deleteSourceFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -5478,7 +5483,7 @@ export function PostgresSourcesView({
     payload: { codeIds: string[]; note: string },
   ) {
     if (!activeSourceLock || activeSourceLock.sourceId !== sourceId || activeSourceLock.userId !== currentUserId) {
-      throw new Error("You need to hold the source lock before adding annotations.");
+      throw new Error(t("projectCore.sources.errors.lockRequiredAddAnnotation"));
     }
     setSubmitting(true);
     setSubmitError(null);
@@ -5503,7 +5508,7 @@ export function PostgresSourcesView({
           : row
       )));
     } catch (annotationError) {
-      setSubmitError(annotationError instanceof Error ? annotationError.message : "Failed to create annotation.");
+      setSubmitError(annotationError instanceof Error ? annotationError.message : t("projectCore.sources.errors.createAnnotationFailed"));
       throw annotationError;
     } finally {
       setSubmitting(false);
@@ -5525,7 +5530,7 @@ export function PostgresSourcesView({
     },
   ) {
     if (!selectedRow || !activeSourceLock || activeSourceLock.sourceId !== selectedRow.id || activeSourceLock.userId !== currentUserId) {
-      throw new Error("You need to hold the source lock before editing annotations.");
+      throw new Error(t("projectCore.sources.errors.lockRequiredEditAnnotation"));
     }
     setSubmitting(true);
     setSubmitError(null);
@@ -5556,7 +5561,7 @@ export function PostgresSourcesView({
 
   async function handleDeleteAnnotation(annotationId: string) {
     if (!selectedRow || !activeSourceLock || activeSourceLock.sourceId !== selectedRow.id || activeSourceLock.userId !== currentUserId) {
-      throw new Error("You need to hold the source lock before deleting annotations.");
+      throw new Error(t("projectCore.sources.errors.lockRequiredDeleteAnnotation"));
     }
     setSubmitting(true);
     setSubmitError(null);
@@ -5682,7 +5687,7 @@ export function PostgresSourcesView({
       setAttributeDraft(null);
       await loadSources();
     } catch (saveError) {
-      setAttributeError(saveError instanceof Error ? saveError.message : "Failed to save source attribute.");
+      setAttributeError(saveError instanceof Error ? saveError.message : t("projectCore.sources.errors.saveSourceAttributeFailed"));
     } finally {
       setAttributeSaving(false);
     }
@@ -5716,7 +5721,7 @@ export function PostgresSourcesView({
       setBulkAttributeTarget(null);
       await loadSources();
     } catch (saveError) {
-      setAttributeError(saveError instanceof Error ? saveError.message : "Failed to save source attribute values.");
+      setAttributeError(saveError instanceof Error ? saveError.message : t("projectCore.sources.errors.saveSourceAttributeValuesFailed"));
     } finally {
       setAttributeSaving(false);
     }
@@ -6025,7 +6030,7 @@ export function PostgresSourcesView({
       : sourceLockBySourceId.get(selectedRow.id) ?? null)
     : null;
   const pageTitle = showAttributesTable
-    ? "Source Attributes"
+    ? t("projectCore.sources.sourceAttributes")
     : pageTitleOverride ?? (codingEnabled ? "Code Sources" : "Sources");
   const gettingStartedGuideActive =
     !!gettingStartedState
@@ -6262,7 +6267,7 @@ export function PostgresSourcesView({
         />
         {editorOpen ? (
           <SourceEditorModal
-            title={editingRow ? "Edit Source" : "New Source"}
+            title={editingRow ? t("projectCore.sources.editSource") : t("projectCore.sources.newSource")}
             initialRow={editingRow}
             projectStoragePath={projectStoragePath}
             sourceTypeSettings={sourceTypeSettings}
@@ -6281,20 +6286,20 @@ export function PostgresSourcesView({
         ) : null}
         {deleteRow ? (
           <SettingsModal
-            title="Delete Source"
+            title={t("projectCore.sources.deleteSource")}
             onClose={() => setDeleteRow(null)}
             closeDisabled={submitting}
           >
             <div className="app-settings-modal-body">
               <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                Delete <strong>{deleteRow.name}</strong>?
+                {t("projectCore.sources.deletePrompt", { name: deleteRow.name })}
               </p>
               {submitError && <p className="auth-error">{submitError}</p>}
             </div>
             <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-              <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
+              <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>{t("projectCore.sources.cancel")}</button>
               <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
-                {submitting ? "Deleting..." : "Delete"}
+                {submitting ? t("projectCore.sources.deleting") : t("common.delete")}
               </button>
             </div>
           </SettingsModal>
@@ -6345,8 +6350,8 @@ export function PostgresSourcesView({
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Open sources help"
-            aria-label="Open sources help"
+            title={t("projectCore.sources.help.open")}
+            aria-label={t("projectCore.sources.help.open")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -6354,18 +6359,18 @@ export function PostgresSourcesView({
       </header>
 
       {helpOpen ? (
-        <SettingsModal title="Sources Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("projectCore.sources.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Add sources, edit source details and graphics, manage source type defaults, and open coding workspaces for text, image, audio, video, PDF, and transcript material.
+              {t("projectCore.sources.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Use the left column to filter by source type or switch into the attributes table. Select a source to review its details, relationships, annotations, and available actions.
+              {t("projectCore.sources.help.line2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("projectCore.sources.help.close")}
             </button>
           </div>
         </SettingsModal>
@@ -6374,10 +6379,10 @@ export function PostgresSourcesView({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Add a source"
+            title={t("app.gettingStarted.addSourceTitle")}
             onDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
           >
-            <p>Click the plus button to add a text source for the walkthrough.</p>
+            <p>{t("app.gettingStarted.addSourceBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
@@ -6385,10 +6390,10 @@ export function PostgresSourcesView({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Open coding"
+            title={t("app.gettingStarted.openCodingTitle")}
             onDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
           >
-            <p>Click the source you just created to start coding it.</p>
+            <p>{t("app.gettingStarted.openCreatedSourceBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
@@ -6424,10 +6429,10 @@ export function PostgresSourcesView({
             <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
               <div className="segmented-control" role="presentation">
                 <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
-                  Details
+                  {t("sharedModals.tabs.details")}
                 </button>
                 <button type="button" className="segmented-control-option" tabIndex={-1}>
-                  Attributes
+                  {t("sharedModals.tabs.attributes")}
                 </button>
               </div>
             </div>
@@ -6444,10 +6449,10 @@ export function PostgresSourcesView({
             >
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <h2 style={{ margin: 0, fontSize: 18 }}>Source Types</h2>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>{t("projectCore.sources.sourceTypes")}</h2>
                   {textCodingMode === "ai-assisted" ? (
                     <p className="users-guide-copy" style={{ margin: 0, fontSize: 12 }}>
-                      Text and Transcripts only
+                      {t("projectCore.sources.textAndTranscriptsOnly")}
                     </p>
                   ) : null}
                 </div>
@@ -6463,7 +6468,7 @@ export function PostgresSourcesView({
                       style={{ width: "76%" }}
                       onClick={() => handleSourceKindSort("label")}
                     >
-                      Type
+                      {t("projectCore.entities.type")}
                       <span className="users-sort-icon">
                         {sourceKindSortCol === "label" ? (sourceKindSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                       </span>
@@ -6473,7 +6478,7 @@ export function PostgresSourcesView({
                       style={{ width: "24%" }}
                       onClick={() => handleSourceKindSort("count")}
                     >
-                      Count
+                      {t("projectCore.entities.count")}
                       <span className="users-sort-icon">
                         {sourceKindSortCol === "count" ? (sourceKindSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                       </span>
@@ -6501,7 +6506,7 @@ export function PostgresSourcesView({
                       }}
                     >
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span>All sources</span>
+                        <span>{t("projectCore.sources.allSources")}</span>
                       </div>
                     </td>
                     <td className="users-td users-td--muted">{visibleRows.length}</td>
@@ -6546,7 +6551,7 @@ export function PostgresSourcesView({
                               {sourceTypeRowLabel(summary.label)}
                             </span>
                             <span className="postgres-users-meta project-type-list-meta">
-                              {summary.attributeDefinitionCount} attributes
+                              {t("projectCore.sources.attributesCount", { count: summary.attributeDefinitionCount })}
                             </span>
                           </div>
                         </div>
@@ -6564,7 +6569,7 @@ export function PostgresSourcesView({
               </table>
               {sourceKindSummaries.length === 0 ? (
                 <div className="empty-state" style={{ minHeight: 140 }}>
-                  <p>No sources yet.</p>
+                  <p>{t("projectCore.sources.noSources")}</p>
                 </div>
               ) : null}
             </div>
@@ -6589,7 +6594,7 @@ export function PostgresSourcesView({
           {!selectedRow ? (
             <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
               <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
-                <div className="segmented-control" role="tablist" aria-label="Source workspace views">
+                <div className="segmented-control" role="tablist" aria-label={t("projectCore.sources.sourceWorkspaceViews")}>
                   <button
                     type="button"
                     className={showAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
@@ -6597,7 +6602,7 @@ export function PostgresSourcesView({
                     aria-selected={!showAttributesTable}
                     onClick={() => setShowAttributesTable(false)}
                   >
-                    Details
+                    {t("sharedModals.tabs.details")}
                   </button>
                   <button
                     type="button"
@@ -6606,7 +6611,7 @@ export function PostgresSourcesView({
                     aria-selected={showAttributesTable}
                     onClick={() => setShowAttributesTable(true)}
                   >
-                    Attributes
+                    {t("sharedModals.tabs.attributes")}
                   </button>
                 </div>
               </div>
@@ -6616,12 +6621,12 @@ export function PostgresSourcesView({
             <>
             {selectedSourceKindFilter === "all" ? (
               <div className="empty-state postgres-users-empty-state">
-                <p>Select a source type in the left column to view its attributes.</p>
+                <p>{t("projectCore.sources.selectTypeForAttributes")}</p>
               </div>
             ) : (
               <div className="home-project-card project-table-card">
                 <div className="project-table-card-header">
-                  <h2>Attributes</h2>
+                  <h2>{t("sharedModals.tabs.attributes")}</h2>
                   <button
                     className="btn btn--primary project-table-header-icon-button"
                     onClick={() => {
@@ -6637,8 +6642,8 @@ export function PostgresSourcesView({
                     disabled={!canManageSources || !sourceTypeSettings.some(
                       (setting) => normalizeSourceKindFilterValue(setting.sourceKind) === normalizeSourceKindFilterValue(selectedSourceKindFilter),
                     )}
-                    title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "Add attribute"}
-                    aria-label="Add attribute"
+                    title={!canManageSources ? t("projectCore.sources.cannotManageSources") : t("sharedModals.attributes.add")}
+                    aria-label={t("sharedModals.attributes.add")}
                   >
                     <PlusIcon className="project-table-header-icon" />
                   </button>
@@ -6651,7 +6656,7 @@ export function PostgresSourcesView({
                         className={`users-th case-attributes-case-col${attributeSortCol === "name" ? " users-th--sorted" : ""}`}
                         onClick={() => handleAttributeSort("name")}
                       >
-                        Source
+                        {t("projectCore.entities.source")}
                         <span className="users-sort-icon">
                           {attributeSortCol === "name" ? (attributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
                         </span>
@@ -6667,7 +6672,7 @@ export function PostgresSourcesView({
                             setBulkAttributeTarget({ attribute, rows: sortedAttributeRows });
                             setAttributeError(null);
                           }}
-                          title={canManageSources ? "Edit values for this attribute" : "Only project owners, administrators, or editors can edit source attributes."}
+                          title={canManageSources ? t("projectCore.sources.editValuesForAttribute") : t("projectCore.sources.cannotManageSources")}
                         >
                           {attribute.name}
                           <span className="users-sort-icon">
@@ -6681,7 +6686,7 @@ export function PostgresSourcesView({
                   <tbody>
                     {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">{t("projectDocuments.empty.loading")}</td></tr>}
                     {!loading && sortedAttributeRows.length === 0 && (
-                      <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">No matching sources yet.</td></tr>
+                      <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="users-td-msg">{t("projectCore.sources.noMatchingSources")}</td></tr>
                     )}
                     {!loading && sortedAttributeRows.map((row) => (
                       <tr key={row.id} className="case-attributes-row">
@@ -6695,7 +6700,7 @@ export function PostgresSourcesView({
                             className={`users-td case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}${hoveredAttributeColumnId === attribute.id ? " case-attributes-col--hovered" : ""}`}
                             role="button"
                             tabIndex={0}
-                            title="View attribute value history"
+                            title={t("sharedModals.attributes.historyTitle")}
                             onClick={() => {
                               setActiveAttributeHistoryCell({ sourceId: row.id, attributeDefinitionId: attribute.id });
                               setAttributeHistoryTarget({
@@ -6793,7 +6798,7 @@ export function PostgresSourcesView({
               />
               {editorOpen ? (
                 <SourceEditorModal
-                  title={editingRow ? "Edit Source" : "New Source"}
+                  title={editingRow ? t("projectCore.sources.editSource") : t("projectCore.sources.newSource")}
                   initialRow={editingRow}
                   projectStoragePath={projectStoragePath}
                   sourceTypeSettings={sourceTypeSettings}
@@ -6812,20 +6817,20 @@ export function PostgresSourcesView({
               ) : null}
               {deleteRow ? (
                 <SettingsModal
-                  title="Delete Source"
+                  title={t("projectCore.sources.deleteSource")}
                   onClose={() => setDeleteRow(null)}
                   closeDisabled={submitting}
                 >
                   <div className="app-settings-modal-body">
                     <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                      Delete <strong>{deleteRow.name}</strong>?
+                      {t("projectCore.sources.deletePrompt", { name: deleteRow.name })}
                     </p>
                     {submitError && <p className="auth-error">{submitError}</p>}
                   </div>
                   <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-                    <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
+                    <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>{t("common.cancel")}</button>
                     <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
-                      {submitting ? "Deleting..." : "Delete"}
+                      {submitting ? t("projectCore.sources.deleting") : t("common.delete")}
                     </button>
                   </div>
                 </SettingsModal>
@@ -6838,8 +6843,8 @@ export function PostgresSourcesView({
                 <button
                   type="button"
                   className={`btn btn--primary project-table-header-icon-button${gettingStartedAddSourceActive && !newSourceOpen ? " getting-started-spotlight-target" : ""}`}
-                  aria-label="New source"
-                  title={!canManageSources ? "Only project owners, administrators, or editors can manage sources." : "New source"}
+                  aria-label={t("projectCore.sources.newSource")}
+                  title={!canManageSources ? t("projectCore.sources.cannotManageSources") : t("projectCore.sources.newSource")}
                   onClick={() => {
                     setNewSourceOpen(true);
                     setSubmitError(null);
@@ -6870,7 +6875,7 @@ export function PostgresSourcesView({
                       {t("projectDocuments.columns.type")}
                     </th>
                     <th style={{ width: "16%" }} className="users-th">
-                      Lock
+                      {t("projectCore.entities.lock")}
                     </th>
                     <th
                       style={{ width: "24%" }}
@@ -6887,7 +6892,7 @@ export function PostgresSourcesView({
                     <tr><td colSpan={4} className="users-td-msg">{t("projectDocuments.empty.loading")}</td></tr>
                   )}
                   {!loading && sorted.length === 0 && (
-                    <tr><td colSpan={4} className="users-td-msg">No matching sources yet.</td></tr>
+                    <tr><td colSpan={4} className="users-td-msg">{t("projectCore.sources.noMatchingSources")}</td></tr>
                   )}
                   {!loading && sorted.map((row) => {
                     const lock = sourceLockBySourceId.get(row.id) ?? null;
@@ -6931,7 +6936,7 @@ export function PostgresSourcesView({
               setSourceContextMenu(null);
             }}
           >
-            Edit Source
+            {t("projectCore.sources.editSource")}
           </button>
           <button
             type="button"
@@ -6942,7 +6947,7 @@ export function PostgresSourcesView({
               setSourceContextMenu(null);
             }}
           >
-            Delete Source
+            {t("projectCore.sources.deleteSource")}
           </button>
         </div>
       ) : null}
@@ -6959,7 +6964,7 @@ export function PostgresSourcesView({
               setSourceTypeContextMenu(null);
             }}
           >
-            Edit
+            {t("projectCore.sources.detail.edit")}
           </button>
         </div>
       ) : null}
@@ -7033,7 +7038,7 @@ export function PostgresSourcesView({
       ) : null}
       {editorOpen && !selectedRow && (
         <SourceEditorModal
-        title={editingRow ? "Edit Source" : "New Source"}
+        title={editingRow ? t("projectCore.sources.editSource") : t("projectCore.sources.newSource")}
         initialRow={editingRow}
         projectStoragePath={projectStoragePath}
         sourceTypeSettings={sourceTypeSettings}
@@ -7052,20 +7057,20 @@ export function PostgresSourcesView({
       )}
       {deleteRow && !selectedRow && (
         <SettingsModal
-          title="Delete Source"
+          title={t("projectCore.sources.deleteSource")}
           onClose={() => setDeleteRow(null)}
           closeDisabled={submitting}
         >
           <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Delete <strong>{deleteRow.name}</strong>?
+              {t("projectCore.sources.deletePrompt", { name: deleteRow.name })}
             </p>
             {submitError && <p className="auth-error">{submitError}</p>}
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>Cancel</button>
+            <button className="btn" onClick={() => setDeleteRow(null)} disabled={submitting}>{t("projectCore.sources.cancel")}</button>
             <button className="btn btn--danger" onClick={() => void handleDeleteSource()} disabled={submitting}>
-              {submitting ? "Deleting..." : "Delete"}
+              {submitting ? t("projectCore.sources.deleting") : t("common.delete")}
             </button>
           </div>
         </SettingsModal>

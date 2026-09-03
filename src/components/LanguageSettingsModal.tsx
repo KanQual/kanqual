@@ -1,11 +1,12 @@
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
+import { useI18n } from "../i18n/provider";
 import { SettingsModal } from "./SettingsModal";
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export function LanguageSettingsModal({
   title,
-  label = "App language",
+  label,
   locale,
   onChange,
   onClose,
@@ -16,6 +17,9 @@ export function LanguageSettingsModal({
   onChange: (locale: SupportedLocale) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
+  const resolvedLabel = label ?? t("appSettings.language.label");
+
   return (
     <SettingsModal title={title} onClose={onClose}>
       <div className="app-settings-modal-body">
@@ -25,7 +29,7 @@ export function LanguageSettingsModal({
           </div>
           <div className="app-settings-modal-section-body">
             <div className="settings-row settings-row--centered">
-              <div className="settings-row-label">{label}</div>
+              <div className="settings-row-label">{resolvedLabel}</div>
               <select
                 className="form-input"
                 style={{ width: "max-content", maxWidth: "100%" }}
@@ -42,7 +46,7 @@ export function LanguageSettingsModal({
       </div>
       <div className="app-settings-modal-footer">
         <span />
-        <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
+        <button type="button" className="btn btn--primary" onClick={onClose}>{t("common.done")}</button>
       </div>
     </SettingsModal>
   );

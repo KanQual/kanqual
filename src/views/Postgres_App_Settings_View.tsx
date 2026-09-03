@@ -235,9 +235,9 @@ function safeExportName(name: string): string {
   return name.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "kanqual_project";
 }
 
-function backupReasonLabel(entry: PostgresProjectBackupEntry): string {
-  if (entry.reason === "manual") return "Manual";
-  return "Automatic";
+function backupReasonLabel(entry: PostgresProjectBackupEntry, t: ReturnType<typeof useI18n>["t"]): string {
+  if (entry.reason === "manual") return t("appSettings.project.snapshots.manual");
+  return t("appSettings.project.snapshots.automatic");
 }
 
 function formatSnapshotHour(date: Date): string {
@@ -256,15 +256,15 @@ function formatSnapshotDay(date: Date): string {
   }).format(date);
 }
 
-function snapshotRetentionUntilLabel(status: BackupRetentionStatus): string {
+function snapshotRetentionUntilLabel(status: BackupRetentionStatus, t: ReturnType<typeof useI18n>["t"]): string {
   if (status.category === "manual") {
-    return "Indefinite";
+    return t("appSettings.project.snapshots.indefinite");
   }
   if (status.category === "latest") {
-    return "Until superseded";
+    return t("appSettings.project.snapshots.untilSuperseded");
   }
   if (status.category === "pending-delete") {
-    return "Next cleanup";
+    return t("appSettings.project.snapshots.nextCleanup");
   }
   if (status.deletionDate) {
     return formatSnapshotDay(status.deletionDate);
@@ -275,21 +275,21 @@ function snapshotRetentionUntilLabel(status: BackupRetentionStatus): string {
 type SnapshotRetentionBadgeKind = "manual" | "hourly" | "daily" | "weekly" | "promotion" | "empty";
 type ProjectLogFilterColumn = "time" | "user" | "access" | "category" | "description";
 
-function snapshotRetentionBucketLabels(status: BackupRetentionStatus): Array<{ label: string; kind: SnapshotRetentionBadgeKind }> {
+function snapshotRetentionBucketLabels(status: BackupRetentionStatus, t: ReturnType<typeof useI18n>["t"]): Array<{ label: string; kind: SnapshotRetentionBadgeKind }> {
   const labels: Array<{ label: string; kind: SnapshotRetentionBadgeKind }> = [];
   if (status.category === "manual") {
-    labels.push({ label: "Manual", kind: "manual" });
+    labels.push({ label: t("appSettings.project.snapshots.manual"), kind: "manual" });
   } else if (status.category === "hourly" && status.bucketStart) {
-    labels.push({ label: `Hourly: ${formatSnapshotHour(status.bucketStart)}`, kind: "hourly" });
+    labels.push({ label: t("appSettings.project.snapshots.hourly", { value: formatSnapshotHour(status.bucketStart) }), kind: "hourly" });
   } else if (status.category === "daily" && status.bucketStart) {
-    labels.push({ label: `Daily: ${formatSnapshotDay(status.bucketStart)}`, kind: "daily" });
+    labels.push({ label: t("appSettings.project.snapshots.daily", { value: formatSnapshotDay(status.bucketStart) }), kind: "daily" });
   } else if (status.category === "weekly" && status.bucketStart) {
-    labels.push({ label: `Weekly: ${formatSnapshotDay(status.bucketStart)}`, kind: "weekly" });
+    labels.push({ label: t("appSettings.project.snapshots.weekly", { value: formatSnapshotDay(status.bucketStart) }), kind: "weekly" });
   } else if (!status.promotion) {
     labels.push({ label: "-", kind: "empty" });
   }
   if (status.promotion) {
-    labels.push({ label: `Will become ${status.promotion}`, kind: "promotion" });
+    labels.push({ label: t("appSettings.project.snapshots.willBecome", { value: status.promotion }), kind: "promotion" });
   }
   return labels;
 }
@@ -298,13 +298,13 @@ function snapshotRetentionBadgeClass(kind: SnapshotRetentionBadgeKind): string {
   return `backup-badge backup-badge--retention backup-badge--retention-${kind}`;
 }
 
-function projectCreationSourceLabel(source: string): string {
+function projectCreationSourceLabel(source: string, t: ReturnType<typeof useI18n>["t"]): string {
   switch (source) {
-    case "snapshot": return "Snapshot";
-    case "kanqual_export": return "KanQual export";
-    case "refi_qda": return "REFI-QDA";
-    case "manual": return "Manual";
-    default: return source ? source.replace(/_/g, " ") : "Manual";
+    case "snapshot": return t("appSettings.project.createdFrom.snapshot");
+    case "kanqual_export": return t("appSettings.project.createdFrom.kanqualExport");
+    case "refi_qda": return t("appSettings.project.createdFrom.refiQda");
+    case "manual": return t("appSettings.project.createdFrom.manual");
+    default: return source ? source.replace(/_/g, " ") : t("appSettings.project.createdFrom.manual");
   }
 }
 
@@ -437,7 +437,7 @@ function EmbeddedPostgresProjectSettings({
       const extension = format === "json" ? "json" : format === "xlsx" ? "xlsx" : "qdpx";
       const path = await save({
         defaultPath: `${safeExportName(project.name)}_export.${extension}`,
-        filters: [{ name: `${extension.toUpperCase()} file`, extensions: [extension] }],
+        filters: [{ name: t("appSettings.project.export.fileDialog", { format: extension.toUpperCase() }), extensions: [extension] }],
       });
       if (!path) return;
       const data = await fetchPostgresProjectExportData(project);
@@ -448,7 +448,7 @@ function EmbeddedPostgresProjectSettings({
       } else {
         await writeFile(path, makeRefiQdaProject(data));
       }
-      setNotice(`Exported ${format.toUpperCase()} project data.`);
+      setNotice(t("appSettings.project.notices.exportedProjectData", { format: format.toUpperCase() }));
     } catch (exportFailure) {
       setExportError(describeUnknownError(exportFailure));
     } finally {
@@ -459,14 +459,14 @@ function EmbeddedPostgresProjectSettings({
   async function handleEncryptedBackupExport() {
     setExportError("");
     if (!encryptedBackupPassword || encryptedBackupPassword !== encryptedBackupPasswordConfirm) {
-      setExportError("Enter matching backup passwords.");
+      setExportError(t("appSettings.project.errors.matchingBackupPasswords"));
       return;
     }
     setExporting("encrypted");
     try {
       const path = await save({
         defaultPath: `${safeExportName(project.name)}_encrypted_backup.kqbe`,
-        filters: [{ name: "KanQual encrypted backup", extensions: ["kqbe"] }],
+        filters: [{ name: t("appSettings.project.export.kanqualEncryptedBackupDialog"), extensions: ["kqbe"] }],
       });
       if (!path) return;
       const data = await fetchPostgresProjectExportData(project);
@@ -479,7 +479,7 @@ function EmbeddedPostgresProjectSettings({
       await writeTextFile(path, encryptedBackup);
       setEncryptedBackupPassword("");
       setEncryptedBackupPasswordConfirm("");
-      setNotice("Exported encrypted project backup.");
+      setNotice(t("appSettings.project.notices.exportedEncryptedBackup"));
     } catch (exportFailure) {
       setExportError(describeUnknownError(exportFailure));
     } finally {
@@ -493,12 +493,19 @@ function EmbeddedPostgresProjectSettings({
     try {
       const path = await save({
         defaultPath: `${safeExportName(project.name)}_project_log.csv`,
-        filters: [{ name: "CSV file", extensions: ["csv"] }],
+        filters: [{ name: t("appSettings.project.export.csvFileDialog"), extensions: ["csv"] }],
       });
       if (!path) return;
       const entries = projectLogEntries.length ? sortedProjectLogEntries : await listPostgresProjectLog(project.id);
       const csv = [
-        ["Time", "User", "Access", "Category", "Action", "Description"].map(csvEscape).join(","),
+        [
+          t("appSettings.project.log.time"),
+          t("appSettings.project.log.user"),
+          t("appSettings.project.log.access"),
+          t("appSettings.project.log.category"),
+          t("appSettings.project.log.action"),
+          t("appSettings.project.log.description"),
+        ].map(csvEscape).join(","),
         ...entries.map((entry) => [
           csvEscape(formatProjectLogDateTime(entry.occurredAt)),
           csvEscape(entry.userName || "-"),
@@ -509,7 +516,7 @@ function EmbeddedPostgresProjectSettings({
         ].join(",")),
       ].join("\n");
       await writeTextFile(path, csv);
-      setNotice("Exported project log.");
+      setNotice(t("appSettings.project.notices.exportedProjectLog"));
     } catch (exportFailure) {
       setExportError(describeUnknownError(exportFailure));
     } finally {
@@ -521,7 +528,7 @@ function EmbeddedPostgresProjectSettings({
     setBackupError("");
     setBackupNotice("");
     if (!canManageProject) {
-      setBackupError("Only project owners or administrators can create project snapshots.");
+      setBackupError(t("appSettings.project.errors.createSnapshotDenied"));
       return;
     }
     setBackupBusy("manual");
@@ -531,7 +538,7 @@ function EmbeddedPostgresProjectSettings({
       clearPendingProjectBackupAttempt(project.id);
       clearProjectBackupBannerIssue(project.id);
       notifyProjectBackupsChanged(project.id);
-      setBackupNotice("Snapshot created.");
+      setBackupNotice(t("appSettings.project.notices.snapshotCreated"));
     } catch (backupFailure) {
       setBackupError(describeUnknownError(backupFailure));
     } finally {
@@ -543,12 +550,12 @@ function EmbeddedPostgresProjectSettings({
     if (!deleteBackup) return;
     setBackupError("");
     if (!canManageProject) {
-      setBackupError("Only project owners or administrators can delete project snapshots.");
+      setBackupError(t("appSettings.project.errors.deleteSnapshotDenied"));
       setDeleteBackup(null);
       return;
     }
     if (!deleteBackup.manual) {
-      setBackupError("Automatic and session snapshots are managed by retention settings.");
+      setBackupError(t("appSettings.project.errors.automaticSnapshotsManaged"));
       setDeleteBackup(null);
       return;
     }
@@ -556,7 +563,7 @@ function EmbeddedPostgresProjectSettings({
     try {
       setBackupManifest(await deletePostgresProjectBackup(project, deleteBackup));
       setDeleteBackup(null);
-      setBackupNotice("Snapshot deleted.");
+      setBackupNotice(t("appSettings.project.notices.snapshotDeleted"));
     } catch (deleteFailure) {
       setBackupError(describeUnknownError(deleteFailure));
     } finally {
@@ -569,11 +576,11 @@ function EmbeddedPostgresProjectSettings({
     setBackupError("");
     setBackupNotice("");
     if (!importBackupProjectName.trim()) {
-      setBackupError("Enter a name for the new project.");
+      setBackupError(t("appSettings.project.errors.enterNewProjectName"));
       return;
     }
     if (!canManageProject) {
-      setBackupError("Only project owners or administrators can restore project snapshots.");
+      setBackupError(t("appSettings.project.errors.restoreSnapshotDenied"));
       setImportBackup(null);
       return;
     }
@@ -585,7 +592,7 @@ function EmbeddedPostgresProjectSettings({
       setImportedBackupProject(imported);
       setImportBackup(null);
       setImportBackupProjectName("");
-      setBackupNotice(`Restored snapshot as "${imported.name}".`);
+      setBackupNotice(t("appSettings.project.notices.snapshotRestored", { name: imported.name }));
     } catch (importFailure) {
       setBackupError(describeUnknownError(importFailure));
     } finally {
@@ -599,12 +606,12 @@ function EmbeddedPostgresProjectSettings({
     try {
       const path = await save({
         defaultPath: `${safeExportName(project.name)}_codebook.qdc`,
-        filters: [{ name: "REFI-QDA Codebook", extensions: ["qdc"] }],
+        filters: [{ name: t("appSettings.project.codebook.refiTitle"), extensions: ["qdc"] }],
       });
       if (!path) return;
       const data = await fetchPostgresProjectExportData(project);
       await writeTextFile(path, makeRefiQdaCodebook(data));
-      setNotice("Exported codebook.");
+      setNotice(t("appSettings.project.notices.exportedCodebook"));
     } catch (exportFailure) {
       setCodebookError(describeUnknownError(exportFailure));
     } finally {
@@ -618,7 +625,7 @@ function EmbeddedPostgresProjectSettings({
     try {
       const path = await open({
         multiple: false,
-        filters: [{ name: "REFI-QDA Codebook", extensions: ["qdc", "xml"] }],
+        filters: [{ name: t("appSettings.project.codebook.refiTitle"), extensions: ["qdc", "xml"] }],
       });
       if (!path || Array.isArray(path)) return;
       const codes = parseRefiQdaCodebook(await readTextFile(path));
@@ -636,11 +643,11 @@ function EmbeddedPostgresProjectSettings({
     setError("");
     setNotice("");
     if (!canEditProjectMetadata) {
-      setError("Only project owners, editors, or the PostgreSQL administrator can change project details.");
+      setError(t("appSettings.project.errors.editDetailsDenied"));
       return;
     }
     if (!name.trim()) {
-      setError("Enter a project name.");
+      setError(t("appSettings.project.errors.enterProjectName"));
       return;
     }
 
@@ -665,11 +672,11 @@ function EmbeddedPostgresProjectSettings({
     setError("");
     setNotice("");
     if (!canManageProject) {
-      setError("Only project owners or the PostgreSQL administrator can delete this project.");
+      setError(t("appSettings.project.errors.deleteProjectDenied"));
       return;
     }
     if (deleteConfirmationName.trim() !== project.name.trim()) {
-      setError("Enter the exact project name to confirm deletion.");
+      setError(t("appSettings.project.errors.confirmProjectName"));
       return;
     }
 
@@ -708,13 +715,13 @@ function EmbeddedPostgresProjectSettings({
 
   const projectSettingsSections = [
     {
-      heading: "Project",
+      heading: t("appSettings.project.cards.projectHeading"),
       cards: [
         {
           id: "details",
-          title: "Details",
+          title: t("appSettings.project.cards.detailsShortTitle"),
           icon: "DE",
-          description: "Rename the project and edit its description.",
+          description: t("appSettings.project.cards.detailsShortDescription"),
           onOpen: () => {
             setError("");
             setName(project.name);
@@ -724,9 +731,9 @@ function EmbeddedPostgresProjectSettings({
         },
         {
           id: "storage",
-          title: "Storage",
+          title: t("appSettings.project.cards.storageTitle"),
           icon: "HD",
-          description: "See the per-project database name, file location, and timestamps.",
+          description: t("appSettings.project.cards.storageDescription"),
           onOpen: () => {
             setError("");
             setActiveModal("storage");
@@ -735,13 +742,13 @@ function EmbeddedPostgresProjectSettings({
       ],
     },
     {
-      heading: "Project Data",
+      heading: t("appSettings.project.cards.dataHeading"),
       cards: [
         {
           id: "uploaded-files",
-          title: "Uploaded Files",
+          title: t("appSettings.project.cards.uploadedFilesTitle"),
           icon: "UP",
-          description: "Review retained source file metadata for this project.",
+          description: t("appSettings.project.cards.uploadedFilesDescription"),
           onOpen: () => {
             setError("");
             setActiveModal("uploaded-files");
@@ -750,9 +757,9 @@ function EmbeddedPostgresProjectSettings({
         },
         {
           id: "backups",
-          title: "Snapshots",
+          title: t("appSettings.project.cards.snapshotsTitle"),
           icon: "SN",
-          description: "Create and review project-level snapshots.",
+          description: t("appSettings.project.cards.snapshotsDescription"),
           onOpen: () => {
             setBackupError("");
             setBackupNotice("");
@@ -762,9 +769,9 @@ function EmbeddedPostgresProjectSettings({
         },
         {
           id: "log",
-          title: "Log",
+          title: t("appSettings.project.cards.logTitle"),
           icon: "LG",
-          description: "Review and export this project's activity log.",
+          description: t("appSettings.project.cards.logDescription"),
           onOpen: () => {
             setError("");
             setActiveModal("log");
@@ -774,13 +781,13 @@ function EmbeddedPostgresProjectSettings({
       ],
     },
     {
-      heading: "Exchange",
+      heading: t("appSettings.project.cards.exchangeHeading"),
       cards: [
         {
           id: "export",
-          title: "Export",
+          title: t("appSettings.project.cards.exportTitle"),
           icon: "EX",
-          description: "Export project data as JSON, Excel, REFI-QDA, or encrypted backup.",
+          description: t("appSettings.project.cards.exportDescription"),
           onOpen: () => {
             setExportError("");
             setActiveModal("export");
@@ -788,9 +795,9 @@ function EmbeddedPostgresProjectSettings({
         },
         {
           id: "codebook",
-          title: "Codebook",
+          title: t("appSettings.project.cards.codebookTitle"),
           icon: "CB",
-          description: "Import or export a REFI-QDA codebook file.",
+          description: t("appSettings.project.cards.codebookDescription"),
           onOpen: () => {
             setCodebookError("");
             setActiveModal("codebook");
@@ -798,9 +805,9 @@ function EmbeddedPostgresProjectSettings({
         },
         {
           id: "danger",
-          title: "Delete Project",
+          title: t("appSettings.project.cards.deleteProjectTitle"),
           icon: "DL",
-          description: "Permanently remove this project and its dedicated PostgreSQL database.",
+          description: t("appSettings.project.cards.deleteProjectDescription"),
           requiresProjectManagement: true,
           onOpen: () => {
             setError("");
@@ -839,7 +846,7 @@ function EmbeddedPostgresProjectSettings({
       {!embedded ? (
         <header className="view-header">
           <div className="view-title-with-help">
-            <h1>Project Settings</h1>
+            <h1>{t("appSettings.project.pageTitle")}</h1>
           </div>
         </header>
       ) : null}
@@ -871,31 +878,31 @@ function EmbeddedPostgresProjectSettings({
       </div>
 
       {activeModal === "details" ? (
-        <SettingsModal title="Project Details" onClose={() => setActiveModal(null)} closeDisabled={submitting === "details"}>
+        <SettingsModal title={t("appSettings.project.details.title")} onClose={() => setActiveModal(null)} closeDisabled={submitting === "details"}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Metadata</h3>
+                    <h3>{t("appSettings.project.details.metadata")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <div className="home-restricted-list" style={{ marginBottom: 16 }}>
                       <div className="home-restricted-item">
-                        <span className="home-restricted-label">Created from</span>
-                        <span className="home-restricted-value">{projectCreationSourceLabel(project.creationSource)}</span>
+                        <span className="home-restricted-label">{t("appSettings.project.details.createdFrom")}</span>
+                        <span className="home-restricted-value">{projectCreationSourceLabel(project.creationSource, t)}</span>
                       </div>
                       <div className="home-restricted-item">
-                        <span className="home-restricted-label">Created at</span>
+                        <span className="home-restricted-label">{t("appSettings.project.details.createdAt")}</span>
                         <span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span>
                       </div>
                       <div className="home-restricted-item">
-                        <span className="home-restricted-label">Created by</span>
-                        <span className="home-restricted-value">{project.createdByUsername || "Unknown"}</span>
+                        <span className="home-restricted-label">{t("appSettings.project.details.createdBy")}</span>
+                        <span className="home-restricted-value">{project.createdByUsername || t("appSettings.project.createdFrom.unknown")}</span>
                       </div>
                     </div>
                     <form className="form" onSubmit={handleSaveDetails}>
                       <label className="form-label">
-                        Project name
+                        {t("appSettings.project.details.projectName")}
                         <input
                           className="form-input"
                           value={name}
@@ -905,7 +912,7 @@ function EmbeddedPostgresProjectSettings({
                         />
                       </label>
                       <label className="form-label">
-                        Description
+                        {t("appSettings.project.details.description")}
                         <textarea
                           className="form-input form-textarea"
                           rows={5}
@@ -916,19 +923,19 @@ function EmbeddedPostgresProjectSettings({
                       </label>
                       {!canEditProjectMetadata ? (
                         <p className="auth-hint" style={{ marginTop: 0 }}>
-                          Only project owners, editors, or the PostgreSQL administrator can change these details.
+                          {t("appSettings.project.errors.editDetailsDenied")}
                         </p>
                       ) : null}
                       <div className="form-actions">
                         <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "details"}>
-                          Cancel
+                          {t("common.cancel")}
                         </button>
                         <button
                           type="submit"
                           className="btn btn--primary"
                           disabled={submitting === "details" || !canEditProjectMetadata || !name.trim()}
                         >
-                          {submitting === "details" ? "Saving..." : "Save changes"}
+                          {submitting === "details" ? t("common.saving") : t("appSettings.project.details.saveChanges")}
                         </button>
                       </div>
                     </form>
@@ -940,26 +947,26 @@ function EmbeddedPostgresProjectSettings({
       ) : null}
 
       {activeModal === "storage" ? (
-        <SettingsModal title="Project Storage" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("appSettings.project.storage.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Dedicated Database</h3>
+                    <h3>{t("appSettings.project.storage.dedicatedDatabase")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Database name</span><span className="home-restricted-value">{project.databaseName || "-"}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.databaseName")}</span><span className="home-restricted-value">{project.databaseName || "-"}</span></div>
                       <div className="home-restricted-item">
-                        <span className="home-restricted-label">Storage path</span>
+                        <span className="home-restricted-label">{t("appSettings.project.storage.storagePath")}</span>
                         <span className="home-restricted-value" style={{ textAlign: "right", overflowWrap: "anywhere" }}>
                           {project.storagePath || "-"}
                         </span>
                       </div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Created</span><span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Last updated</span><span className="home-restricted-value">{formatPostgresDateTime(project.updatedAt)}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Owners</span><span className="home-restricted-value">{ownerCount}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Members</span><span className="home-restricted-value">{memberCount}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.created")}</span><span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.lastUpdated")}</span><span className="home-restricted-value">{formatPostgresDateTime(project.updatedAt)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.owners")}</span><span className="home-restricted-value">{ownerCount}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.members")}</span><span className="home-restricted-value">{memberCount}</span></div>
                     </div>
                   </div>
                 </section>
@@ -967,18 +974,18 @@ function EmbeddedPostgresProjectSettings({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "uploaded-files" ? (
-        <SettingsModal title="Uploaded Files" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("appSettings.project.uploadedFiles.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Retained Source Files</h3>
+                    <h3>{t("appSettings.project.uploadedFiles.retainedSourceFiles")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <div className="backup-list">
@@ -986,7 +993,7 @@ function EmbeddedPostgresProjectSettings({
                         <div key={source.id} className="backup-list-item">
                           <div>
                             <div className="backup-list-title">
-                              {source.originalFileName || source.title || "Untitled source"}
+                              {source.originalFileName || source.title || t("appSettings.project.uploadedFiles.untitledSource")}
                               <span className="backup-badge backup-badge--scheduled">{source.sourceKind}</span>
                             </div>
                             <div className="backup-list-meta">
@@ -994,13 +1001,13 @@ function EmbeddedPostgresProjectSettings({
                               {source.storagePath ? ` | ${source.storagePath}` : ""}
                             </div>
                             <div className="backup-list-meta">
-                              Imported {formatPostgresDateTime(source.createdAt)}
+                              {t("appSettings.project.uploadedFiles.imported", { date: formatPostgresDateTime(source.createdAt) })}
                             </div>
                           </div>
                         </div>
                       )) : (
                         <div className="empty-state backup-empty-state">
-                          <p>No retained source files were found for this project.</p>
+                          <p>{t("appSettings.project.uploadedFiles.noneFound")}</p>
                         </div>
                       )}
                     </div>
@@ -1010,13 +1017,13 @@ function EmbeddedPostgresProjectSettings({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "backups" ? (
-        <SettingsModal title="Snapshots" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("appSettings.project.snapshots.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 {backupError ? <div className="form-error project-settings-error">{backupError}</div> : null}
@@ -1028,21 +1035,21 @@ function EmbeddedPostgresProjectSettings({
                         className="btn"
                         onClick={() => void handleManualBackup()}
                         disabled={backupBusy === "manual" || !canManageProject}
-                        title={!canManageProject ? "Only project owners or administrators can create project snapshots." : undefined}
+                        title={!canManageProject ? t("appSettings.project.errors.createSnapshotDenied") : undefined}
                       >
-                        {backupBusy === "manual" ? "Creating..." : "Create Snapshot Now"}
+                        {backupBusy === "manual" ? t("appSettings.project.snapshots.creating") : t("appSettings.project.snapshots.createNow")}
                       </button>
                     </div>
                     {!canManageProject ? (
                       <p className="auth-hint" style={{ marginBottom: 0 }}>
-                        Only project owners or administrators can create, delete, or restore project snapshots.
+                        {t("appSettings.project.errors.manageSnapshotsDenied")}
                       </p>
                     ) : null}
                   </div>
                 </section>
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Available Snapshots</h3>
+                    <h3>{t("appSettings.project.snapshots.available")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <div className="backup-list">
@@ -1051,13 +1058,13 @@ function EmbeddedPostgresProjectSettings({
                           <table className="project-log-table snapshot-table">
                             <thead>
                               <tr>
-                                <th>Created</th>
-                                <th>Retained Until</th>
-                                <th>Retention</th>
-                                <th>Reason</th>
-                                <th>Total</th>
-                                <th>Trigger</th>
-                                <th>Actions</th>
+                                <th>{t("appSettings.project.snapshots.created")}</th>
+                                <th>{t("appSettings.project.snapshots.retainedUntil")}</th>
+                                <th>{t("appSettings.project.snapshots.retention")}</th>
+                                <th>{t("appSettings.project.snapshots.reason")}</th>
+                                <th>{t("appSettings.project.snapshots.total")}</th>
+                                <th>{t("appSettings.project.snapshots.trigger")}</th>
+                                <th>{t("appSettings.project.snapshots.actions")}</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1067,7 +1074,7 @@ function EmbeddedPostgresProjectSettings({
                                   backupManifest.backups,
                                   backupManifest.retention,
                                 );
-                                const retentionLabels = snapshotRetentionBucketLabels(retentionStatus);
+                                const retentionLabels = snapshotRetentionBucketLabels(retentionStatus, t);
                                 const createdParts = formatSnapshotCreatedParts(backup.createdAt);
                                 return (
                                   <tr key={backup.file}>
@@ -1075,7 +1082,7 @@ function EmbeddedPostgresProjectSettings({
                                       <span>{createdParts.date}</span>
                                       {createdParts.time ? <span>{createdParts.time}</span> : null}
                                     </td>
-                                    <td className="log-cell log-cell--time">{snapshotRetentionUntilLabel(retentionStatus)}</td>
+                                    <td className="log-cell log-cell--time">{snapshotRetentionUntilLabel(retentionStatus, t)}</td>
                                     <td className="log-cell snapshot-retention-cell">
                                       {retentionLabels.map((item) => (
                                         <span
@@ -1086,9 +1093,9 @@ function EmbeddedPostgresProjectSettings({
                                         </span>
                                       ))}
                                     </td>
-                                    <td className="log-cell log-cell--label">{backupReasonLabel(backup)}</td>
+                                    <td className="log-cell log-cell--label">{backupReasonLabel(backup, t)}</td>
                                     <td className="log-cell log-cell--time">{formatPostgresBackupSize(backup.sizeBytes) || "0 B"}</td>
-                                    <td className="log-cell log-cell--label">{backup.sourceLogLabel ? `Triggered by ${backup.sourceLogLabel}` : "-"}</td>
+                                    <td className="log-cell log-cell--label">{backup.sourceLogLabel ? t("appSettings.project.snapshots.triggeredBy", { label: backup.sourceLogLabel }) : "-"}</td>
                                     <td
                                       className="log-cell snapshot-table-actions"
                                       ref={openBackupActionsFile === backup.file ? backupActionsMenuRef : undefined}
@@ -1099,9 +1106,9 @@ function EmbeddedPostgresProjectSettings({
                                         onClick={() => {
                                           setOpenBackupActionsFile((current) => current === backup.file ? null : backup.file);
                                         }}
-                                        aria-label="Snapshot actions"
+                                        aria-label={t("appSettings.project.snapshots.actionMenu")}
                                         aria-expanded={openBackupActionsFile === backup.file}
-                                        title="Snapshot actions"
+                                        title={t("appSettings.project.snapshots.actionMenu")}
                                       >
                                         ...
                                       </button>
@@ -1115,13 +1122,13 @@ function EmbeddedPostgresProjectSettings({
                                               setBackupError("");
                                               setBackupNotice("");
                                               setImportBackup(backup);
-                                              setImportBackupProjectName(`${project.name} Snapshot Copy`);
+                                              setImportBackupProjectName(t("appSettings.project.snapshots.snapshotCopyName", { projectName: project.name }));
                                             }}
                                             disabled={!!backupBusy || !canManageProject}
-                                            title={!canManageProject ? "Only project owners or administrators can restore project snapshots." : undefined}
+                                            title={!canManageProject ? t("appSettings.project.errors.restoreSnapshotDenied") : undefined}
                                             role="menuitem"
                                           >
-                                            Restore
+                                            {t("common.restore")}
                                           </button>
                                           <button
                                             type="button"
@@ -1133,14 +1140,14 @@ function EmbeddedPostgresProjectSettings({
                                             disabled={!!backupBusy || !canManageProject || !backup.manual}
                                             title={
                                               !canManageProject
-                                                ? "Only project owners or administrators can delete project snapshots."
+                                                ? t("appSettings.project.errors.deleteSnapshotDenied")
                                                 : !backup.manual
-                                                  ? "Automatic snapshots are managed by retention settings."
+                                                  ? t("appSettings.project.errors.automaticSnapshotsManagedShort")
                                                   : undefined
                                             }
                                             role="menuitem"
                                           >
-                                            Delete
+                                            {t("common.delete")}
                                           </button>
                                         </div>
                                       ) : null}
@@ -1153,7 +1160,7 @@ function EmbeddedPostgresProjectSettings({
                         </div>
                       ) : (
                         <div className="empty-state backup-empty-state">
-                          <p>No snapshots yet.</p>
+                          <p>{t("appSettings.project.snapshots.noSnapshots")}</p>
                         </div>
                       )}
                     </div>
@@ -1163,13 +1170,13 @@ function EmbeddedPostgresProjectSettings({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "log" ? (
-        <SettingsModal title="Project Log" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("appSettings.project.log.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               {exportError ? <p className="auth-error">{exportError}</p> : null}
               <div className="app-settings-modal-sections">
@@ -1181,8 +1188,8 @@ function EmbeddedPostgresProjectSettings({
                         className="codebook-icon-action"
                         onClick={() => void handleProjectLogExport()}
                         disabled={projectLogExporting}
-                        aria-label="Export project log as CSV"
-                        title={projectLogExporting ? "Exporting..." : "Export CSV"}
+                        aria-label={t("appSettings.project.log.exportCsvLabel")}
+                        title={projectLogExporting ? t("appSettings.project.export.exporting") : t("appSettings.project.log.exportCsvTitle")}
                       >
                         <DownloadIcon className="filter-icon-svg" />
                       </button>
@@ -1190,27 +1197,27 @@ function EmbeddedPostgresProjectSettings({
                         type="button"
                         className="codebook-icon-action"
                         onClick={() => setProjectLogFilterOpen(true)}
-                        aria-label="Filter project log"
-                        title="Filter"
+                        aria-label={t("appSettings.project.log.filterLogLabel")}
+                        title={t("appSettings.project.log.filter")}
                       >
                         <FilterIcon className="filter-icon-svg" />
                       </button>
                     </div>
                     {sortedProjectLogEntries.length === 0 ? (
                       <div className="empty-state backup-empty-state">
-                        <p>No project activity yet.</p>
+                        <p>{t("appSettings.project.log.noActivity")}</p>
                       </div>
                     ) : (
                       <div className="project-log-table-wrap">
                         <table className="project-log-table">
                           <thead>
                             <tr>
-                              <th>Time</th>
-                              <th>User</th>
-                              <th>Access</th>
-                              <th>Category</th>
-                              <th>Description</th>
-                              <th>Details</th>
+                              <th>{t("appSettings.project.log.time")}</th>
+                              <th>{t("appSettings.project.log.user")}</th>
+                              <th>{t("appSettings.project.log.access")}</th>
+                              <th>{t("appSettings.project.log.category")}</th>
+                              <th>{t("appSettings.project.log.description")}</th>
+                              <th>{t("appSettings.project.log.details")}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1241,7 +1248,7 @@ function EmbeddedPostgresProjectSettings({
                                           onClick={() => setExpandedLogIds((current) => ({ ...current, [entry.id]: !current[entry.id] }))}
                                           aria-expanded={isExpanded}
                                         >
-                                          {isExpanded ? "Hide" : "View"}
+                                          {isExpanded ? t("appSettings.project.log.hide") : t("appSettings.project.log.view")}
                                         </button>
                                       ) : (
                                         <span className="log-details-none">-</span>
@@ -1268,24 +1275,24 @@ function EmbeddedPostgresProjectSettings({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "log" && projectLogFilterOpen ? (
-        <SettingsModal title="Filter Project Log" onClose={() => setProjectLogFilterOpen(false)}>
+        <SettingsModal title={t("appSettings.project.log.filterTitle")} onClose={() => setProjectLogFilterOpen(false)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-body">
                     <div className="settings-form-grid">
                       {([
-                        ["time", "Time"],
-                        ["user", "User"],
-                        ["access", "Access"],
-                        ["category", "Category"],
-                        ["description", "Description"],
+                        ["time", t("appSettings.project.log.time")],
+                        ["user", t("appSettings.project.log.user")],
+                        ["access", t("appSettings.project.log.access")],
+                        ["category", t("appSettings.project.log.category")],
+                        ["description", t("appSettings.project.log.description")],
                       ] as Array<[ProjectLogFilterColumn, string]>).map(([column, label]) => (
                         <label className="form-field" key={column}>
                           <span>{label}</span>
@@ -1293,7 +1300,7 @@ function EmbeddedPostgresProjectSettings({
                             className="form-input"
                             value={projectLogFilters[column]}
                             onChange={(event) => setProjectLogFilters((current) => ({ ...current, [column]: event.target.value }))}
-                            placeholder={`Filter ${label.toLowerCase()}`}
+                            placeholder={t("appSettings.project.log.filterPlaceholder", { label: label.toLowerCase() })}
                           />
                         </label>
                       ))}
@@ -1314,28 +1321,28 @@ function EmbeddedPostgresProjectSettings({
                   description: "",
                 })}
               >
-                Clear
+                {t("common.clear")}
               </button>
-              <button type="button" className="btn btn--primary" onClick={() => setProjectLogFilterOpen(false)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setProjectLogFilterOpen(false)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "export" ? (
-        <SettingsModal title="Backup & Export" onClose={() => setActiveModal(null)} closeDisabled={!!exporting}>
+        <SettingsModal title={t("appSettings.project.export.title")} onClose={() => setActiveModal(null)} closeDisabled={!!exporting}>
             <div className="app-settings-modal-body">
               {exportError ? <p className="auth-error">{exportError}</p> : null}
               <div className="app-settings-modal-sections">
                 <section className="project-backup-primary-panel">
                   <div className="project-backup-primary-header">
                     <div>
-                      <h3>Encrypted Backup</h3>
-                      <p>Create a password-protected KanQual backup for safekeeping or transfer.</p>
+                      <h3>{t("appSettings.project.export.encryptedTitle")}</h3>
+                      <p>{t("appSettings.project.export.encryptedDescription")}</p>
                     </div>
                   </div>
                   <div className="project-backup-password-grid">
                     <label className="form-label">
-                      Backup Password
+                      {t("appSettings.project.export.backupPassword")}
                       <div className="password-input-wrap">
                         <input
                           className="form-input password-input-field"
@@ -1348,7 +1355,7 @@ function EmbeddedPostgresProjectSettings({
                         <button
                           type="button"
                           className="password-visibility-btn"
-                          aria-label={encryptedBackupPasswordVisible ? "Hide password" : "Show password"}
+                          aria-label={encryptedBackupPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                           aria-pressed={encryptedBackupPasswordVisible}
                           onClick={() => setEncryptedBackupPasswordVisible((current) => !current)}
                           disabled={!!exporting}
@@ -1358,7 +1365,7 @@ function EmbeddedPostgresProjectSettings({
                       </div>
                     </label>
                     <label className="form-label">
-                      Confirm Password
+                      {t("appSettings.project.export.confirmPassword")}
                       <div className="password-input-wrap">
                         <input
                           className="form-input password-input-field"
@@ -1371,7 +1378,7 @@ function EmbeddedPostgresProjectSettings({
                         <button
                           type="button"
                           className="password-visibility-btn"
-                          aria-label={encryptedBackupPasswordConfirmVisible ? "Hide password" : "Show password"}
+                          aria-label={encryptedBackupPasswordConfirmVisible ? t("common.hidePassword") : t("common.showPassword")}
                           aria-pressed={encryptedBackupPasswordConfirmVisible}
                           onClick={() => setEncryptedBackupPasswordConfirmVisible((current) => !current)}
                           disabled={!!exporting}
@@ -1383,47 +1390,47 @@ function EmbeddedPostgresProjectSettings({
                   </div>
                   {encryptedBackupPasswordConfirm && encryptedBackupPassword !== encryptedBackupPasswordConfirm ? (
                     <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
-                      The password entries do not match.
+                      {t("appSettings.project.export.passwordMismatch")}
                     </p>
                   ) : null}
                   <div className="project-backup-primary-actions">
                     <button className="btn btn--primary" onClick={() => void handleEncryptedBackupExport()} disabled={!!exporting || !encryptedBackupPassword || !encryptedBackupPasswordConfirm || encryptedBackupPassword !== encryptedBackupPasswordConfirm}>
-                      {exporting === "encrypted" ? "Exporting..." : "Export Backup"}
+                      {exporting === "encrypted" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportBackup")}
                     </button>
                   </div>
                 </section>
 
                 <section className="project-export-secondary-section">
-                  <h3>Other Formats</h3>
+                  <h3>{t("appSettings.project.export.otherFormats")}</h3>
                   <p className="project-export-secondary-note">
-                    These exports are not encrypted and can be read by anyone with access to the files.
+                    {t("appSettings.project.export.otherFormatsNote")}
                   </p>
                   <div className="project-export-format-list">
                     <div className="project-export-format-row">
                       <div>
-                        <div className="project-export-format-title">JSON</div>
-                        <div className="project-export-format-copy">Raw project data.</div>
+                        <div className="project-export-format-title">{t("appSettings.project.export.jsonFormat")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.export.jsonDescription")}</div>
                       </div>
                       <button className="btn" onClick={() => void handleExport("json")} disabled={!!exporting}>
-                        {exporting === "json" ? "Exporting..." : "Export"}
+                        {exporting === "json" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportAction")}
                       </button>
                     </div>
                     <div className="project-export-format-row">
                       <div>
-                        <div className="project-export-format-title">REFI-QDA</div>
-                        <div className="project-export-format-copy">Exchange with QDA software.</div>
+                        <div className="project-export-format-title">{t("appSettings.project.export.refiQdaFormat")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.export.refiDescription")}</div>
                       </div>
                       <button className="btn" onClick={() => void handleExport("qdpx")} disabled={!!exporting}>
-                        {exporting === "qdpx" ? "Exporting..." : "Export"}
+                        {exporting === "qdpx" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportAction")}
                       </button>
                     </div>
                     <div className="project-export-format-row">
                       <div>
-                        <div className="project-export-format-title">Excel</div>
-                        <div className="project-export-format-copy">Review workbook.</div>
+                        <div className="project-export-format-title">{t("appSettings.project.export.excelFormat")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.export.excelDescription")}</div>
                       </div>
                       <button className="btn" onClick={() => void handleExport("xlsx")} disabled={!!exporting}>
-                        {exporting === "xlsx" ? "Exporting..." : "Export"}
+                        {exporting === "xlsx" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportAction")}
                       </button>
                     </div>
                   </div>
@@ -1432,40 +1439,40 @@ function EmbeddedPostgresProjectSettings({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)} disabled={!!exporting}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)} disabled={!!exporting}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "codebook" ? (
-        <SettingsModal title="Codebook" onClose={() => setActiveModal(null)} closeDisabled={!!codebookBusy}>
+        <SettingsModal title={t("appSettings.project.codebook.title")} onClose={() => setActiveModal(null)} closeDisabled={!!codebookBusy}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 {codebookError ? <p className="auth-error">{codebookError}</p> : null}
                 <section className="project-backup-primary-panel">
                   <div className="project-backup-primary-header">
                     <div>
-                      <h3>REFI-QDA Codebook</h3>
-                      <p>Import or export code definitions as a REFI-QDA codebook file.</p>
+                      <h3>{t("appSettings.project.codebook.refiTitle")}</h3>
+                      <p>{t("appSettings.project.codebook.description")}</p>
                     </div>
                   </div>
                   <div className="project-export-format-list">
                     <div className="project-export-format-row">
                       <div>
-                        <div className="project-export-format-title">Import</div>
-                        <div className="project-export-format-copy">Add codes from a REFI-QDA codebook file.</div>
+                        <div className="project-export-format-title">{t("appSettings.project.codebook.importTitle")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.codebook.importDescription")}</div>
                       </div>
                       <button className="btn" onClick={() => void handleCodebookImport()} disabled={!!codebookBusy}>
-                        {codebookBusy === "import" ? "Importing..." : "Import"}
+                        {codebookBusy === "import" ? t("appSettings.project.codebook.importing") : t("appSettings.project.codebook.importTitle")}
                       </button>
                     </div>
                     <div className="project-export-format-row">
                       <div>
-                        <div className="project-export-format-title">Export</div>
-                        <div className="project-export-format-copy">Save this project's codebook for use elsewhere.</div>
+                        <div className="project-export-format-title">{t("appSettings.project.codebook.exportTitle")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.codebook.exportDescription")}</div>
                       </div>
                       <button className="btn btn--primary" onClick={() => void handleCodebookExport()} disabled={!!codebookBusy}>
-                        {codebookBusy === "export" ? "Exporting..." : "Export"}
+                        {codebookBusy === "export" ? t("appSettings.project.export.exporting") : t("appSettings.project.codebook.exportTitle")}
                       </button>
                     </div>
                   </div>
@@ -1474,26 +1481,25 @@ function EmbeddedPostgresProjectSettings({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)} disabled={!!codebookBusy}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)} disabled={!!codebookBusy}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "danger" ? (
-        <SettingsModal title="Delete Project" onClose={() => setActiveModal(null)} closeDisabled={submitting === "delete"}>
+        <SettingsModal title={t("appSettings.project.deleteProject.title")} onClose={() => setActiveModal(null)} closeDisabled={submitting === "delete"}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--danger">
-                    <h3>Danger Zone</h3>
+                    <h3>{t("appSettings.project.deleteProject.dangerZone")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <p className="settings-warning settings-warning--danger">
-                      This permanently deletes <strong>{project.name}</strong>, including its dedicated database,
-                      objects, relationships, and project memberships.
+                      {t("appSettings.project.deleteProject.warningPrefix")} <strong>{project.name}</strong>, {t("appSettings.project.deleteProject.warningSuffix")}
                     </p>
                     <label className="form-label">
-                      Type the project name to confirm
+                      {t("appSettings.project.deleteProject.confirmLabel")}
                       <input
                         className="form-input"
                         value={deleteConfirmationName}
@@ -1504,7 +1510,7 @@ function EmbeddedPostgresProjectSettings({
                     </label>
                     {!canManageProject ? (
                       <p className="auth-hint" style={{ marginTop: 0 }}>
-                        Only project owners or the administrator can delete this project.
+                        {t("appSettings.project.errors.deleteProjectDenied")}
                       </p>
                     ) : null}
                   </div>
@@ -1512,30 +1518,30 @@ function EmbeddedPostgresProjectSettings({
               </div>
             </div>
             <div className="app-settings-modal-footer">
-              <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "delete"}>Cancel</button>
+              <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "delete"}>{t("common.cancel")}</button>
               <button
                 type="button"
                 className="btn btn--danger"
                 onClick={() => void handleDeleteProject()}
                 disabled={submitting === "delete" || !canManageProject || deleteConfirmationName.trim() !== project.name.trim()}
               >
-                {submitting === "delete" ? "Deleting..." : "Delete project"}
+                {submitting === "delete" ? t("appSettings.project.deleteProject.deleting") : t("appSettings.project.deleteProject.deleteAction")}
               </button>
             </div>
         </SettingsModal>
       ) : null}
 
       {deleteBackup ? (
-        <SettingsModal title="Delete Snapshot" onClose={() => setDeleteBackup(null)} closeDisabled={backupBusy === "delete"}>
+        <SettingsModal title={t("appSettings.project.snapshots.deleteTitle")} onClose={() => setDeleteBackup(null)} closeDisabled={backupBusy === "delete"}>
             <div className="app-settings-modal-body">
               <p className="import-project-copy">
-                Delete the snapshot from {formatPostgresDateTime(deleteBackup.createdAt)}?
+                {t("appSettings.project.snapshots.deleteBody", { date: formatPostgresDateTime(deleteBackup.createdAt) })}
               </p>
             </div>
             <div className="app-settings-modal-footer">
-              <button type="button" className="btn" onClick={() => setDeleteBackup(null)} disabled={backupBusy === "delete"}>Cancel</button>
+              <button type="button" className="btn" onClick={() => setDeleteBackup(null)} disabled={backupBusy === "delete"}>{t("common.cancel")}</button>
               <button type="button" className="btn btn--danger" onClick={() => void handleDeleteBackup()} disabled={backupBusy === "delete" || !canManageProject}>
-                {backupBusy === "delete" ? "Deleting..." : "Delete Snapshot"}
+                {backupBusy === "delete" ? t("appSettings.project.snapshots.deleting") : t("appSettings.project.snapshots.deleteAction")}
               </button>
             </div>
         </SettingsModal>
@@ -1543,7 +1549,7 @@ function EmbeddedPostgresProjectSettings({
 
       {importBackup ? (
         <SettingsModal
-          title="Restore Snapshot"
+          title={t("appSettings.project.snapshots.restoreTitle")}
           onClose={() => {
             setImportBackup(null);
             setImportBackupProjectName("");
@@ -1552,10 +1558,10 @@ function EmbeddedPostgresProjectSettings({
         >
             <div className="app-settings-modal-body">
               <p className="import-project-copy">
-                Restore the snapshot from {formatPostgresDateTime(importBackup.createdAt)} as a new project.
+                {t("appSettings.project.snapshots.restoreBody", { date: formatPostgresDateTime(importBackup.createdAt) })}
               </p>
               <label className="form-field">
-                <span>New project name</span>
+                <span>{t("appSettings.project.snapshots.newProjectName")}</span>
                 <input
                   className="form-input"
                   value={importBackupProjectName}
@@ -1565,28 +1571,28 @@ function EmbeddedPostgresProjectSettings({
                 />
               </label>
               <div className="home-restricted-list">
-                <div className="home-restricted-item"><span className="home-restricted-label">Database</span><span className="home-restricted-value">{formatPostgresBackupSize(importBackup.databaseBytes) || "0 B"}</span></div>
-                <div className="home-restricted-item"><span className="home-restricted-label">Files</span><span className="home-restricted-value">{formatPostgresBackupSize(importBackup.storageBytes) || "0 B"}</span></div>
-                <div className="home-restricted-item"><span className="home-restricted-label">Stored files</span><span className="home-restricted-value">{importBackup.storageFileCount}</span></div>
+                <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.snapshots.database")}</span><span className="home-restricted-value">{formatPostgresBackupSize(importBackup.databaseBytes) || "0 B"}</span></div>
+                <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.snapshots.files")}</span><span className="home-restricted-value">{formatPostgresBackupSize(importBackup.storageBytes) || "0 B"}</span></div>
+                <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.snapshots.storedFiles")}</span><span className="home-restricted-value">{importBackup.storageFileCount}</span></div>
               </div>
             </div>
             <div className="app-settings-modal-footer">
               <button type="button" className="btn" onClick={() => {
                 setImportBackup(null);
                 setImportBackupProjectName("");
-              }} disabled={backupBusy === "import"}>Cancel</button>
+              }} disabled={backupBusy === "import"}>{t("common.cancel")}</button>
               <button type="button" className="btn btn--primary" onClick={() => void handleImportBackup()} disabled={backupBusy === "import" || !canManageProject || !importBackupProjectName.trim()}>
-                {backupBusy === "import" ? "Restoring..." : "Restore"}
+                {backupBusy === "import" ? t("common.restoring") : t("common.restore")}
               </button>
             </div>
         </SettingsModal>
       ) : null}
 
       {importedBackupProject ? (
-        <SettingsModal title="Snapshot Restored" onClose={() => setImportedBackupProject(null)}>
+        <SettingsModal title={t("appSettings.project.snapshots.restoredTitle")} onClose={() => setImportedBackupProject(null)}>
             <div className="app-settings-modal-body">
               <p className="import-project-copy">
-                Created "{importedBackupProject.name}" as a new project.
+                {t("appSettings.project.snapshots.restoredBody", { name: importedBackupProject.name })}
               </p>
             </div>
             <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
@@ -1600,23 +1606,23 @@ function EmbeddedPostgresProjectSettings({
                     void onProjectOpened(projectToOpen);
                   }}
                 >
-                  Open Project
+                  {t("appSettings.project.snapshots.openProject")}
                 </button>
               ) : null}
-              <button type="button" className="btn btn--primary" onClick={() => setImportedBackupProject(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setImportedBackupProject(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {codebookImportResult ? (
-        <SettingsModal title="Codebook Imported" onClose={() => setCodebookImportResult(null)}>
+        <SettingsModal title={t("appSettings.project.codebook.importedTitle")} onClose={() => setCodebookImportResult(null)}>
             <div className="app-settings-modal-body">
               <p className="import-project-copy">
-                Imported {codebookImportResult.importedCount} codes.
+                {t("appSettings.project.codebook.importedBody", { count: codebookImportResult.importedCount })}
               </p>
             </div>
             <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-              <button type="button" className="btn btn--primary" onClick={() => setCodebookImportResult(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setCodebookImportResult(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}

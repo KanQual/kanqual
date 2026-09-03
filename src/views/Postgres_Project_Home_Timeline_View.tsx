@@ -12,6 +12,7 @@ import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-out
 import { CollaborationIcon, DownloadIcon, FitCornersIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon, ZoomIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SettingsModal } from "../components/SettingsModal";
+import { useI18n } from "../i18n/provider";
 import { getAppDefaults, getStoredOverrides, getStoredTheme } from "../theme";
 import type {
   PostgresObject,
@@ -856,6 +857,7 @@ function ProjectHomeTimelineSelectorCard({
   onClear: () => void;
   emptyText: string;
 }) {
+  const { t } = useI18n();
   return (
     <section className="home-project-card project-home-selector-card">
       <div
@@ -887,7 +889,7 @@ function ProjectHomeTimelineSelectorCard({
           <button
             type="button"
             className="project-home-selector-collapse-btn"
-            aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+            aria-label={collapsed ? t("projectCore.graph.expand", { title }) : t("projectCore.graph.collapse", { title })}
           >
             {collapsed ? "▶" : "▼"}
           </button>
@@ -897,16 +899,16 @@ function ProjectHomeTimelineSelectorCard({
         <>
           {rows.length > 0 ? (
             <div className="project-home-selector-actions">
-              <button type="button" className="btn" onClick={onSelectAll}>All</button>
-              <button type="button" className="btn" onClick={onClear}>Clear</button>
+              <button type="button" className="btn" onClick={onSelectAll}>{t("common.all")}</button>
+              <button type="button" className="btn" onClick={onClear}>{t("common.clear")}</button>
             </div>
           ) : null}
           <div className="users-table-wrap project-home-selector-table-wrap">
             <table className="users-table project-home-selector-table">
               <thead>
                 <tr>
-                  <th className="users-th" style={{ width: "72%" }}>Name</th>
-                  <th className="users-th" style={{ width: "28%" }}>Count</th>
+                  <th className="users-th" style={{ width: "72%" }}>{t("common.name")}</th>
+                  <th className="users-th" style={{ width: "28%" }}>{t("projectCore.entities.count")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -940,6 +942,10 @@ async function renderTimelineExportPng(
   element: HTMLElement,
   entries: PostgresProjectTimelineEntry[],
   appearance: TimelineAppearanceSettings,
+  messages: {
+    canvasUnavailable: string;
+    encodeFailed: string;
+  },
 ): Promise<Uint8Array> {
   const rect = element.getBoundingClientRect();
   const width = Math.max(1, Math.ceil(rect.width));
@@ -951,7 +957,7 @@ async function renderTimelineExportPng(
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
   const context = canvas.getContext("2d");
-  if (!context) throw new Error("Canvas export is not available.");
+  if (!context) throw new Error(messages.canvasUnavailable);
 
   context.scale(scale, scale);
   context.fillStyle = timelineExportColor(appearance.backgroundColor, "#ffffff");
@@ -1043,7 +1049,7 @@ async function renderTimelineExportPng(
   return await new Promise<Uint8Array>((resolve, reject) => {
     canvas.toBlob(async (nextBlob) => {
       if (!nextBlob) {
-        reject(new Error("Timeline PNG could not be encoded."));
+        reject(new Error(messages.encodeFailed));
         return;
       }
       resolve(new Uint8Array(await nextBlob.arrayBuffer()));
@@ -1137,6 +1143,7 @@ export function PostgresProjectHomeTimelineView({
     groupId: string | null;
   }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<TimelineController | null>(null);
   const createControlRef = useRef<HTMLDivElement | null>(null);
@@ -1224,7 +1231,7 @@ export function PostgresProjectHomeTimelineView({
     if (!groupModalDraft || groupModalSaving) return;
     const name = groupModalName.trim();
     if (!name) {
-      setGroupModalError("Timeline group name is required.");
+      setGroupModalError(t("projectCore.timeline.groupNameRequired"));
       return;
     }
     setGroupModalSaving(true);
@@ -2076,6 +2083,10 @@ export function PostgresProjectHomeTimelineView({
         timelineElement,
         visibleTimelineEntries,
         timelineAppearance,
+        {
+          canvasUnavailable: t("projectCore.timeline.exportUnavailable"),
+          encodeFailed: t("projectCore.timeline.exportEncodeFailed"),
+        },
       );
       await writeFile(path, pngBytes);
     } catch (error) {
@@ -2099,7 +2110,7 @@ export function PostgresProjectHomeTimelineView({
           setCreateMenuOpen((current) => !current);
         }}
         aria-expanded={createMenuOpen}
-        aria-label={createMenuOpen ? "Close create menu" : "Create timeline item"}
+        aria-label={createMenuOpen ? t("projectCore.timeline.closeCreateMenu") : t("projectCore.timeline.createTimelineItem")}
       >
         <PlusIcon className="project-home-canvas-create-icon" />
       </button>
@@ -2114,8 +2125,8 @@ export function PostgresProjectHomeTimelineView({
               handleCreateTimelineGroup();
             }}
             disabled={!canManageSources}
-            aria-label="Add group"
-            title="Group"
+            aria-label={t("projectCore.timeline.addGroup")}
+            title={t("projectCore.timeline.group")}
           >
             <CollaborationIcon className="project-home-canvas-create-action-icon" />
           </button>
@@ -2130,8 +2141,8 @@ export function PostgresProjectHomeTimelineView({
               }}
               disabled={!canManageSources}
               aria-expanded={createItemMenuOpen}
-              aria-label={createItemMenuOpen ? "Close new item menu" : "Add item"}
-              title="Item"
+              aria-label={createItemMenuOpen ? t("projectCore.timeline.closeNewItemMenu") : t("projectCore.timeline.addItem")}
+              title={t("projectCore.timeline.addItem")}
             >
               <PlusIcon className="project-home-canvas-create-action-icon" />
             </button>
@@ -2146,8 +2157,8 @@ export function PostgresProjectHomeTimelineView({
                     handleCreateTimelineSource();
                   }}
                   disabled={!canManageSources}
-                  aria-label="Add source"
-                  title="Source"
+                  aria-label={t("projectCore.graph.addSource")}
+                  title={t("projectCore.entities.source")}
                 >
                   <SourceIcon className="project-home-canvas-create-action-icon" />
                 </button>
@@ -2160,8 +2171,8 @@ export function PostgresProjectHomeTimelineView({
                     handleCreateTimelineObject();
                   }}
                   disabled={!canManageSources}
-                  aria-label="Add object"
-                  title="Object"
+                  aria-label={t("projectCore.graph.addObject")}
+                  title={t("projectCore.entities.object")}
                 >
                   <ObjectIcon className="project-home-canvas-create-action-icon" />
                 </button>
@@ -2174,8 +2185,8 @@ export function PostgresProjectHomeTimelineView({
                     handleCreateTimelineRelationship();
                   }}
                   disabled={!canManageSources}
-                  aria-label="Add relationship"
-                  title="Relationship"
+                  aria-label={t("projectCore.graph.addRelationship")}
+                  title={t("projectCore.entities.relationship")}
                 >
                   <RelationshipIcon className="project-home-canvas-create-action-icon" />
                 </button>
@@ -2190,7 +2201,7 @@ export function PostgresProjectHomeTimelineView({
   const renderTimelineControlCluster = (embedded = false) => (
     <div
       className={`${embedded ? "" : "postgres-explore-canvas-controls "}project-home-timeline-controls`}
-      aria-label="Timeline controls"
+      aria-label={t("projectCore.timeline.controls")}
     >
       <div className="project-home-timeline-filter-control" ref={timelineFilterControlRef}>
         <button
@@ -2202,8 +2213,8 @@ export function PostgresProjectHomeTimelineView({
             setTimelineFilterMenuOpen((current) => !current);
           }}
           aria-expanded={timelineFilterMenuOpen}
-          aria-label={timelineFilterMenuOpen ? "Hide timeline filters" : "Show timeline filters"}
-          title="Filter"
+          aria-label={timelineFilterMenuOpen ? t("projectCore.timeline.hideFilters") : t("projectCore.timeline.showFilters")}
+          title={t("projectCore.timeline.filter")}
         >
           <FilterIcon className="postgres-explore-canvas-control-icon" />
         </button>
@@ -2211,34 +2222,34 @@ export function PostgresProjectHomeTimelineView({
           <div className="project-home-filter-drawer project-home-timeline-filter-menu">
             <div className="home-primary-column postgres-experiment-home-primary-column project-home-selector-column project-home-selector-column--drawer">
               <ProjectHomeTimelineSelectorCard
-                title="Sources"
+                title={t("projectCore.entities.sources")}
                 count={timelineSourceKindSummaries.reduce((total, summary) => total + summary.count, 0)}
                 collapsed={timelineFilterCollapsedSections.has("sources")}
                 rows={timelineSourceRows}
                 onToggleCollapsed={() => toggleTimelineFilterSectionCollapsed("sources")}
                 onSelectAll={() => setTimelineSourceKinds(new Set())}
                 onClear={() => setTimelineSourceKinds(new Set(["__none"]))}
-                emptyText="No timeline sources yet."
+                emptyText={t("projectCore.timeline.noTimelineSources")}
               />
               <ProjectHomeTimelineSelectorCard
-                title="Objects"
+                title={t("projectCore.entities.objects")}
                 count={timelineObjectTypeSummaries.reduce((total, summary) => total + summary.count, 0)}
                 collapsed={timelineFilterCollapsedSections.has("objects")}
                 rows={timelineObjectRows}
                 onToggleCollapsed={() => toggleTimelineFilterSectionCollapsed("objects")}
                 onSelectAll={() => setTimelineObjectTypeIds(new Set())}
                 onClear={() => setTimelineObjectTypeIds(new Set(["__none"]))}
-                emptyText="No timeline objects yet."
+                emptyText={t("projectCore.timeline.noTimelineObjects")}
               />
               <ProjectHomeTimelineSelectorCard
-                title="Relationships"
+                title={t("projectCore.entities.relationships")}
                 count={timelineRelationshipTypeSummaries.reduce((total, summary) => total + summary.count, 0)}
                 collapsed={timelineFilterCollapsedSections.has("relationships")}
                 rows={timelineRelationshipRows}
                 onToggleCollapsed={() => toggleTimelineFilterSectionCollapsed("relationships")}
                 onSelectAll={() => setTimelineRelationshipTypeIds(new Set())}
                 onClear={() => setTimelineRelationshipTypeIds(new Set(["__none"]))}
-                emptyText="No timeline relationships yet."
+                emptyText={t("projectCore.timeline.noTimelineRelationships")}
               />
             </div>
           </div>
@@ -2254,15 +2265,15 @@ export function PostgresProjectHomeTimelineView({
             setTimelineZoomMenuOpen((current) => !current);
           }}
           aria-expanded={timelineZoomMenuOpen}
-          aria-label={timelineZoomMenuOpen ? "Hide zoom control" : "Show zoom control"}
-          title="Zoom"
+          aria-label={timelineZoomMenuOpen ? t("projectCore.timeline.hideZoom") : t("projectCore.timeline.showZoom")}
+          title={t("projectCore.timeline.zoom")}
         >
           <ZoomIcon className="postgres-explore-canvas-control-icon" />
         </button>
         {timelineZoomMenuOpen ? (
           <div className="postgres-explore-zoom-menu">
             <label className="postgres-explore-zoom-slider-label" htmlFor="project-home-timeline-zoom-slider">
-              <span>Zoom</span>
+              <span>{t("projectCore.timeline.zoom")}</span>
               <strong>{timelineZoomPercent}%</strong>
             </label>
             <input
@@ -2281,8 +2292,8 @@ export function PostgresProjectHomeTimelineView({
               className="btn btn--ghost postgres-explore-zoom-fit-btn"
               onClick={fitTimeline}
               disabled={visibleTimelineEntries.length === 0}
-              aria-label="Fit timeline"
-              title="Fit timeline"
+              aria-label={t("projectCore.timeline.fit")}
+              title={t("projectCore.timeline.fit")}
             >
               <FitCornersIcon className="postgres-explore-canvas-control-icon" />
             </button>
@@ -2294,8 +2305,8 @@ export function PostgresProjectHomeTimelineView({
         className="btn btn--ghost"
         onClick={() => void exportTimelinePng()}
         disabled={timelineExportBusy || visibleTimelineEntries.length === 0}
-        aria-label="Export timeline"
-        title="Export"
+        aria-label={t("projectCore.timeline.exportTimeline")}
+        title={t("projectCore.timeline.export")}
       >
         <DownloadIcon className="postgres-explore-canvas-control-icon" />
       </button>
@@ -2325,8 +2336,8 @@ export function PostgresProjectHomeTimelineView({
           </div>
           <p className="project-home-timeline-empty-text">
             {mappedDefinitionsCount === 0
-              ? "Add sources, objects, relationships, or codes, then map timeline fields to display them here."
-              : "Add start dates to mapped timeline fields to display items here."}
+              ? t("projectCore.timeline.emptyUnmapped")
+              : t("projectCore.timeline.emptyMapped")}
           </p>
         </div>
       ) : (
@@ -2364,7 +2375,7 @@ export function PostgresProjectHomeTimelineView({
             ) : null}
             {!canManageSources ? renderTimelineControlCluster() : null}
             {visibleTimelineEntries.length === 0 ? (
-              <p className="project-home-timeline-filter-empty">No timeline items match the current filters.</p>
+              <p className="project-home-timeline-filter-empty">{t("projectCore.timeline.noItemsMatch")}</p>
             ) : null}
             {timelineExportError ? (
               <p className="project-home-timeline-export-error">{timelineExportError}</p>
@@ -2374,42 +2385,42 @@ export function PostgresProjectHomeTimelineView({
       )}
       {groupModalDraft ? (
         <SettingsModal
-          title={groupModalDraft === "new" ? "New Timeline Group" : "Edit Timeline Group"}
+          title={groupModalDraft === "new" ? t("projectCore.timeline.newGroupTitle") : t("projectCore.timeline.editGroupTitle")}
           onClose={() => setGroupModalDraft(null)}
           closeDisabled={groupModalSaving}
         >
           <div className="app-settings-modal-body">
-            <div className="segmented-control modal-segmented-control" role="tablist" aria-label="Timeline group settings">
+            <div className="segmented-control modal-segmented-control" role="tablist" aria-label={t("projectCore.timeline.groupSettings")}>
               <button
                 type="button"
                 className={groupModalTab === "details" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => setGroupModalTab("details")}
               >
-                Details
+                {t("sharedModals.tabs.details")}
               </button>
               <button
                 type="button"
                 className={groupModalTab === "appearance" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => setGroupModalTab("appearance")}
               >
-                Appearance
+                {t("projectCore.timeline.appearance")}
               </button>
               <button
                 type="button"
                 className={groupModalTab === "items" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                 onClick={() => setGroupModalTab("items")}
               >
-                Items
+                {t("projectCore.timeline.items")}
               </button>
             </div>
             {groupModalTab === "details" ? (
               <>
                 <label className="form-group">
-                  <span className="form-label">Name</span>
+                  <span className="form-label">{t("common.name")}</span>
                   <input className="form-input" value={groupModalName} onChange={(event) => setGroupModalName(event.target.value)} />
                 </label>
                 <label className="form-group">
-                  <span className="form-label">Description</span>
+                  <span className="form-label">{t("common.description")}</span>
                   <textarea className="form-input" rows={3} value={groupModalDescription} onChange={(event) => setGroupModalDescription(event.target.value)} />
                 </label>
               </>
@@ -2418,7 +2429,7 @@ export function PostgresProjectHomeTimelineView({
                   <div className="timeline-group-items-layout">
                     <div className="timeline-group-items-controls">
                       <label className="form-label">
-                        Background Color
+                        {t("projectCore.timeline.backgroundColor")}
                         <div className="timeline-group-color-control">
                           <input
                             className="form-input form-input--color"
@@ -2434,7 +2445,7 @@ export function PostgresProjectHomeTimelineView({
                         </div>
                       </label>
                       <label className="form-label timeline-group-opacity-control">
-                        Background Transparency
+                        {t("projectCore.timeline.backgroundTransparency")}
                         <div className="timeline-group-slider-row">
                           <input
                             className="form-range"
@@ -2449,8 +2460,8 @@ export function PostgresProjectHomeTimelineView({
                         </div>
                       </label>
                     </div>
-                    <div className="timeline-group-item-preview-card" aria-label="Timeline group preview">
-                      <span className="form-label">Preview</span>
+                    <div className="timeline-group-item-preview-card" aria-label={t("projectCore.timeline.groupPreview")}>
+                      <span className="form-label">{t("common.preview")}</span>
                       <div
                         className="timeline-group-item-preview-row"
                         style={{
@@ -2464,7 +2475,7 @@ export function PostgresProjectHomeTimelineView({
                         }}
                       >
                         <div className="timeline-group-item-preview-label">
-                          {groupModalName.trim() || "Group"}
+                          {groupModalName.trim() || t("projectCore.timeline.groupFallback")}
                         </div>
                         <div className="timeline-group-item-preview-track">
                           <div
@@ -2480,7 +2491,7 @@ export function PostgresProjectHomeTimelineView({
                               borderColor: normalizeTimelineColor(groupModalOutlineColor, TIMELINE_DEFAULT_GROUP_COLOR),
                             }}
                           >
-                            Timeline Item
+                            {t("projectCore.timeline.timelineItem")}
                           </div>
                         </div>
                       </div>
@@ -2492,7 +2503,7 @@ export function PostgresProjectHomeTimelineView({
                   <div className="timeline-group-items-layout">
                     <div className="timeline-group-items-controls">
                       <label className="form-label">
-                        Outline
+                        {t("sharedModals.graphics.outline")}
                         <div className="timeline-group-color-control">
                           <input
                             className="form-input form-input--color"
@@ -2508,8 +2519,8 @@ export function PostgresProjectHomeTimelineView({
                         </div>
                       </label>
                       <div className="timeline-group-setting-row">
-                        <span className="form-label">Item Text Size</span>
-                        <div className="text-size-controls timeline-group-setting-control" aria-label="Timeline group item text size">
+                        <span className="form-label">{t("projectCore.timeline.itemTextSize")}</span>
+                        <div className="text-size-controls timeline-group-setting-control" aria-label={t("projectCore.timeline.itemTextSizeAria")}>
                           <button
                             type="button"
                             className="text-size-control-btn text-size-control-btn--decrease"
@@ -2518,12 +2529,12 @@ export function PostgresProjectHomeTimelineView({
                               setGroupModalTextSize(TIMELINE_GROUP_TEXT_SIZE_ORDER[Math.max(0, currentIndex - 1)] ?? "small");
                             }}
                             disabled={groupModalTextSize === "small"}
-                            aria-label="Decrease item text size"
+                            aria-label={t("projectCore.timeline.decreaseItemTextSize")}
                           >
                             A
                           </button>
                           <span className="text-size-control-value">
-                            {TIMELINE_GROUP_TEXT_SIZE_OPTIONS.find((option) => option.value === groupModalTextSize)?.label ?? "Regular"}
+                            {TIMELINE_GROUP_TEXT_SIZE_OPTIONS.find((option) => option.value === groupModalTextSize)?.label ?? t("projectCore.timeline.regular")}
                           </span>
                           <button
                             type="button"
@@ -2533,14 +2544,14 @@ export function PostgresProjectHomeTimelineView({
                               setGroupModalTextSize(TIMELINE_GROUP_TEXT_SIZE_ORDER[Math.min(TIMELINE_GROUP_TEXT_SIZE_ORDER.length - 1, currentIndex + 1)] ?? "large");
                             }}
                             disabled={groupModalTextSize === "large"}
-                            aria-label="Increase item text size"
+                            aria-label={t("projectCore.timeline.increaseItemTextSize")}
                           >
                             A
                           </button>
                         </div>
                       </div>
                       <label className="form-label">
-                        Item Text Color
+                        {t("projectCore.timeline.itemTextColor")}
                         <div className="timeline-group-color-control">
                           <input
                             className="form-input form-input--color"
@@ -2556,8 +2567,8 @@ export function PostgresProjectHomeTimelineView({
                         </div>
                       </label>
                       <div className="timeline-group-setting-row">
-                        <span className="form-label">Item Fill</span>
-                        <div className="segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two timeline-group-setting-control timeline-group-fill-selector" role="tablist" aria-label="Timeline group item fill">
+                        <span className="form-label">{t("projectCore.timeline.itemFill")}</span>
+                        <div className="segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two timeline-group-setting-control timeline-group-fill-selector" role="tablist" aria-label={t("projectCore.timeline.itemFillAria")}>
                           {TIMELINE_GROUP_FILL_OPTIONS.map((option) => (
                             <button
                               key={option.value}
@@ -2572,7 +2583,7 @@ export function PostgresProjectHomeTimelineView({
                       </div>
                       {groupModalItemFill === "filled" ? (
                         <label className="form-label">
-                          Fill
+                          {t("sharedModals.graphics.fill")}
                           <div className="timeline-group-color-control">
                             <input
                               className="form-input form-input--color"
@@ -2590,7 +2601,7 @@ export function PostgresProjectHomeTimelineView({
                       ) : null}
                       {groupModalItemFill === "filled" ? (
                         <div className="timeline-group-setting-row">
-                          <span className="form-label">Fill Transparency</span>
+                          <span className="form-label">{t("sharedModals.graphics.fillTransparency")}</span>
                           <div className="timeline-group-slider-row">
                             <input
                               className="form-range"
@@ -2606,8 +2617,8 @@ export function PostgresProjectHomeTimelineView({
                         </div>
                       ) : null}
                     </div>
-                    <div className="timeline-group-item-preview-card" aria-label="Timeline item preview">
-                      <span className="form-label">Preview</span>
+                    <div className="timeline-group-item-preview-card" aria-label={t("projectCore.timeline.itemPreview")}>
+                      <span className="form-label">{t("common.preview")}</span>
                       <div
                         className="timeline-group-item-preview-row"
                         style={{
@@ -2621,7 +2632,7 @@ export function PostgresProjectHomeTimelineView({
                         }}
                       >
                         <div className="timeline-group-item-preview-label">
-                          {groupModalName.trim() || "Group"}
+                          {groupModalName.trim() || t("projectCore.timeline.groupFallback")}
                         </div>
                         <div className="timeline-group-item-preview-track">
                           <div
@@ -2638,7 +2649,7 @@ export function PostgresProjectHomeTimelineView({
                               color: normalizeTimelineColor(groupModalItemTextColor, TIMELINE_DEFAULT_ITEM_TEXT_COLOR),
                             }}
                           >
-                            Timeline Item
+                            {t("projectCore.timeline.timelineItem")}
                           </div>
                         </div>
                       </div>
@@ -2650,10 +2661,10 @@ export function PostgresProjectHomeTimelineView({
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn" onClick={() => setGroupModalDraft(null)} disabled={groupModalSaving}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button type="button" className="btn btn--primary" onClick={submitTimelineGroupModal} disabled={groupModalSaving || !groupModalName.trim()}>
-              {groupModalSaving ? "Saving..." : "Save"}
+              {groupModalSaving ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </SettingsModal>
@@ -2676,7 +2687,7 @@ export function PostgresProjectHomeTimelineView({
                 openTimelineGroupModal(contextGroup);
               }}
             >
-              Edit
+              {t("common.edit")}
             </button>
             <button
               type="button"
@@ -2687,7 +2698,7 @@ export function PostgresProjectHomeTimelineView({
                 void deleteTimelineGroup(contextGroup);
               }}
             >
-              {deletingGroupId === contextGroup.id ? "Deleting..." : "Delete"}
+              {deletingGroupId === contextGroup.id ? t("projectCore.timeline.deleting") : t("common.delete")}
             </button>
           </div>
         );
@@ -2705,7 +2716,7 @@ export function PostgresProjectHomeTimelineView({
             disabled={!canManageSources}
             onClick={() => handleCreateTimelineSource(timelineBackgroundContextMenu.timelineStart)}
           >
-            New source
+            {t("projectCore.timeline.newSource")}
           </button>
           <button
             type="button"
@@ -2713,7 +2724,7 @@ export function PostgresProjectHomeTimelineView({
             disabled={!canManageSources}
             onClick={() => handleCreateTimelineObject(timelineBackgroundContextMenu.timelineStart)}
           >
-            New object
+            {t("projectCore.timeline.newObject")}
           </button>
           <button
             type="button"
@@ -2721,7 +2732,7 @@ export function PostgresProjectHomeTimelineView({
             disabled={!canManageSources}
             onClick={() => handleCreateTimelineRelationship(timelineBackgroundContextMenu.timelineStart)}
           >
-            New relationship
+            {t("projectCore.timeline.newRelationship")}
           </button>
           <button
             type="button"
@@ -2731,19 +2742,19 @@ export function PostgresProjectHomeTimelineView({
               setTimelineAppearanceModalOpen(true);
             }}
           >
-            Edit timeline
+            {t("projectCore.timeline.editTimeline")}
           </button>
         </div>
       ) : null}
       {timelineAppearanceModalOpen ? (
         <SettingsModal
-          title="Edit Timeline"
+          title={t("projectCore.timeline.editTimelineTitle")}
           onClose={() => setTimelineAppearanceModalOpen(false)}
         >
           <div className="form app-settings-modal-body">
             <div className="timeline-appearance-grid">
               <label className="form-label">
-                Background
+                {t("projectCore.timeline.background")}
                 <div className="timeline-group-color-control">
                   <input
                     className="form-input form-input--color"
@@ -2767,7 +2778,7 @@ export function PostgresProjectHomeTimelineView({
                 </div>
               </label>
               <label className="form-label">
-                Lines
+                {t("projectCore.timeline.lines")}
                 <div className="timeline-group-color-control">
                   <input
                     className="form-input form-input--color"
@@ -2792,26 +2803,26 @@ export function PostgresProjectHomeTimelineView({
               </label>
             </div>
             <div className="timeline-group-setting-row">
-              <span className="form-label">Font size</span>
-              <div className="text-size-controls timeline-group-setting-control" aria-label="Timeline font size">
+              <span className="form-label">{t("projectCore.timeline.fontSize")}</span>
+              <div className="text-size-controls timeline-group-setting-control" aria-label={t("projectCore.timeline.fontSizeAria")}>
                 <button
                   type="button"
                   className="text-size-control-btn text-size-control-btn--decrease"
                   onClick={() => adjustTimelineAppearanceFontSize(-1)}
                   disabled={timelineAppearance.fontSize === "small"}
-                  aria-label="Decrease timeline font size"
+                  aria-label={t("projectCore.timeline.decreaseFontSize")}
                 >
                   A
                 </button>
                 <span className="text-size-control-value" aria-live="polite">
-                  {TIMELINE_GROUP_TEXT_SIZE_OPTIONS.find((option) => option.value === timelineAppearance.fontSize)?.label ?? "Regular"}
+                  {TIMELINE_GROUP_TEXT_SIZE_OPTIONS.find((option) => option.value === timelineAppearance.fontSize)?.label ?? t("projectCore.timeline.regular")}
                 </span>
                 <button
                   type="button"
                   className="text-size-control-btn text-size-control-btn--increase"
                   onClick={() => adjustTimelineAppearanceFontSize(1)}
                   disabled={timelineAppearance.fontSize === "large"}
-                  aria-label="Increase timeline font size"
+                  aria-label={t("projectCore.timeline.increaseFontSize")}
                 >
                   A
                 </button>
@@ -2828,10 +2839,10 @@ export function PostgresProjectHomeTimelineView({
                 saveTimelineAppearanceSettings(defaults);
               }}
             >
-              Reset
+              {t("common.reset")}
             </button>
             <button type="button" className="btn btn--primary" onClick={() => setTimelineAppearanceModalOpen(false)}>
-              Done
+              {t("common.done")}
             </button>
           </div>
         </SettingsModal>

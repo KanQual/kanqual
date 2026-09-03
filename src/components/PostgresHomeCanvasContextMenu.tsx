@@ -1,4 +1,5 @@
 import type { PostgresCanvasPoint } from "../lib/postgres";
+import { useI18n } from "../i18n/provider";
 
 export type PostgresHomeCanvasContextKind = "background" | "source" | "object" | "relationship" | "code" | "annotation";
 
@@ -37,6 +38,7 @@ export function PostgresHomeCanvasContextMenu(props: {
   deleteLabel?: string;
   deleteDisabledTitle?: string;
 }) {
+  const { t } = useI18n();
   const {
     menu,
     canManageSources,
@@ -53,8 +55,8 @@ export function PostgresHomeCanvasContextMenu(props: {
     onEditItem,
     onRemoveFromGroup,
     onDeleteItem,
-    deleteLabel = "Delete",
-    deleteDisabledTitle = "Coders and viewers cannot delete canvas items.",
+    deleteLabel = t("common.delete"),
+    deleteDisabledTitle = t("sharedModals.canvas.deleteDisabled"),
   } = props;
   const canEditItem = menu.kind === "code" ? canManageAnnotations : canManageSources;
   const canRemoveFromGroup = canManageSources && menu.timelineGroupId?.startsWith("group:");
@@ -77,7 +79,7 @@ export function PostgresHomeCanvasContextMenu(props: {
               onCreateSource();
             }}
           >
-            Add source
+            {t("sharedModals.canvas.addSource")}
           </button>
           <button
             type="button"
@@ -89,7 +91,7 @@ export function PostgresHomeCanvasContextMenu(props: {
               onCreateObject(preferredPosition);
             }}
           >
-            Add object
+            {t("sharedModals.canvas.addObject")}
           </button>
           <button
             type="button"
@@ -100,7 +102,7 @@ export function PostgresHomeCanvasContextMenu(props: {
               onCreateRelationship();
             }}
           >
-            Add relationship
+            {t("sharedModals.canvas.addRelationship")}
           </button>
           <button
             type="button"
@@ -111,7 +113,7 @@ export function PostgresHomeCanvasContextMenu(props: {
               onCreateCode();
             }}
           >
-            Add code
+            {t("sharedModals.canvas.addCode")}
           </button>
           <button
             type="button"
@@ -121,16 +123,16 @@ export function PostgresHomeCanvasContextMenu(props: {
               onEditCanvas();
             }}
           >
-            Edit canvas
+            {t("sharedModals.canvas.editTitle")}
           </button>
         </>
       ) : (
         <>
           <button type="button" className="context-menu-item" onClick={() => onViewDetails(menu)}>
-            View details
+            {t("sharedModals.canvas.viewDetails")}
           </button>
           {menu.kind === "annotation" ? (
-            <div className="context-menu-item context-menu-item--disabled">Edit</div>
+            <div className="context-menu-item context-menu-item--disabled">{t("common.edit")}</div>
           ) : (
             <button
               type="button"
@@ -138,7 +140,7 @@ export function PostgresHomeCanvasContextMenu(props: {
               disabled={!canEditItem}
               onClick={() => onEditItem(menu)}
             >
-              Edit
+              {t("common.edit")}
             </button>
           )}
           {menu.timelineGroupId !== undefined ? (
@@ -148,7 +150,7 @@ export function PostgresHomeCanvasContextMenu(props: {
               disabled={!canRemoveFromGroup}
               onClick={() => onRemoveFromGroup(menu)}
             >
-              Remove from group
+              {t("sharedModals.canvas.removeFromGroup")}
             </button>
           ) : null}
           {hasDeleteTarget ? (

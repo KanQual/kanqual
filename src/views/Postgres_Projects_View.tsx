@@ -15,6 +15,7 @@ import {
 } from "../lib/postgres";
 import { LogoutIcon } from "../components/AppIcons";
 import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
+import { useI18n } from "../i18n/provider";
 import {
   clearGettingStartedHandoff,
   normalizeGettingStartedState,
@@ -40,15 +41,15 @@ function formatProjectLastLogin(value: string): string {
   }).format(new Date(value));
 }
 
-function formatProjectLastLoginBadge(value: string): string {
+function formatProjectLastLoginBadge(value: string, t: ReturnType<typeof useI18n>["t"]): string {
   const date = new Date(value);
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const dayDelta = Math.floor((startOfToday - startOfDate) / 86_400_000);
-  if (dayDelta === 0) return "Today";
-  if (dayDelta === 1) return "Yesterday";
-  if (dayDelta > 1 && dayDelta < 7) return `${dayDelta} days ago`;
+  if (dayDelta === 0) return t("auth.relativeTime.today");
+  if (dayDelta === 1) return t("auth.relativeTime.yesterday");
+  if (dayDelta > 1 && dayDelta < 7) return t("auth.relativeTime.daysAgo", { days: dayDelta });
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
@@ -97,6 +98,7 @@ export function PostgresProjectsView({
   onSignOut,
   renderProjectHome,
 }: PostgresProjectsViewProps) {
+  const { t } = useI18n();
   const [projects, setProjects] = useState<PostgresProject[]>([]);
   const [recentProjects, setRecentProjects] = useState<PostgresRecentProject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -307,15 +309,15 @@ export function PostgresProjectsView({
           type="button"
           className="projects-logout-button"
           onClick={() => void onSignOut()}
-          aria-label="Sign out"
-          title="Sign out"
+          aria-label={t("common.signOut")}
+          title={t("common.signOut")}
         >
           <LogoutIcon className="projects-logout-icon" />
         </button>
         <div className="projects-view">
           <header className="view-header">
             <div className="view-title-with-help">
-              <h1>Projects</h1>
+              <h1>{t("postgresProjects.title")}</h1>
             </div>
           </header>
 
@@ -323,23 +325,23 @@ export function PostgresProjectsView({
 
           {gettingStartedHandoff?.step === "chooseProject" ? (
             <GettingStartedGuideCallout
-              title="Continue the guide"
+              title={t("app.gettingStarted.continueTitle")}
               onDismiss={() => {
                 clearGettingStartedHandoff();
                 setGettingStartedHandoff(null);
               }}
             >
-              <p>Click the project you created as the administrator.</p>
+              <p>{t("app.gettingStarted.chooseProjectBody")}</p>
             </GettingStartedGuideCallout>
           ) : null}
 
           {loading ? (
             <div className="empty-state">
-              <p>Loading PostgreSQL projects...</p>
+              <p>{t("postgresProjects.loading")}</p>
             </div>
           ) : projects.length === 0 ? (
             <div className="empty-state">
-              <p>No projects yet</p>
+              <p>{t("postgresProjects.empty")}</p>
             </div>
           ) : (
             <div className="project-selection-card-list">
@@ -360,13 +362,13 @@ export function PostgresProjectsView({
                     <span className="project-selection-card-body">
                       <span className="project-selection-card-name">{project.name}</span>
                       <span className="project-selection-card-desc">
-                        {description || "No description"}
+                        {description || t("common.noDescription")}
                       </span>
                     </span>
                     <span className="project-selection-card-meta">
-                      <span className="project-selection-card-last-label">Last opened</span>
+                      <span className="project-selection-card-last-label">{t("postgresProjects.lastOpened")}</span>
                       <span className="project-selection-card-last-badge">
-                        {recentProject?.openedAt ? formatProjectLastLoginBadge(recentProject.openedAt) : "Never"}
+                        {recentProject?.openedAt ? formatProjectLastLoginBadge(recentProject.openedAt, t) : t("common.never")}
                       </span>
                       {recentProject?.openedAt ? (
                         <span className="project-selection-card-last-time">

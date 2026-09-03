@@ -23,12 +23,14 @@ import {
   type ListFormatterOptions,
 } from "./formatters";
 import { detectSystemLocale, resolveSupportedLocale } from "./localeDetection";
+import { asterisk } from "./locales/asterisk";
 import { en } from "./locales/en";
 import { formatIcuMessage } from "./messageFormat";
 import type { LocaleCode, TranslationKey, TranslationSchema, TranslationValues } from "./types";
 
 const dictionaries: Partial<Record<LocaleCode, TranslationSchema>> = {
   en,
+  asterisk,
 };
 
 const localeLoaders: Partial<Record<LocaleCode, () => Promise<TranslationSchema>>> = {};

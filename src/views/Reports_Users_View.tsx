@@ -345,23 +345,24 @@ function UserReportExportModal({
   onExportCSV: () => void;
   exportingFormat: string | null;
 }) {
+  const { t } = useI18n();
   const options = [
     {
       key: "html",
       label: "HTML",
-      description: "Can be opened in a web browser and preserves the report's readable layout.",
+      description: t("reportsUsers.exportHtmlDescription"),
       onClick: onExportHTML,
     },
     {
       key: "csv",
       label: "CSV",
-      description: "Exports report tables in a spreadsheet-friendly text format.",
+      description: t("reportsUsers.exportCsvDescription"),
       onClick: onExportCSV,
     },
   ] as const;
 
   return (
-    <SettingsModal title="Export Report" onClose={onClose} closeDisabled={!!exportingFormat} modalClassName="modal--wide">
+    <SettingsModal title={t("reportsUsers.exportTitle")} onClose={onClose} closeDisabled={!!exportingFormat} modalClassName="modal--wide">
       <div className="app-settings-modal-body">
         <div
           style={{
@@ -392,14 +393,14 @@ function UserReportExportModal({
             >
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                 <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>
-                  {exportingFormat === option.key ? "Exporting..." : option.label}
+                  {exportingFormat === option.key ? t("reportsUsers.exporting") : option.label}
                 </div>
                 <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--color-text-muted)" }}>
                   {option.description}
                 </div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                Export as {option.label}
+                {t("reportsUsers.exportAs", { format: option.label })}
               </div>
             </button>
           ))}
@@ -760,7 +761,7 @@ function CoderActivityOverTimeCard({
         <span className="users-filter-count">{visibleRows.length}</span>
       </div>
       <div style={{ display: "flex", justifyContent: "center", padding: "0 14px 10px" }}>
-        <div className="segmented-control" role="tablist" aria-label="Activity time scale" style={{ width: "fit-content" }}>
+        <div className="segmented-control" role="tablist" aria-label={t("reportsUsers.activity.overTime")} style={{ width: "fit-content" }}>
           {(["day", "week", "month"] as const).map((option) => (
             <button
               key={option}
@@ -782,7 +783,7 @@ function CoderActivityOverTimeCard({
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 18, alignItems: "center" }}>
             <div style={{ minWidth: 0, overflowX: "auto", paddingBottom: 4 }}>
-              <Suspense fallback={<div className="users-td-msg" style={{ padding: "24px 12px" }}>Loading chart...</div>}>
+              <Suspense fallback={<div className="users-td-msg" style={{ padding: "24px 12px" }}>{t("reportsUsers.empty.loadingChart")}</div>}>
                 <EChart
                   option={activityChartOption}
                   style={{
@@ -1329,11 +1330,11 @@ function CoderReportCreationPage({
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{item.name}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <label className="form-label" style={{ margin: 0 }}>
-                    Min
+                    {t("reportsUsers.filterEditors.min")}
                     <input className="form-input" type="number" value={filter.min ?? ""} disabled={isFrozen} min={stat?.minNumber ?? undefined} max={stat?.maxNumber ?? undefined} onChange={(e) => onUpdate(item.id, { min: e.target.value })} />
                   </label>
                   <label className="form-label" style={{ margin: 0 }}>
-                    Max
+                    {t("reportsUsers.filterEditors.max")}
                     <input className="form-input" type="number" value={filter.max ?? ""} disabled={isFrozen} min={stat?.minNumber ?? undefined} max={stat?.maxNumber ?? undefined} onChange={(e) => onUpdate(item.id, { max: e.target.value })} />
                   </label>
                 </div>
@@ -1346,11 +1347,11 @@ function CoderReportCreationPage({
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{item.name}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <label className="form-label" style={{ margin: 0 }}>
-                    After
+                    {t("reportsUsers.filterEditors.after")}
                     <input className="form-input" type="datetime-local" value={filter.min ?? ""} disabled={isFrozen} onChange={(e) => onUpdate(item.id, { min: e.target.value })} />
                   </label>
                   <label className="form-label" style={{ margin: 0 }}>
-                    Before
+                    {t("reportsUsers.filterEditors.before")}
                     <input className="form-input" type="datetime-local" value={filter.max ?? ""} disabled={isFrozen} onChange={(e) => onUpdate(item.id, { max: e.target.value })} />
                   </label>
                 </div>
@@ -1683,8 +1684,8 @@ function CoderReportCreationPage({
                   className="btn btn--secondary project-table-header-icon-button report-title-action-button"
                   onClick={() => setShowExportModal(true)}
                   disabled={!isFrozen || !canExportReports}
-                  title={!isFrozen ? "Only saved reports can be exported" : "Export Report"}
-                  aria-label="Export Report"
+                  title={!isFrozen ? t("reportsUsers.exportSavedOnly") : t("reportsUsers.exportTitle")}
+                  aria-label={t("reportsUsers.exportTitle")}
                 >
                   <DownloadIcon className="project-table-header-icon" />
                 </button>
@@ -2079,7 +2080,7 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      if (!postgresProjectId) throw new Error("Reports are not available outside a project workspace.");
+      if (!postgresProjectId) throw new Error(t("reportsCommon.projectWorkspaceRequired"));
       await deletePostgresReport(postgresProjectId, confirmDelete.id);
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);

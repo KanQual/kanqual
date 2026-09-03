@@ -401,13 +401,13 @@ export function MemoEditorView({
           >
             <ArrowLeftIcon className="code-text-header-back-icon" />
           </button>
-          <h1>Memo Builder</h1>
+          <h1>{t("analysisMemos.editor.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setBuilderHelpOpen(true)}
-            title="Open memo builder help"
-            aria-label="Open memo builder help"
+            title={t("analysisMemos.editor.openHelp")}
+            aria-label={t("analysisMemos.editor.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -426,18 +426,18 @@ export function MemoEditorView({
       {error && <div className="error-banner">{error}</div>}
 
       {builderHelpOpen ? (
-        <SettingsModal title="Memo Builder Help" onClose={() => setBuilderHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("analysisMemos.editor.helpTitle")} onClose={() => setBuilderHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Write a memo, attach relevant project material, and save it as analytic context.
+              {t("analysisMemos.editor.legacyHelpLine1")}
             </p>
             <p className="users-guide-copy">
-              Use the association panels to connect cases, documents, codes, annotations, and attributes to the memo before saving.
+              {t("analysisMemos.editor.legacyHelpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setBuilderHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -797,7 +797,7 @@ export function MemoEditorView({
                     {expandable && expandedSummaryCards.has(key) && (
                       <div style={{ marginTop: 10, paddingTop: 8, borderTop: "var(--border-width) solid var(--color-border)", maxHeight: 130, overflowY: "auto", textAlign: "left" }}>
                         {items.length === 0 ? (
-                          <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>None.</div>
+                          <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>{t("analysisMemos.empty.none")}</div>
                         ) : (
                           items.map((item) => (
                             <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, lineHeight: 1.4, padding: "2px 0" }}>
@@ -1220,14 +1220,14 @@ ${annDetails.length > 0 ? `<section><h2>${escHtml(t("analysisMemos.detail.annota
       </div>
       <div className="case-detail-topbar">
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={() => setShowExportModal(true)}>Export</button>
+          <button className="btn" onClick={() => setShowExportModal(true)}>{t("analysisMemos.actions.export")}</button>
           <button
             className="btn btn--primary"
             onClick={onEdit}
             disabled={!canEdit}
-            title={!canEdit ? "You do not have permission to edit this memo" : undefined}
+            title={!canEdit ? t("analysisMemos.editor.editDenied") : undefined}
           >
-            Edit
+            {t("analysisMemos.actions.edit")}
           </button>
         </div>
       </div>
@@ -1291,7 +1291,7 @@ ${annDetails.length > 0 ? `<section><h2>${escHtml(t("analysisMemos.detail.annota
                 {expandable && expandedSummaryCards.has(key) && (
                   <div style={{ marginTop: 10, paddingTop: 8, borderTop: "var(--border-width) solid var(--color-border)", maxHeight: 130, overflowY: "auto", textAlign: "left" }}>
                     {names.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>None.</div>
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)", textAlign: "center" }}>{t("analysisMemos.empty.none")}</div>
                     ) : (
                       names.map((name, i) => (
                         <div key={i} style={{ fontSize: 12, lineHeight: 1.4, padding: "2px 0" }}>{name}</div>

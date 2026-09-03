@@ -1168,6 +1168,18 @@ mod postgres_auth_regression_tests {
     }
 
     #[test]
+    fn login_failure_classifier_does_not_treat_bad_password_as_unavailable() {
+        let psql_bad_password = "psql: error: connection to server at \"127.0.0.1\", port 5432 failed: FATAL:  password authentication failed for user \"kanqual_admin\"";
+        assert!(!postgres_login_failure_is_runtime_unavailable(psql_bad_password));
+    }
+
+    #[test]
+    fn login_failure_classifier_treats_refused_connection_as_unavailable() {
+        let refused = "psql: error: connection to server at \"127.0.0.1\", port 5432 failed: Connection refused";
+        assert!(postgres_login_failure_is_runtime_unavailable(refused));
+    }
+
+    #[test]
     fn parses_postgres_disconnection_log_line() {
         let entry = parse_postgres_server_auth_log_line(
             None,
@@ -1523,8 +1535,13 @@ fn run_psql_command_with_binary(
 
 fn postgres_login_failure_is_runtime_unavailable(message: &str) -> bool {
     let lower = message.to_lowercase();
+    if lower.contains("password authentication failed")
+        || lower.contains("authentication failed")
+        || lower.contains("role \"")
+    {
+        return false;
+    }
     lower.contains("could not connect")
-        || lower.contains("connection to server")
         || lower.contains("connection refused")
         || lower.contains("server closed the connection")
         || lower.contains("database system is starting up")
@@ -1995,6 +2012,7 @@ fn normalize_postgres_experiment_source_text_size_px(value: i32) -> i32 {
 fn normalize_postgres_experiment_locale(value: &str) -> String {
     match value.trim() {
         "en" => "en".to_string(),
+        "asterisk" => "asterisk".to_string(),
         _ => "en".to_string(),
     }
 }
@@ -34897,8 +34915,6 @@ pub fn run() {
         ))))
         .setup(|app| {
             create_configured_window(app, "main").expect("could not create main window");
-            create_configured_window(app, "splashscreen")
-                .expect("could not create splashscreen window");
 
             let app_data_dir =
                 kanqual_data_dir(&app.app_handle()).expect("could not resolve app data dir");
@@ -34917,9 +34933,6 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(250)).await;
 
-                if let Some(splash) = handle.get_webview_window("splashscreen") {
-                    splash.close().ok();
-                }
                 if let Some(main_window) = handle.get_webview_window("main") {
                     main_window.show().ok();
                 }

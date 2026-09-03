@@ -25,7 +25,7 @@ import { getAppRuntimeInfo, joinFsPath, type AppRuntimeInfo } from "../lib/dataR
 import { DEFAULT_GETTING_STARTED_STATE, normalizeGettingStartedState, writeGettingStartedHandoff, type GettingStartedState } from "../lib/gettingStartedGuide";
 import { buildPermissionMatrixRows, type PermissionMatrixRow } from "../lib/permissionMatrix";
 import { notifyPostgresEmbeddingModelDownloadChanged } from "./App_Shell_Helpers";
-import { projectLogActionCategory, projectLogActionLabel } from "./Project_Log_View";
+import { parseProjectLogDetails, projectLogActionCategory, projectLogActionLabel, projectLogDescriptionLabel } from "./Project_Log_View";
 import {
   createPostgresAppUser,
   createPostgresProject,
@@ -264,8 +264,9 @@ function PostgresNetworkPingBadge({
   successText: string;
   errorText: string;
 }) {
-  if (result.status === "idle") return <span className="ping-badge ping-badge--idle">Not tested</span>;
-  if (result.status === "loading") return <span className="ping-badge ping-badge--idle">Testing...</span>;
+  const { t } = useI18n();
+  if (result.status === "idle") return <span className="ping-badge ping-badge--idle">{t("adminSettings.system.network.notTested")}</span>;
+  if (result.status === "loading") return <span className="ping-badge ping-badge--idle">{t("adminSettings.system.network.testing")}</span>;
   if (result.status === "success") {
     return (
       <span className="ping-badge ping-badge--ok">
@@ -317,6 +318,7 @@ function PostgresNetworkAddressCard({
   successText: string;
   errorText: string;
 }) {
+  const { t } = useI18n();
   const address = host ? `${host}:${port}` : null;
   const testDisabled = !address || disabled || ping.status === "loading";
   return (
@@ -330,14 +332,14 @@ function PostgresNetworkAddressCard({
       </div>
       <div className="network-address-card-actions">
         <code className="settings-code-line network-address-code">
-          {loading ? "Detecting..." : (address ?? "Unavailable")}
+          {loading ? t("adminSettings.system.network.detecting") : (address ?? t("adminSettings.system.network.unavailable"))}
         </code>
         <div className="network-address-card-buttons">
           <button className="btn btn--sm" type="button" disabled={!address || copyDisabled} onClick={() => address && onCopy(address)}>
-            {copied ? "Copied" : "Copy"}
+            {copied ? t("adminSettings.system.network.copied") : t("adminSettings.system.network.copy")}
           </button>
           <button className="btn btn--sm btn--primary" type="button" disabled={testDisabled} title={testDisabledReason} onClick={onTest}>
-            {ping.status === "loading" ? "Testing..." : "Test"}
+            {ping.status === "loading" ? t("adminSettings.system.network.testing") : t("adminSettings.system.network.test")}
           </button>
         </div>
       </div>
@@ -394,8 +396,16 @@ async function readDirectoryStats(path: string): Promise<DirectoryStats> {
   }
 }
 
-function formatStorageFileSummary(count: number, directory: string): string {
-  return `${count.toLocaleString()} files in ${directory}`;
+function formatStorageFileSummary(
+  count: number,
+  directory: string,
+  t: ReturnType<typeof useI18n>["t"],
+  formatNumber: ReturnType<typeof useI18n>["formatNumber"],
+): string {
+  return t("appSettings.storage.filesInDirectory", {
+    count: formatNumber(count),
+    directory,
+  });
 }
 
 function syncLegacyAppSettingsFromPostgresInstallationSettings(
@@ -481,16 +491,85 @@ function matchesAdminLogFilter(value: string | number | null | undefined, filter
   return String(value ?? "").toLowerCase().includes(trimmed.toLowerCase());
 }
 
-function yesNo(value: boolean | null | undefined): string {
+function yesNo(value: boolean | null | undefined, t: ReturnType<typeof useI18n>["t"]): string {
   if (value == null) return "-";
-  return value ? "Yes" : "No";
+  return value ? t("adminSettings.system.statuses.yes") : t("adminSettings.system.statuses.no");
 }
 
-function postgresUserLoginAccessLabel(user: PostgresAppUser): string {
-  if (!user.active) return "Disabled";
-  if (user.loginPermanentlyBlocked) return "Permanently blocked";
-  if (user.loginBlockedUntilMs && user.loginBlockedUntilMs > Date.now()) return "Temporarily blocked";
-  return "Allowed";
+function formatBundledPostgresPreflightIssue(issue: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const trimmed = issue.trim();
+  let formatted = trimmed;
+  formatted = formatted.replace(
+    /Bundled PostgreSQL runtime root is missing\./g,
+    t("adminSettings.system.database.preflightIssues.runtimeRootMissing"),
+  );
+  formatted = formatted.replace(
+    /Required bundled PostgreSQL binaries are missing\./g,
+    t("adminSettings.system.database.preflightIssues.binariesMissing"),
+  );
+  formatted = formatted.replace(
+    /Kanqual data root is not writable\./g,
+    t("adminSettings.system.database.preflightIssues.dataRootNotWritable"),
+  );
+  formatted = formatted.replace(
+    /Bundled PostgreSQL data directory is already initialized\./g,
+    t("adminSettings.system.database.preflightIssues.dataDirectoryInitialized"),
+  );
+  formatted = formatted.replace(
+    /Bundled PostgreSQL data directory exists but is not empty\./g,
+    t("adminSettings.system.database.preflightIssues.dataDirectoryNotEmpty"),
+  );
+  formatted = formatted.replace(
+    /Default PostgreSQL port (\d+) is already reachable\./g,
+    (_match, port: string) => t("adminSettings.system.database.preflightIssues.defaultPortReachable", { port }),
+  );
+  if (formatted !== trimmed) {
+    return formatted;
+  }
+  if (trimmed === "Bundled PostgreSQL runtime root is missing.") {
+    return t("adminSettings.system.database.preflightIssues.runtimeRootMissing");
+  }
+  if (trimmed === "Required bundled PostgreSQL binaries are missing.") {
+    return t("adminSettings.system.database.preflightIssues.binariesMissing");
+  }
+  if (trimmed === "Kanqual data root is not writable.") {
+    return t("adminSettings.system.database.preflightIssues.dataRootNotWritable");
+  }
+  if (trimmed === "Bundled PostgreSQL data directory is already initialized.") {
+    return t("adminSettings.system.database.preflightIssues.dataDirectoryInitialized");
+  }
+  if (trimmed === "Bundled PostgreSQL data directory exists but is not empty.") {
+    return t("adminSettings.system.database.preflightIssues.dataDirectoryNotEmpty");
+  }
+  const portMatch = trimmed.match(/^Default PostgreSQL port (\d+) is already reachable\.$/);
+  if (portMatch) {
+    return t("adminSettings.system.database.preflightIssues.defaultPortReachable", { port: portMatch[1] });
+  }
+  return issue;
+}
+
+function formatBundledPostgresPreflightIssues(issues: string[], t: ReturnType<typeof useI18n>["t"]): string {
+  return issues
+    .flatMap((issue) => issue.match(/[^.]+(?:\.|$)/g) ?? [issue])
+    .map((issue) => formatBundledPostgresPreflightIssue(issue, t))
+    .filter((issue) => issue.trim().length > 0)
+    .join(" ");
+}
+
+function formatBundledPostgresDistribution(
+  distribution: BundledPostgresStatus["paths"]["distribution"] | null | undefined,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (distribution === "installed") return t("adminSettings.system.database.distributions.installed");
+  if (distribution === "portable") return t("adminSettings.system.database.distributions.portable");
+  return distribution ?? "-";
+}
+
+function postgresUserLoginAccessLabel(user: PostgresAppUser, t: ReturnType<typeof useI18n>["t"]): string {
+  if (!user.active) return t("adminSettings.system.users.loginAccess.disabled");
+  if (user.loginPermanentlyBlocked) return t("adminSettings.system.users.loginAccess.permanentlyBlocked");
+  if (user.loginBlockedUntilMs && user.loginBlockedUntilMs > Date.now()) return t("adminSettings.system.users.loginAccess.temporarilyBlocked");
+  return t("adminSettings.system.users.loginAccess.allowed");
 }
 
 function postgresUserIsLoginBlocked(user: PostgresAppUser): boolean {
@@ -502,7 +581,7 @@ export function PostgresAdminSettingsView({
   onOpenProject,
   onSignOut,
 }: PostgresAdminSettingsViewProps) {
-  const { locale, setLocale, t } = useI18n();
+  const { locale, setLocale, t, formatNumber } = useI18n();
   const [activeModal, setActiveModal] = useState<AppSettingsModalId | null>(null);
   const [showThemeManager, setShowThemeManager] = useState(false);
   const [installationSettings, setInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
@@ -654,8 +733,8 @@ export function PostgresAdminSettingsView({
   const [auditError, setAuditError] = useState("");
   const databaseAccountStatus =
     authSession.authKind === "postgres_admin"
-      ? "PostgreSQL superuser"
-      : "App account (not PostgreSQL superuser)";
+      ? t("adminSettings.system.statuses.postgresSuperuser")
+      : t("adminSettings.system.statuses.appAccountNotSuperuser");
 
   const settingsOverviewCards: Array<{
     id: AppSettingsModalId;
@@ -673,8 +752,8 @@ export function PostgresAdminSettingsView({
     },
     {
       id: "appearance",
-      title: "Appearance",
-      description: "Adjust the interface theme, density, and text size.",
+      title: t("adminSettings.system.appearance.title"),
+      description: t("adminSettings.cards.appearance.description"),
       icon: "A",
       tone: "default" as const,
     },
@@ -687,22 +766,22 @@ export function PostgresAdminSettingsView({
     },
     {
       id: "updates",
-      title: "Back-up and Updates",
-      description: t("appSettings.overview.updates"),
+      title: t("adminSettings.cards.backupUpdates.title"),
+      description: t("adminSettings.cards.backupUpdates.description"),
       icon: "U",
       tone: "admin" as const,
     },
     {
       id: "diagnostics",
-      title: "Database",
-      description: t("appSettings.overview.diagnostics"),
+      title: t("adminSettings.cards.database.title"),
+      description: t("adminSettings.cards.database.description"),
       icon: "D",
       tone: "default" as const,
     },
     {
       id: "administratorLog",
-      title: "Administrator Log",
-      description: "Review authentication events and merged project activity.",
+      title: t("adminSettings.cards.administratorLog.title"),
+      description: t("adminSettings.cards.administratorLog.description"),
       icon: "Log",
       tone: "admin" as const,
     },
@@ -715,8 +794,8 @@ export function PostgresAdminSettingsView({
     },
     {
       id: "aiAssist",
-      title: "AI Assist",
-      description: "Control server-wide and project-level AI Assist availability.",
+      title: t("adminSettings.cards.aiAssist.title"),
+      description: t("adminSettings.cards.aiAssist.description"),
       icon: "AI",
       tone: "admin" as const,
     },
@@ -729,36 +808,36 @@ export function PostgresAdminSettingsView({
     },
     {
       id: "gettingStarted",
-      title: "Getting Started",
-      description: "Restart or dismiss the first-run guide.",
+      title: t("adminSettings.cards.gettingStarted.title"),
+      description: t("adminSettings.cards.gettingStarted.description"),
       icon: "?",
       tone: "default" as const,
     },
     {
       id: "addProject",
-      title: "Add Project",
-      description: "Create a project and assign initial project members.",
+      title: t("adminSettings.cards.addProject.title"),
+      description: t("adminSettings.cards.addProject.description"),
       icon: "+P",
       tone: "admin" as const,
     },
     {
       id: "manageProjects",
-      title: "Manage Projects",
-      description: "Open, disable, or delete project workspaces.",
+      title: t("adminSettings.cards.manageProjects.title"),
+      description: t("adminSettings.cards.manageProjects.description"),
       icon: "P",
       tone: "admin" as const,
     },
     {
       id: "addUser",
-      title: "Add User",
-      description: "Create a PostgreSQL user account.",
+      title: t("adminSettings.cards.addUser.title"),
+      description: t("adminSettings.cards.addUser.description"),
       icon: "+U",
       tone: "admin" as const,
     },
     {
       id: "manageUsers",
-      title: "Manage Users",
-      description: "Review accounts, project access, roles, and password resets.",
+      title: t("adminSettings.cards.manageUsers.title"),
+      description: t("adminSettings.cards.manageUsers.description"),
       icon: "U",
       tone: "admin" as const,
     },
@@ -772,27 +851,27 @@ export function PostgresAdminSettingsView({
   }> = [
     {
       id: "user-roles",
-      sectionHeading: "Users",
+      sectionHeading: t("adminSettings.overviewSections.users"),
       cardIds: ["addUser", "manageUsers", "permissions"],
     },
     {
       id: "projects",
-      sectionHeading: "Projects",
+      sectionHeading: t("adminSettings.overviewSections.projects"),
       cardIds: ["addProject", "manageProjects"],
     },
     {
       id: "features",
-      sectionHeading: "Features",
+      sectionHeading: t("adminSettings.overviewSections.features"),
       cardIds: ["aiAssist", "network"],
     },
     {
       id: "system",
-      sectionHeading: "System",
+      sectionHeading: t("adminSettings.overviewSections.system"),
       cardIds: ["administratorLog", "diagnostics", "storage", "updates"],
     },
     {
       id: "preferences",
-      sectionHeading: "Preferences",
+      sectionHeading: t("adminSettings.overviewSections.preferences"),
       cardIds: ["appearance", "language", "gettingStarted"],
     },
   ];
@@ -946,7 +1025,7 @@ export function PostgresAdminSettingsView({
     try {
       const tableName = adminAuditTab === "auth" ? "users" : "projects";
       const outputPath = await saveDialog({
-        title: `Export administrator ${tableName} log`,
+        title: t("adminSettings.system.logs.exportDialogTitle", { tableName }),
         defaultPath: `kanqual-administrator-${tableName}-log.csv`,
         filters: [{ name: "CSV", extensions: ["csv"] }],
       });
@@ -971,7 +1050,7 @@ export function PostgresAdminSettingsView({
               entry.projectName || entry.projectId,
               entry.userName || entry.userId || "",
               projectLogActionLabel(entry.action, t),
-              entry.label || "",
+              projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t),
             ].map(csvCell).join(",")),
           ];
       await writeTextFile(outputPath, rows.join("\n"));
@@ -1037,7 +1116,7 @@ export function PostgresAdminSettingsView({
     event.preventDefault();
     if (upgradeBackupSubmitting) return;
     if (!upgradeBackupPassword.trim()) {
-      setUpdatesError("Enter the administrator password to create a backup.");
+      setUpdatesError(t("adminSettings.system.updates.passwordRequired"));
       setUpdatesNotice("");
       return;
     }
@@ -1055,7 +1134,7 @@ export function PostgresAdminSettingsView({
       setUpgradeBackupPasswordVisible(false);
       setShowUpgradeBackupPasswordModal(false);
       setShowUpgradeBackupSuccessModal(true);
-      setUpdatesNotice("Upgrade backup created.");
+      setUpdatesNotice(t("adminSettings.system.updates.backupCreated"));
       void loadUpgradeBackupDiagnostics();
     } catch (backupError) {
       setUpdatesError(describeUnknownError(backupError));
@@ -1072,18 +1151,18 @@ export function PostgresAdminSettingsView({
     try {
       const sourceName = lastUpgradeBackup.path.split(/[\\/]/).pop() || `kanqual-upgrade-backup-${lastUpgradeBackup.createdAtMs}.kanqual-upgrade-backup`;
       const outputPath = await saveDialog({
-        title: "Copy KanQual backup",
+        title: t("adminSettings.system.updates.copyBackupDialog"),
         defaultPath: sourceName,
         filters: [
           {
-            name: "KanQual upgrade backup",
+            name: t("adminSettings.system.updates.upgradeBackupFilter"),
             extensions: ["kanqual-upgrade-backup"],
           },
         ],
       });
       if (typeof outputPath !== "string") return;
       await copyFile(lastUpgradeBackup.path, outputPath);
-      setUpgradeBackupCopyNotice("Backup copy created.");
+      setUpgradeBackupCopyNotice(t("adminSettings.system.updates.backupCopyCreated"));
     } catch (copyError) {
       setUpgradeBackupCopyError(describeUnknownError(copyError));
     } finally {
@@ -1281,7 +1360,7 @@ export function PostgresAdminSettingsView({
     await persistAiAssistLlmSettings({
       ...cloudProviderDraft,
       connectionMode: "cloud",
-    }, "Cloud provider saved.");
+    }, t("adminSettings.system.aiAssist.cloudProviderSaved"));
     setCloudProviderModalOpen(false);
     setCloudProviderDraft(null);
     setAdminCloudModels([]);
@@ -1298,7 +1377,7 @@ export function PostgresAdminSettingsView({
       cloudSelectedModel: "",
       cloudSelectedModelsByProvider: {},
       cloudEnabledModelsByProvider: {},
-    }, "Cloud provider removed.");
+    }, t("adminSettings.system.aiAssist.cloudProviderRemoved"));
     setCloudProviderMenu(null);
     setCloudProviderModalOpen(false);
     setCloudProviderDraft(null);
@@ -1308,7 +1387,7 @@ export function PostgresAdminSettingsView({
   async function handleAdminTestLocalLlmProvider() {
     if (!localProviderDraft) return;
     if (!localProviderDraft.ollamaHost.trim() || localProviderDraft.ollamaPort <= 0) {
-      setAiAssistError("Enter a host and port before testing the local provider.");
+      setAiAssistError(t("adminSettings.system.aiAssist.errors.localProviderHostPort"));
       setAiAssistNotice("");
       return;
     }
@@ -1347,7 +1426,7 @@ export function PostgresAdminSettingsView({
   async function handleAdminTestCloudLlmProvider() {
     if (!cloudProviderDraft) return;
     if (!cloudProviderDraft.cloudApiSecret.trim()) {
-      setAiAssistError("Enter an API secret before testing the cloud provider.");
+      setAiAssistError(t("adminSettings.system.aiAssist.errors.cloudProviderSecret"));
       setAiAssistNotice("");
       return;
     }
@@ -1465,7 +1544,7 @@ export function PostgresAdminSettingsView({
       totalFiles: 0,
       currentFile: null,
       progressPercent: null,
-      message: "Preparing download...",
+      message: t("adminSettings.system.aiAssist.preparingDownload"),
     };
     setEmbeddingModelDownloadStatus(pendingStatus);
     notifyEmbeddingModelDownloadChanged({ status: pendingStatus, retry: { kind: "default" } });
@@ -1503,7 +1582,7 @@ export function PostgresAdminSettingsView({
       totalFiles: 0,
       currentFile: null,
       progressPercent: null,
-      message: `Preparing download from ${trimmedModelUrl}...`,
+      message: t("adminSettings.system.aiAssist.preparingDownloadFrom", { modelUrl: trimmedModelUrl }),
     };
     setEmbeddingModelDownloadStatus(pendingStatus);
     notifyEmbeddingModelDownloadChanged({ status: pendingStatus, retry: { kind: "custom", modelUrl: trimmedModelUrl } });
@@ -1530,7 +1609,7 @@ export function PostgresAdminSettingsView({
   function handleDownloadCustomEmbeddingModel() {
     const modelUrl = customEmbeddingModelUrl.trim();
     if (!modelUrl || embeddingDownloadBusy) {
-      if (!modelUrl) setAiAssistError("Enter a Hugging Face model URL or repository id.");
+      if (!modelUrl) setAiAssistError(t("adminSettings.system.aiAssist.errors.huggingFaceModelUrl"));
       return;
     }
     setEmbeddingModelSubmitting("custom-download");
@@ -1545,7 +1624,7 @@ export function PostgresAdminSettingsView({
       totalFiles: 0,
       currentFile: null,
       progressPercent: null,
-      message: `Preparing download from ${modelUrl}...`,
+      message: t("adminSettings.system.aiAssist.preparingDownloadFrom", { modelUrl }),
     };
     setEmbeddingModelDownloadStatus(pendingStatus);
     notifyEmbeddingModelDownloadChanged({ status: pendingStatus, retry: { kind: "custom", modelUrl } });
@@ -1579,12 +1658,12 @@ export function PostgresAdminSettingsView({
         || await openDialog({
           directory: true,
           multiple: false,
-          title: "Choose embedding model folder",
+          title: t("adminSettings.system.aiAssist.chooseEmbeddingModelFolder"),
         });
       if (typeof selected !== "string") return;
       const status = await importPostgresEmbeddingModelFolder(selected);
       setEmbeddingModelStatus(status);
-      setAiAssistNotice(`${status.displayName} imported.`);
+      setAiAssistNotice(t("adminSettings.system.aiAssist.imported", { modelName: status.displayName }));
       setCustomEmbeddingFolderPath("");
       setActiveEmbeddingModelModal(null);
       await refreshEmbeddingModelDetails();
@@ -1604,7 +1683,7 @@ export function PostgresAdminSettingsView({
     try {
       const status = await clearPostgresEmbeddingModel();
       setEmbeddingModelStatus(status);
-      setAiAssistNotice("Embedding model files cleared.");
+      setAiAssistNotice(t("adminSettings.system.aiAssist.embeddingModelFilesCleared"));
       await refreshEmbeddingModelDetails();
     } catch (clearError) {
       setAiAssistError(describeUnknownError(clearError));
@@ -1621,7 +1700,7 @@ export function PostgresAdminSettingsView({
       ? (droppedFile as File & { path?: string }).path ?? ""
       : "";
     if (!droppedPath) {
-      setAiAssistError("Drop a local embedding model folder, or use Choose Folder.");
+      setAiAssistError(t("adminSettings.system.aiAssist.errors.localEmbeddingFolder"));
       return;
     }
     setCustomEmbeddingFolderPath(droppedPath);
@@ -1632,7 +1711,7 @@ export function PostgresAdminSettingsView({
     const selected = await openDialog({
       directory: true,
       multiple: false,
-      title: "Choose embedding model folder",
+      title: t("adminSettings.system.aiAssist.chooseEmbeddingModelFolder"),
     });
     if (typeof selected === "string") setCustomEmbeddingFolderPath(selected);
   }
@@ -1782,7 +1861,7 @@ export function PostgresAdminSettingsView({
       );
       setProjectMemberships(nextMemberships.flat());
     } catch (membershipError) {
-      setError(`Could not load PostgreSQL project memberships: ${describeUnknownError(membershipError)}`);
+      setError(t("adminSettings.system.users.errors.membershipsLoadFailed", { error: describeUnknownError(membershipError) }));
     } finally {
       setLoadingProjectMemberships(false);
     }
@@ -1879,7 +1958,7 @@ export function PostgresAdminSettingsView({
         backupFiles: backupStats.files,
       });
     } catch (storageError) {
-      setError(`Could not load storage details: ${describeUnknownError(storageError)}`);
+      setError(t("adminSettings.system.users.errors.storageLoadFailed", { error: describeUnknownError(storageError) }));
     }
   }, []);
 
@@ -1894,11 +1973,11 @@ export function PostgresAdminSettingsView({
     setRuntimeNotice("");
     try {
       await prepareBundledPostgresRuntimeDirs();
-      setNotice("Bundled PostgreSQL runtime folders prepared.");
+      setNotice(t("adminSettings.system.database.runtimeFoldersPrepared"));
       await refreshPostgresDetails();
       await refreshStorageDetails();
     } catch (prepareError) {
-      setError(`Could not prepare bundled PostgreSQL runtime folders: ${describeUnknownError(prepareError)}`);
+      setError(t("adminSettings.system.database.prepareFailed", { error: describeUnknownError(prepareError) }));
     } finally {
       setLoading(false);
     }
@@ -1913,7 +1992,7 @@ export function PostgresAdminSettingsView({
       setRuntimeNotice(result.message);
       await refreshPostgresDetails();
     } catch (startError) {
-      setError(`Could not start bundled PostgreSQL runtime: ${describeUnknownError(startError)}`);
+      setError(t("adminSettings.system.database.startFailed", { error: describeUnknownError(startError) }));
     } finally {
       setLoading(false);
     }
@@ -1928,7 +2007,7 @@ export function PostgresAdminSettingsView({
       setRuntimeNotice(result.message);
       await refreshPostgresDetails();
     } catch (stopError) {
-      setError(`Could not stop bundled PostgreSQL runtime: ${describeUnknownError(stopError)}`);
+      setError(t("adminSettings.system.database.stopFailed", { error: describeUnknownError(stopError) }));
     } finally {
       setLoading(false);
     }
@@ -2021,9 +2100,9 @@ export function PostgresAdminSettingsView({
       },
       () => {
         if (activeModal === "network") {
-          setNetworkError("Could not copy the address to the clipboard.");
+          setNetworkError(t("adminSettings.system.network.copyAddressFailed"));
         } else {
-          setError("Could not copy the address to the clipboard.");
+          setError(t("adminSettings.system.network.copyAddressFailed"));
         }
       },
     );
@@ -2039,7 +2118,7 @@ export function PostgresAdminSettingsView({
         setPostgresNetworkMode(mode),
         new Promise<never>((_, reject) => {
           window.setTimeout(() => {
-            reject(new Error("Timed out while saving PostgreSQL network settings."));
+            reject(new Error(t("adminSettings.system.network.saveTimeout")));
           }, 60000);
         }),
       ]);
@@ -2048,10 +2127,10 @@ export function PostgresAdminSettingsView({
       setInternetPing({ status: "idle" });
       setNetworkNotice(
         mode === "device"
-          ? "Device-only database mode restored."
+          ? t("adminSettings.system.network.deviceModeRestored")
           : mode === "network"
-            ? "LAN collaboration mode enabled."
-            : "Internet database access mode enabled.",
+            ? t("adminSettings.system.network.lanEnabled")
+            : t("adminSettings.system.network.internetEnabled"),
       );
     } catch (switchError) {
       setNetworkError(describeUnknownError(switchError));
@@ -2127,12 +2206,12 @@ export function PostgresAdminSettingsView({
   async function handleCreatePostgresProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to create projects.");
+      setError(t("adminSettings.system.projects.errors.createAdminRequired"));
       return;
     }
     const name = addProjectName.trim();
     if (!name) {
-      setError("Enter a project name.");
+      setError(t("adminSettings.system.projects.errors.enterName"));
       setAddProjectTab("details");
       return;
     }
@@ -2178,7 +2257,7 @@ export function PostgresAdminSettingsView({
         setActiveModal(null);
       } else {
         setActiveModal(null);
-        setNotice(`Created project ${created.name}.`);
+        setNotice(t("adminSettings.system.projects.createdNotice", { projectName: created.name }));
       }
     } catch (createError) {
       setError(describeUnknownError(createError));
@@ -2189,7 +2268,7 @@ export function PostgresAdminSettingsView({
 
   async function handleOpenManagedProject(project: PostgresProject) {
     if (!project.active) {
-      setError("Enable this project before opening it.");
+      setError(t("adminSettings.system.projects.errors.enableBeforeOpening"));
       return;
     }
     setOpeningProjectId(project.id);
@@ -2208,7 +2287,7 @@ export function PostgresAdminSettingsView({
 
   async function handleSetManagedProjectActive(project: PostgresProject, active: boolean) {
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to manage project status.");
+      setError(t("adminSettings.system.projects.errors.manageStatusAdminRequired"));
       return;
     }
     setUpdatingProjectStatusId(project.id);
@@ -2218,7 +2297,9 @@ export function PostgresAdminSettingsView({
       const updated = await setPostgresProjectActive(project.id, active);
       setProjects((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
       setProjectAccessWarning(null);
-      setNotice(`${active ? "Enabled" : "Disabled"} project ${updated.name}.`);
+      setNotice(active
+        ? t("adminSettings.system.projects.enabledNotice", { projectName: updated.name })
+        : t("adminSettings.system.projects.disabledNotice", { projectName: updated.name }));
     } catch (statusError) {
       setError(describeUnknownError(statusError));
     } finally {
@@ -2228,7 +2309,7 @@ export function PostgresAdminSettingsView({
 
   async function handleDeleteManagedProject(project: PostgresProject) {
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to delete projects.");
+      setError(t("adminSettings.system.projects.errors.deleteAdminRequired"));
       return;
     }
     setDeletingProjectId(project.id);
@@ -2240,7 +2321,7 @@ export function PostgresAdminSettingsView({
       setProjects((current) => current.filter((entry) => entry.id !== project.id));
       setProjectMemberships((current) => current.filter((entry) => entry.projectId !== project.id));
       setProjectAccessWarning(null);
-      setNotice(`Deleted project ${project.name}.`);
+      setNotice(t("adminSettings.system.projects.deletedNotice", { projectName: project.name }));
     } catch (deleteError) {
       setError(describeUnknownError(deleteError));
     } finally {
@@ -2251,33 +2332,33 @@ export function PostgresAdminSettingsView({
   async function handleCreatePostgresUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to create users.");
+      setError(t("adminSettings.system.users.errors.createAdminRequired"));
       return;
     }
     const username = addUserUsername.trim().toLowerCase();
     if (!username) {
-      setError("Enter a username.");
+      setError(t("adminSettings.system.users.errors.enterUsername"));
       setAddUserTab("account");
       return;
     }
     if (/\s/.test(username)) {
-      setError("Usernames cannot contain spaces.");
+      setError(t("adminSettings.system.users.errors.usernameNoSpaces"));
       setAddUserTab("account");
       return;
     }
     if (addUserPassword.length < 8) {
-      setError("Choose a password with at least 8 characters.");
+      setError(t("adminSettings.system.users.errors.passwordTooShort"));
       setAddUserTab("account");
       return;
     }
     if (addUserPassword !== addUserPasswordConfirm) {
-      setError("The passwords do not match.");
+      setError(t("adminSettings.system.users.errors.passwordsDoNotMatch"));
       setAddUserTab("account");
       return;
     }
     const selectedProjectRoles = Object.entries(addUserProjectRoles).filter(([, role]) => role);
     if (!selectedProjectRoles.length) {
-      setError("Choose at least one project for this user.");
+      setError(t("adminSettings.system.users.errors.chooseProject"));
       setAddUserTab("projects");
       return;
     }
@@ -2323,7 +2404,7 @@ export function PostgresAdminSettingsView({
         setActiveModal(null);
       } else {
         setActiveModal(null);
-        setNotice(`Created PostgreSQL app user ${created.username}. They will be asked to change their password on first login.`);
+        setNotice(t("adminSettings.system.users.createdNotice", { username: created.username }));
       }
     } catch (createError) {
       setError(describeUnknownError(createError));
@@ -2334,7 +2415,7 @@ export function PostgresAdminSettingsView({
 
   async function handleDeactivatePostgresUser(user: PostgresAppUser) {
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to deactivate users.");
+      setError(t("adminSettings.system.users.errors.deactivateAdminRequired"));
       return;
     }
     if (!user.active) return;
@@ -2347,7 +2428,7 @@ export function PostgresAdminSettingsView({
       setAppUsers((current) => current.map((entry) => entry.id === deactivated.id ? deactivated : entry));
       setAuthStatus(await getPostgresAuthStatus());
       setUserAccessWarning(null);
-      setNotice(`Disabled ${deactivated.username}.`);
+      setNotice(t("adminSettings.system.users.disabledNotice", { username: deactivated.username }));
     } catch (deactivateError) {
       setError(describeUnknownError(deactivateError));
     } finally {
@@ -2357,7 +2438,7 @@ export function PostgresAdminSettingsView({
 
   async function handleReactivatePostgresUser(user: PostgresAppUser) {
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to enable users.");
+      setError(t("adminSettings.system.users.errors.enableAdminRequired"));
       return;
     }
     if (user.active) return;
@@ -2375,7 +2456,7 @@ export function PostgresAdminSettingsView({
 
   async function handleUpdateProjectMembershipRole(membership: PostgresProjectUser, role: string) {
     if (authSession.authKind !== "postgres_admin") {
-      setMembershipError("Sign in as the PostgreSQL administrator to change project roles.");
+      setMembershipError(t("adminSettings.system.membership.changeRolesAdminRequired"));
       return;
     }
     if (!role || role === membership.role) return;
@@ -2390,7 +2471,10 @@ export function PostgresAdminSettingsView({
         role,
       });
       setProjectMemberships((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
-      setMembershipNotice(`Updated ${updated.email}'s role for ${projectById.get(updated.projectId)?.name ?? "project"}.`);
+      setMembershipNotice(t("adminSettings.system.membership.roleUpdated", {
+        email: updated.email,
+        projectName: projectById.get(updated.projectId)?.name ?? t("adminSettings.system.users.project"),
+      }));
     } catch (updateError) {
       setMembershipError(describeUnknownError(updateError));
     } finally {
@@ -2400,7 +2484,7 @@ export function PostgresAdminSettingsView({
 
   async function handleAddProjectMembership(user: PostgresAppUser, project: PostgresProject) {
     if (authSession.authKind !== "postgres_admin") {
-      setMembershipError("Sign in as the PostgreSQL administrator to add project access.");
+      setMembershipError(t("adminSettings.system.membership.addAccessAdminRequired"));
       return;
     }
     if ((membershipsByAppUserId[user.id] ?? []).some((membership) => membership.projectId === project.id)) {
@@ -2420,7 +2504,7 @@ export function PostgresAdminSettingsView({
         ...current.filter((entry) => entry.id !== created.id),
         created,
       ]);
-      setMembershipNotice(`Added ${created.email} to ${project.name}.`);
+      setMembershipNotice(t("adminSettings.system.membership.added", { email: created.email, projectName: project.name }));
     } catch (addError) {
       setMembershipError(describeUnknownError(addError));
     } finally {
@@ -2430,7 +2514,7 @@ export function PostgresAdminSettingsView({
 
   async function handleRemoveProjectMembership(membership: PostgresProjectUser) {
     if (authSession.authKind !== "postgres_admin") {
-      setMembershipError("Sign in as the PostgreSQL administrator to remove project access.");
+      setMembershipError(t("adminSettings.system.membership.removeAccessAdminRequired"));
       return;
     }
     setMembershipError("");
@@ -2440,7 +2524,7 @@ export function PostgresAdminSettingsView({
 
   async function confirmRemoveProjectMembership(membership: PostgresProjectUser) {
     if (authSession.authKind !== "postgres_admin") {
-      setMembershipError("Sign in as the PostgreSQL administrator to remove project access.");
+      setMembershipError(t("adminSettings.system.membership.removeAccessAdminRequired"));
       return;
     }
     const project = projectById.get(membership.projectId);
@@ -2452,7 +2536,10 @@ export function PostgresAdminSettingsView({
       await deletePostgresProjectUser(membership.projectId, membership.id);
       setProjectMemberships((current) => current.filter((entry) => entry.id !== membership.id));
       setMembershipRemovalWarning(null);
-      setMembershipNotice(`Removed ${membership.email}'s access to ${project?.name ?? "project"}.`);
+      setMembershipNotice(t("adminSettings.system.users.membershipRemovedNotice", {
+        email: membership.email,
+        projectName: project?.name ?? t("adminSettings.system.users.thisProject"),
+      }));
     } catch (removeError) {
       setMembershipError(describeUnknownError(removeError));
     } finally {
@@ -2464,15 +2551,15 @@ export function PostgresAdminSettingsView({
     event.preventDefault();
     if (!resetPasswordUser) return;
     if (authSession.authKind !== "postgres_admin") {
-      setError("Sign in as the PostgreSQL administrator to reset user passwords.");
+      setError(t("adminSettings.system.users.errors.resetPasswordAdminRequired"));
       return;
     }
     if (resetPasswordValue.length < 8) {
-      setError("Choose a password with at least 8 characters.");
+      setError(t("adminSettings.system.users.errors.passwordTooShort"));
       return;
     }
     if (resetPasswordValue !== resetPasswordConfirmValue) {
-      setError("The password entries do not match.");
+      setError(t("adminSettings.system.passwordReset.entriesDoNotMatch"));
       return;
     }
 
@@ -2500,10 +2587,10 @@ export function PostgresAdminSettingsView({
       setRequiredResetUserId("");
       setNotice(
         wasLoginBlocked
-          ? `Reset password and removed login block for ${finalUser.username}.`
+          ? t("adminSettings.system.users.passwordResetUnblockNotice", { username: finalUser.username })
           : finalUser.active && requiredResetUserId === resetPasswordUser.id
-          ? `Enabled ${finalUser.username}. They will be asked to change their password on first login.`
-          : `Reset password for ${finalUser.username}.`,
+          ? t("adminSettings.system.users.enabledPasswordNotice", { username: finalUser.username })
+          : t("adminSettings.system.users.passwordResetNotice", { username: finalUser.username }),
       );
     } catch (resetError) {
       setError(describeUnknownError(resetError));
@@ -2517,12 +2604,12 @@ export function PostgresAdminSettingsView({
     <div className="view app-settings-view app-settings-view--admin">
       <header className="view-header">
         <div className="users-header-title-wrap">
-          <h1>Administrator Settings</h1>
+          <h1>{t("adminSettings.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show App Settings help"
-            title="Show Help"
+            aria-label={t("adminSettings.openHelp")}
+            title={t("adminSettings.showHelp")}
             onClick={() => setHelpOpen(true)}
           >
             <HelpIcon className="users-help-icon" />
@@ -2536,13 +2623,13 @@ export function PostgresAdminSettingsView({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Sign in as the project user"
+            title={t("app.gettingStarted.signInAsProjectUserTitle")}
             onDismiss={() => {
               void dismissGettingStartedGuide();
             }}
           >
             <p>
-              Click the sign-out button, then log in as {gettingStartedState.temporaryUsername || "the user you created"}. You will be asked to choose a new password before opening the project.
+              {t("app.gettingStarted.signInAsProjectUserBody", { username: gettingStartedState.temporaryUsername || t("app.gettingStarted.createdUserFallback") })}
             </p>
           </GettingStartedGuideCallout>
         </>
@@ -2552,12 +2639,12 @@ export function PostgresAdminSettingsView({
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <div className="getting-started-admin-callout getting-started-spotlight-target">
             <GettingStartedGuideCallout
-              title="Create a project"
+              title={t("app.gettingStarted.createProjectTitle")}
               onDismiss={() => {
                 void dismissGettingStartedGuide();
               }}
             >
-              <p>Click Add Project to create the workspace you will use for the rest of the walkthrough.</p>
+              <p>{t("app.gettingStarted.createProjectBody")}</p>
             </GettingStartedGuideCallout>
           </div>
         </>
@@ -2567,12 +2654,12 @@ export function PostgresAdminSettingsView({
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <div className="getting-started-admin-callout getting-started-spotlight-target">
             <GettingStartedGuideCallout
-              title="Create a user"
+              title={t("app.gettingStarted.createUserTitle")}
               onDismiss={() => {
                 void dismissGettingStartedGuide();
               }}
             >
-              <p>Click Add User to create the project account that will do the practice coding work.</p>
+              <p>{t("app.gettingStarted.createUserBody")}</p>
             </GettingStartedGuideCallout>
           </div>
         </>
@@ -2580,17 +2667,17 @@ export function PostgresAdminSettingsView({
 
       {gettingStartedPromptOpen ? (
         <SettingsModal
-          title="Getting Started"
+          title={t("app.gettingStarted.promptTitle")}
           onClose={() => {
             void dismissGettingStartedGuide();
           }}
         >
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Do you need some help getting started?
+              {t("app.gettingStarted.promptQuestion")}
             </p>
             <p className="users-guide-copy">
-              The guide will walk through creating a project, creating a project user, adding a source, making a code, and applying it to text.
+              {t("app.gettingStarted.promptBody")}
             </p>
           </div>
           <div className="app-settings-modal-footer">
@@ -2601,7 +2688,7 @@ export function PostgresAdminSettingsView({
                 void dismissGettingStartedGuide();
               }}
             >
-              No thanks
+              {t("app.gettingStarted.promptNo")}
             </button>
             <button
               type="button"
@@ -2610,25 +2697,25 @@ export function PostgresAdminSettingsView({
                 void startGettingStartedGuide();
               }}
             >
-              Yes, guide me
+              {t("app.gettingStarted.promptYes")}
             </button>
           </div>
         </SettingsModal>
       ) : null}
 
       {helpOpen ? (
-        <SettingsModal title="App Settings Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("adminSettings.helpTitle")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Manage language, appearance, AI runtime defaults, updates, storage, and PostgreSQL administration.
+              {t("adminSettings.helpLine1")}
             </p>
             <p className="users-guide-copy">
-              PostgreSQL-backed settings are shared through the local installation database. Appearance and recent-project display preferences are stored per signed-in app user.
+              {t("adminSettings.helpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -2668,8 +2755,8 @@ export function PostgresAdminSettingsView({
         <button
           type="button"
           className={`admin-signout-button${gettingStartedState.step === "loginAsUser" && !gettingStartedState.dismissed && !gettingStartedState.completed ? " getting-started-spotlight-target" : ""}`}
-          aria-label="Sign out"
-          title="Sign out"
+          aria-label={t("common.signOut")}
+          title={t("common.signOut")}
           onClick={() => {
             if (gettingStartedState.step === "loginAsUser" && !gettingStartedState.dismissed && !gettingStartedState.completed) {
               writeGettingStartedHandoff({
@@ -2717,32 +2804,32 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {activeModal === "gettingStarted" ? (
-        <SettingsModal title="Getting Started" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("app.gettingStarted.settingsTitle")} onClose={() => setActiveModal(null)}>
           <div className="app-settings-modal-body">
             <div className="app-settings-modal-sections">
-              <SettingsModalSection title="Guide">
+              <SettingsModalSection title={t("app.gettingStarted.guide")}>
                 <div className="settings-row">
                   <div className="settings-row-info">
-                    <div className="settings-row-label">First-run guide</div>
+                    <div className="settings-row-label">{t("app.gettingStarted.settingsCardTitle")}</div>
                     <div className="settings-row-desc">
-                      Walk through project setup, user setup, source upload, code creation, and the first coded annotation.
+                      {t("app.gettingStarted.settingsCardDescription")}
                     </div>
                   </div>
                   <div className="settings-row-value">
                     {gettingStartedState.completed
-                      ? "Completed"
+                      ? t("app.gettingStarted.completed")
                       : gettingStartedState.dismissed
-                      ? "Dismissed"
+                      ? t("app.gettingStarted.dismissed")
                       : gettingStartedState.step
-                      ? "In progress"
-                      : "Not started"}
+                      ? t("app.gettingStarted.inProgress")
+                      : t("app.gettingStarted.notStarted")}
                   </div>
                 </div>
                 <div className="settings-row">
                   <div className="settings-row-info">
-                    <div className="settings-row-label">Current step</div>
+                    <div className="settings-row-label">{t("app.gettingStarted.currentStep")}</div>
                     <div className="settings-row-desc">
-                      {gettingStartedState.step || "The guide has not started yet."}
+                      {gettingStartedState.step || t("app.gettingStarted.notStarted")}
                     </div>
                   </div>
                 </div>
@@ -2757,7 +2844,7 @@ export function PostgresAdminSettingsView({
                 void dismissGettingStartedGuide();
               }}
             >
-              Dismiss guide
+              {t("app.gettingStarted.dismissGuide")}
             </button>
             <button
               type="button"
@@ -2766,26 +2853,26 @@ export function PostgresAdminSettingsView({
                 void restartGettingStartedGuide();
               }}
             >
-              Restart guide
+              {t("app.gettingStarted.restartGuide")}
             </button>
           </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "appearance" ? (
-        <SettingsModal title="Appearance" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("adminSettings.system.appearance.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               {membershipNotice ? <p className="settings-success">{membershipNotice}</p> : null}
               {membershipError ? <p className="auth-error">{membershipError}</p> : null}
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Interface</h3></div>
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>{t("adminSettings.system.appearance.interface")}</h3></div>
                   <div className="app-settings-modal-section-body">
                     <ActiveThemePreviewRow theme={theme} onEdit={() => setShowThemeManager(true)} />
                     <div className="settings-row">
                       <div className="settings-row-info">
-                        <div className="settings-row-label">Interface density</div>
-                        <div className="settings-row-desc">Choose a more spacious or compact layout.</div>
+                        <div className="settings-row-label">{t("adminSettings.system.appearance.interfaceDensity")}</div>
+                        <div className="settings-row-desc">{t("adminSettings.system.appearance.interfaceDensityDescription")}</div>
                       </div>
                       <div className="segmented-control">
                         {(["comfortable", "compact"] as Density[]).map((option) => (
@@ -2795,15 +2882,15 @@ export function PostgresAdminSettingsView({
                             className={density === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                             onClick={() => handleDensity(option)}
                           >
-                            {option === "comfortable" ? "Comfortable" : "Compact"}
+                            {option === "comfortable" ? t("adminSettings.system.appearance.comfortable") : t("adminSettings.system.appearance.compact")}
                           </button>
                         ))}
                       </div>
                     </div>
                     <div className="settings-row">
                       <div className="settings-row-info">
-                        <div className="settings-row-label">Text size</div>
-                        <div className="settings-row-desc">Adjust default interface text size.</div>
+                        <div className="settings-row-label">{t("adminSettings.system.appearance.textSize")}</div>
+                        <div className="settings-row-desc">{t("adminSettings.system.appearance.textSizeDescription")}</div>
                       </div>
                       <div className="segmented-control">
                         {(["small", "normal", "large"] as FontSize[]).map((option) => (
@@ -2813,7 +2900,7 @@ export function PostgresAdminSettingsView({
                             className={fontSize === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                             onClick={() => handleFontSize(option)}
                           >
-                            {option === "small" ? "Small" : option === "normal" ? "Normal" : "Large"}
+                            {option === "small" ? t("adminSettings.system.appearance.small") : option === "normal" ? t("adminSettings.system.appearance.normal") : t("adminSettings.system.appearance.large")}
                           </button>
                         ))}
                       </div>
@@ -2824,7 +2911,7 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
@@ -2867,12 +2954,12 @@ export function PostgresAdminSettingsView({
                     <div className="app-settings-stat-card">
                       <strong>{t("appSettings.storage.database")}</strong>
                       <span>{formatBytes(storageSummary.databaseBytes)}</span>
-                      <small>{formatStorageFileSummary(storageSummary.databaseFiles, "postgres-projects")}</small>
+                      <small>{formatStorageFileSummary(storageSummary.databaseFiles, "postgres-projects", t, formatNumber)}</small>
                     </div>
                     <div className="app-settings-stat-card">
                       <strong>{t("appSettings.storage.backups")}</strong>
                       <span>{formatBytes(storageSummary.backupBytes)}</span>
-                      <small>{formatStorageFileSummary(storageSummary.backupFiles, "project_backups")}</small>
+                      <small>{formatStorageFileSummary(storageSummary.backupFiles, "project_backups", t, formatNumber)}</small>
                     </div>
                     <div className="app-settings-stat-card">
                       <strong>{t("appSettings.storage.totalTrackedStorage")}</strong>
@@ -2885,7 +2972,7 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
@@ -2923,79 +3010,79 @@ export function PostgresAdminSettingsView({
                           disabled={networkSwitching || !status}
                         >
                           {option === "device"
-                            ? "Device"
+                            ? t("adminSettings.system.network.device")
                             : option === "network"
-                              ? "LAN"
-                              : "Internet"}
+                              ? t("adminSettings.system.network.lan")
+                              : t("adminSettings.system.network.internet")}
                         </button>
                       ))}
                     </div>
                   </div>
                   {status?.networkMode === "internet" ? (
                     <div className="settings-warning settings-warning--danger">
-                      <strong>Internet mode is live.</strong>
+                      <strong>{t("adminSettings.system.network.internetModeLive")}</strong>
                       <br />
-                      KanQual is accepting database connections from the public Internet. KanQual does not manage TLS certificates for this mode, so traffic may be readable unless you protect access with a VPN, encrypted tunnel, firewall, or equivalent network security.
+                      {t("adminSettings.system.network.internetModeWarning")}
                     </div>
                   ) : status?.networkMode === "network" ? (
                     <div className="settings-warning settings-warning--danger">
-                      <strong>LAN mode is live.</strong>
+                      <strong>{t("adminSettings.system.network.lanModeLive")}</strong>
                       <br />
-                      Other devices on the same trusted network may connect to this PostgreSQL database until you switch back to Device mode.
+                      {t("adminSettings.system.network.lanModeWarning")}
                     </div>
                   ) : (
                     <div className="settings-warning">
-                      <strong>Device mode is the default.</strong>
+                      <strong>{t("adminSettings.system.network.deviceModeDefault")}</strong>
                       <br />
-                      KanQual will revert to Device mode every time it starts. Remote users cannot connect while Device mode is active.
+                      {t("adminSettings.system.network.deviceModeWarning")}
                     </div>
                   )}
                 </SettingsModalSection>
 
                 <SettingsModalSection title={t("appSettings.network.connectionAddressesTitle")}>
                   <PostgresNetworkAddressCard
-                    label="LAN"
+                    label={t("adminSettings.system.network.lan")}
                     host={status?.localIp ?? null}
                     port={status?.port ?? 5432}
                     loading={Boolean(status && !status.localIp)}
                     mode="network"
-                    statusText={status?.networkMode === "network" ? "Active" : status?.networkMode === "internet" ? "Available through Internet mode" : "Enable LAN or Internet"}
+                    statusText={status?.networkMode === "network" ? t("adminSettings.system.network.active") : status?.networkMode === "internet" ? t("adminSettings.system.network.internet") : t("adminSettings.system.network.enableLanOrInternetMode")}
                     copied={Boolean(status?.localIp && copiedNetworkAddress === `${status.localIp}:${status.port}`)}
                     ping={lanPing}
                     disabled={!status || status.networkMode === "device"}
                     copyDisabled={status?.networkMode === "device"}
-                    testDisabledReason={status?.networkMode === "device" ? "Enable LAN or Internet mode before testing this address." : undefined}
+                    testDisabledReason={status?.networkMode === "device" ? t("adminSettings.system.network.enableLanOrInternet") : undefined}
                     onCopy={copyNetworkAddress}
                     onTest={testPostgresLanPing}
-                    successText="Network database reachable"
-                    errorText="Network database unreachable"
+                    successText={t("adminSettings.system.network.networkReachable")}
+                    errorText={t("adminSettings.system.network.networkUnreachable")}
                   />
                   <PostgresNetworkAddressCard
-                    label="Internet"
+                    label={t("adminSettings.system.network.internet")}
                     host={externalIp.value ?? null}
                     port={status?.port ?? 5432}
                     loading={status?.networkMode === "internet" && externalIp.status === "loading"}
                     mode="internet"
-                    statusText={status?.networkMode === "internet" ? "Active" : "Enable Internet"}
+                    statusText={status?.networkMode === "internet" ? t("adminSettings.system.network.active") : t("adminSettings.system.network.enableInternetMode")}
                     copied={Boolean(externalIp.value && copiedNetworkAddress === `${externalIp.value}:${status?.port ?? 5432}`)}
                     ping={internetPing}
                     disabled={!status || status.networkMode !== "internet" || externalIp.status !== "success"}
                     copyDisabled={status?.networkMode !== "internet" || externalIp.status !== "success"}
                     testDisabledReason={
                       status?.networkMode !== "internet"
-                        ? "Enable Internet mode before testing this endpoint."
+                        ? t("adminSettings.system.network.enableInternet")
                         : externalIp.status === "error"
                           ? externalIp.error
-                          : "Public reachability depends on external routing, firewall, VPN, or tunnel settings."
+                          : t("adminSettings.system.network.publicAddressWarning")
                     }
                     onCopy={copyNetworkAddress}
                     onTest={testPostgresInternetPing}
-                    successText="Public database endpoint reachable"
-                    errorText="Database unreachable"
+                    successText={t("adminSettings.system.network.publicReachable")}
+                    errorText={t("adminSettings.system.network.publicUnreachable")}
                   />
                   {status?.networkMode === "internet" ? (
                     <div className="settings-warning settings-warning--danger">
-                      This is the public IP address and port for your KanQual server. Other security settings like routing, firewall, VPN, or encrypted tunnels may be necessary for others to reach it safely.
+                      {t("adminSettings.system.network.publicAddressWarning")}
                     </div>
                   ) : null}
                 </SettingsModalSection>
@@ -3013,7 +3100,7 @@ export function PostgresAdminSettingsView({
                   setNetworkError("");
                 }}
               >
-                Done
+                {t("common.done")}
               </button>
             </div>
         </SettingsModal>
@@ -3021,50 +3108,50 @@ export function PostgresAdminSettingsView({
 
       {activeModal === "aiAssist" ? (
         <>
-          <SettingsModal title="AI Assist" onClose={closeAiAssistModal}>
+          <SettingsModal title={t("adminSettings.system.aiAssist.title")} onClose={closeAiAssistModal}>
             <div className="app-settings-modal-body">
               {aiAssistNotice ? <p className="settings-success">{aiAssistNotice}</p> : null}
               {aiAssistError ? <p className="auth-error">{aiAssistError}</p> : null}
               <div className="ai-assist-home-tabbar" style={{ marginBottom: 16 }}>
-                <div className="segmented-control" role="tablist" aria-label="AI Assist administrator settings">
+                <div className="segmented-control" role="tablist" aria-label={t("adminSettings.system.aiAssist.aria")}>
                   <button
                     type="button"
                     className={aiAssistAdminTab === "usage" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                     onClick={() => setAiAssistAdminTab("usage")}
                   >
-                    Usage
+                    {t("adminSettings.system.aiAssist.usage")}
                   </button>
                   <button
                     type="button"
                     className={aiAssistAdminTab === "embeddings" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                     disabled={aiAssistSetupDisabled}
                     onClick={() => setAiAssistAdminTab("embeddings")}
-                    title={aiAssistSetupDisabled ? "Enable AI Assist usage before configuring embeddings." : undefined}
+                    title={aiAssistSetupDisabled ? t("adminSettings.system.aiAssist.enableEmbeddingsFirst") : undefined}
                   >
-                    Embeddings
+                    {t("adminSettings.system.aiAssist.embeddings")}
                   </button>
                   <button
                     type="button"
                     className={aiAssistAdminTab === "llms" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                     disabled={aiAssistSetupDisabled}
                     onClick={() => setAiAssistAdminTab("llms")}
-                    title={aiAssistSetupDisabled ? "Enable AI Assist usage before configuring LLMs." : undefined}
+                    title={aiAssistSetupDisabled ? t("adminSettings.system.aiAssist.enableLlmsFirst") : undefined}
                   >
-                    LLMs
+                    {t("adminSettings.system.aiAssist.llms")}
                   </button>
                 </div>
               </div>
 
               {aiAssistAdminTab === "usage" ? (
                 <div className="app-settings-modal-sections">
-                  <SettingsModalSection title="Availability">
+                  <SettingsModalSection title={t("adminSettings.system.aiAssist.availability")}>
                     <div className="settings-toggle-row">
-                      <span className="settings-row-label">AI Assist access</span>
-                      <div className="segmented-control" role="tablist" aria-label="AI Assist access" style={{ width: "fit-content" }}>
+                      <span className="settings-row-label">{t("adminSettings.system.aiAssist.access")}</span>
+                      <div className="segmented-control" role="tablist" aria-label={t("adminSettings.system.aiAssist.access")} style={{ width: "fit-content" }}>
                         {[
-                          { mode: "disabled", label: "Disabled", message: "AI Assist disabled for this server." },
-                          { mode: "project", label: "Selective", message: "AI Assist will use project-specific availability." },
-                          { mode: "enabled", label: "Enabled", message: "AI Assist enabled for every project." },
+                          { mode: "disabled", label: t("adminSettings.system.aiAssist.disabled"), message: t("adminSettings.system.aiAssist.accessDisabledMessage") },
+                          { mode: "project", label: t("adminSettings.system.aiAssist.selective"), message: t("adminSettings.system.aiAssist.accessProjectMessage") },
+                          { mode: "enabled", label: t("adminSettings.system.aiAssist.enabled"), message: t("adminSettings.system.aiAssist.accessEnabledMessage") },
                         ].map((option) => (
                           <button
                             key={option.mode}
@@ -3092,19 +3179,19 @@ export function PostgresAdminSettingsView({
                   </SettingsModalSection>
 
                   {aiAssistPolicyMode === "project" ? (
-                    <SettingsModalSection title="Projects">
+                    <SettingsModalSection title={t("adminSettings.system.aiAssist.projects")}>
                       <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 360 }}>
                         <table className="users-table" style={{ tableLayout: "auto", width: "100%" }}>
                           <thead>
                             <tr>
-                              <th className="users-th">Project</th>
-                              <th className="users-th" style={{ width: 220, whiteSpace: "nowrap" }}>Status</th>
+                              <th className="users-th">{t("adminSettings.system.aiAssist.project")}</th>
+                              <th className="users-th" style={{ width: 220, whiteSpace: "nowrap" }}>{t("adminSettings.system.aiAssist.status")}</th>
                             </tr>
                           </thead>
                           <tbody>
                             {projects.length === 0 ? (
                               <tr>
-                                <td className="users-td users-td--muted" colSpan={2}>No projects yet</td>
+                                <td className="users-td users-td--muted" colSpan={2}>{t("adminSettings.system.aiAssist.noProjectsYet")}</td>
                               </tr>
                             ) : projects.map((project) => {
                               const allowed = aiAssistAllowedForProject(project.id);
@@ -3112,13 +3199,13 @@ export function PostgresAdminSettingsView({
                                 <tr key={project.id} className="users-row">
                                   <td className="users-td users-td--name">{project.name}</td>
                                   <td className="users-td" style={{ width: 220, whiteSpace: "nowrap" }}>
-                                    <div className="segmented-control" role="tablist" aria-label={`AI Assist status for ${project.name}`} style={{ width: "fit-content" }}>
+                                    <div className="segmented-control" role="tablist" aria-label={t("adminSettings.system.aiAssist.projectStatusAria", { projectName: project.name })} style={{ width: "fit-content" }}>
                                       {[
-                                        { value: false, label: "Disabled", message: `AI Assist disallowed for ${project.name}.` },
-                                        { value: true, label: "Enabled", message: `AI Assist allowed for ${project.name}.` },
+                                        { value: false, label: t("adminSettings.system.aiAssist.disabled"), message: t("adminSettings.system.aiAssist.projectDisallowedMessage", { projectName: project.name }) },
+                                        { value: true, label: t("adminSettings.system.aiAssist.enabled"), message: t("adminSettings.system.aiAssist.projectAllowedMessage", { projectName: project.name }) },
                                       ].map((option) => (
                                         <button
-                                          key={option.label}
+                                          key={String(option.value)}
                                           type="button"
                                           className={allowed === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                                           disabled={!installationSettings || aiAssistPolicySaving}
@@ -3154,30 +3241,30 @@ export function PostgresAdminSettingsView({
                 </div>
               ) : aiAssistAdminTab === "embeddings" ? (
                 <div className="app-settings-modal-sections">
-                  <SettingsModalSection title="Select Model">
+                  <SettingsModalSection title={t("adminSettings.system.aiAssist.selectModel")}>
                     <select className="form-input" value={hasEmbeddingModel ? embeddingModelStatus?.repoId ?? "" : ""} disabled={!hasEmbeddingModel}>
                       {hasEmbeddingModel ? (
                         <option value={embeddingModelStatus?.repoId ?? ""}>
-                          {embeddingModelStatus?.displayName ?? "Downloaded embedding model"}
+                          {embeddingModelStatus?.displayName ?? t("adminSettings.system.aiAssist.downloadedEmbeddingModel")}
                         </option>
                       ) : (
-                        <option value="">No downloaded embedding models</option>
+                        <option value="">{t("adminSettings.system.aiAssist.noDownloadedEmbeddingModels")}</option>
                       )}
                     </select>
                   </SettingsModalSection>
 
-                  <SettingsModalSection title="Default Model">
+                  <SettingsModalSection title={t("adminSettings.system.aiAssist.defaultModel")}>
                     <div className="settings-toggle-row">
                       <div className="settings-row-info">
                         <div className="settings-row-label">multilingual-e5-large</div>
-                        <div className="settings-row-desc">This is the default embedding model.</div>
+                        <div className="settings-row-desc">{t("adminSettings.system.aiAssist.defaultModelDescription")}</div>
                         <a
                           className="settings-inline-link"
                           href="https://huggingface.co/intfloat/multilingual-e5-large"
                           target="_blank"
                           rel="noreferrer"
                         >
-                          https://huggingface.co/intfloat/multilingual-e5-large
+                          {t("adminSettings.system.aiAssist.defaultModelUrl")}
                         </a>
                       </div>
                       {!hasEmbeddingModel && !partialEmbeddingModelIsDefault && !embeddingDownloadBusy ? (
@@ -3188,7 +3275,7 @@ export function PostgresAdminSettingsView({
                           disabled={embeddingModelSubmitting === "download"}
                           style={{ marginLeft: "auto" }}
                         >
-                          {embeddingModelSubmitting === "download" ? "Starting..." : "Download"}
+                          {embeddingModelSubmitting === "download" ? t("adminSettings.system.aiAssist.starting") : t("adminSettings.system.aiAssist.download")}
                         </button>
                       ) : null}
                       {partialEmbeddingModelIsDefault && !embeddingDownloadBusy ? (
@@ -3199,7 +3286,7 @@ export function PostgresAdminSettingsView({
                             onClick={() => void handleClearEmbeddingModel()}
                             disabled={embeddingModelSubmitting === "clear"}
                           >
-                            {embeddingModelSubmitting === "clear" ? "Clearing..." : "Clear"}
+                            {embeddingModelSubmitting === "clear" ? t("adminSettings.system.aiAssist.clearing") : t("common.clear")}
                           </button>
                           <button
                             className="btn btn--primary"
@@ -3207,13 +3294,13 @@ export function PostgresAdminSettingsView({
                             onClick={() => void handleDownloadEmbeddingModel()}
                             disabled={embeddingModelSubmitting === "download"}
                           >
-                            {embeddingModelSubmitting === "download" ? "Starting..." : "Retry"}
+                            {embeddingModelSubmitting === "download" ? t("adminSettings.system.aiAssist.starting") : t("common.retry")}
                           </button>
                         </div>
                       ) : null}
                       {embeddingDownloadBusy ? (
                         <span className="settings-field-hint" style={{ marginLeft: "auto" }}>
-                          Download progress is shown in the banner.
+                          {t("adminSettings.system.aiAssist.downloadProgressBanner")}
                         </span>
                       ) : null}
                       {activeEmbeddingModelIsDefault && !embeddingDownloadBusy ? (
@@ -3224,27 +3311,27 @@ export function PostgresAdminSettingsView({
                           disabled={embeddingModelSubmitting === "clear"}
                           style={{ marginLeft: "auto" }}
                         >
-                          {embeddingModelSubmitting === "clear" ? "Clearing..." : "Clear"}
+                          {embeddingModelSubmitting === "clear" ? t("adminSettings.system.aiAssist.clearing") : t("common.clear")}
                         </button>
                       ) : null}
                     </div>
                   </SettingsModalSection>
 
-                  <SettingsModalSection title="Custom Model">
+                  <SettingsModalSection title={t("adminSettings.system.aiAssist.customModel")}>
                     <ul className="settings-field-hint" style={{ margin: "0 0 12px 18px", padding: 0 }}>
-                      <li>Hugging Face sentence-transformer model with an XLM-RoBERTa/e5-compatible config.</li>
-                      <li>Requires tokenizer files plus root-level safetensors weights.</li>
-                      <li>ONNX, GGUF, Ollama, and other model architectures are not supported here yet.</li>
+                      <li>{t("adminSettings.system.aiAssist.customModelDescription")}</li>
+                      <li>{t("adminSettings.system.aiAssist.customModelFiles")}</li>
+                      <li>{t("adminSettings.system.aiAssist.customModelUnsupported")}</li>
                     </ul>
                     <div className="users-table-wrap" style={{ marginBottom: 12 }}>
                       <table className="users-table">
                         <thead>
                           <tr>
-                            <th className="users-th">Model</th>
-                            <th className="users-th">Source</th>
-                            <th className="users-th">Added</th>
-                            <th className="users-th">Size</th>
-                            <th className="users-th">Action</th>
+                            <th className="users-th">{t("adminSettings.system.aiAssist.model")}</th>
+                            <th className="users-th">{t("adminSettings.system.aiAssist.source")}</th>
+                            <th className="users-th">{t("adminSettings.system.aiAssist.added")}</th>
+                            <th className="users-th">{t("adminSettings.system.aiAssist.size")}</th>
+                            <th className="users-th">{t("adminSettings.system.aiAssist.action")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3254,7 +3341,7 @@ export function PostgresAdminSettingsView({
                                 <div>{(activeCustomEmbeddingModel ?? partialCustomEmbeddingModel)?.displayName}</div>
                                 <div className="users-td--muted">{(activeCustomEmbeddingModel ?? partialCustomEmbeddingModel)?.modelDir}</div>
                                 {partialCustomEmbeddingModel ? (
-                                  <div className="users-td--muted">Partial download</div>
+                                  <div className="users-td--muted">{t("adminSettings.system.aiAssist.partialDownload")}</div>
                                 ) : null}
                               </td>
                               <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>
@@ -3276,7 +3363,7 @@ export function PostgresAdminSettingsView({
                                     onClick={() => void handleClearEmbeddingModel()}
                                     disabled={embeddingModelSubmitting === "clear" || embeddingDownloadBusy}
                                   >
-                                    {embeddingModelSubmitting === "clear" ? "Clearing..." : "Clear"}
+                                    {embeddingModelSubmitting === "clear" ? t("adminSettings.system.aiAssist.clearing") : t("common.clear")}
                                   </button>
                                   {partialCustomEmbeddingModel ? (
                                     <button
@@ -3285,7 +3372,7 @@ export function PostgresAdminSettingsView({
                                       onClick={() => void handleRetryCustomEmbeddingModel(partialCustomEmbeddingModel.repoId)}
                                       disabled={embeddingModelSubmitting === "custom-download" || embeddingDownloadBusy}
                                     >
-                                      {embeddingModelSubmitting === "custom-download" ? "Starting..." : "Retry"}
+                                      {embeddingModelSubmitting === "custom-download" ? t("adminSettings.system.aiAssist.starting") : t("common.retry")}
                                     </button>
                                   ) : null}
                                 </div>
@@ -3294,7 +3381,7 @@ export function PostgresAdminSettingsView({
                           ) : (
                             <tr>
                               <td className="users-td users-td--muted" colSpan={5}>
-                                No custom embedding models are currently downloaded or linked.
+                                {t("adminSettings.system.aiAssist.noCustomModels")}
                               </td>
                             </tr>
                           )}
@@ -3308,7 +3395,7 @@ export function PostgresAdminSettingsView({
                         onClick={() => setActiveEmbeddingModelModal("folder")}
                         disabled={embeddingDownloadBusy}
                       >
-                        Select Folder
+                        {t("adminSettings.system.aiAssist.selectFolder")}
                       </button>
                       <button
                         className="btn btn--primary"
@@ -3316,20 +3403,20 @@ export function PostgresAdminSettingsView({
                         onClick={() => setActiveEmbeddingModelModal("download")}
                         disabled={embeddingDownloadBusy}
                       >
-                        Download
+                        {t("adminSettings.system.aiAssist.download")}
                       </button>
                     </div>
                   </SettingsModalSection>
                 </div>
               ) : (
                 <div className="app-settings-modal-sections">
-                  <SettingsModalSection title="Local Providers" className="app-settings-modal-section--compact-controls">
+                  <SettingsModalSection title={t("adminSettings.system.aiAssist.localProviders")} className="app-settings-modal-section--compact-controls">
                     <div className="project-export-actions project-export-actions--modal admin-local-provider-add-row" style={{ justifyContent: "flex-end" }}>
                       <button
                         type="button"
                         className="btn btn--primary admin-local-provider-add-button"
-                        aria-label="Add local provider"
-                        title="Add local provider"
+                        aria-label={t("adminSettings.system.aiAssist.addLocalProvider")}
+                        title={t("adminSettings.system.aiAssist.addLocalProvider")}
                         onClick={openLocalProviderModal}
                         disabled={!installationSettings || aiAssistPolicySaving}
                       >
@@ -3340,17 +3427,17 @@ export function PostgresAdminSettingsView({
                       <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
                         <thead>
                           <tr>
-                            <th className="users-th" style={{ width: "28%" }}>Provider</th>
-                            <th className="users-th" style={{ width: "34%" }}>Endpoint</th>
-                            <th className="users-th" style={{ width: "22%" }}>Models</th>
-                            <th className="users-th" style={{ width: 64, textAlign: "right" }}>Actions</th>
+                            <th className="users-th" style={{ width: "28%" }}>{t("adminSettings.system.aiAssist.provider")}</th>
+                            <th className="users-th" style={{ width: "34%" }}>{t("adminSettings.system.aiAssist.endpoint")}</th>
+                            <th className="users-th" style={{ width: "22%" }}>{t("adminSettings.system.aiAssist.models")}</th>
+                            <th className="users-th" style={{ width: 64, textAlign: "right" }}>{t("adminSettings.system.aiAssist.actions")}</th>
                           </tr>
                         </thead>
                         <tbody>
                           {!savedLocalLlmProvider || !aiAssistLlmSettings ? (
                             <tr>
                               <td className="users-td users-td--muted" colSpan={4}>
-                                No local providers configured.
+                                {t("adminSettings.system.aiAssist.noLocalProviders")}
                               </td>
                             </tr>
                           ) : (
@@ -3360,7 +3447,7 @@ export function PostgresAdminSettingsView({
                                 {aiAssistLlmSettings.ollamaProtocol}://{aiAssistLlmSettings.ollamaHost}:{aiAssistLlmSettings.ollamaPort}
                               </td>
                               <td className="users-td">
-                                {savedLocalEnabledModels.length ? `${savedLocalEnabledModels.length} enabled` : "All listed models"}
+                                {savedLocalEnabledModels.length ? t("adminSettings.system.aiAssist.enabledCount", { count: savedLocalEnabledModels.length }) : t("adminSettings.system.aiAssist.allListedModels")}
                               </td>
                               <td className="users-td snapshot-table-actions">
                                 <button
@@ -3380,9 +3467,9 @@ export function PostgresAdminSettingsView({
                                     });
                                   }}
                                   disabled={!installationSettings || aiAssistPolicySaving}
-                                  aria-label={`Actions for ${savedLocalLlmProvider.label}`}
+                                  aria-label={t("adminSettings.system.aiAssist.actionsForProvider", { providerName: savedLocalLlmProvider.label })}
                                   aria-expanded={Boolean(localProviderMenu)}
-                                  title="Provider actions"
+                                  title={t("adminSettings.system.aiAssist.providerActions")}
                                 >
                                   ...
                                 </button>
@@ -3394,13 +3481,13 @@ export function PostgresAdminSettingsView({
                     </div>
                   </SettingsModalSection>
 
-                  <SettingsModalSection title="Cloud Providers" className="app-settings-modal-section--compact-controls">
+                  <SettingsModalSection title={t("adminSettings.system.aiAssist.cloudProviders")} className="app-settings-modal-section--compact-controls">
                     <div className="project-export-actions project-export-actions--modal admin-local-provider-add-row" style={{ justifyContent: "flex-end" }}>
                       <button
                         type="button"
                         className="btn btn--primary admin-local-provider-add-button"
-                        aria-label="Add cloud provider"
-                        title="Add cloud provider"
+                        aria-label={t("adminSettings.system.aiAssist.addCloudProvider")}
+                        title={t("adminSettings.system.aiAssist.addCloudProvider")}
                         onClick={openCloudProviderModal}
                         disabled={!installationSettings || aiAssistPolicySaving}
                       >
@@ -3411,27 +3498,27 @@ export function PostgresAdminSettingsView({
                       <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
                         <thead>
                           <tr>
-                            <th className="users-th" style={{ width: "32%" }}>Provider</th>
-                            <th className="users-th" style={{ width: "32%" }}>Secret</th>
-                            <th className="users-th" style={{ width: "20%" }}>Models</th>
-                            <th className="users-th" style={{ width: 64, textAlign: "right" }}>Actions</th>
+                            <th className="users-th" style={{ width: "32%" }}>{t("adminSettings.system.aiAssist.provider")}</th>
+                            <th className="users-th" style={{ width: "32%" }}>{t("adminSettings.system.aiAssist.secret")}</th>
+                            <th className="users-th" style={{ width: "20%" }}>{t("adminSettings.system.aiAssist.models")}</th>
+                            <th className="users-th" style={{ width: 64, textAlign: "right" }}>{t("adminSettings.system.aiAssist.actions")}</th>
                           </tr>
                         </thead>
                         <tbody>
                           {!savedCloudLlmProvider || !aiAssistLlmSettings ? (
                             <tr>
                               <td className="users-td users-td--muted" colSpan={4}>
-                                No cloud providers configured.
+                                {t("adminSettings.system.aiAssist.noCloudProviders")}
                               </td>
                             </tr>
                           ) : (
                             <tr className="users-row">
                               <td className="users-td users-td--name">{savedCloudLlmProvider.label}</td>
                               <td className="users-td users-td--muted">
-                                {aiAssistLlmSettings.cloudApiSecret.trim() ? "Configured" : "Missing"}
+                                {aiAssistLlmSettings.cloudApiSecret.trim() ? t("adminSettings.system.aiAssist.configured") : t("adminSettings.system.aiAssist.missing")}
                               </td>
                               <td className="users-td">
-                                {savedCloudEnabledModels.length ? `${savedCloudEnabledModels.length} enabled` : "All listed models"}
+                                {savedCloudEnabledModels.length ? t("adminSettings.system.aiAssist.enabledCount", { count: savedCloudEnabledModels.length }) : t("adminSettings.system.aiAssist.allListedModels")}
                               </td>
                               <td className="users-td snapshot-table-actions">
                                 <button
@@ -3451,9 +3538,9 @@ export function PostgresAdminSettingsView({
                                     });
                                   }}
                                   disabled={!installationSettings || aiAssistPolicySaving}
-                                  aria-label={`Actions for ${savedCloudLlmProvider.label}`}
+                                  aria-label={t("adminSettings.system.aiAssist.actionsForProvider", { providerName: savedCloudLlmProvider.label })}
                                   aria-expanded={Boolean(cloudProviderMenu)}
-                                  title="Provider actions"
+                                  title={t("adminSettings.system.aiAssist.providerActions")}
                                 >
                                   ...
                                 </button>
@@ -3465,10 +3552,10 @@ export function PostgresAdminSettingsView({
                     </div>
                   </SettingsModalSection>
 
-                  <SettingsModalSection title="Generation Defaults">
+                  <SettingsModalSection title={t("adminSettings.system.aiAssist.generationDefaults")}>
                     <fieldset className="llm-settings-grid" disabled={!installationSettings || aiAssistPolicySaving} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                       <label className="form-label">
-                        Temperature
+                        {t("adminSettings.system.aiAssist.temperature")}
                         <input
                           className="form-input"
                           type="number"
@@ -3483,7 +3570,7 @@ export function PostgresAdminSettingsView({
                         />
                       </label>
                       <label className="form-label">
-                        Context window
+                        {t("adminSettings.system.aiAssist.contextWindow")}
                         <input
                           className="form-input"
                           type="number"
@@ -3497,7 +3584,7 @@ export function PostgresAdminSettingsView({
                         />
                       </label>
                       <label className="form-label">
-                        Keep alive minutes
+                        {t("adminSettings.system.aiAssist.keepAliveMinutes")}
                         <input
                           className="form-input"
                           type="number"
@@ -3511,7 +3598,7 @@ export function PostgresAdminSettingsView({
                         />
                       </label>
                       <label className="form-label">
-                        Relevant segment shortlist
+                        {t("adminSettings.system.aiAssist.relevantSegmentShortlist")}
                         <input
                           className="form-input"
                           type="number"
@@ -3529,7 +3616,7 @@ export function PostgresAdminSettingsView({
                         />
                       </label>
                       <label className="form-label">
-                        Relevant segments returned
+                        {t("adminSettings.system.aiAssist.relevantSegmentsReturned")}
                         <input
                           className="form-input"
                           type="number"
@@ -3548,7 +3635,7 @@ export function PostgresAdminSettingsView({
                         />
                       </label>
                       <label className="form-label">
-                        Document timeout
+                        {t("adminSettings.system.aiAssist.documentTimeout")}
                         <input
                           className="form-input"
                           type="number"
@@ -3572,23 +3659,23 @@ export function PostgresAdminSettingsView({
               )}
             </div>
             <div className="app-settings-modal-footer">
-              <span>{aiAssistPolicySaving ? "Saving..." : ""}</span>
-              <button type="button" className="btn btn--primary" onClick={closeAiAssistModal}>Done</button>
+              <span>{aiAssistPolicySaving ? t("common.saving") : ""}</span>
+              <button type="button" className="btn btn--primary" onClick={closeAiAssistModal}>{t("common.done")}</button>
             </div>
           </SettingsModal>
           {localProviderModalOpen && localProviderDraft ? (
             <SettingsModal
-              title="Local Provider"
+              title={t("adminSettings.system.aiAssist.localProvider")}
               onClose={closeLocalProviderModal}
             >
                 <div className="app-settings-modal-body">
                   {aiAssistNotice ? <p className="settings-success">{aiAssistNotice}</p> : null}
                   {aiAssistError ? <p className="auth-error">{aiAssistError}</p> : null}
                   <div className="app-settings-modal-sections">
-                    <SettingsModalSection title="Connection">
+                    <SettingsModalSection title={t("adminSettings.system.aiAssist.connection")}>
                       <fieldset className="llm-settings-grid" disabled={!installationSettings || aiAssistPolicySaving || adminLocalModelsBusy} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                         <label className="form-label">
-                          API provider
+                          {t("adminSettings.system.aiAssist.apiProvider")}
                           <select
                             className="form-input"
                             value={localProviderDraft.localProvider}
@@ -3601,7 +3688,7 @@ export function PostgresAdminSettingsView({
                           {selectedLocalLlmProvider ? <span className="settings-field-hint">{selectedLocalLlmProvider.helpText}</span> : null}
                         </label>
                         <label className="form-label">
-                          Protocol
+                          {t("adminSettings.system.aiAssist.protocol")}
                           <select
                             className="form-input"
                             value={localProviderDraft.ollamaProtocol}
@@ -3615,7 +3702,7 @@ export function PostgresAdminSettingsView({
                           </select>
                         </label>
                         <label className="form-label">
-                          Host URL
+                          {t("adminSettings.system.aiAssist.hostUrl")}
                           <input
                             className="form-input"
                             type="text"
@@ -3625,7 +3712,7 @@ export function PostgresAdminSettingsView({
                           />
                         </label>
                         <label className="form-label">
-                          Port
+                          {t("adminSettings.system.aiAssist.port")}
                           <input
                             className="form-input"
                             type="number"
@@ -3641,7 +3728,7 @@ export function PostgresAdminSettingsView({
                           />
                         </label>
                         <label className="form-label">
-                          Request timeout
+                          {t("adminSettings.system.aiAssist.requestTimeout")}
                           <input
                             className="form-input"
                             type="number"
@@ -3662,24 +3749,24 @@ export function PostgresAdminSettingsView({
                           onClick={() => void handleAdminTestLocalLlmProvider()}
                           disabled={!installationSettings || aiAssistPolicySaving || adminLocalModelsBusy || !localProviderDraft.ollamaHost.trim() || localProviderDraft.ollamaPort <= 0}
                         >
-                          {adminLocalModelsBusy ? "Testing..." : "Test"}
+                          {adminLocalModelsBusy ? t("adminSettings.system.network.testing") : t("adminSettings.system.network.test")}
                         </button>
                       </div>
                     </SettingsModalSection>
-                    <SettingsModalSection title="Models">
+                    <SettingsModalSection title={t("adminSettings.system.aiAssist.models")}>
                       <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 260 }}>
                         <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "42%" }}>Model</th>
-                              <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>Enabled</th>
+                              <th className="users-th" style={{ width: "42%" }}>{t("adminSettings.system.aiAssist.model")}</th>
+                              <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>{t("adminSettings.system.aiAssist.enabled")}</th>
                             </tr>
                           </thead>
                           <tbody>
                             {adminLocalModels.length === 0 ? (
                               <tr>
                                 <td className="users-td users-td--muted" colSpan={2}>
-                                  Test the local provider to list available models.
+                                  {t("adminSettings.system.aiAssist.localModelsPrompt")}
                                 </td>
                               </tr>
                             ) : adminLocalModels.map((model) => {
@@ -3692,14 +3779,14 @@ export function PostgresAdminSettingsView({
                                     </div>
                                   </td>
                                   <td className="users-td" style={{ whiteSpace: "nowrap" }}>
-                                    <div className="segmented-control" role="tablist" aria-label={`Availability for ${model.name}`} style={{ width: "fit-content", flexWrap: "nowrap" }}>
+                                    <div className="segmented-control" role="tablist" aria-label={t("adminSettings.system.aiAssist.modelAvailabilityAria", { modelName: model.name })} style={{ width: "fit-content", flexWrap: "nowrap" }}>
                                       <button
                                         type="button"
                                         className={!enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                                         disabled={aiAssistPolicySaving}
                                         onClick={() => handleAdminLocalModelToggle(model.name, false)}
                                       >
-                                        Disabled
+                                        {t("adminSettings.system.aiAssist.disabled")}
                                       </button>
                                       <button
                                         type="button"
@@ -3707,7 +3794,7 @@ export function PostgresAdminSettingsView({
                                         disabled={aiAssistPolicySaving}
                                         onClick={() => handleAdminLocalModelToggle(model.name, true)}
                                       >
-                                        Enabled
+                                        {t("adminSettings.system.aiAssist.enabled")}
                                       </button>
                                     </div>
                                   </td>
@@ -3722,7 +3809,7 @@ export function PostgresAdminSettingsView({
                 </div>
                 <div className="app-settings-modal-footer">
                   <button type="button" className="btn" onClick={closeLocalProviderModal} disabled={adminLocalModelsBusy || aiAssistPolicySaving}>
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="button"
@@ -3730,28 +3817,28 @@ export function PostgresAdminSettingsView({
                     onClick={() => void saveLocalProviderDraft()}
                     disabled={adminLocalModelsBusy || aiAssistPolicySaving || !localProviderDraft.ollamaHost.trim() || localProviderDraft.ollamaPort <= 0}
                   >
-                    {aiAssistPolicySaving ? "Saving..." : "Save Provider"}
+                    {aiAssistPolicySaving ? t("common.saving") : t("adminSettings.system.aiAssist.saveProvider")}
                   </button>
                 </div>
             </SettingsModal>
           ) : null}
           {cloudProviderModalOpen && cloudProviderDraft ? (
             <SettingsModal
-              title="Cloud Provider"
+              title={t("adminSettings.system.aiAssist.cloudProvider")}
               onClose={closeCloudProviderModal}
             >
                 <div className="app-settings-modal-body">
                   <div className="app-settings-modal-sections">
-                    <SettingsModalSection title="Connection">
+                    <SettingsModalSection title={t("adminSettings.system.aiAssist.connection")}>
                       <fieldset className="llm-settings-grid" disabled={!installationSettings || aiAssistPolicySaving} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                         <label className="form-label">
-                          API provider
+                          {t("adminSettings.system.aiAssist.apiProvider")}
                           <select
                             className="form-input"
                             value={cloudProviderDraft.cloudProvider}
                             onChange={(event) => handleAdminCloudLlmProviderChange(event.target.value as CloudLlmProvider | "")}
                           >
-                            <option value="">None</option>
+                            <option value="">{t("adminSettings.system.aiAssist.none")}</option>
                             {CLOUD_LLM_PROVIDER_OPTIONS.map((provider) => (
                               <option key={provider.value} value={provider.value}>{provider.label}</option>
                             ))}
@@ -3764,20 +3851,20 @@ export function PostgresAdminSettingsView({
                                 type="button"
                                 onClick={() => void openUrl(selectedCloudLlmProvider.keyUrl)}
                               >
-                                Open key setup
+                                {t("adminSettings.system.aiAssist.openKeySetup")}
                               </button>
                             </span>
                           ) : null}
                         </label>
                         <label className="form-label">
-                          API secret
+                          {t("adminSettings.system.aiAssist.apiSecret")}
                           <input
                             className="form-input"
                             type="password"
                             autoComplete="off"
                             value={cloudProviderDraft.cloudApiSecret}
                             onChange={(event) => updateCloudProviderDraft((current) => ({ ...current, cloudApiSecret: event.target.value }))}
-                            placeholder={selectedCloudLlmProvider ? `${selectedCloudLlmProvider.label} API secret` : ""}
+                            placeholder={selectedCloudLlmProvider ? t("adminSettings.system.aiAssist.apiSecretPlaceholder", { providerName: selectedCloudLlmProvider.label }) : ""}
                           />
                         </label>
                       </fieldset>
@@ -3788,25 +3875,25 @@ export function PostgresAdminSettingsView({
                           onClick={() => void handleAdminTestCloudLlmProvider()}
                           disabled={!installationSettings || aiAssistPolicySaving || adminCloudModelsBusy || !cloudProviderDraft.cloudApiSecret.trim()}
                         >
-                          {adminCloudModelsBusy ? "Testing..." : "Test"}
+                          {adminCloudModelsBusy ? t("adminSettings.system.network.testing") : t("adminSettings.system.network.test")}
                         </button>
                       </div>
                     </SettingsModalSection>
-                    <SettingsModalSection title="Models">
+                    <SettingsModalSection title={t("adminSettings.system.aiAssist.models")}>
                       <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 260 }}>
                         <table className="users-table" style={{ tableLayout: "fixed", width: "100%" }}>
                           <thead>
                             <tr>
-                              <th className="users-th" style={{ width: "38%" }}>Model</th>
-                              <th className="users-th" style={{ width: 140, whiteSpace: "nowrap" }}>Publisher</th>
-                              <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>Enabled</th>
+                              <th className="users-th" style={{ width: "38%" }}>{t("adminSettings.system.aiAssist.model")}</th>
+                              <th className="users-th" style={{ width: 140, whiteSpace: "nowrap" }}>{t("adminSettings.system.aiAssist.publisher")}</th>
+                              <th className="users-th" style={{ width: 260, whiteSpace: "nowrap" }}>{t("adminSettings.system.aiAssist.enabled")}</th>
                             </tr>
                           </thead>
                           <tbody>
                             {adminCloudModels.length === 0 ? (
                               <tr>
                                 <td className="users-td users-td--muted" colSpan={3}>
-                                  Test the cloud provider to list available models.
+                                  {t("adminSettings.system.aiAssist.cloudModelsPrompt")}
                                 </td>
                               </tr>
                             ) : adminCloudModels.map((model) => {
@@ -3825,14 +3912,14 @@ export function PostgresAdminSettingsView({
                                     {model.publisher ?? "-"}
                                   </td>
                                   <td className="users-td" style={{ whiteSpace: "nowrap" }}>
-                                    <div className="segmented-control" role="tablist" aria-label={`Availability for ${model.name}`} style={{ width: "fit-content", flexWrap: "nowrap" }}>
+                                    <div className="segmented-control" role="tablist" aria-label={t("adminSettings.system.aiAssist.modelAvailabilityAria", { modelName: model.name })} style={{ width: "fit-content", flexWrap: "nowrap" }}>
                                       <button
                                         type="button"
                                         className={!enabled ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                                         disabled={aiAssistPolicySaving}
                                         onClick={() => handleAdminCloudModelToggle(model.id, false)}
                                       >
-                                        Disabled
+                                        {t("adminSettings.system.aiAssist.disabled")}
                                       </button>
                                       <button
                                         type="button"
@@ -3840,7 +3927,7 @@ export function PostgresAdminSettingsView({
                                         disabled={aiAssistPolicySaving}
                                         onClick={() => handleAdminCloudModelToggle(model.id, true)}
                                       >
-                                        Enabled
+                                        {t("adminSettings.system.aiAssist.enabled")}
                                       </button>
                                     </div>
                                   </td>
@@ -3855,7 +3942,7 @@ export function PostgresAdminSettingsView({
                 </div>
                 <div className="app-settings-modal-footer">
                   <button type="button" className="btn" onClick={closeCloudProviderModal} disabled={adminCloudModelsBusy || aiAssistPolicySaving}>
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="button"
@@ -3863,7 +3950,7 @@ export function PostgresAdminSettingsView({
                     onClick={() => void saveCloudProviderDraft()}
                     disabled={adminCloudModelsBusy || aiAssistPolicySaving || !cloudProviderDraft.cloudApiSecret.trim()}
                   >
-                    {aiAssistPolicySaving ? "Saving..." : "Save Provider"}
+                    {aiAssistPolicySaving ? t("common.saving") : t("adminSettings.system.aiAssist.saveProvider")}
                   </button>
                 </div>
             </SettingsModal>
@@ -3884,7 +3971,7 @@ export function PostgresAdminSettingsView({
                   openLocalProviderModal();
                 }}
               >
-                Edit
+                {t("common.edit")}
               </button>
               <button
                 type="button"
@@ -3892,7 +3979,7 @@ export function PostgresAdminSettingsView({
                 onClick={() => void removeLocalProvider()}
                 disabled={aiAssistPolicySaving}
               >
-                Remove
+                {t("common.remove")}
               </button>
             </div>
           ) : null}
@@ -3912,7 +3999,7 @@ export function PostgresAdminSettingsView({
                   openCloudProviderModal();
                 }}
               >
-                Edit
+                {t("common.edit")}
               </button>
               <button
                 type="button"
@@ -3920,27 +4007,27 @@ export function PostgresAdminSettingsView({
                 onClick={() => void removeCloudProvider()}
                 disabled={aiAssistPolicySaving}
               >
-                Remove
+                {t("common.remove")}
               </button>
             </div>
           ) : null}
           {activeEmbeddingModelModal === "download" ? (
             <SettingsModal
-              title="Download Custom Model"
+              title={t("adminSettings.system.aiAssist.downloadCustomModel")}
               onClose={() => setActiveEmbeddingModelModal(null)}
             >
                 <div className="app-settings-modal-body">
                   <label className="settings-field">
-                    <span className="settings-row-label">Model URL or repository</span>
+                    <span className="settings-row-label">{t("adminSettings.system.aiAssist.modelUrlOrRepository")}</span>
                     <input
                       className="form-input"
                       type="text"
                       value={customEmbeddingModelUrl}
                       onChange={(event) => setCustomEmbeddingModelUrl(event.target.value)}
-                      placeholder="https://huggingface.co/intfloat/multilingual-e5-large"
+                      placeholder={t("adminSettings.system.aiAssist.modelUrlPlaceholder")}
                       disabled={embeddingDownloadBusy || embeddingModelSubmitting === "custom-download"}
                     />
-                    <span className="settings-field-hint">Use a compatible Hugging Face model URL or repository id.</span>
+                    <span className="settings-field-hint">{t("adminSettings.system.aiAssist.compatibleModelHint")}</span>
                   </label>
                 </div>
                 <div className="app-settings-modal-footer">
@@ -3951,14 +4038,14 @@ export function PostgresAdminSettingsView({
                     onClick={() => void handleDownloadCustomEmbeddingModel()}
                     disabled={embeddingDownloadBusy || embeddingModelSubmitting === "custom-download" || !customEmbeddingModelUrl.trim()}
                   >
-                    {embeddingModelSubmitting === "custom-download" ? "Starting..." : "Download"}
+                    {embeddingModelSubmitting === "custom-download" ? t("adminSettings.system.aiAssist.starting") : t("adminSettings.system.aiAssist.download")}
                   </button>
                 </div>
             </SettingsModal>
           ) : null}
           {activeEmbeddingModelModal === "folder" ? (
             <SettingsModal
-              title="Select Local Model Folder"
+              title={t("adminSettings.system.aiAssist.selectLocalModelFolder")}
               onClose={() => setActiveEmbeddingModelModal(null)}
             >
                 <div className="app-settings-modal-body">
@@ -3983,12 +4070,12 @@ export function PostgresAdminSettingsView({
                     {customEmbeddingFolderPath ? (
                       <>
                         <span className="doc-dropzone-filename">{customEmbeddingFolderPath}</span>
-                        <span className="doc-dropzone-hint">Ready to import</span>
+                        <span className="doc-dropzone-hint">{t("adminSettings.system.aiAssist.readyToImport")}</span>
                       </>
                     ) : (
                       <>
-                        <span className="doc-dropzone-primary">Click to browse or drag and drop a folder</span>
-                        <span className="doc-dropzone-hint">Choose an already-downloaded compatible embedding model folder.</span>
+                        <span className="doc-dropzone-primary">{t("adminSettings.system.aiAssist.folderDropPrompt")}</span>
+                        <span className="doc-dropzone-hint">{t("adminSettings.system.aiAssist.folderDropDescription")}</span>
                       </>
                     )}
                   </div>
@@ -4001,7 +4088,7 @@ export function PostgresAdminSettingsView({
                     onClick={() => void handleImportEmbeddingModelFolder(customEmbeddingFolderPath || undefined)}
                     disabled={embeddingDownloadBusy || embeddingModelSubmitting === "import" || !customEmbeddingFolderPath}
                   >
-                    {embeddingModelSubmitting === "import" ? "Importing..." : "Import"}
+                    {embeddingModelSubmitting === "import" ? t("adminSettings.system.aiAssist.importing") : t("adminSettings.system.aiAssist.import")}
                   </button>
                 </div>
             </SettingsModal>
@@ -4010,18 +4097,18 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {activeModal === "updates" ? (
-        <SettingsModal title="Back-up and Updates" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("adminSettings.system.updates.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 {updatesNotice ? <p className="settings-inline-success">{updatesNotice}</p> : null}
                 {updatesError ? <p className="auth-error">{updatesError}</p> : null}
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Backup All Data</h3>
+                    <h3>{t("adminSettings.system.updates.backupAllData")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <p className="settings-muted-text">
-                      Backup all the data in the current version. You can import this data after installing a newer version of KanQual.
+                      {t("adminSettings.system.updates.backupAllDataDescription")}
                     </p>
                     <div className="backup-create-actions">
                       <button
@@ -4036,23 +4123,23 @@ export function PostgresAdminSettingsView({
                           setShowUpgradeBackupPasswordModal(true);
                         }}
                       >
-                        {upgradeBackupSubmitting ? "Backing up..." : "Backup"}
+                        {upgradeBackupSubmitting ? t("adminSettings.system.updates.backingUp") : t("adminSettings.system.updates.backup")}
                       </button>
                     </div>
                   </div>
                 </section>
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Backup Diagnostics</h3>
+                    <h3>{t("adminSettings.system.updates.backupDiagnostics")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <div className="home-restricted-list" style={{ marginBottom: 12 }}>
                       <div className="home-restricted-item">
-                        <span className="home-restricted-label">Default folder</span>
+                        <span className="home-restricted-label">{t("adminSettings.system.updates.defaultFolder")}</span>
                         <span className="home-restricted-value">{upgradeBackupDiagnostics?.folderPath || "-"}</span>
                       </div>
                       <div className="home-restricted-item">
-                        <span className="home-restricted-label">Last successful backup</span>
+                        <span className="home-restricted-label">{t("adminSettings.system.updates.lastSuccessfulBackup")}</span>
                         <span className="home-restricted-value">
                           {upgradeBackupDiagnostics?.lastSuccessfulBackup
                             ? formatPostgresTimestampMs(upgradeBackupDiagnostics.lastSuccessfulBackup.createdAtMs)
@@ -4063,19 +4150,19 @@ export function PostgresAdminSettingsView({
                     <div className="backup-list">
                       {upgradeBackupDiagnosticsLoading ? (
                         <div className="empty-state backup-empty-state">
-                          <p>Loading backups...</p>
+                          <p>{t("adminSettings.system.updates.loadingBackups")}</p>
                         </div>
                       ) : upgradeBackupDiagnostics?.backups.length ? (
                         <div className="project-log-table-wrap snapshot-table-wrap">
                           <table className="project-log-table snapshot-table">
                             <thead>
                               <tr>
-                                <th>Created</th>
-                                <th>KanQual</th>
-                                <th>PostgreSQL</th>
-                                <th>Projects</th>
-                                <th>Source Files</th>
-                                <th>Total</th>
+                                <th>{t("adminSettings.system.updates.created")}</th>
+                                <th>{t("adminSettings.system.updates.kanqual")}</th>
+                                <th>{t("adminSettings.system.updates.postgresql")}</th>
+                                <th>{t("adminSettings.system.updates.projects")}</th>
+                                <th>{t("adminSettings.system.updates.sourceFiles")}</th>
+                                <th>{t("adminSettings.system.updates.total")}</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -4096,7 +4183,7 @@ export function PostgresAdminSettingsView({
                         </div>
                       ) : (
                         <div className="empty-state backup-empty-state">
-                          <p>No backups yet.</p>
+                          <p>{t("adminSettings.system.updates.noBackups")}</p>
                         </div>
                       )}
                     </div>
@@ -4104,20 +4191,20 @@ export function PostgresAdminSettingsView({
                 </section>
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
-                    <h3>Updates</h3>
+                    <h3>{t("adminSettings.system.updates.updates")}</h3>
                   </div>
                   <div className="app-settings-modal-section-body">
                     <div className="settings-toggle-row">
                       <span>
-                        <strong>Automatically check for updates</strong>
+                        <strong>{t("adminSettings.system.updates.automaticallyCheck")}</strong>
                       </span>
-                      <div className="segmented-control" role="group" aria-label="Automatic update checks">
+                      <div className="segmented-control" role="group" aria-label={t("adminSettings.system.updates.automaticUpdateChecks")}>
                         {[
-                          { value: false, label: "Disabled" },
-                          { value: true, label: "Enabled" },
+                          { value: false, label: t("adminSettings.system.updates.disabled") },
+                          { value: true, label: t("adminSettings.system.updates.enabled") },
                         ].map((option) => (
                           <button
-                            key={option.label}
+                            key={String(option.value)}
                             type="button"
                             className={(installationSettings?.updatesAutoCheck ?? true) === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                             disabled={!installationSettings}
@@ -4125,7 +4212,7 @@ export function PostgresAdminSettingsView({
                               if (!installationSettings) return;
                               void persistInstallationSettings(
                                 { ...installationSettings, updatesAutoCheck: option.value },
-                                "Update preferences saved.",
+                                t("adminSettings.system.updates.preferencesSaved"),
                               );
                             }}
                           >
@@ -4136,15 +4223,15 @@ export function PostgresAdminSettingsView({
                     </div>
                     <div className="settings-toggle-row">
                       <span>
-                        <strong>Show update available banner to users</strong>
+                        <strong>{t("adminSettings.system.updates.showUpdateBanner")}</strong>
                       </span>
-                      <div className="segmented-control" role="group" aria-label="Update available banner">
+                      <div className="segmented-control" role="group" aria-label={t("adminSettings.system.updates.updateAvailableBanner")}>
                         {[
-                          { value: false, label: "Disabled" },
-                          { value: true, label: "Enabled" },
+                          { value: false, label: t("adminSettings.system.updates.disabled") },
+                          { value: true, label: t("adminSettings.system.updates.enabled") },
                         ].map((option) => (
                           <button
-                            key={option.label}
+                            key={String(option.value)}
                             type="button"
                             className={(installationSettings?.updatesBannerEnabled ?? true) === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                             disabled={!installationSettings}
@@ -4152,7 +4239,7 @@ export function PostgresAdminSettingsView({
                               if (!installationSettings) return;
                               void persistInstallationSettings(
                                 { ...installationSettings, updatesBannerEnabled: option.value },
-                                "Update preferences saved.",
+                                t("adminSettings.system.updates.preferencesSaved"),
                               );
                             }}
                           >
@@ -4178,14 +4265,14 @@ export function PostgresAdminSettingsView({
               </div>
             </div>
             <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {showUpgradeBackupPasswordModal ? (
         <SettingsModal
-          title="Backup All Data"
+          title={t("adminSettings.system.updates.backupAllData")}
           onClose={() => {
             if (!upgradeBackupSubmitting) setShowUpgradeBackupPasswordModal(false);
           }}
@@ -4193,10 +4280,10 @@ export function PostgresAdminSettingsView({
         >
             <form className="app-settings-modal-body" onSubmit={handleCreateUpgradeBackup}>
               <div className="settings-warning settings-warning--danger">
-                Enter the administrator password to create an encrypted backup. This password will be required to restore the backup later.
+                {t("adminSettings.system.updates.passwordPrompt")}
               </div>
               <label className="form-label">
-                Administrator Password
+                {t("adminSettings.system.updates.administratorPassword")}
                 <div className="password-input-wrap">
                   <input
                     className="form-input password-input-field"
@@ -4210,7 +4297,7 @@ export function PostgresAdminSettingsView({
                   <button
                     type="button"
                     className="password-visibility-btn"
-                    aria-label={upgradeBackupPasswordVisible ? "Hide password" : "Show password"}
+                    aria-label={upgradeBackupPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                     aria-pressed={upgradeBackupPasswordVisible}
                     onClick={() => setUpgradeBackupPasswordVisible((current) => !current)}
                     disabled={upgradeBackupSubmitting}
@@ -4227,14 +4314,14 @@ export function PostgresAdminSettingsView({
                   onClick={() => setShowUpgradeBackupPasswordModal(false)}
                   disabled={upgradeBackupSubmitting}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="btn btn--primary"
                   disabled={upgradeBackupSubmitting || !upgradeBackupPassword.trim()}
                 >
-                  {upgradeBackupSubmitting ? "Backing up..." : "Backup"}
+                  {upgradeBackupSubmitting ? t("adminSettings.system.updates.backingUp") : t("adminSettings.system.updates.backup")}
                 </button>
               </div>
             </form>
@@ -4242,29 +4329,29 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {showUpgradeBackupSuccessModal && lastUpgradeBackup ? (
-        <SettingsModal title="Backup Complete" onClose={() => setShowUpgradeBackupSuccessModal(false)}>
+        <SettingsModal title={t("adminSettings.system.updates.completeTitle")} onClose={() => setShowUpgradeBackupSuccessModal(false)}>
             <div className="app-settings-modal-body">
-              <p className="settings-inline-success">KanQual finished backing up all data.</p>
+              <p className="settings-inline-success">{t("adminSettings.system.updates.completeMessage")}</p>
               <p className="settings-muted-text">
-                KanQual saved the backup in its managed backup folder. You can copy it somewhere else if you want an extra copy.
+                {t("adminSettings.system.updates.completeDescription")}
               </p>
               {upgradeBackupCopyNotice ? <p className="settings-inline-success">{upgradeBackupCopyNotice}</p> : null}
               {upgradeBackupCopyError ? <p className="auth-error">{upgradeBackupCopyError}</p> : null}
               <div className="settings-diagnostics-grid settings-diagnostics-grid--compact">
                 <div>
-                  <span>Managed Path</span>
+                  <span>{t("adminSettings.system.updates.managedPath")}</span>
                   <strong>{lastUpgradeBackup.path}</strong>
                 </div>
                 <div>
-                  <span>Projects</span>
+                  <span>{t("adminSettings.system.updates.projects")}</span>
                   <strong>{lastUpgradeBackup.projectCount}</strong>
                 </div>
                 <div>
-                  <span>Files</span>
+                  <span>{t("adminSettings.system.updates.files")}</span>
                   <strong>{lastUpgradeBackup.storageFileCount}</strong>
                 </div>
                 <div>
-                  <span>Size</span>
+                  <span>{t("adminSettings.system.updates.size")}</span>
                   <strong>{formatBytes(lastUpgradeBackup.bytes)}</strong>
                 </div>
               </div>
@@ -4276,21 +4363,21 @@ export function PostgresAdminSettingsView({
                 onClick={() => void handleCopyLastUpgradeBackup()}
                 disabled={upgradeBackupCopying}
               >
-                {upgradeBackupCopying ? "Copying..." : "Copy to..."}
+                {upgradeBackupCopying ? t("adminSettings.system.updates.copying") : t("adminSettings.system.updates.copyTo")}
               </button>
               <button type="button" className="btn btn--primary" onClick={() => setShowUpgradeBackupSuccessModal(false)}>
-                Done
+                {t("common.done")}
               </button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "diagnostics" ? (
-        <SettingsModal title={t("appSettings.sectionTitles.diagnostics")} onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("adminSettings.system.database.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <SettingsModalSection
-                  title="Database status"
+                  title={t("adminSettings.system.database.statusTitle")}
                   action={(
                     <button
                       type="button"
@@ -4300,83 +4387,83 @@ export function PostgresAdminSettingsView({
                       }}
                       disabled={loading}
                     >
-                      {loading ? "Refreshing..." : t("appSettings.diagnostics.recheck")}
+                      {loading ? t("adminSettings.system.database.refreshing") : t("appSettings.diagnostics.recheck")}
                     </button>
                   )}
                 >
                   <div className="home-restricted-list">
-                    <div className="home-restricted-item"><span className="home-restricted-label">Host</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Bundled database reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Control database ready</span><span className="home-restricted-value">{status?.bootstrapApplied ? "Yes" : "No"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Setup finalized</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Database account</span><span className="home-restricted-value">{databaseAccountStatus}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.host")}</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.bundledReachable")}</span><span className="home-restricted-value">{yesNo(status?.serviceReachable, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.controlReady")}</span><span className="home-restricted-value">{yesNo(status?.bootstrapApplied, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.setupFinalized")}</span><span className="home-restricted-value">{yesNo(status?.adminHandoffCompleted, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.databaseAccount")}</span><span className="home-restricted-value">{databaseAccountStatus}</span></div>
                   </div>
                 </SettingsModalSection>
                 <SettingsModalSection
-                  title="Bundled runtime"
+                  title={t("adminSettings.system.database.bundledRuntime")}
                   action={(
                     <div className="settings-inline-actions">
                       <button type="button" className="btn" onClick={() => void handlePrepareBundledRuntimeDirs()} disabled={loading}>
-                        Prepare
+                        {t("adminSettings.system.database.prepare")}
                       </button>
                       <button type="button" className="btn btn--secondary" onClick={() => void handleStartBundledPostgresRuntime()} disabled={loading || !bundledPostgresStatus?.initialized}>
-                        Start
+                        {t("adminSettings.system.database.start")}
                       </button>
                       <button type="button" className="btn" onClick={() => void handleStopBundledPostgresRuntime()} disabled={loading || !bundledPostgresStatus?.reachable}>
-                        Stop
+                        {t("adminSettings.system.database.stop")}
                       </button>
                     </div>
                   )}
                 >
                   <div className="home-restricted-list">
-                    <div className="home-restricted-item"><span className="home-restricted-label">Distribution</span><span className="home-restricted-value">{bundledPostgresStatus?.paths.distribution ?? "-"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Expected PostgreSQL</span><span className="home-restricted-value">{bundledPostgresStatus?.paths.expectedVersion ?? "-"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Runtime root</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.runtimeRootExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Binary folder</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.binDirExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Server binary</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.postgresBinaryExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Initdb binary</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.initdbBinaryExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Control binary</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.pgCtlBinaryExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Dump binary</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.pgDumpBinaryExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Data root</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.dataRootExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Data directory</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.dataDirExists)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Initialized</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.initialized)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Initialized version</span><span className="home-restricted-value">{bundledPostgresStatus?.initializedVersion ?? "-"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Version matches</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.expectedVersionMatches)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Probe reachable</span><span className="home-restricted-value">{bundledPostgresStatus ? `${yesNo(bundledPostgresStatus.reachable)} (${bundledPostgresStatus.probeHost}:${bundledPostgresStatus.probePort})` : "-"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Process marker</span><span className="home-restricted-value">{bundledPostgresStatus?.postmasterPidExists ? `Yes${bundledPostgresStatus.postmasterPid ? ` (${bundledPostgresStatus.postmasterPid})` : ""}` : "No"}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Marker process alive</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.postmasterPidRunning)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Writable data root</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.dataRootWritable)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Safe data directory</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.dataDirEmptyOrMissing)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Required binaries</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.requiredBinariesAvailable)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Default port available</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.defaultPortAvailable)}</span></div>
-                    <div className="home-restricted-item"><span className="home-restricted-label">Ready to initialize</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.canInitialize)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.distribution")}</span><span className="home-restricted-value">{formatBundledPostgresDistribution(bundledPostgresStatus?.paths.distribution, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.expectedPostgresql")}</span><span className="home-restricted-value">{bundledPostgresStatus?.paths.expectedVersion ?? "-"}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.runtimeRoot")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.runtimeRootExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.binaryFolder")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.binDirExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.serverBinary")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.postgresBinaryExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.initdbBinary")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.initdbBinaryExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.controlBinary")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.pgCtlBinaryExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.dumpBinary")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.pgDumpBinaryExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.dataRoot")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.dataRootExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.dataDirectory")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.dataDirExists, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.initialized")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.initialized, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.initializedVersion")}</span><span className="home-restricted-value">{bundledPostgresStatus?.initializedVersion ?? "-"}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.versionMatches")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.expectedVersionMatches, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.probeReachable")}</span><span className="home-restricted-value">{bundledPostgresStatus ? `${yesNo(bundledPostgresStatus.reachable, t)} (${bundledPostgresStatus.probeHost}:${bundledPostgresStatus.probePort})` : "-"}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.processMarker")}</span><span className="home-restricted-value">{bundledPostgresStatus?.postmasterPidExists ? `${t("adminSettings.system.statuses.yes")}${bundledPostgresStatus.postmasterPid ? ` (${bundledPostgresStatus.postmasterPid})` : ""}` : t("adminSettings.system.statuses.no")}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.markerProcessAlive")}</span><span className="home-restricted-value">{yesNo(bundledPostgresStatus?.postmasterPidRunning, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.writableDataRoot")}</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.dataRootWritable, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.safeDataDirectory")}</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.dataDirEmptyOrMissing, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.requiredBinaries")}</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.requiredBinariesAvailable, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.defaultPortAvailable")}</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.defaultPortAvailable, t)}</span></div>
+                    <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.readyToInitialize")}</span><span className="home-restricted-value">{yesNo(bundledPostgresPreflight?.canInitialize, t)}</span></div>
                   </div>
                   {runtimeNotice ? <p className="settings-success">{runtimeNotice}</p> : null}
                   {bundledPostgresPreflight?.issues.length ? (
                     <div className="settings-row settings-row--block">
                       <div className="settings-row-info">
-                        <div className="settings-row-label">Initialization blockers</div>
+                        <div className="settings-row-label">{t("adminSettings.system.database.initializationBlockers")}</div>
                         <div className="settings-row-desc">
-                          {bundledPostgresPreflight.issues.join(" ")}
+                          {formatBundledPostgresPreflightIssues(bundledPostgresPreflight.issues, t)}
                         </div>
                       </div>
                     </div>
                   ) : null}
                   <div className="settings-row settings-row--block">
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Runtime path</div>
+                      <div className="settings-row-label">{t("adminSettings.system.database.runtimePath")}</div>
                       <code className="settings-code-line">{bundledPostgresStatus?.paths.runtimeRoot ?? "-"}</code>
                     </div>
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Data path</div>
+                      <div className="settings-row-label">{t("adminSettings.system.database.dataPath")}</div>
                       <code className="settings-code-line">{bundledPostgresStatus?.paths.dataRoot ?? "-"}</code>
                     </div>
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Latest log</div>
+                      <div className="settings-row-label">{t("adminSettings.system.database.latestLog")}</div>
                       <code className="settings-code-line">{bundledPostgresStatus?.latestLogPath ?? "-"}</code>
                     </div>
                     <div className="settings-row-info">
-                      <div className="settings-row-label">Runtime diagnostics log</div>
+                      <div className="settings-row-label">{t("adminSettings.system.database.runtimeDiagnosticsLog")}</div>
                       <code className="settings-code-line">{bundledPostgresStatus?.paths.runtimeDiagnosticsLog ?? "-"}</code>
                     </div>
                   </div>
@@ -4385,13 +4472,13 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "administratorLog" ? (
-        <SettingsModal title="Administrator Log" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("adminSettings.system.logs.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -4403,7 +4490,7 @@ export function PostgresAdminSettingsView({
                     <div
                       className="segmented-control"
                       role="tablist"
-                      aria-label="Administrator log"
+                      aria-label={t("adminSettings.system.logs.aria")}
                       style={{ gridColumn: 2, justifySelf: "center", width: "max-content", flex: "0 0 auto" }}
                     >
                       <button
@@ -4411,14 +4498,14 @@ export function PostgresAdminSettingsView({
                         className={`segmented-control-option ${adminAuditTab === "auth" ? "segmented-control-option--active" : ""}`}
                         onClick={() => setAdminAuditTab("auth")}
                       >
-                        Users
+                        {t("adminSettings.system.logs.users")}
                       </button>
                       <button
                         type="button"
                         className={`segmented-control-option ${adminAuditTab === "projects" ? "segmented-control-option--active" : ""}`}
                         onClick={() => setAdminAuditTab("projects")}
                       >
-                        Projects
+                        {t("adminSettings.system.logs.projects")}
                       </button>
                     </div>
                     <div className="settings-inline-actions" style={{ gridColumn: 3, justifySelf: "end" }}>
@@ -4426,8 +4513,8 @@ export function PostgresAdminSettingsView({
                         type="button"
                         className="codebook-icon-action"
                         onClick={() => void handleExportAdminLogCsv()}
-                        aria-label="Export active administrator log table as CSV"
-                        title="Export CSV"
+                        aria-label={t("adminSettings.system.logs.exportCsvAria")}
+                        title={t("adminSettings.system.logs.exportCsvTitle")}
                       >
                         <DownloadIcon className="filter-icon-svg" />
                       </button>
@@ -4435,8 +4522,8 @@ export function PostgresAdminSettingsView({
                         type="button"
                         className="codebook-icon-action"
                         onClick={() => setAdminLogFilterOpen(true)}
-                        aria-label="Filter active administrator log table"
-                        title="Filter"
+                        aria-label={t("adminSettings.system.logs.filterAria")}
+                        title={t("adminSettings.system.logs.filterTitle")}
                       >
                         <FilterIcon className="filter-icon-svg" />
                       </button>
@@ -4446,12 +4533,12 @@ export function PostgresAdminSettingsView({
                   {auditError ? <p className="auth-error">{auditError}</p> : null}
                   {auditLoading ? (
                     <div className="empty-state empty-state--compact">
-                      <p>Loading audit log...</p>
+                      <p>{t("adminSettings.system.logs.loadingAuditLog")}</p>
                     </div>
                   ) : adminAuditTab === "auth" ? (
                     authAuditEntries.length === 0 ? (
                       <div className="empty-state empty-state--compact">
-                        <p>No authentication events yet.</p>
+                        <p>{t("adminSettings.system.logs.noAuthenticationEvents")}</p>
                       </div>
                     ) : (
                       <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 520 }}>
@@ -4463,43 +4550,43 @@ export function PostgresAdminSettingsView({
                                 style={{ whiteSpace: "nowrap" }}
                                 onClick={() => toggleAdminUsersLogSort("time")}
                               >
-                                Time<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "time", adminUsersLogSortDirection)}</span>
+                                {t("adminSettings.system.logs.time")}<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "time", adminUsersLogSortDirection)}</span>
                               </th>
                               <th
                                 className={`users-th${adminUsersLogSortColumn === "event" ? " users-th--sorted" : ""}`}
                                 onClick={() => toggleAdminUsersLogSort("event")}
                               >
-                                Event<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "event", adminUsersLogSortDirection)}</span>
+                                {t("adminSettings.system.logs.event")}<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "event", adminUsersLogSortDirection)}</span>
                               </th>
                               <th
                                 className={`users-th${adminUsersLogSortColumn === "outcome" ? " users-th--sorted" : ""}`}
                                 onClick={() => toggleAdminUsersLogSort("outcome")}
                               >
-                                Outcome<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "outcome", adminUsersLogSortDirection)}</span>
+                                {t("adminSettings.system.logs.outcome")}<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "outcome", adminUsersLogSortDirection)}</span>
                               </th>
                               <th
                                 className={`users-th${adminUsersLogSortColumn === "user" ? " users-th--sorted" : ""}`}
                                 onClick={() => toggleAdminUsersLogSort("user")}
                               >
-                                User<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "user", adminUsersLogSortDirection)}</span>
+                                {t("adminSettings.system.logs.user")}<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "user", adminUsersLogSortDirection)}</span>
                               </th>
                               <th
                                 className={`users-th${adminUsersLogSortColumn === "ip" ? " users-th--sorted" : ""}`}
                                 onClick={() => toggleAdminUsersLogSort("ip")}
                               >
-                                IP Address<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "ip", adminUsersLogSortDirection)}</span>
+                                {t("adminSettings.system.logs.ipAddress")}<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "ip", adminUsersLogSortDirection)}</span>
                               </th>
                               <th
                                 className={`users-th${adminUsersLogSortColumn === "reason" ? " users-th--sorted" : ""}`}
                                 onClick={() => toggleAdminUsersLogSort("reason")}
                               >
-                                Reason<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "reason", adminUsersLogSortDirection)}</span>
+                                {t("adminSettings.system.logs.reason")}<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "reason", adminUsersLogSortDirection)}</span>
                               </th>
                               <th
                                 className={`users-th${adminUsersLogSortColumn === "message" ? " users-th--sorted" : ""}`}
                                 onClick={() => toggleAdminUsersLogSort("message")}
                               >
-                                Message<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "message", adminUsersLogSortDirection)}</span>
+                                {t("adminSettings.system.logs.message")}<span className="users-sort-icon">{sortIcon(adminUsersLogSortColumn === "message", adminUsersLogSortDirection)}</span>
                               </th>
                             </tr>
                           </thead>
@@ -4530,7 +4617,7 @@ export function PostgresAdminSettingsView({
                     )
                   ) : projectAuditEntries.length === 0 ? (
                     <div className="empty-state empty-state--compact">
-                      <p>No project activity yet.</p>
+                      <p>{t("adminSettings.system.logs.noProjectActivity")}</p>
                     </div>
                   ) : (
                       <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 520 }}>
@@ -4542,31 +4629,31 @@ export function PostgresAdminSettingsView({
                               style={{ whiteSpace: "nowrap" }}
                               onClick={() => toggleAdminProjectsLogSort("time")}
                             >
-                              Time<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "time", adminProjectsLogSortDirection)}</span>
+                              {t("adminSettings.system.logs.time")}<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "time", adminProjectsLogSortDirection)}</span>
                             </th>
                             <th
                               className={`users-th${adminProjectsLogSortColumn === "project" ? " users-th--sorted" : ""}`}
                               onClick={() => toggleAdminProjectsLogSort("project")}
                             >
-                              Project<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "project", adminProjectsLogSortDirection)}</span>
+                              {t("adminSettings.system.logs.project")}<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "project", adminProjectsLogSortDirection)}</span>
                             </th>
                             <th
                               className={`users-th${adminProjectsLogSortColumn === "user" ? " users-th--sorted" : ""}`}
                               onClick={() => toggleAdminProjectsLogSort("user")}
                             >
-                              User<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "user", adminProjectsLogSortDirection)}</span>
+                              {t("adminSettings.system.logs.user")}<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "user", adminProjectsLogSortDirection)}</span>
                             </th>
                             <th
                               className={`users-th${adminProjectsLogSortColumn === "action" ? " users-th--sorted" : ""}`}
                               onClick={() => toggleAdminProjectsLogSort("action")}
                             >
-                              Action<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "action", adminProjectsLogSortDirection)}</span>
+                              {t("adminSettings.system.logs.action")}<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "action", adminProjectsLogSortDirection)}</span>
                             </th>
                             <th
                               className={`users-th${adminProjectsLogSortColumn === "description" ? " users-th--sorted" : ""}`}
                               onClick={() => toggleAdminProjectsLogSort("description")}
                             >
-                              Description<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "description", adminProjectsLogSortDirection)}</span>
+                              {t("adminSettings.system.logs.description")}<span className="users-sort-icon">{sortIcon(adminProjectsLogSortColumn === "description", adminProjectsLogSortDirection)}</span>
                             </th>
                           </tr>
                         </thead>
@@ -4581,7 +4668,7 @@ export function PostgresAdminSettingsView({
                                   {projectLogActionLabel(entry.action, t)}
                                 </span>
                               </td>
-                              <td className="users-td">{entry.label || "-"}</td>
+                              <td className="users-td">{projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -4589,10 +4676,10 @@ export function PostgresAdminSettingsView({
                     </div>
                   )}
                   {adminAuditTab === "auth" && authAuditEntries.length > 250 ? (
-                    <p className="auth-hint">Showing the 250 newest authentication events.</p>
+                    <p className="auth-hint">{t("adminSettings.system.logs.authNewest")}</p>
                   ) : null}
                   {adminAuditTab === "projects" && projectAuditEntries.length > 500 ? (
-                    <p className="auth-hint">Showing the 500 newest project activity events.</p>
+                    <p className="auth-hint">{t("adminSettings.system.logs.projectNewest")}</p>
                   ) : null}
                   </div>
                 </section>
@@ -4600,13 +4687,13 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "administratorLog" && adminLogFilterOpen ? (
-        <SettingsModal title={`Filter ${adminAuditTab === "auth" ? "Users" : "Projects"} Log`} onClose={() => setAdminLogFilterOpen(false)}>
+        <SettingsModal title={adminAuditTab === "auth" ? t("adminSettings.system.logs.filterUsersLog") : t("adminSettings.system.logs.filterProjectsLog")} onClose={() => setAdminLogFilterOpen(false)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
@@ -4614,13 +4701,13 @@ export function PostgresAdminSettingsView({
                     {adminAuditTab === "auth" ? (
                       <div className="settings-form-grid">
                         {([
-                          ["time", "Time"],
-                          ["event", "Event"],
-                          ["outcome", "Outcome"],
-                          ["user", "User"],
-                          ["ip", "IP Address"],
-                          ["reason", "Reason"],
-                          ["message", "Message"],
+                          ["time", t("adminSettings.system.logs.time")],
+                          ["event", t("adminSettings.system.logs.event")],
+                          ["outcome", t("adminSettings.system.logs.outcome")],
+                          ["user", t("adminSettings.system.logs.user")],
+                          ["ip", t("adminSettings.system.logs.ipAddress")],
+                          ["reason", t("adminSettings.system.logs.reason")],
+                          ["message", t("adminSettings.system.logs.message")],
                         ] as Array<[AdminUsersLogSortColumn, string]>).map(([column, label]) => (
                           <label className="form-field" key={column}>
                             <span>{label}</span>
@@ -4628,7 +4715,7 @@ export function PostgresAdminSettingsView({
                               className="form-input"
                               value={adminUsersLogFilters[column]}
                               onChange={(event) => setAdminUsersLogFilters((current) => ({ ...current, [column]: event.target.value }))}
-                              placeholder={`Filter ${label.toLowerCase()}`}
+                              placeholder={t("adminSettings.system.logs.filterPlaceholder", { label: label.toLowerCase() })}
                             />
                           </label>
                         ))}
@@ -4636,11 +4723,11 @@ export function PostgresAdminSettingsView({
                     ) : (
                       <div className="settings-form-grid">
                         {([
-                          ["time", "Time"],
-                          ["project", "Project"],
-                          ["user", "User"],
-                          ["action", "Action"],
-                          ["description", "Description"],
+                          ["time", t("adminSettings.system.logs.time")],
+                          ["project", t("adminSettings.system.logs.project")],
+                          ["user", t("adminSettings.system.logs.user")],
+                          ["action", t("adminSettings.system.logs.action")],
+                          ["description", t("adminSettings.system.logs.description")],
                         ] as Array<[AdminProjectsLogSortColumn, string]>).map(([column, label]) => (
                           <label className="form-field" key={column}>
                             <span>{label}</span>
@@ -4648,7 +4735,7 @@ export function PostgresAdminSettingsView({
                               className="form-input"
                               value={adminProjectsLogFilters[column]}
                               onChange={(event) => setAdminProjectsLogFilters((current) => ({ ...current, [column]: event.target.value }))}
-                              placeholder={`Filter ${label.toLowerCase()}`}
+                              placeholder={t("adminSettings.system.logs.filterPlaceholder", { label: label.toLowerCase() })}
                             />
                           </label>
                         ))}
@@ -4684,9 +4771,9 @@ export function PostgresAdminSettingsView({
                   }
                 }}
               >
-                Clear
+                {t("common.clear")}
               </button>
-              <button type="button" className="btn btn--primary" onClick={() => setAdminLogFilterOpen(false)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setAdminLogFilterOpen(false)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
@@ -4737,14 +4824,14 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "addProject" ? (
         <SettingsModal
-          title="Add Project"
+          title={t("adminSettings.cards.addProject.title")}
           onClose={() => {
             resetAddProjectModal();
             setActiveModal(null);
@@ -4756,12 +4843,12 @@ export function PostgresAdminSettingsView({
                 <section className="app-settings-modal-section">
                   {gettingStartedState.step === "createProject" ? (
                     <GettingStartedGuideCallout
-                      title="Project details"
+                      title={t("app.gettingStarted.projectDetailsTitle")}
                       onDismiss={() => {
                         void dismissGettingStartedGuide();
                       }}
                     >
-                      <p>Give the project a name and optional description. You can ignore Members for now; the guide will help you add the project user next.</p>
+                      <p>{t("app.gettingStarted.projectDetailsBody")}</p>
                     </GettingStartedGuideCallout>
                   ) : null}
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default" style={{ alignItems: "center" }}>
@@ -4771,14 +4858,14 @@ export function PostgresAdminSettingsView({
                         className={addProjectTab === "details" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                         onClick={() => setAddProjectTab("details")}
                       >
-                        Details
+                        {t("adminSettings.projectModal.details")}
                       </button>
                       <button
                         type="button"
                         className={addProjectTab === "members" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                         onClick={() => setAddProjectTab("members")}
                       >
-                        Members
+                        {t("adminSettings.projectModal.members")}
                       </button>
                     </div>
                   </div>
@@ -4786,7 +4873,7 @@ export function PostgresAdminSettingsView({
                     {addProjectTab === "details" ? (
                       <div className="settings-grid settings-grid--two">
                         <label className="form-label">
-                          Project name
+                          {t("adminSettings.projectModal.projectName")}
                           <input
                             className="form-input"
                             type="text"
@@ -4798,7 +4885,7 @@ export function PostgresAdminSettingsView({
                         </label>
                         <span />
                         <label className="form-label" style={{ gridColumn: "1 / -1", marginTop: 8 }}>
-                          Description
+                          {t("adminSettings.projectModal.description")}
                           <textarea
                             className="form-input form-textarea"
                             value={addProjectDescription}
@@ -4815,9 +4902,9 @@ export function PostgresAdminSettingsView({
                             <table className="users-table">
                               <thead>
                                 <tr>
-                                  <th className="users-th">User</th>
-                                  <th className="users-th">Username</th>
-                                  <th className="users-th">Role</th>
+                                  <th className="users-th">{t("adminSettings.projectModal.user")}</th>
+                                  <th className="users-th">{t("adminSettings.projectModal.username")}</th>
+                                  <th className="users-th">{t("adminSettings.projectModal.role")}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -4834,11 +4921,11 @@ export function PostgresAdminSettingsView({
                                           onChange={(event) => setAddProjectUserRole(user.id, event.target.value)}
                                           disabled={creatingProject || authSession.authKind !== "postgres_admin"}
                                         >
-                                          <option value="">No access</option>
-                                          <option value="owner">Owner</option>
-                                          <option value="editor">Editor</option>
-                                          <option value="coder">Coder</option>
-                                          <option value="viewer">Viewer</option>
+                                          <option value="">{t("adminSettings.roles.noAccess")}</option>
+                                          <option value="owner">{t("adminSettings.roles.owner")}</option>
+                                          <option value="editor">{t("adminSettings.roles.editor")}</option>
+                                          <option value="coder">{t("adminSettings.roles.coder")}</option>
+                                          <option value="viewer">{t("adminSettings.roles.viewer")}</option>
                                         </select>
                                       </td>
                                     </tr>
@@ -4847,13 +4934,13 @@ export function PostgresAdminSettingsView({
                             </table>
                           </div>
                         ) : (
-                          <p className="auth-hint">Create users before assigning project members.</p>
+                          <p className="auth-hint">{t("adminSettings.projectModal.createUsersFirst")}</p>
                         )}
                       </>
                     )}
                     {authSession.authKind !== "postgres_admin" ? (
                       <p className="auth-hint" style={{ marginTop: 12 }}>
-                        Sign in as the PostgreSQL administrator to create projects.
+                        {t("adminSettings.projectModal.adminRequiredCreateProject")}
                       </p>
                     ) : null}
                   </div>
@@ -4870,7 +4957,7 @@ export function PostgresAdminSettingsView({
                 }}
                 disabled={creatingProject}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <div className="form-actions" style={{ margin: 0 }}>
                 {addProjectTab === "details" ? (
@@ -4880,7 +4967,7 @@ export function PostgresAdminSettingsView({
                     onClick={() => setAddProjectTab("members")}
                     disabled={creatingProject || authSession.authKind !== "postgres_admin" || !addProjectName.trim()}
                   >
-                    Next
+                    {t("common.next")}
                   </button>
                 ) : (
                   <button
@@ -4889,7 +4976,7 @@ export function PostgresAdminSettingsView({
                     className="btn btn--primary"
                     disabled={creatingProject || authSession.authKind !== "postgres_admin" || !addProjectName.trim()}
                   >
-                    {creatingProject ? "Creating..." : "Create"}
+                    {creatingProject ? t("common.creating") : t("adminSettings.projectModal.create")}
                   </button>
                 )}
               </div>
@@ -4898,25 +4985,25 @@ export function PostgresAdminSettingsView({
       ) : null}
 
       {activeModal === "manageProjects" ? (
-        <SettingsModal title="Manage Projects" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("adminSettings.system.projects.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-body">
                     {authSession.authKind !== "postgres_admin" ? (
                       <p className="auth-hint">
-                        Sign in as the PostgreSQL administrator to manage projects.
+                        {t("adminSettings.system.projects.adminRequired")}
                       </p>
                     ) : null}
                     <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 520, width: "fit-content", maxWidth: "100%", margin: "0 auto" }}>
                       <table className="users-table" style={{ tableLayout: "auto", width: "max-content", minWidth: 0 }}>
                         <thead>
                           <tr>
-                            <th className="users-th">Project</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Status</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Created</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Last Updated</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Actions</th>
+                            <th className="users-th">{t("adminSettings.system.projects.project")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.projects.status")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.projects.created")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.projects.lastUpdated")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.projects.actions")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4944,14 +5031,14 @@ export function PostgresAdminSettingsView({
                                     y: event.clientY,
                                   });
                                 }}
-                                title="Right-click for project actions"
+                                title={t("adminSettings.system.projects.rowActionsTitle")}
                                 style={{ cursor: "context-menu" }}
                               >
                                 <td className="users-td users-td--name">
                                   <div>{project.name}</div>
                                 </td>
                                 <td className="users-td" style={{ whiteSpace: "nowrap" }}>
-                                  <div>{project.active ? "Active" : "Disabled"}</div>
+                                  <div>{project.active ? t("adminSettings.system.users.active") : t("adminSettings.system.users.disabled")}</div>
                                   {!project.active && project.disabledAt ? (
                                     <div className="users-td--muted">{formatPostgresDateTime(project.disabledAt)}</div>
                                   ) : null}
@@ -4974,9 +5061,9 @@ export function PostgresAdminSettingsView({
                                         y: rect.bottom + 4,
                                       });
                                     }}
-                                    aria-label={`Actions for ${project.name}`}
+                                    aria-label={t("adminSettings.system.users.actionsFor", { name: project.name })}
                                     aria-expanded={manageProjectMenu?.projectId === project.id}
-                                    title="Project actions"
+                                    title={t("adminSettings.system.projects.projectActions")}
                                   >
                                     ...
                                   </button>
@@ -4985,7 +5072,7 @@ export function PostgresAdminSettingsView({
                             );
                           }) : (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={5}>No PostgreSQL projects have been created yet.</td>
+                              <td className="users-td users-td--muted" colSpan={5}>{t("adminSettings.system.projects.none")}</td>
                             </tr>
                           )}
                         </tbody>
@@ -4997,7 +5084,7 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
@@ -5019,7 +5106,9 @@ export function PostgresAdminSettingsView({
               void handleOpenManagedProject(manageProjectMenuProject);
             }}
           >
-            {openingProjectId === manageProjectMenuProject.id ? "Opening..." : "Open"}
+            {openingProjectId === manageProjectMenuProject.id
+              ? t("adminSettings.system.projects.opening")
+              : t("adminSettings.system.projects.open")}
           </button>
           <button
             type="button"
@@ -5044,8 +5133,12 @@ export function PostgresAdminSettingsView({
             }}
           >
             {updatingProjectStatusId === manageProjectMenuProject.id
-              ? manageProjectMenuProject.active ? "Disabling..." : "Enabling..."
-              : manageProjectMenuProject.active ? "Disable" : "Enable"}
+              ? manageProjectMenuProject.active
+                ? t("adminSettings.system.projects.disabling")
+                : t("adminSettings.system.projects.enabling")
+              : manageProjectMenuProject.active
+                ? t("adminSettings.system.projects.disable")
+                : t("adminSettings.system.projects.enable")}
           </button>
           <button
             type="button"
@@ -5060,14 +5153,16 @@ export function PostgresAdminSettingsView({
               setProjectAccessWarning({ action: "delete", project: manageProjectMenuProject });
             }}
           >
-            {deletingProjectId === manageProjectMenuProject.id ? "Deleting..." : "Delete"}
+            {deletingProjectId === manageProjectMenuProject.id
+              ? t("adminSettings.system.projects.deleting")
+              : t("adminSettings.system.projects.delete")}
           </button>
         </div>
       ) : null}
 
       {activeModal === "addUser" ? (
         <SettingsModal
-          title="Add User"
+          title={t("adminSettings.cards.addUser.title")}
           onClose={() => {
             resetAddUserModal();
             setActiveModal(null);
@@ -5079,18 +5174,18 @@ export function PostgresAdminSettingsView({
                 <section className="app-settings-modal-section">
                   {gettingStartedState.step === "createUser" ? (
                     <GettingStartedGuideCallout
-                      title={addUserTab === "projects" ? "Assign the project" : "User details"}
+                      title={addUserTab === "projects" ? t("app.gettingStarted.assignProjectTitle") : t("app.gettingStarted.userDetailsTitle")}
                       onDismiss={() => {
                         void dismissGettingStartedGuide();
                       }}
                     >
                       {addUserTab === "projects" ? (
                         <>
-                          <p>Find the project you just created and choose Owner in its Role field, then click Create.</p>
-                          <p>Owner is used for this walkthrough so the guide user can try the full workflow. Editor, Coder, and Viewer are more limited roles for normal project work.</p>
+                          <p>{t("app.gettingStarted.assignProjectBody")}</p>
+                          <p>{t("app.gettingStarted.roleHintBody")}</p>
                         </>
                       ) : (
-                        <p>Create a project user with a username and temporary password, then click Next.</p>
+                        <p>{t("app.gettingStarted.userDetailsBody")}</p>
                       )}
                     </GettingStartedGuideCallout>
                   ) : null}
@@ -5101,14 +5196,14 @@ export function PostgresAdminSettingsView({
                         className={addUserTab === "account" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                         onClick={() => setAddUserTab("account")}
                       >
-                        Account
+                        {t("adminSettings.userModal.account")}
                       </button>
                       <button
                         type="button"
                         className={addUserTab === "projects" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                         onClick={() => setAddUserTab("projects")}
                       >
-                        Projects
+                        {t("adminSettings.userModal.projects")}
                       </button>
                     </div>
                   </div>
@@ -5116,7 +5211,7 @@ export function PostgresAdminSettingsView({
                     {addUserTab === "account" ? (
                       <div className="settings-grid settings-grid--two">
                         <label className="form-label">
-                          Username
+                          {t("adminSettings.userModal.username")}
                           <input
                             className="form-input"
                             type="text"
@@ -5129,7 +5224,7 @@ export function PostgresAdminSettingsView({
                         </label>
                         <span />
                         <label className="form-label" style={{ marginTop: 8 }}>
-                          Temporary Password
+                          {t("adminSettings.userModal.temporaryPassword")}
                           <div className="password-input-wrap">
                             <input
                               className="form-input password-input-field"
@@ -5142,7 +5237,7 @@ export function PostgresAdminSettingsView({
                             <button
                               type="button"
                               className="password-visibility-btn"
-                              aria-label={addUserPasswordVisible ? "Hide password" : "Show password"}
+                              aria-label={addUserPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                               aria-pressed={addUserPasswordVisible}
                               onClick={() => setAddUserPasswordVisible((current) => !current)}
                               disabled={creatingUser || authSession.authKind !== "postgres_admin"}
@@ -5150,10 +5245,10 @@ export function PostgresAdminSettingsView({
                               {addUserPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                             </button>
                           </div>
-                          <p className="password-requirement-note">Minimum 8 characters.</p>
+                          <p className="password-requirement-note">{t("adminSettings.userModal.minimumCharacters")}</p>
                         </label>
                         <label className="form-label" style={{ marginTop: 8 }}>
-                          Confirm password
+                          {t("adminSettings.userModal.confirmPassword")}
                           <div className="password-input-wrap">
                             <input
                               className="form-input password-input-field"
@@ -5166,7 +5261,7 @@ export function PostgresAdminSettingsView({
                             <button
                               type="button"
                               className="password-visibility-btn"
-                              aria-label={addUserPasswordConfirmVisible ? "Hide password" : "Show password"}
+                              aria-label={addUserPasswordConfirmVisible ? t("common.hidePassword") : t("common.showPassword")}
                               aria-pressed={addUserPasswordConfirmVisible}
                               onClick={() => setAddUserPasswordConfirmVisible((current) => !current)}
                               disabled={creatingUser || authSession.authKind !== "postgres_admin"}
@@ -5177,7 +5272,7 @@ export function PostgresAdminSettingsView({
                         </label>
                         {addUserPasswordMismatch ? (
                           <p className="settings-warning settings-warning--danger" style={{ gridColumn: "1 / -1", margin: 0 }}>
-                            The password entries do not match.
+                            {t("adminSettings.userModal.passwordEntriesDoNotMatch")}
                           </p>
                         ) : null}
                       </div>
@@ -5188,9 +5283,9 @@ export function PostgresAdminSettingsView({
                             <table className="users-table">
                               <thead>
                                 <tr>
-                                  <th className="users-th">Project</th>
-                                  <th className="users-th">Database</th>
-                                  <th className="users-th">Role</th>
+                                  <th className="users-th">{t("adminSettings.userModal.project")}</th>
+                                  <th className="users-th">{t("adminSettings.userModal.database")}</th>
+                                  <th className="users-th">{t("adminSettings.userModal.role")}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -5208,11 +5303,11 @@ export function PostgresAdminSettingsView({
                                         onChange={(event) => setAddUserProjectRole(project.id, event.target.value)}
                                         disabled={creatingUser || authSession.authKind !== "postgres_admin"}
                                       >
-                                        <option value="">No access</option>
-                                        <option value="owner">Owner</option>
-                                        <option value="editor">Editor</option>
-                                        <option value="coder">Coder</option>
-                                        <option value="viewer">Viewer</option>
+                                        <option value="">{t("adminSettings.roles.noAccess")}</option>
+                                        <option value="owner">{t("adminSettings.roles.owner")}</option>
+                                        <option value="editor">{t("adminSettings.roles.editor")}</option>
+                                        <option value="coder">{t("adminSettings.roles.coder")}</option>
+                                        <option value="viewer">{t("adminSettings.roles.viewer")}</option>
                                       </select>
                                     </td>
                                   </tr>
@@ -5221,13 +5316,13 @@ export function PostgresAdminSettingsView({
                             </table>
                           </div>
                         ) : (
-                          <p className="auth-hint">Create a project before assigning project roles.</p>
+                          <p className="auth-hint">{t("adminSettings.userModal.createProjectFirst")}</p>
                         )}
                       </>
                     )}
                     {authSession.authKind !== "postgres_admin" ? (
                       <p className="auth-hint" style={{ marginTop: 12 }}>
-                        Sign in as the PostgreSQL administrator to create database-backed users.
+                        {t("adminSettings.userModal.adminRequiredCreateUser")}
                       </p>
                     ) : null}
                   </div>
@@ -5244,7 +5339,7 @@ export function PostgresAdminSettingsView({
                 }}
                 disabled={creatingUser}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <div className="form-actions" style={{ margin: 0 }}>
                 {addUserTab === "account" ? (
@@ -5254,7 +5349,7 @@ export function PostgresAdminSettingsView({
                     onClick={() => setAddUserTab("projects")}
                     disabled={creatingUser || authSession.authKind !== "postgres_admin" || addUserPasswordMismatch}
                   >
-                    Next
+                    {t("common.next")}
                   </button>
                 ) : (
                   <button
@@ -5263,7 +5358,7 @@ export function PostgresAdminSettingsView({
                     className="btn btn--primary"
                     disabled={creatingUser || authSession.authKind !== "postgres_admin" || addUserPasswordMismatch}
                   >
-                    {creatingUser ? "Creating..." : "Create"}
+                    {creatingUser ? t("common.creating") : t("adminSettings.userModal.create")}
                   </button>
                 )}
               </div>
@@ -5273,7 +5368,7 @@ export function PostgresAdminSettingsView({
 
       {activeModal === "manageUsers" ? (
         <SettingsModal
-          title="Manage Users"
+          title={t("adminSettings.system.users.title")}
           onClose={() => {
             setMembershipUser(null);
             setManageUserMenu(null);
@@ -5286,19 +5381,19 @@ export function PostgresAdminSettingsView({
                   <div className="app-settings-modal-section-body">
                     {authSession.authKind !== "postgres_admin" ? (
                       <p className="auth-hint">
-                        Sign in as the PostgreSQL administrator to manage database-backed users.
+                        {t("adminSettings.system.users.adminRequired")}
                       </p>
                     ) : null}
                     <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 520 }}>
                       <table className="users-table" style={{ tableLayout: "auto", width: "100%" }}>
                         <thead>
                           <tr>
-                            <th className="users-th">User</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Status</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Login</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Created</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Last Active</th>
-                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>Actions</th>
+                            <th className="users-th">{t("adminSettings.system.users.user")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.users.status")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.users.login")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.users.created")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.users.lastActive")}</th>
+                            <th className="users-th" style={{ width: "1%", whiteSpace: "nowrap" }}>{t("adminSettings.system.users.actions")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5326,7 +5421,7 @@ export function PostgresAdminSettingsView({
                                     y: event.clientY,
                                   });
                                 }}
-                                title="Right-click for user actions"
+                                title={t("adminSettings.system.users.rowActionsTitle")}
                                 style={{ cursor: "context-menu" }}
                               >
                                 <td className="users-td users-td--name">
@@ -5334,17 +5429,17 @@ export function PostgresAdminSettingsView({
                                   <div className="users-td--muted">{user.username}</div>
                                 </td>
                                 <td className="users-td" style={{ whiteSpace: "nowrap" }}>
-                                  <div>{user.active ? "Active" : "Disabled"}</div>
+                                  <div>{user.active ? t("adminSettings.system.users.active") : t("adminSettings.system.users.disabled")}</div>
                                   {user.mustChangePassword ? (
-                                    <div className="users-td--muted">Password reset required</div>
+                                    <div className="users-td--muted">{t("adminSettings.system.users.passwordResetRequired")}</div>
                                   ) : null}
                                 </td>
                                 <td className="users-td" style={{ whiteSpace: "nowrap" }}>
-                                  <div>{postgresUserLoginAccessLabel(user)}</div>
+                                  <div>{postgresUserLoginAccessLabel(user, t)}</div>
                                   {user.loginBlockedUntilMs && user.loginBlockedUntilMs > Date.now() ? (
-                                    <div className="users-td--muted">Until {formatPostgresTimestampMs(user.loginBlockedUntilMs)}</div>
+                                    <div className="users-td--muted">{t("adminSettings.system.users.until")} {formatPostgresTimestampMs(user.loginBlockedUntilMs)}</div>
                                   ) : user.loginFailedAttemptsLastHour > 0 ? (
-                                    <div className="users-td--muted">{user.loginFailedAttemptsLastHour} failed in last hour</div>
+                                    <div className="users-td--muted">{user.loginFailedAttemptsLastHour} {t("adminSettings.system.users.failedLastHour")}</div>
                                   ) : null}
                                 </td>
                                 <td className="users-td users-td--muted" style={{ whiteSpace: "nowrap" }}>{formatPostgresDateTime(user.createdAt)}</td>
@@ -5365,9 +5460,9 @@ export function PostgresAdminSettingsView({
                                         y: rect.bottom + 4,
                                       });
                                     }}
-                                    aria-label={`Actions for ${user.username}`}
+                                    aria-label={t("adminSettings.system.users.actionsFor", { name: user.username })}
                                     aria-expanded={manageUserMenu?.userId === user.id}
-                                    title="User actions"
+                                    title={t("adminSettings.system.users.userActions")}
                                   >
                                     ...
                                   </button>
@@ -5376,7 +5471,7 @@ export function PostgresAdminSettingsView({
                             );
                           }) : (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={6}>No PostgreSQL app users have been created yet.</td>
+                              <td className="users-td users-td--muted" colSpan={6}>{t("adminSettings.system.users.none")}</td>
                             </tr>
                           )}
                         </tbody>
@@ -5397,7 +5492,7 @@ export function PostgresAdminSettingsView({
                   setActiveModal(null);
                 }}
               >
-                Done
+                {t("common.done")}
               </button>
             </div>
         </SettingsModal>
@@ -5425,14 +5520,14 @@ export function PostgresAdminSettingsView({
               setError("");
             }}
           >
-            {postgresUserIsLoginBlocked(manageUserMenuUser) ? "Reset + Unblock" : "Reset Password"}
+            {postgresUserIsLoginBlocked(manageUserMenuUser) ? t("adminSettings.system.users.resetUnblock") : t("adminSettings.system.users.resetPassword")}
           </button>
           <button
             type="button"
             className="context-menu-item"
             onClick={() => handleInspectUserLoginAttempts(manageUserMenuUser)}
           >
-            Inspect Login Attempts
+            {t("adminSettings.system.users.inspectLoginAttempts")}
           </button>
           <button
             type="button"
@@ -5446,8 +5541,8 @@ export function PostgresAdminSettingsView({
             }}
           >
             {loadingProjectMemberships
-              ? "Loading memberships..."
-              : `View Memberships (${(membershipsByAppUserId[manageUserMenuUser.id] ?? []).length})`}
+              ? t("adminSettings.system.users.loadingMemberships")
+              : t("adminSettings.system.users.viewMemberships", { count: (membershipsByAppUserId[manageUserMenuUser.id] ?? []).length })}
           </button>
           <button
             type="button"
@@ -5469,12 +5564,12 @@ export function PostgresAdminSettingsView({
             }}
           >
             {deactivatingUserId === manageUserMenuUser.id
-              ? "Disabling..."
+              ? t("adminSettings.system.users.disabling")
               : reactivatingUserId === manageUserMenuUser.id
-                ? "Enabling..."
+                ? t("adminSettings.system.users.enabling")
                 : manageUserMenuUser.active
-                  ? "Disable"
-                  : "Enable"}
+                  ? t("adminSettings.system.users.disable")
+                  : t("adminSettings.system.users.enable")}
           </button>
         </div>
       ) : null}
@@ -5501,15 +5596,15 @@ export function PostgresAdminSettingsView({
                       return (
                         <div className="admin-membership-lists">
                           <div className="admin-membership-list">
-                            <h3 className="admin-membership-list-title">Project Memberships</h3>
+                            <h3 className="admin-membership-list-title">{t("adminSettings.system.users.projectMemberships")}</h3>
                             {memberships.length ? (
                               <div className="users-table-wrap postgres-users-table-wrap admin-membership-table-wrap">
                                 <table className="users-table">
                                   <thead>
                                     <tr>
-                                      <th className="users-th">Project</th>
-                                      <th className="users-th">Role</th>
-                                      <th className="users-th admin-membership-icon-th" aria-label="Remove" />
+                                      <th className="users-th">{t("adminSettings.system.users.project")}</th>
+                                      <th className="users-th">{t("adminSettings.system.users.role")}</th>
+                                      <th className="users-th admin-membership-icon-th" aria-label={t("adminSettings.system.users.removeAria")} />
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -5531,18 +5626,21 @@ export function PostgresAdminSettingsView({
                                               onChange={(event) => void handleUpdateProjectMembershipRole(membership, event.target.value)}
                                               disabled={authSession.authKind !== "postgres_admin" || membershipBusy}
                                             >
-                                              <option value="owner">Owner</option>
-                                              <option value="editor">Editor</option>
-                                              <option value="coder">Coder</option>
-                                              <option value="viewer">Viewer</option>
+                                              <option value="owner">{t("adminSettings.roles.owner")}</option>
+                                              <option value="editor">{t("adminSettings.roles.editor")}</option>
+                                              <option value="coder">{t("adminSettings.roles.coder")}</option>
+                                              <option value="viewer">{t("adminSettings.roles.viewer")}</option>
                                             </select>
                                           </td>
                                           <td className="users-td admin-membership-icon-cell">
                                             <button
                                               type="button"
                                               className="admin-membership-icon-button admin-membership-icon-button--remove"
-                                              aria-label={`Remove ${membershipUser.username} from ${membershipProject?.name ?? "project"}`}
-                                              title={removingMembershipId === membership.id ? "Removing" : "Remove"}
+                                              aria-label={t("adminSettings.system.users.removeFromProjectAria", {
+                                                username: membershipUser.username,
+                                                projectName: membershipProject?.name ?? t("adminSettings.system.users.thisProject"),
+                                              })}
+                                              title={removingMembershipId === membership.id ? t("adminSettings.system.users.removing") : t("common.remove")}
                                               onClick={() => void handleRemoveProjectMembership(membership)}
                                               disabled={authSession.authKind !== "postgres_admin" || membershipBusy}
                                             >
@@ -5556,20 +5654,20 @@ export function PostgresAdminSettingsView({
                                 </table>
                               </div>
                             ) : (
-                              <p className="auth-hint">No project memberships.</p>
+                              <p className="auth-hint">{t("adminSettings.system.users.noProjectMemberships")}</p>
                             )}
                           </div>
 
                           <div className="admin-membership-list">
-                            <h3 className="admin-membership-list-title">Available Projects</h3>
+                            <h3 className="admin-membership-list-title">{t("adminSettings.system.users.availableProjects")}</h3>
                             {availableProjects.length ? (
                               <div className="users-table-wrap postgres-users-table-wrap admin-membership-table-wrap">
                                 <table className="users-table">
                                   <thead>
                                     <tr>
-                                      <th className="users-th">Project</th>
-                                      <th className="users-th">Status</th>
-                                      <th className="users-th admin-membership-icon-th" aria-label="Add" />
+                                      <th className="users-th">{t("adminSettings.system.users.project")}</th>
+                                      <th className="users-th">{t("adminSettings.system.users.status")}</th>
+                                      <th className="users-th admin-membership-icon-th" aria-label={t("adminSettings.system.users.addAria")} />
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -5581,13 +5679,13 @@ export function PostgresAdminSettingsView({
                                             <div>{project.name}</div>
                                             <div className="users-td--muted">{project.databaseName}</div>
                                           </td>
-                                          <td className="users-td">{project.active ? "Active" : "Disabled"}</td>
+                                          <td className="users-td">{project.active ? t("adminSettings.system.users.active") : t("adminSettings.system.users.disabled")}</td>
                                           <td className="users-td admin-membership-icon-cell">
                                             <button
                                               type="button"
                                               className="admin-membership-icon-button admin-membership-icon-button--add"
-                                              aria-label={`Add ${membershipUser.username} to ${project.name}`}
-                                              title={adding ? "Adding" : "Add as viewer"}
+                                              aria-label={t("adminSettings.system.users.addToProjectAria", { username: membershipUser.username, projectName: project.name })}
+                                              title={adding ? t("adminSettings.system.users.adding") : t("adminSettings.system.users.addAsViewer")}
                                               onClick={() => void handleAddProjectMembership(membershipUser, project)}
                                               disabled={authSession.authKind !== "postgres_admin" || adding || Boolean(addingMembershipProjectId)}
                                             >
@@ -5601,7 +5699,7 @@ export function PostgresAdminSettingsView({
                                 </table>
                               </div>
                             ) : (
-                              <p className="auth-hint">No available projects.</p>
+                              <p className="auth-hint">{t("adminSettings.system.users.noAvailableProjects")}</p>
                             )}
                           </div>
                         </div>
@@ -5613,7 +5711,7 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={closeMembershipModal}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={closeMembershipModal}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
@@ -5624,52 +5722,52 @@ export function PostgresAdminSettingsView({
           onClose={() => setActiveModal(null)}
           subtitle={(
             <button type="button" className="btn" onClick={() => void refreshPostgresDetails()} disabled={loading}>
-              {loading ? "Refreshing..." : "Refresh"}
+              {loading ? t("adminSettings.system.database.refreshing") : t("common.refresh")}
             </button>
           )}
         >
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Current Session</h3></div>
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>{t("adminSettings.system.users.currentSession")}</h3></div>
                   <div className="app-settings-modal-section-body">
                     <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Signed in as</span><span className="home-restricted-value">{authSession.user.name}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Role</span><span className="home-restricted-value">{authSession.authKind === "postgres_admin" ? "Local administrator" : authSession.user.role}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Session started</span><span className="home-restricted-value">{formatPostgresDateTime(new Date(authSession.startedAtMs).toISOString())}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.users.signedInAs")}</span><span className="home-restricted-value">{authSession.user.name}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.users.role")}</span><span className="home-restricted-value">{authSession.authKind === "postgres_admin" ? t("adminSettings.system.users.localAdministrator") : authSession.user.role}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.users.sessionStarted")}</span><span className="home-restricted-value">{formatPostgresDateTime(new Date(authSession.startedAtMs).toISOString())}</span></div>
                     </div>
                   </div>
                 </section>
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Local PostgreSQL</h3></div>
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>{t("adminSettings.system.users.localPostgresql")}</h3></div>
                   <div className="app-settings-modal-section-body">
                     <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Host</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Bundled database reachable</span><span className="home-restricted-value">{status?.serviceReachable ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Control database ready</span><span className="home-restricted-value">{status?.bootstrapApplied ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Setup finalized</span><span className="home-restricted-value">{status?.adminHandoffCompleted ? "Yes" : "No"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Database account</span><span className="home-restricted-value">{databaseAccountStatus}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.host")}</span><span className="home-restricted-value">{status ? `${status.host}:${status.port}` : "-"}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.bundledReachable")}</span><span className="home-restricted-value">{yesNo(status?.serviceReachable, t)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.controlReady")}</span><span className="home-restricted-value">{yesNo(status?.bootstrapApplied, t)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.setupFinalized")}</span><span className="home-restricted-value">{yesNo(status?.adminHandoffCompleted, t)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.database.databaseAccount")}</span><span className="home-restricted-value">{databaseAccountStatus}</span></div>
                     </div>
                   </div>
                 </section>
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>User Accounts</h3></div>
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>{t("adminSettings.system.users.userAccounts")}</h3></div>
                   <div className="app-settings-modal-section-body">
                     {authSession.authKind !== "postgres_admin" ? (
                       <p className="auth-hint">
-                        Sign in as the PostgreSQL administrator to create database-backed users.
+                        {t("adminSettings.system.users.createUsersAdminRequired")}
                       </p>
                     ) : null}
                     <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 320 }}>
                       <table className="users-table">
                         <thead>
                           <tr>
-                            <th className="users-th">Name</th>
-                            <th className="users-th">Username</th>
-                            <th className="users-th">Role</th>
-                            <th className="users-th">Status</th>
-                            <th className="users-th">Updated</th>
-                            <th className="users-th">Action</th>
+                            <th className="users-th">{t("adminSettings.system.users.name")}</th>
+                            <th className="users-th">{t("adminSettings.system.users.username")}</th>
+                            <th className="users-th">{t("adminSettings.system.users.role")}</th>
+                            <th className="users-th">{t("adminSettings.system.users.status")}</th>
+                            <th className="users-th">{t("adminSettings.system.users.updated")}</th>
+                            <th className="users-th">{t("adminSettings.system.users.action")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5678,7 +5776,7 @@ export function PostgresAdminSettingsView({
                               <td className="users-td users-td--name">{user.name}</td>
                               <td className="users-td users-td--muted">{user.username}</td>
                               <td className="users-td">{user.role}</td>
-                              <td className="users-td">{user.active ? "Active" : "Disabled"}</td>
+                              <td className="users-td">{user.active ? t("adminSettings.system.users.active") : t("adminSettings.system.users.disabled")}</td>
                               <td className="users-td users-td--muted">{formatPostgresDateTime(user.updatedAt)}</td>
                               <td className="users-td">
                                 <div className="form-actions" style={{ gap: 8, justifyContent: "flex-start", margin: 0 }}>
@@ -5699,7 +5797,7 @@ export function PostgresAdminSettingsView({
                                       setError("");
                                     }}
                                   >
-                                    Reset
+                                    {t("adminSettings.system.users.reset")}
                                   </button>
                                   <button
                                     type="button"
@@ -5711,14 +5809,14 @@ export function PostgresAdminSettingsView({
                                     }
                                     onClick={() => setUserAccessWarning({ action: "disable", user })}
                                   >
-                                    {deactivatingUserId === user.id ? "Disabling..." : "Disable"}
+                                    {deactivatingUserId === user.id ? t("adminSettings.system.users.disabling") : t("adminSettings.system.users.disable")}
                                   </button>
                                 </div>
                               </td>
                             </tr>
                           )) : (
                             <tr>
-                              <td className="users-td users-td--muted" colSpan={6}>No PostgreSQL app users have been created yet.</td>
+                              <td className="users-td users-td--muted" colSpan={6}>{t("adminSettings.system.users.none")}</td>
                             </tr>
                           )}
                         </tbody>
@@ -5727,16 +5825,16 @@ export function PostgresAdminSettingsView({
                   </div>
                 </section>
                 <section className="app-settings-modal-section">
-                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>Workspace Summary</h3></div>
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default"><h3>{t("adminSettings.system.users.workspaceSummary")}</h3></div>
                   <div className="app-settings-modal-section-body">
                     <div className="home-restricted-list">
-                      <div className="home-restricted-item"><span className="home-restricted-label">Registered users</span><span className="home-restricted-value">{authStatus?.registeredUserCount ?? "-"}</span></div>
-                      <div className="home-restricted-item"><span className="home-restricted-label">Project databases</span><span className="home-restricted-value">{projects.length}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.users.registeredUsers")}</span><span className="home-restricted-value">{authStatus?.registeredUserCount ?? "-"}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("adminSettings.system.users.projectDatabases")}</span><span className="home-restricted-value">{projects.length}</span></div>
                     </div>
                     {projects.length > 0 ? (
                       <div className="users-table-wrap postgres-users-table-wrap" style={{ marginTop: 16, maxHeight: 280 }}>
                         <table className="users-table">
-                          <thead><tr><th className="users-th">Project</th><th className="users-th">Database</th><th className="users-th">Updated</th></tr></thead>
+                          <thead><tr><th className="users-th">{t("adminSettings.system.users.project")}</th><th className="users-th">{t("adminSettings.system.database.title")}</th><th className="users-th">{t("adminSettings.system.users.updated")}</th></tr></thead>
                           <tbody>
                             {projects.map((project) => (
                               <tr key={project.id} className="users-row">
@@ -5749,7 +5847,7 @@ export function PostgresAdminSettingsView({
                         </table>
                       </div>
                     ) : (
-                      <p className="auth-hint" style={{ marginTop: 12 }}>No PostgreSQL project databases have been created yet.</p>
+                      <p className="auth-hint" style={{ marginTop: 12 }}>{t("adminSettings.system.users.noProjectDatabases")}</p>
                     )}
                   </div>
                 </section>
@@ -5757,23 +5855,24 @@ export function PostgresAdminSettingsView({
             </div>
             <div className="app-settings-modal-footer">
               <span />
-              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button>
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
       ) : null}
 
       {membershipRemovalWarning ? (
         <SettingsModal
-          title="Remove Project Access"
+          title={t("adminSettings.system.dialogs.removeProjectAccess")}
           onClose={() => setMembershipRemovalWarning(null)}
           closeDisabled={removingMembershipId === membershipRemovalWarning.id}
           modalClassName="modal--narrow"
         >
           <div className="app-settings-modal-body">
             <p className="settings-warning settings-warning--danger">
-              {`This will remove ${membershipRemovalWarning.email}'s access to ${
-                projectById.get(membershipRemovalWarning.projectId)?.name ?? "this project"
-              }.`}
+              {t("adminSettings.system.dialogs.removeProjectAccessWarning", {
+                email: membershipRemovalWarning.email,
+                projectName: projectById.get(membershipRemovalWarning.projectId)?.name ?? t("adminSettings.system.users.thisProject"),
+              })}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only membership-removal-actions">
@@ -5783,7 +5882,7 @@ export function PostgresAdminSettingsView({
                 onClick={() => setMembershipRemovalWarning(null)}
                 disabled={removingMembershipId === membershipRemovalWarning.id}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -5791,7 +5890,7 @@ export function PostgresAdminSettingsView({
                 onClick={() => void confirmRemoveProjectMembership(membershipRemovalWarning)}
                 disabled={removingMembershipId === membershipRemovalWarning.id}
               >
-                {removingMembershipId === membershipRemovalWarning.id ? "Removing..." : "Remove"}
+                {removingMembershipId === membershipRemovalWarning.id ? t("adminSettings.system.users.removing") : t("common.remove")}
               </button>
           </div>
         </SettingsModal>
@@ -5801,10 +5900,10 @@ export function PostgresAdminSettingsView({
         <SettingsModal
           title={
             projectAccessWarning.action === "delete"
-              ? "Delete Project"
+              ? t("adminSettings.system.dialogs.deleteProject")
               : projectAccessWarning.action === "disable"
-                ? "Disable Project"
-                : "Enable Project"
+                ? t("adminSettings.system.dialogs.disableProject")
+                : t("adminSettings.system.dialogs.enableProject")
           }
           onClose={() => setProjectAccessWarning(null)}
           closeDisabled={
@@ -5816,10 +5915,10 @@ export function PostgresAdminSettingsView({
           <div className="app-settings-modal-body">
             <p className={projectAccessWarning.action === "delete" ? "settings-warning settings-warning--danger" : "settings-warning"}>
               {projectAccessWarning.action === "delete"
-                ? `This will permanently delete ${projectAccessWarning.project.name}, including its PostgreSQL database and local project storage. This cannot be undone.`
+                ? t("adminSettings.system.dialogs.deleteProjectWarning", { projectName: projectAccessWarning.project.name })
                 : projectAccessWarning.action === "disable"
-                  ? `Users will lose access to ${projectAccessWarning.project.name} until the project is enabled again.`
-                  : `Users with project memberships will regain access to ${projectAccessWarning.project.name}.`}
+                  ? t("adminSettings.system.dialogs.disableProjectWarning", { projectName: projectAccessWarning.project.name })
+                  : t("adminSettings.system.dialogs.enableProjectWarning", { projectName: projectAccessWarning.project.name })}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
@@ -5832,7 +5931,7 @@ export function PostgresAdminSettingsView({
                   deletingProjectId === projectAccessWarning.project.id
                 }
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -5854,10 +5953,10 @@ export function PostgresAdminSettingsView({
                 }
               >
                 {projectAccessWarning.action === "delete"
-                  ? deletingProjectId === projectAccessWarning.project.id ? "Deleting..." : "Delete"
+                  ? deletingProjectId === projectAccessWarning.project.id ? t("common.deleting") : t("common.delete")
                   : updatingProjectStatusId === projectAccessWarning.project.id
-                    ? projectAccessWarning.action === "enable" ? "Enabling..." : "Disabling..."
-                    : projectAccessWarning.action === "enable" ? "Enable" : "Disable"}
+                    ? projectAccessWarning.action === "enable" ? t("adminSettings.system.users.enabling") : t("adminSettings.system.users.disabling")
+                    : projectAccessWarning.action === "enable" ? t("adminSettings.system.users.enable") : t("adminSettings.system.users.disable")}
               </button>
           </div>
         </SettingsModal>
@@ -5865,7 +5964,7 @@ export function PostgresAdminSettingsView({
 
       {userAccessWarning ? (
         <SettingsModal
-          title={userAccessWarning.action === "disable" ? "Disable User" : "Enable User"}
+          title={userAccessWarning.action === "disable" ? t("adminSettings.system.dialogs.disableUser") : t("adminSettings.system.dialogs.enableUser")}
           onClose={() => setUserAccessWarning(null)}
           closeDisabled={
             deactivatingUserId === userAccessWarning.user.id ||
@@ -5876,8 +5975,8 @@ export function PostgresAdminSettingsView({
           <div className="app-settings-modal-body">
             <p className="settings-row-desc">
               {userAccessWarning.action === "disable"
-                ? `${userAccessWarning.user.username} will lose access to KanQual, the PostgreSQL server, and every project.`
-                : `${userAccessWarning.user.username} will regain access to the PostgreSQL server. You will need to set a temporary password before the account can be used.`}
+                ? t("adminSettings.system.dialogs.disableUserWarning", { username: userAccessWarning.user.username })
+                : t("adminSettings.system.dialogs.enableUserWarning", { username: userAccessWarning.user.username })}
             </p>
             <div className="form-actions" style={{ justifyContent: "flex-end" }}>
               <button
@@ -5889,7 +5988,7 @@ export function PostgresAdminSettingsView({
                   reactivatingUserId === userAccessWarning.user.id
                 }
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -5907,8 +6006,8 @@ export function PostgresAdminSettingsView({
                 }
               >
                 {userAccessWarning.action === "disable"
-                  ? deactivatingUserId === userAccessWarning.user.id ? "Disabling..." : "Disable"
-                  : reactivatingUserId === userAccessWarning.user.id ? "Enabling..." : "Enable"}
+                  ? deactivatingUserId === userAccessWarning.user.id ? t("adminSettings.system.users.disabling") : t("adminSettings.system.users.disable")
+                  : reactivatingUserId === userAccessWarning.user.id ? t("adminSettings.system.users.enabling") : t("adminSettings.system.users.enable")}
               </button>
             </div>
           </div>
@@ -5917,7 +6016,7 @@ export function PostgresAdminSettingsView({
 
       {confirmEnableNetworkMode ? (
         <SettingsModal
-          title={pendingNetworkMode === "internet" ? "Enable Internet Mode" : t("appSettings.network.enableTitle")}
+          title={pendingNetworkMode === "internet" ? t("adminSettings.system.dialogs.enableInternetMode") : t("appSettings.network.enableTitle")}
           onClose={() => {
             setConfirmEnableNetworkMode(false);
             setInternetModeConfirmation("");
@@ -5928,12 +6027,12 @@ export function PostgresAdminSettingsView({
           <div className="app-settings-modal-body">
             <p className="settings-warning settings-warning--danger">
               {pendingNetworkMode === "internet"
-                ? "Internet mode can expose this KanQual server to the public Internet. KanQual does not manage TLS certificates for this mode, so database traffic may be readable unless you protect access with a VPN, encrypted tunnel, firewall, or equivalent network security. Use this only if you understand and accept that risk."
-                : "Other devices on your trusted local network may be able to connect to this PostgreSQL database."}
+                ? t("adminSettings.system.dialogs.internetModeRisk")
+                : t("adminSettings.system.dialogs.lanModeRisk")}
             </p>
             {pendingNetworkMode === "internet" ? (
               <label className="form-label">
-                Type ENABLE INTERNET to continue
+                {t("adminSettings.system.network.confirmInternet")}
                 <input
                   className="form-input"
                   value={internetModeConfirmation}
@@ -5970,7 +6069,7 @@ export function PostgresAdminSettingsView({
 
       {resetPasswordUser ? (
         <SettingsModal
-          title={postgresUserIsLoginBlocked(resetPasswordUser) ? "Reset + Unblock" : "Reset Password"}
+          title={postgresUserIsLoginBlocked(resetPasswordUser) ? t("adminSettings.system.users.resetUnblock") : t("adminSettings.system.users.resetPassword")}
           onClose={() => {
             if (!resettingPassword && requiredResetUserId !== resetPasswordUser.id) {
               setResetPasswordUser(null);
@@ -5986,14 +6085,14 @@ export function PostgresAdminSettingsView({
           <div className="app-settings-modal-body">
             <p className="settings-row-desc">
               {postgresUserIsLoginBlocked(resetPasswordUser)
-                ? `Set a new temporary password for ${resetPasswordUser.username}. The login block will be removed after the password is reset.`
+                ? t("adminSettings.system.dialogs.resetUnblockDescription", { username: resetPasswordUser.username })
                 : requiredResetUserId === resetPasswordUser.id
-                ? `Set a temporary password for ${resetPasswordUser.username} to finish enabling this account.`
-                : `Set a new temporary password for ${resetPasswordUser.username}.`}
+                ? t("adminSettings.system.dialogs.requiredResetDescription", { username: resetPasswordUser.username })
+                : t("adminSettings.system.dialogs.resetPasswordDescription", { username: resetPasswordUser.username })}
             </p>
             <form className="form" onSubmit={handleResetPostgresUserPassword}>
               <label className="form-label" style={{ marginTop: 8 }}>
-                New password
+                {t("adminSettings.system.passwordReset.newPassword")}
                 <div className="password-input-wrap">
                   <input
                     className="form-input password-input-field"
@@ -6007,7 +6106,7 @@ export function PostgresAdminSettingsView({
                   <button
                     type="button"
                     className="password-visibility-btn"
-                    aria-label={resetPasswordVisible ? "Hide password" : "Show password"}
+                    aria-label={resetPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                     aria-pressed={resetPasswordVisible}
                     onClick={() => setResetPasswordVisible((current) => !current)}
                     disabled={resettingPassword}
@@ -6015,10 +6114,10 @@ export function PostgresAdminSettingsView({
                     {resetPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
-                <p className="password-requirement-note">Minimum 8 characters.</p>
+                <p className="password-requirement-note">{t("adminSettings.system.passwordReset.minimumCharacters")}</p>
               </label>
               <label className="form-label">
-                Confirm password
+                {t("adminSettings.system.passwordReset.confirmPassword")}
                 <div className="password-input-wrap">
                   <input
                     className="form-input password-input-field"
@@ -6031,7 +6130,7 @@ export function PostgresAdminSettingsView({
                   <button
                     type="button"
                     className="password-visibility-btn"
-                    aria-label={resetPasswordConfirmVisible ? "Hide password" : "Show password"}
+                    aria-label={resetPasswordConfirmVisible ? t("common.hidePassword") : t("common.showPassword")}
                     aria-pressed={resetPasswordConfirmVisible}
                     onClick={() => setResetPasswordConfirmVisible((current) => !current)}
                     disabled={resettingPassword}
@@ -6042,7 +6141,7 @@ export function PostgresAdminSettingsView({
               </label>
               {resetPasswordConfirmValue && resetPasswordValue !== resetPasswordConfirmValue ? (
                 <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
-                  The password entries do not match.
+                  {t("adminSettings.system.passwordReset.entriesDoNotMatch")}
                 </p>
               ) : null}
               <div className="form-actions" style={{ justifyContent: "flex-end" }}>

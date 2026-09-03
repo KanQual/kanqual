@@ -204,6 +204,7 @@ function AudioAnnotationClip({
   timeStartMs?: number | null;
   timeEndMs?: number | null;
 }) {
+  const { t } = useI18n();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -245,14 +246,14 @@ function AudioAnnotationClip({
           if (current) URL.revokeObjectURL(current);
           return null;
         });
-        setLoadError(error instanceof Error ? error.message : "Could not load the audio clip.");
+        setLoadError(error instanceof Error ? error.message : t("projectAnnotations.errors.audioClipLoadFailed"));
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [endMs, mediaType, resolvedPath, startMs]);
+  }, [endMs, mediaType, resolvedPath, startMs, t]);
 
   if (startMs == null || endMs == null) return null;
 
@@ -310,7 +311,7 @@ function AudioAnnotationClip({
 
   return (
     <div className="case-card">
-      <h3 className="case-card-title">Audio Clip</h3>
+      <h3 className="case-card-title">{t("projectAnnotations.detail.audioClip")}</h3>
       <div className="annotation-excerpt annotation-excerpt--clip">
         <div className="annotation-excerpt-label">
           {formatMediaMilliseconds(startMs)} - {formatMediaMilliseconds(endMs)}
@@ -333,8 +334,8 @@ function AudioAnnotationClip({
               type="button"
               className="annotation-clip-play-btn"
               onClick={togglePlayback}
-              title={playing ? "Pause" : "Play"}
-              aria-label={playing ? "Pause audio clip" : "Play audio clip"}
+              title={playing ? t("projectAnnotations.media.pause") : t("projectAnnotations.media.play")}
+              aria-label={playing ? t("projectAnnotations.media.pauseAudioClip") : t("projectAnnotations.media.playAudioClip")}
             >
               {playing ? <ClipPauseIcon /> : <ClipPlayIcon />}
             </button>
@@ -346,7 +347,7 @@ function AudioAnnotationClip({
                 step="100"
                 value={Math.round(clipProgressMs)}
                 onChange={(event) => seekWithinClip(Number(event.target.value))}
-                aria-label="Clip position"
+                aria-label={t("projectAnnotations.media.clipPosition")}
               />
               <div className="annotation-clip-time-row">
                 <span>{formatMediaMilliseconds(clipProgressMs)}</span>
@@ -355,7 +356,7 @@ function AudioAnnotationClip({
             </div>
           </div>
         ) : (
-          <p className="users-guide-copy" style={{ margin: 0 }}>Loading audio clip...</p>
+          <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingAudioClip")}</p>
         )}
       </div>
     </div>
@@ -373,6 +374,7 @@ function VideoAnnotationClip({
   timeStartMs?: number | null;
   timeEndMs?: number | null;
 }) {
+  const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -410,14 +412,14 @@ function VideoAnnotationClip({
           if (current) URL.revokeObjectURL(current);
           return null;
         });
-        setLoadError(error instanceof Error ? error.message : "Could not load the video clip.");
+        setLoadError(error instanceof Error ? error.message : t("projectAnnotations.errors.videoClipLoadFailed"));
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [endMs, mediaType, resolvedPath, startMs]);
+  }, [endMs, mediaType, resolvedPath, startMs, t]);
 
   if (startMs == null || endMs == null) return null;
 
@@ -428,7 +430,7 @@ function VideoAnnotationClip({
 
   return (
     <div className="case-card">
-      <h3 className="case-card-title">Video Clip</h3>
+      <h3 className="case-card-title">{t("projectAnnotations.detail.videoClip")}</h3>
       <div className="annotation-excerpt annotation-excerpt--clip">
         <div className="annotation-excerpt-label">
           {formatMediaMilliseconds(startMs)} - {formatMediaMilliseconds(endMs)}
@@ -443,13 +445,13 @@ function VideoAnnotationClip({
               preload="metadata"
               playsInline
               onLoadedMetadata={handleLoadedMetadata}
-              aria-label="Video clip preview"
+              aria-label={t("projectAnnotations.media.videoClipPreview")}
             >
               <source src={videoUrl} type={mediaType ?? undefined} />
             </video>
           </div>
         ) : (
-          <p className="users-guide-copy" style={{ margin: 0 }}>Loading video clip...</p>
+          <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingVideoClip")}</p>
         )}
       </div>
     </div>
@@ -467,6 +469,7 @@ function ImageAnnotationCrop({
   projectStoragePath?: string;
   imageRegion?: AnnRow["imageRegion"];
 }) {
+  const { t } = useI18n();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const resolvedPath = resolveProjectStoragePath(projectStoragePath, sourcePath);
@@ -500,14 +503,14 @@ function ImageAnnotationCrop({
       const viewport = page.getViewport({ scale: 1.6 });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      if (!context) throw new Error(t("projectAnnotations.errors.pdfPreviewPrepareFailed"));
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       await page.render({ canvas, canvasContext: context, viewport }).promise;
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((nextBlob) => {
           if (nextBlob) resolve(nextBlob);
-          else reject(new Error("Could not render the PDF page preview."));
+          else reject(new Error(t("projectAnnotations.errors.pdfPreviewRenderFailed")));
         }, "image/png");
       });
       return URL.createObjectURL(blob);
@@ -532,14 +535,14 @@ function ImageAnnotationCrop({
           if (current) URL.revokeObjectURL(current);
           return null;
         });
-        setLoadError(error instanceof Error ? error.message : `Could not load the ${isPdf ? "PDF" : "image"} crop.`);
+        setLoadError(error instanceof Error ? error.message : t("projectAnnotations.errors.cropLoadFailed", { kind: isPdf ? "PDF" : "image" }));
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isPdf, region, resolvedPath]);
+  }, [isPdf, region, resolvedPath, t]);
 
   if (!region) return null;
 
@@ -550,10 +553,10 @@ function ImageAnnotationCrop({
 
   return (
     <div className="case-card">
-      <h3 className="case-card-title">{isPdf ? "PDF Region" : "Image Region"}</h3>
+      <h3 className="case-card-title">{isPdf ? t("projectAnnotations.detail.pdfRegion") : t("projectAnnotations.detail.imageRegion")}</h3>
       <div className="annotation-excerpt annotation-excerpt--clip">
         <div className="annotation-excerpt-label">
-          {isPdf ? `Page ${region.pageNumber ?? 1} - ` : ""}
+          {isPdf ? t("projectAnnotations.detail.pagePrefix", { page: region.pageNumber ?? 1 }) : ""}
           {Math.round(region.width)} x {Math.round(region.height)} px
         </div>
         {loadError ? (
@@ -565,7 +568,7 @@ function ImageAnnotationCrop({
           >
             <img
               src={imageUrl}
-              alt="Cropped annotation region"
+              alt={t("projectAnnotations.detail.croppedAnnotationRegion")}
               style={{
                 width: `${(safeImageWidth / safeRegionWidth) * 100}%`,
                 height: `${(safeImageHeight / safeRegionHeight) * 100}%`,
@@ -574,7 +577,7 @@ function ImageAnnotationCrop({
             />
           </div>
         ) : (
-          <p className="users-guide-copy" style={{ margin: 0 }}>Loading image region...</p>
+          <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingImageRegion")}</p>
         )}
       </div>
     </div>
@@ -585,22 +588,23 @@ function describeSourceLock(
   userId: string | undefined,
   userName: string | undefined,
   currentUserId: string | undefined,
+  t: ReturnType<typeof useI18n>["t"],
 ): { label: string; title: string } {
   if (!userId) {
     return {
-      label: "Available",
-      title: "This source is currently available for coding.",
+      label: t("projectAnnotations.values.available"),
+      title: t("projectAnnotations.values.availableTitle"),
     };
   }
   if (currentUserId && userId === currentUserId) {
     return {
-      label: "You",
-      title: "You are currently holding this source lock.",
+      label: t("projectAnnotations.values.you"),
+      title: t("projectAnnotations.values.youLockTitle"),
     };
   }
   return {
-    label: "Locked",
-    title: `${userName || "Another user"} is currently holding this source lock.`,
+    label: t("projectAnnotations.values.locked"),
+    title: t("projectAnnotations.values.lockedTitle", { name: userName || t("projectAnnotations.values.anotherUser") }),
   };
 }
 
@@ -695,6 +699,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
           sourceLock?.userId,
           sourceLock?.userName,
           postgresCurrentUserId,
+          t,
         );
         return {
           id: annotation.id,
@@ -849,7 +854,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
       <div className="view doc-detail-view">
         <div className="workspace-back-row workspace-back-row--split">
           <button className="btn" onClick={() => setSelectedRow(null)}>
-            Back to Annotations
+            {t("projectAnnotations.actions.backToAnnotations")}
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <button
@@ -857,7 +862,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               className="btn"
               onClick={() => jumpToSourceAnnotation(selectedRow)}
             >
-              Open in Coding
+              {t("projectAnnotations.actions.openInCoding")}
             </button>
           </div>
         </div>
@@ -865,28 +870,28 @@ export function AnnotationsView(props: AnnotationsViewProps) {
         <div className="doc-detail-layout">
           <div className="doc-detail-left">
             <div className="case-card">
-              <h3 className="case-card-title">Annotation</h3>
+              <h3 className="case-card-title">{t("projectAnnotations.detail.annotation")}</h3>
               <p className="case-card-value">{formatAnnotationDisplayId(selectedRow.displayId)}</p>
               <p className="users-guide-copy" style={{ marginTop: 8, marginBottom: 0 }} title={selectedRow.lockTitle}>
-                Lock: {selectedRow.lockLabel ?? "-"}
+                {t("projectAnnotations.detail.lockValue", { value: selectedRow.lockLabel ?? "-" })}
               </p>
             </div>
 
             <dl className="user-detail-meta case-detail-meta">
-              <dt>ID</dt> <dd>{formatAnnotationDisplayId(selectedRow.displayId)}</dd>
-              <dt>Source ID</dt> <dd>{selectedRow.documentId}</dd>
+              <dt>{t("projectAnnotations.table.id")}</dt> <dd>{formatAnnotationDisplayId(selectedRow.displayId)}</dd>
+              <dt>{t("projectAnnotations.table.sourceId")}</dt> <dd>{selectedRow.documentId}</dd>
               <dt>{t("projectAnnotations.table.document")}</dt> <dd>{selectedRow.documentName}</dd>
-              <dt>Source Type</dt> <dd>{formatSourceType(selectedRow.sourceKind)}</dd>
+              <dt>{t("projectAnnotations.table.sourceType")}</dt> <dd>{formatSourceType(selectedRow.sourceKind)}</dd>
               <dt>{t("projectAnnotations.table.code")}</dt>
               <dd style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span className="code-swatch" style={{ background: selectedRow.codeColor }} />
                 {selectedRow.codeLabel}
               </dd>
-              <dt>Start Time</dt>
+              <dt>{t("projectAnnotations.table.startTime")}</dt>
               <dd>
                 {typeof selectedRow.timeStartMs === "number" ? formatMediaMilliseconds(selectedRow.timeStartMs) : "-"}
               </dd>
-              <dt>End Time</dt>
+              <dt>{t("projectAnnotations.table.endTime")}</dt>
               <dd>
                 {typeof selectedRow.timeEndMs === "number" ? formatMediaMilliseconds(selectedRow.timeEndMs) : "-"}
               </dd>
@@ -896,7 +901,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
 
             {selectedRow.note ? (
               <div className="case-card">
-                <h3 className="case-card-title">Note</h3>
+                <h3 className="case-card-title">{t("projectAnnotations.detail.note")}</h3>
                 <p className="users-guide-copy" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
                   {selectedRow.note}
                 </p>
@@ -930,7 +935,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               <div className="case-card doc-content-card doc-content-card--annotation-text">
                 <div className="case-card-header">
                   <div className="doc-content-header-title">
-                    <h3 className="case-card-title">Annotated Text</h3>
+                    <h3 className="case-card-title">{t("projectAnnotations.detail.annotatedText")}</h3>
                   </div>
                 </div>
                 <div className="doc-content-scroll-shell">
@@ -938,7 +943,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                     className="doc-content-body"
                     style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                   >
-                    {selectedRow.quote || "No annotation text is available for this annotation."}
+                    {selectedRow.quote || t("projectAnnotations.detail.noAnnotatedText")}
                   </pre>
                 </div>
               </div>
@@ -994,10 +999,10 @@ export function AnnotationsView(props: AnnotationsViewProps) {
           <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
             <div className="segmented-control" role="presentation">
               <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
-                Details
+                {t("projectAnnotations.detail.details")}
               </button>
               <button type="button" className="segmented-control-option" tabIndex={-1}>
-                Attributes
+                {t("projectAnnotations.detail.attributes")}
               </button>
             </div>
           </div>
@@ -1012,7 +1017,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 18 }}>Codes</h2>
+                <h2 style={{ margin: 0, fontSize: 18 }}>{t("projectAnnotations.table.codes")}</h2>
               </div>
             </div>
             <div>
@@ -1024,7 +1029,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                       style={{ width: "76%" }}
                       onClick={() => handleCodeFilterSort("code")}
                     >
-                      Code
+                      {t("projectAnnotations.table.code")}
                       <span className="users-sort-icon">
                         {codeFilterSortCol === "code" ? (codeFilterSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
@@ -1034,7 +1039,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                       style={{ width: "24%" }}
                       onClick={() => handleCodeFilterSort("count")}
                     >
-                      Count
+                      {t("projectAnnotations.table.count")}
                       <span className="users-sort-icon">
                         {codeFilterSortCol === "count" ? (codeFilterSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
@@ -1060,7 +1065,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                         }
                       }}
                     >
-                      <span>All annotations</span>
+                      <span>{t("projectAnnotations.detail.allAnnotations")}</span>
                     </td>
                     <td className="users-td users-td--muted">{rows.length}</td>
                   </tr>
@@ -1093,8 +1098,8 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                                 event.stopPropagation();
                                 toggleCollapsedCode(code.id);
                               }}
-                              title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
-                              aria-label={collapsedCodeIds.has(code.id) ? "Expand code" : "Collapse code"}
+                              title={collapsedCodeIds.has(code.id) ? t("projectAnnotations.actions.expand") : t("projectAnnotations.actions.collapse")}
+                              aria-label={collapsedCodeIds.has(code.id) ? t("projectAnnotations.actions.expandCode") : t("projectAnnotations.actions.collapseCode")}
                             >
                               {collapsedCodeIds.has(code.id) ? "▶" : "▼"}
                             </button>
@@ -1114,7 +1119,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               </table>
               {codes.length === 0 ? (
                 <div className="empty-state" style={{ minHeight: 140 }}>
-                  <p>No codes yet.</p>
+                  <p>{t("projectAnnotations.detail.noCodes")}</p>
                 </div>
               ) : null}
             </div>
@@ -1148,7 +1153,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               <thead>
                 <tr>
                   <th style={{ width: ANNOTATION_ID_WIDTH }} className="users-th">
-                    ID
+                    {t("projectAnnotations.table.id")}
                   </th>
                   {localizedCols.map((col) => (
                     <th

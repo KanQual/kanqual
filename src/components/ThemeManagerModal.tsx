@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useI18n } from "../i18n/provider";
 import { PlusIcon } from "./AppIcons";
 import { SettingsModal } from "./SettingsModal";
 import {
@@ -113,6 +114,7 @@ function ColorRow({
   onChange: (key: string, val: string) => void;
   onReset: (key: string) => void;
 }) {
+  const { t } = useI18n();
   const [hexInput, setHexInput] = useState(value);
   const isCustom = value.toLowerCase() !== defaultValue.toLowerCase();
 
@@ -146,7 +148,7 @@ function ColorRow({
         className="color-row-picker"
         value={value}
         onChange={handlePickerChange}
-        title="Open color picker"
+        title={t("sharedModals.theme.openColorPicker")}
       />
       <input
         type="text"
@@ -163,9 +165,9 @@ function ColorRow({
           type="button"
           className="btn btn--sm color-row-reset"
           onClick={() => onReset(varDef.key)}
-          title="Reset to default"
+          title={t("sharedModals.theme.resetToDefault")}
         >
-          Reset
+          {t("common.reset")}
         </button>
       ) : (
         <span className="color-row-reset-spacer" />
@@ -224,6 +226,7 @@ function ThemeEditor({
   onSave: (preset: ThemePreset) => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const [name, setName] = useState(initial.name);
   const [base, setBase] = useState<Theme>(initial.base);
   const [colors, setColors] = useState<Record<string, string>>(initial.colors);
@@ -266,7 +269,7 @@ function ThemeEditor({
   function handleSave() {
     onSave({
       id: initial.id,
-      name: name.trim() || "Untitled Theme",
+      name: name.trim() || t("sharedModals.theme.untitledTheme"),
       base,
       colors,
       borderRadius,
@@ -281,12 +284,12 @@ function ThemeEditor({
       <div className="theme-editor-scroll">
         <div className="theme-editor-field">
           <label className="form-label">
-            Name
+            {t("common.name")}
             <input
               className="form-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My Theme"
+              placeholder={t("sharedModals.theme.myThemePlaceholder")}
               autoFocus
             />
           </label>
@@ -294,7 +297,7 @@ function ThemeEditor({
 
         <div className="theme-editor-field">
           <div className="form-label" style={{ marginBottom: 8 }}>
-            Base Mode
+            {t("sharedModals.theme.baseMode")}
           </div>
           <div className="theme-options" style={{ justifyContent: "flex-start" }}>
             {(["light", "dark"] as Theme[]).map((theme) => (
@@ -312,7 +315,7 @@ function ThemeEditor({
                     <div className="theme-preview-bar" style={{ width: "60%" }} />
                   </div>
                 </div>
-                {theme === "light" ? "Light" : "Dark"}
+                {theme === "light" ? t("sharedModals.theme.light") : t("sharedModals.theme.dark")}
               </button>
             ))}
           </div>
@@ -320,11 +323,11 @@ function ThemeEditor({
 
         <div className="theme-editor-field">
           <div className="form-label" style={{ marginBottom: 8 }}>
-            UI Style
+            {t("sharedModals.theme.uiStyle")}
           </div>
           <SliderRow
-            label="Corner Radius"
-            desc="Roundness of corners on cards, buttons, and inputs"
+            label={t("sharedModals.theme.cornerRadius")}
+            desc={t("sharedModals.theme.cornerRadiusDescription")}
             value={borderRadius}
             min={0}
             max={20}
@@ -332,8 +335,8 @@ function ThemeEditor({
             onChange={setBorderRadius}
           />
           <SliderRow
-            label="Border Width"
-            desc="Thickness of borders on cards, modals, and inputs"
+            label={t("sharedModals.theme.borderWidth")}
+            desc={t("sharedModals.theme.borderWidthDescription")}
             value={borderWidth}
             min={1}
             max={4}
@@ -344,7 +347,7 @@ function ThemeEditor({
 
         <div className="theme-editor-field">
           <div className="form-label" style={{ marginBottom: 8 }}>
-            Canvas
+            {t("sharedModals.theme.canvas")}
           </div>
           <div
             className="settings-row"
@@ -356,10 +359,10 @@ function ThemeEditor({
             }}
           >
             <div>
-              <div className="settings-row-label">Gridlines</div>
-              <div className="settings-row-desc">Show or hide gridlines behind graph canvases</div>
+              <div className="settings-row-label">{t("sharedModals.canvas.gridlines")}</div>
+              <div className="settings-row-desc">{t("sharedModals.canvas.gridlinesDescription")}</div>
             </div>
-            <div className="segmented-control" role="tablist" aria-label="Canvas gridlines">
+            <div className="segmented-control" role="tablist" aria-label={t("sharedModals.canvas.gridlinesAria")}>
               <button
                 type="button"
                 role="tab"
@@ -367,7 +370,7 @@ function ThemeEditor({
                 className={`segmented-control-option${canvasGridEnabled ? " segmented-control-option--active" : ""}`}
                 onClick={() => setCanvasGridEnabled(true)}
               >
-                Show
+                {t("sharedModals.canvas.show")}
               </button>
               <button
                 type="button"
@@ -376,14 +379,14 @@ function ThemeEditor({
                 className={`segmented-control-option${!canvasGridEnabled ? " segmented-control-option--active" : ""}`}
                 onClick={() => setCanvasGridEnabled(false)}
               >
-                Hide
+                {t("sharedModals.canvas.hide")}
               </button>
             </div>
           </div>
           <fieldset disabled={!canvasGridEnabled} style={{ border: 0, margin: 0, padding: 0 }}>
             <SliderRow
-              label="Gridline Density"
-              desc="Distance between canvas gridlines"
+              label={t("sharedModals.canvas.gridlineDensity")}
+              desc={t("sharedModals.canvas.gridlineDensityDescription")}
               value={canvasGridDensity}
               min={8}
               max={48}
@@ -395,7 +398,7 @@ function ThemeEditor({
 
         <div className="theme-editor-field">
           <div className="form-label" style={{ marginBottom: 8 }}>
-            Colors
+            {t("sharedModals.theme.colors")}
           </div>
           <div className="color-groups">
             {groups.map((group) => (
@@ -419,13 +422,13 @@ function ThemeEditor({
 
       <div className="app-settings-modal-footer">
         <button className="btn" onClick={handleResetDefaults}>
-          Reset to Defaults
+          {t("sharedModals.theme.resetToDefaults")}
         </button>
         <button className="btn" onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </button>
         <button className="btn btn--primary" onClick={handleSave}>
-          Save Theme
+          {t("sharedModals.theme.saveTheme")}
         </button>
       </div>
     </>
@@ -484,6 +487,7 @@ export function ThemeManagerModal({
   onApplied: () => void | Promise<void>;
   onCanceled?: () => void | Promise<void>;
 }) {
+  const { t } = useI18n();
   const [presets, setPresets] = useState<ThemePreset[]>(getPresets);
   const [editing, setEditing] = useState<ThemePreset | null>(null);
   const [openThemeActions, setOpenThemeActions] = useState<string | null>(null);
@@ -564,7 +568,7 @@ export function ThemeManagerModal({
     snapshotRef.current = currentSnapshot();
     setEditing({
       id: genId(),
-      name: `${base === "light" ? "Light" : "Dark"} Custom`,
+      name: base === "light" ? t("sharedModals.theme.lightCustom") : t("sharedModals.theme.darkCustom"),
       base,
       colors: { ...getAppDefaults(base) },
       borderRadius: 6,
@@ -632,7 +636,7 @@ export function ThemeManagerModal({
 
   return (
     <SettingsModal
-      title={editing ? (editing.name ? `Editing: ${editing.name}` : "New Theme") : "Theme Presets"}
+      title={editing ? (editing.name ? t("sharedModals.theme.editingTitle", { name: editing.name }) : t("sharedModals.theme.newThemeTitle")) : t("sharedModals.theme.title")}
       onClose={editing ? handleCancel : onClose}
     >
       {editing ? (
@@ -646,8 +650,8 @@ export function ThemeManagerModal({
                 <button
                   className="codebook-icon-action theme-manager-add-button"
                   onClick={openNew}
-                  aria-label="New theme"
-                  title="New theme"
+                  aria-label={t("sharedModals.theme.newTheme")}
+                  title={t("sharedModals.theme.newTheme")}
                 >
                   <PlusIcon />
                 </button>
@@ -661,11 +665,11 @@ export function ThemeManagerModal({
                     <ThemePreviewThumbnail theme={baseTheme} />
                   </div>
                   <div className="theme-preset-info">
-                    <span className="theme-preset-name">{baseTheme === "light" ? "Light" : "Dark"}</span>
+                    <span className="theme-preset-name">{baseTheme === "light" ? t("sharedModals.theme.light") : t("sharedModals.theme.dark")}</span>
                     <span className={`theme-preset-badge theme-preset-badge--${baseTheme}`}>
-                      built-in
+                      {t("sharedModals.theme.builtIn")}
                     </span>
-                    <span className="theme-preset-meta">default theme</span>
+                    <span className="theme-preset-meta">{t("sharedModals.theme.defaultTheme")}</span>
                   </div>
                   <div
                     className="theme-preset-actions"
@@ -675,9 +679,9 @@ export function ThemeManagerModal({
                       className="snapshot-actions-trigger"
                       data-theme-actions-trigger="true"
                       onClick={(event) => openActionsMenu(event, `built-in-${baseTheme}`, 2)}
-                      aria-label={`${baseTheme === "light" ? "Light" : "Dark"} theme actions`}
+                      aria-label={t("sharedModals.theme.namedThemeActions", { name: baseTheme === "light" ? t("sharedModals.theme.light") : t("sharedModals.theme.dark") })}
                       aria-expanded={openThemeActions === `built-in-${baseTheme}`}
-                      title="Theme actions"
+                      title={t("sharedModals.theme.themeActions")}
                     >
                       ...
                     </button>
@@ -694,7 +698,7 @@ export function ThemeManagerModal({
                           onClick={() => handleApplyBuiltIn(baseTheme)}
                           role="menuitem"
                         >
-                          Apply
+                          {t("common.apply")}
                         </button>
                         <button
                           type="button"
@@ -706,7 +710,7 @@ export function ThemeManagerModal({
                           }}
                           role="menuitem"
                         >
-                          Customize
+                          {t("common.customize")}
                         </button>
                       </div>
                     ) : null}
@@ -716,8 +720,8 @@ export function ThemeManagerModal({
 
               {presets.length === 0 ? (
                 <div className="theme-manager-empty">
-                  <p>No saved custom themes yet.</p>
-                  <p>Create a theme to save your custom colors and UI style.</p>
+                  <p>{t("sharedModals.theme.emptyTitle")}</p>
+                  <p>{t("sharedModals.theme.emptyBody")}</p>
                 </div>
               ) : (
                 presets.map((preset) => (
@@ -726,12 +730,12 @@ export function ThemeManagerModal({
                       <ThemePresetPreviewThumbnail preset={preset} />
                     </div>
                     <div className="theme-preset-info">
-                      <span className="theme-preset-name">{preset.name || "Untitled"}</span>
+                      <span className="theme-preset-name">{preset.name || t("sharedModals.theme.untitled")}</span>
                       <span className={`theme-preset-badge theme-preset-badge--${preset.base}`}>
                         {preset.base}
                       </span>
                       <span className="theme-preset-meta">
-                        radius {preset.borderRadius}px border {preset.borderWidth}px
+                        {t("sharedModals.theme.presetMeta", { radius: preset.borderRadius, borderWidth: preset.borderWidth })}
                       </span>
                     </div>
                     <div
@@ -742,9 +746,9 @@ export function ThemeManagerModal({
                         className="snapshot-actions-trigger"
                         data-theme-actions-trigger="true"
                         onClick={(event) => openActionsMenu(event, `preset-${preset.id}`, 3)}
-                        aria-label={`${preset.name || "Untitled"} theme actions`}
+                        aria-label={t("sharedModals.theme.namedThemeActions", { name: preset.name || t("sharedModals.theme.untitled") })}
                         aria-expanded={openThemeActions === `preset-${preset.id}`}
-                        title="Theme actions"
+                        title={t("sharedModals.theme.themeActions")}
                       >
                         ...
                       </button>
@@ -761,7 +765,7 @@ export function ThemeManagerModal({
                             onClick={() => handleApply(preset)}
                             role="menuitem"
                           >
-                            Apply
+                            {t("common.apply")}
                           </button>
                           <button
                             type="button"
@@ -773,7 +777,7 @@ export function ThemeManagerModal({
                             }}
                             role="menuitem"
                           >
-                            Edit
+                            {t("common.edit")}
                           </button>
                           <button
                             type="button"
@@ -785,7 +789,7 @@ export function ThemeManagerModal({
                             }}
                             role="menuitem"
                           >
-                            Delete
+                            {t("common.delete")}
                           </button>
                         </div>
                       ) : null}
@@ -799,7 +803,7 @@ export function ThemeManagerModal({
           <div className="app-settings-modal-footer">
             <span />
             <button className="btn btn--primary" onClick={onClose}>
-              Done
+              {t("common.done")}
             </button>
           </div>
         </>

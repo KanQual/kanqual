@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { HelpIcon } from "../components/AppIcons";
+import { ArrowLeftRightIcon, HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
@@ -463,7 +463,7 @@ export function PostgresAiAssistChatView({
       setChatError("");
     } catch (error) {
       console.error("Failed to load PostgreSQL project chat:", error);
-      setChatError(error instanceof Error ? error.message : "Could not load project chat.");
+      setChatError(error instanceof Error ? error.message : t("aiAssist.chat.errors.couldNotLoad"));
     } finally {
       setLoading(false);
     }
@@ -561,7 +561,7 @@ export function PostgresAiAssistChatView({
     for (const documentId of selectedContext.documentIds) {
       const source = sourceById.get(documentId);
       if (!source || !aiAssistTextSourceIds.has(documentId)) continue;
-      chips.push({ kind: "document", id: documentId, label: source.title, detail: "Source" });
+      chips.push({ kind: "document", id: documentId, label: source.title, detail: t("aiAssist.chat.source") });
     }
 
     for (const objectId of selectedContext.caseIds) {
@@ -576,7 +576,7 @@ export function PostgresAiAssistChatView({
       chips.push({
         kind: "relationship",
         id: relationshipId,
-        label: relationship.relationshipType || "Relationship",
+        label: relationship.relationshipType || t("aiAssist.chat.citationKinds.relationship"),
         detail: `${relationship.fromEntityName || relationship.fromObjectId} -> ${relationship.toEntityName || relationship.toObjectId}`,
       });
     }
@@ -594,15 +594,15 @@ export function PostgresAiAssistChatView({
       chips.push({
         kind: "annotation",
         id: annotationId,
-        label: annotationPreview(annotation.quote || annotation.note || "Annotation"),
-        detail: `${annotation.primaryCodeLabel || "Annotation"} in ${source?.title ?? "source"}`,
+        label: annotationPreview(annotation.quote || annotation.note || t("aiAssist.chat.citationKinds.annotation")),
+        detail: `${annotation.primaryCodeLabel || t("aiAssist.chat.citationKinds.annotation")} in ${source?.title ?? t("aiAssist.chat.sourceFallback")}`,
       });
     }
 
     for (const memoId of selectedContext.memoIds) {
       const memo = memoById.get(memoId);
       if (!memo) continue;
-      chips.push({ kind: "memo", id: memoId, label: memo.title, detail: "Memo" });
+      chips.push({ kind: "memo", id: memoId, label: memo.title, detail: t("aiAssist.chat.citationKinds.memo") });
     }
 
     return chips;
@@ -681,7 +681,7 @@ export function PostgresAiAssistChatView({
   }> = [
     {
       kind: "document",
-      label: "Sources",
+      label: t("aiAssist.chat.contextSources"),
       count: aiAssistTextSourceIds.size,
       selectedCount: selectedContext.documentIds.filter((id) => aiAssistTextSourceIds.has(id)).length,
     },
@@ -705,13 +705,13 @@ export function PostgresAiAssistChatView({
     },
     {
       kind: "annotation",
-      label: "Annotations",
+      label: t("aiAssist.chat.contextAnnotations"),
       count: aiAssistTextAnnotationIds.size,
       selectedCount: selectedContext.annotationIds.filter((id) => aiAssistTextAnnotationIds.has(id)).length,
     },
     {
       kind: "memo",
-      label: "Memos",
+      label: t("aiAssist.chat.contextMemos"),
       count: contextData.memos.length,
       selectedCount: selectedContext.memoIds.length,
     },
@@ -743,7 +743,7 @@ export function PostgresAiAssistChatView({
   async function handleNewChat() {
     if (!canUseAiChat) return;
     if (!currentUserId) {
-      setChatError("You must be a project member to start a project chat.");
+      setChatError(t("aiAssist.chat.errors.mustBeProjectMemberToStart"));
       return;
     }
     if (creatingChat) return;
@@ -770,7 +770,7 @@ export function PostgresAiAssistChatView({
       setChatError("");
       window.setTimeout(() => textareaRef.current?.focus(), 0);
     } catch (error) {
-      setChatError(error instanceof Error ? error.message : "Could not start a new project chat.");
+      setChatError(error instanceof Error ? error.message : t("aiAssist.chat.errors.couldNotStart"));
     } finally {
       setCreatingChat(false);
     }
@@ -812,7 +812,7 @@ export function PostgresAiAssistChatView({
       setContextMenu(null);
       setChatError("");
     } catch (error) {
-      setChatError(error instanceof Error ? error.message : "Could not delete project chat.");
+      setChatError(error instanceof Error ? error.message : t("aiAssist.chat.errors.couldNotDelete"));
     }
   }
 
@@ -947,7 +947,7 @@ export function PostgresAiAssistChatView({
 
   function getTextSegmentCitationSourceTitle(citation: OllamaProjectChatCitation): string {
     return getTextSegmentCitationSource(citation)?.title
-      ?? formatCitationTitle(citation.title || "Source");
+      ?? formatCitationTitle(citation.title || t("aiAssist.chat.source"));
   }
 
   function getAnnotationCitation(citation: OllamaProjectChatCitation): PostgresAnnotationSummary | null {
@@ -963,14 +963,14 @@ export function PostgresAiAssistChatView({
   function getAnnotationCitationCodeLabel(annotation: PostgresAnnotationSummary | null, citation: OllamaProjectChatCitation): string {
     return getAnnotationCitationCode(annotation, citation)?.label
       || annotation?.primaryCodeLabel
-      || "Annotation";
+      || t("aiAssist.chat.citationKinds.annotation");
   }
 
   function getAnnotationCitationText(annotation: PostgresAnnotationSummary | null, citation: OllamaProjectChatCitation): string {
     if (!annotation) return citation.preview;
     return [
       annotation.quote.trim(),
-      annotation.note.trim() ? `Note:\n${annotation.note.trim()}` : "",
+      annotation.note.trim() ? `${t("aiAssist.chat.note")}:\n${annotation.note.trim()}` : "",
     ].filter(Boolean).join("\n\n");
   }
 
@@ -990,8 +990,8 @@ export function PostgresAiAssistChatView({
 
   function getObjectCitationTitle(citation: OllamaProjectChatCitation): string {
     return getObjectCitation(citation)?.title
-      || formatCitationTitle(citation.title || "Object").replace(/^Object:\s*/i, "").trim()
-      || "Object";
+      || formatCitationTitle(citation.title || t("aiAssist.chat.citationKinds.object")).replace(/^Object:\s*/i, "").trim()
+      || t("aiAssist.chat.citationKinds.object");
   }
 
   function getObjectCitationDescription(citation: OllamaProjectChatCitation): string {
@@ -1001,7 +1001,7 @@ export function PostgresAiAssistChatView({
   }
 
   function getObjectCitationType(citation: OllamaProjectChatCitation): string {
-    return getObjectCitation(citation)?.objectType || "Object";
+    return getObjectCitation(citation)?.objectType || t("aiAssist.chat.citationKinds.object");
   }
 
   function getRelationshipCitation(citation: OllamaProjectChatCitation): PostgresRelationship | null {
@@ -1012,15 +1012,15 @@ export function PostgresAiAssistChatView({
   function getRelationshipCitationTitle(citation: OllamaProjectChatCitation): string {
     const relationship = getRelationshipCitation(citation);
     if (relationship) {
-      const fromLabel = relationship.fromEntityName || relationship.fromEntityId || "From";
-      const toLabel = relationship.toEntityName || relationship.toEntityId || "To";
+      const fromLabel = relationship.fromEntityName || relationship.fromEntityId || t("aiAssist.chat.from");
+      const toLabel = relationship.toEntityName || relationship.toEntityId || t("aiAssist.chat.to");
       return `${fromLabel} -> ${toLabel}`;
     }
-    return formatCitationTitle(citation.title || "Relationship").replace(/^Relationship:\s*/i, "").trim() || "Relationship";
+    return formatCitationTitle(citation.title || t("aiAssist.chat.citationKinds.relationship")).replace(/^Relationship:\s*/i, "").trim() || t("aiAssist.chat.citationKinds.relationship");
   }
 
   function getRelationshipCitationType(citation: OllamaProjectChatCitation): string {
-    return getRelationshipCitation(citation)?.relationshipType || "Relationship";
+    return getRelationshipCitation(citation)?.relationshipType || t("aiAssist.chat.citationKinds.relationship");
   }
 
   function getRelationshipCitationDescription(citation: OllamaProjectChatCitation): string {
@@ -1053,7 +1053,7 @@ export function PostgresAiAssistChatView({
       return {
         label,
         title: source?.title || fallbackName || resolvedId || "-",
-        type: formatRelationshipEndpointType(source?.sourceKind || "Source"),
+        type: formatRelationshipEndpointType(source?.sourceKind || t("aiAssist.chat.source")),
       };
     }
 
@@ -1061,14 +1061,14 @@ export function PostgresAiAssistChatView({
     return {
       label,
       title: object?.title || fallbackName || resolvedId || "-",
-      type: object?.objectType || "Object",
+      type: object?.objectType || t("aiAssist.chat.citationKinds.object"),
     };
   }
 
   function getCitationListTitle(citation: OllamaProjectChatCitation, kind: CitationKind): string {
     if (kind === "annotation") {
       const annotation = getAnnotationCitation(citation);
-      return annotation ? formatAnnotationDisplayId(annotation.displayId) : formatCitationTitle(citation.title || "Annotation");
+      return annotation ? formatAnnotationDisplayId(annotation.displayId) : formatCitationTitle(citation.title || t("aiAssist.chat.citationKinds.annotation"));
     }
     if (kind === "object") return getObjectCitationTitle(citation);
     if (kind === "relationship") return getRelationshipCitationTitle(citation);
@@ -1092,11 +1092,11 @@ export function PostgresAiAssistChatView({
   async function handleSendMessage() {
     if (!canUseAiChat) return;
     if (!currentUserId) {
-      setChatError("You must be a project member to send project chat messages.");
+      setChatError(t("aiAssist.chat.errors.mustBeProjectMemberToSend"));
       return;
     }
     if (activeChatReadOnly) {
-      setChatError("This conversation is read-only for your role. Start your own chat to continue.");
+      setChatError(t("aiAssist.chat.errors.conversationReadOnly"));
       return;
     }
     const messageText = draft.trim();
@@ -1109,7 +1109,7 @@ export function PostgresAiAssistChatView({
       runtime = assertActiveLlmRuntime(llmSettings, "using project chat");
       setActiveRuntimeSummary(runtime);
     } catch (error) {
-      setChatError(error instanceof Error ? error.message : "Configure AI Assist before using project chat.");
+      setChatError(error instanceof Error ? error.message : t("aiAssist.chat.errors.configureBeforeChat"));
       return;
     }
 
@@ -1270,7 +1270,7 @@ export function PostgresAiAssistChatView({
           <h1>{t("aiAssist.chat.pageTitle")}</h1>
         </header>
         <div className="empty-state">
-          <p>Loading project chat...</p>
+          <p>{t("aiAssist.chat.loadingProjectChat")}</p>
         </div>
       </div>
     );
@@ -1313,7 +1313,7 @@ export function PostgresAiAssistChatView({
             <p className="users-guide-copy">{t("aiAssist.chat.help.line2")}</p>
             <p className="users-guide-copy">{t("aiAssist.chat.help.line3")}</p>
             <p className="users-guide-copy">
-              Owners, editors, and administrators can view all project chats; coders and viewers only see their own.
+              {t("aiAssist.chat.help.visibility")}
             </p>
           </div>
         </SettingsModal>
@@ -1323,15 +1323,15 @@ export function PostgresAiAssistChatView({
         <aside className="ai-chat-sidebar-panel">
           <div className="ai-chat-sidebar-header">
             <div>
-              <h2>Chats</h2>
+              <h2>{t("aiAssist.chat.chats")}</h2>
             </div>
             <button
               type="button"
               className="codebook-icon-action ai-chat-new-chat-button"
               onClick={() => void handleNewChat()}
               disabled={creatingChat}
-              aria-label={creatingChat ? "Starting new chat" : t("aiAssist.chat.newChat")}
-              title={creatingChat ? "Starting..." : t("aiAssist.chat.newChat")}
+              aria-label={creatingChat ? t("aiAssist.chat.startingNewChat") : t("aiAssist.chat.newChat")}
+              title={creatingChat ? t("aiAssist.chat.starting") : t("aiAssist.chat.newChat")}
             >
               +
             </button>
@@ -1401,7 +1401,7 @@ export function PostgresAiAssistChatView({
                 <p>{t("aiAssist.chat.viewOnlyConversation", { owner: activeChat?.createdByName || t("aiAssist.chat.anotherProjectMember") })}</p>
               )}
               <p className={`ai-chat-runtime-summary${activeRuntimeSummary ? " ai-chat-runtime-summary--ready" : " ai-chat-runtime-summary--missing"}`}>
-                <span>Connected LLM</span>
+                <span>{t("aiAssist.chat.connectedLlm")}</span>
                 <strong>{formatRuntimeSummary(activeRuntimeSummary)}</strong>
               </p>
             </div>
@@ -1521,7 +1521,7 @@ export function PostgresAiAssistChatView({
                         setSelectedContextMode("default");
                       }}
                     >
-                      Clear Context
+                      {t("aiAssist.chat.clearContext")}
                     </button>
                   )}
                 </div>
@@ -1570,7 +1570,7 @@ export function PostgresAiAssistChatView({
             </label>
             <div className="form-actions">
               <button type="button" className="btn btn--primary" onClick={() => void handleSendMessage()} disabled={!draft.trim() || sending || activeChatReadOnly}>
-                {sending ? "Waiting for AI response..." : "Send Message"}
+                {sending ? t("aiAssist.chat.waitingForAiResponse") : t("aiAssist.chat.sendMessage")}
               </button>
             </div>
           </div>
@@ -1579,7 +1579,7 @@ export function PostgresAiAssistChatView({
 
       {citationModal ? (
         <SettingsModal
-          title={`Citation [${citationModal.index + 1}]`}
+          title={t("aiAssist.chat.citationTitle", { number: citationModal.index + 1 })}
           subtitle={
             !["text-segment", "annotation", "object", "relationship"].includes(getCitationKind(citationModal.citation))
               ? formatCitationKindLabel(getCitationKind(citationModal.citation), t)
@@ -1592,12 +1592,12 @@ export function PostgresAiAssistChatView({
               {getCitationKind(citationModal.citation) === "text-segment" ? (
                 <>
                   <div className="ai-citation-detail-summary">
-                    <span>Source</span>
+                    <span>{t("aiAssist.chat.source")}</span>
                     <strong>{getTextSegmentCitationSourceTitle(citationModal.citation)}</strong>
                   </div>
                   {getTextSegmentCitationText(citationModal.citation).trim() ? (
                     <div className="ai-citation-detail-text">
-                      <span>Cited Text Segment</span>
+                      <span>{t("aiAssist.chat.citedTextSegment")}</span>
                       <p>{getTextSegmentCitationText(citationModal.citation)}</p>
                     </div>
                   ) : null}
@@ -1628,12 +1628,12 @@ export function PostgresAiAssistChatView({
               ) : getCitationKind(citationModal.citation) === "object" ? (
                 <>
                   <div className="ai-citation-detail-summary">
-                    <span>Title</span>
+                    <span>{t("aiAssist.chat.titleLabel")}</span>
                     <strong>{getObjectCitationTitle(citationModal.citation)}</strong>
                   </div>
                   {getObjectCitationDescription(citationModal.citation).trim() ? (
                     <div className="ai-citation-detail-text">
-                      <span>Description</span>
+                      <span>{t("aiAssist.chat.description")}</span>
                       <p>{getObjectCitationDescription(citationModal.citation)}</p>
                     </div>
                   ) : null}
@@ -1647,12 +1647,12 @@ export function PostgresAiAssistChatView({
                   return (
                     <>
                       <div className="ai-citation-detail-summary">
-                        <span>Type</span>
+                        <span>{t("aiAssist.chat.type")}</span>
                         <strong>{getRelationshipCitationType(citationModal.citation)}</strong>
                       </div>
                       {description.trim() ? (
                         <div className="ai-citation-detail-text">
-                          <span>Description</span>
+                          <span>{t("aiAssist.chat.description")}</span>
                           <p>{description}</p>
                         </div>
                       ) : null}
@@ -1671,12 +1671,12 @@ export function PostgresAiAssistChatView({
               ) : (
                 <>
                   <div className="ai-citation-detail-summary">
-                    <span>Title</span>
-                    <strong>{formatCitationTitle(citationModal.citation.title || "Citation")}</strong>
+                    <span>{t("aiAssist.chat.titleLabel")}</span>
+                    <strong>{formatCitationTitle(citationModal.citation.title || t("aiAssist.chat.genericCitation"))}</strong>
                   </div>
                   {citationModal.citation.preview?.trim() ? (
                     <div className="ai-citation-detail-text">
-                      <span>Content</span>
+                      <span>{t("aiAssist.chat.content")}</span>
                       <p>{citationModal.citation.preview}</p>
                     </div>
                   ) : null}
@@ -1693,7 +1693,7 @@ export function PostgresAiAssistChatView({
             </div>
             <div className="project-export-actions project-export-actions--modal ai-citation-detail-actions">
               <button type="button" className="btn btn--primary" onClick={handleOpenCitationFromModal}>
-                Open
+                {t("aiAssist.chat.open")}
               </button>
             </div>
         </SettingsModal>
@@ -1704,12 +1704,12 @@ export function PostgresAiAssistChatView({
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">{t("aiAssist.chat.addContextBody")}</p>
             <div className="form-label" style={{ marginBottom: 16 }}>
-              <span style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>Context Mode</span>
-              <div className="segmented-control ai-chat-context-mode-tabs" role="tablist" aria-label="Context mode">
+              <span style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>{t("aiAssist.chat.contextMode")}</span>
+              <div className="segmented-control ai-chat-context-mode-tabs" role="tablist" aria-label={t("aiAssist.chat.contextModeAria")}>
                 {([
-                  ["default", "Default"],
-                  ["prioritize", "Prioritize"],
-                  ["restrict", "Restrict"],
+                  ["default", t("aiAssist.chat.contextModes.default")],
+                  ["prioritize", t("aiAssist.chat.contextModes.prioritize")],
+                  ["restrict", t("aiAssist.chat.contextModes.restrict")],
                 ] as Array<[ChatContextMode, string]>).map(([mode, label]) => (
                   <button
                     key={mode}
@@ -1734,14 +1734,14 @@ export function PostgresAiAssistChatView({
             {selectedContextMode !== "default" && (
               <>
                 <div className="ai-chat-context-picker-summary">
-                  <span>{selectedContextCount === 1 ? "1 selected" : `${selectedContextCount} selected`}</span>
+                  <span>{selectedContextCount === 1 ? t("aiAssist.chat.oneSelected") : t("aiAssist.chat.selectedCount", { count: selectedContextCount })}</span>
                   {selectedContextCount > 0 ? (
                     <button
                       type="button"
                       className="btn btn--sm"
                       onClick={() => setSelectedContext({ documentIds: [], caseIds: [], relationshipIds: [], codeIds: [], annotationIds: [], memoIds: [] })}
                     >
-                      Clear
+                      {t("common.clear")}
                     </button>
                   ) : null}
                 </div>
@@ -1761,7 +1761,7 @@ export function PostgresAiAssistChatView({
                       >
                         <span>
                           <strong>{category.label}</strong>
-                          <small>{category.count} available</small>
+                          <small>{t("aiAssist.chat.availableCount", { count: category.count })}</small>
                         </span>
                         {category.selectedCount > 0 ? <em>{category.selectedCount}</em> : null}
                       </button>
@@ -1769,12 +1769,12 @@ export function PostgresAiAssistChatView({
                   </div>
                   <div className="ai-chat-context-picker-panel">
                     <label className="form-label">
-                      Search {activeContextCategory.label}
+                      {t("aiAssist.chat.searchKind", { kind: activeContextCategory.label })}
                       <input
                         className="form-input"
                         value={contextQuery}
                         onChange={(event) => setContextQuery(event.target.value)}
-                        placeholder={`Search ${activeContextCategory.label.toLowerCase()}...`}
+                        placeholder={t("aiAssist.chat.searchContext", { kind: activeContextCategory.label.toLowerCase() })}
                         autoFocus
                       />
                     </label>
@@ -1788,7 +1788,7 @@ export function PostgresAiAssistChatView({
                           />
                           <span>
                             <strong>{source.title}</strong>
-                            <small>{source.sourceKind || "Source"}</small>
+                            <small>{source.sourceKind || t("aiAssist.chat.source")}</small>
                           </span>
                         </label>
                       ))}
@@ -1801,7 +1801,7 @@ export function PostgresAiAssistChatView({
                           />
                           <span>
                             <strong>{object.title}</strong>
-                            <small>{object.objectType || "Object"}</small>
+                            <small>{object.objectType || t("aiAssist.chat.citationKinds.object")}</small>
                           </span>
                         </label>
                       ))}
@@ -1813,8 +1813,12 @@ export function PostgresAiAssistChatView({
                             onChange={() => toggleContext("relationship", relationship.id)}
                           />
                           <span>
-                            <strong>{relationship.relationshipType || "Relationship"}</strong>
-                            <small>{relationship.fromEntityName || relationship.fromObjectId} &gt; {relationship.toEntityName || relationship.toObjectId}</small>
+                            <strong>{relationship.relationshipType || t("aiAssist.chat.citationKinds.relationship")}</strong>
+                            <small className="ai-chat-context-relationship-detail">
+                              {relationship.fromEntityName || relationship.fromObjectId}
+                              <ArrowLeftRightIcon className="ai-chat-context-relationship-icon" />
+                              {relationship.toEntityName || relationship.toObjectId}
+                            </small>
                           </span>
                         </label>
                       ))}
@@ -1840,8 +1844,8 @@ export function PostgresAiAssistChatView({
                               onChange={() => toggleContext("annotation", annotation.id)}
                             />
                             <span>
-                              <strong>{annotationPreview(annotation.quote || annotation.note || "Annotation")}</strong>
-                              <small>{annotation.primaryCodeLabel || "Annotation"} in {source?.title ?? "source"}</small>
+                              <strong>{annotationPreview(annotation.quote || annotation.note || t("aiAssist.chat.citationKinds.annotation"))}</strong>
+                              <small>{annotation.primaryCodeLabel || t("aiAssist.chat.citationKinds.annotation")} in {source?.title ?? t("aiAssist.chat.sourceFallback")}</small>
                             </span>
                           </label>
                         );
@@ -1855,7 +1859,7 @@ export function PostgresAiAssistChatView({
                           />
                           <span>
                             <strong>{memo.title}</strong>
-                            <small>Memo</small>
+                            <small>{t("aiAssist.chat.citationKinds.memo")}</small>
                           </span>
                         </label>
                       ))}

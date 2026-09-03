@@ -25,6 +25,7 @@ import {
   type PostgresRelationshipLineShape,
   type PostgresSourceObjectVisualKey,
 } from "../lib/postgresGraphics";
+import { useI18n } from "../i18n/provider";
 
 export type PostgresRelationshipTypeModalTab =
   | "details"
@@ -45,13 +46,23 @@ export type PostgresRelationshipEndpointRestrictionItem = {
   imageStoragePath?: string;
 };
 
+function formatRelationshipTypeModalTab(tab: PostgresRelationshipTypeModalTab, t: ReturnType<typeof useI18n>["t"]): string {
+  if (tab === "details") return t("sharedModals.tabs.details");
+  if (tab === "graphics") return t("sharedModals.tabs.graphics");
+  if (tab === "object1") return t("sharedModals.tabs.object1");
+  if (tab === "object2") return t("sharedModals.tabs.object2");
+  if (tab === "attributes") return t("sharedModals.tabs.attributes");
+  return t("sharedModals.tabs.timeline");
+}
+
 function PostgresRelationshipTypeTimelineFields(props: {
   drafts: TypeAttributeDraft[];
   onChange: (role: TimelineFieldRole, value: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="postgres-attribute-modal-section">
-      <div className="postgres-attribute-modal-title">Timeline Fields</div>
+      <div className="postgres-attribute-modal-title">{t("sharedModals.tabs.timelineFields")}</div>
       <div className="case-detail-attributes-table-wrap">
         <table className="case-detail-attributes-table">
           <tbody>
@@ -69,11 +80,11 @@ function PostgresRelationshipTypeTimelineFields(props: {
                       value={selectedDraft?.localId ?? ""}
                       onChange={(event) => props.onChange(field.role, event.target.value)}
                     >
-                      <option value="">None</option>
+                      <option value="">{t("sharedModals.attributes.none")}</option>
                       {eligibleDrafts.map((draft) => (
-                        <option key={draft.localId} value={draft.localId}>{draft.name || "Untitled attribute"}</option>
+                        <option key={draft.localId} value={draft.localId}>{draft.name || t("sharedModals.attributes.untitledAttribute")}</option>
                       ))}
-                      <option value="__create__">Create new attribute...</option>
+                      <option value="__create__">{t("sharedModals.attributes.createNewAttribute")}</option>
                     </select>
                   </td>
                 </tr>
@@ -95,6 +106,7 @@ function PostgresRelationshipTypeEndpointRestrictions(props: {
   onSourceChange: Dispatch<SetStateAction<string[]>>;
   projectStoragePath: string;
 }) {
+  const { t } = useI18n();
   return (
     <div
       style={{
@@ -104,14 +116,14 @@ function PostgresRelationshipTypeEndpointRestrictions(props: {
       }}
     >
       <PostgresRelationshipEndpointRestrictionColumn
-        title="Objects"
+        title={t("sharedModals.graphics.objects")}
         items={props.objectItems}
         value={props.objectValue}
         onChange={props.onObjectChange}
         projectStoragePath={props.projectStoragePath}
       />
       <PostgresRelationshipEndpointRestrictionColumn
-        title="Sources"
+        title={t("sharedModals.graphics.sources")}
         items={props.sourceItems}
         value={props.sourceValue}
         onChange={props.onSourceChange}
@@ -162,6 +174,7 @@ export function PostgresRelationshipTypeModal(props: {
   onDeleteAttribute: (localId: string) => void;
   onChangeValue: (attributeLocalId: string, rowId: string, value: string) => void;
 }) {
+  const { t } = useI18n();
   const disabled = props.submitting;
   const lineWeight = normalizePostgresRelationshipLineWeight(props.lineWeight);
 
@@ -183,13 +196,13 @@ export function PostgresRelationshipTypeModal(props: {
               className={`segmented-control-option ${props.tab === tab ? "segmented-control-option--active" : ""}`}
               onClick={() => props.setTab(tab)}
             >
-              {tab === "object1" ? "Object 1" : tab === "object2" ? "Object 2" : tab.slice(0, 1).toUpperCase() + tab.slice(1)}
+              {formatRelationshipTypeModalTab(tab, t)}
             </button>
           ))}
         </div>
         {props.tab === "details" ? (
           <label className="form-label">
-            Relationship type name
+            {t("sharedModals.relationshipModal.relationshipTypeName")}
             <input
               className="form-input"
               value={props.name}
@@ -201,7 +214,7 @@ export function PostgresRelationshipTypeModal(props: {
           <div className="source-graphics-layout">
             <div className="source-graphics-controls">
               <label className="form-label">
-                Color
+                {t("common.color")}
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <input
                     className="form-input form-input--color"
@@ -217,7 +230,7 @@ export function PostgresRelationshipTypeModal(props: {
                 </div>
               </label>
               <label className="form-label">
-                Line shape
+                {t("sharedModals.graphics.lineShape")}
                 <PostgresRelationshipLineShapePicker
                   value={props.lineShape}
                   onChange={(value) => props.setLineShape((value || "solid") as PostgresRelationshipLineShape)}
@@ -225,7 +238,7 @@ export function PostgresRelationshipTypeModal(props: {
                 />
               </label>
               <label className="form-label">
-                Arrowheads
+                {t("sharedModals.graphics.arrowheads")}
                 <PostgresRelationshipArrowheadPicker
                   value={props.arrowhead}
                   onChange={(value) => props.setArrowhead((value || "one_sided") as PostgresRelationshipArrowhead)}
@@ -233,7 +246,7 @@ export function PostgresRelationshipTypeModal(props: {
                 />
               </label>
               <label className="form-label timeline-group-opacity-control">
-                Line weight
+                {t("sharedModals.graphics.lineWeight")}
                 <div className="timeline-group-slider-row">
                   <input
                     className="form-range"
@@ -249,7 +262,7 @@ export function PostgresRelationshipTypeModal(props: {
               </label>
             </div>
             <PostgresRelationshipGraphicPreviewCard
-              label="Relationship type graphic preview"
+              label={t("sharedModals.graphics.relationshipTypePreview")}
               lineShape={props.lineShape}
               lineWeight={lineWeight}
               arrowhead={props.arrowhead}
@@ -293,7 +306,7 @@ export function PostgresRelationshipTypeModal(props: {
             rows={props.attributeRows}
             values={props.attributeValues}
             disabled={disabled}
-            emptyDefinitionsLabel="No attributes for this relationship type yet."
+            emptyDefinitionsLabel={t("sharedModals.relationshipModal.noTypeAttributes")}
             emptyRowsLabel={props.emptyRowsLabel}
             onAddAttribute={props.onAddAttribute}
             onEditAttribute={props.onEditAttribute}
@@ -303,10 +316,10 @@ export function PostgresRelationshipTypeModal(props: {
         )}
         <div className="app-settings-modal-footer">
           <button type="button" className="btn" onClick={props.onClose} disabled={disabled}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" className="btn btn--primary" disabled={disabled}>
-            {props.submitting ? "Saving..." : props.submitLabel}
+            {props.submitting ? t("common.saving") : props.submitLabel}
           </button>
         </div>
       </form>

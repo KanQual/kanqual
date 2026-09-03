@@ -17,6 +17,7 @@ import {
   type PostgresStatus,
 } from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 import {
   getPostgresAccounts,
   savePostgresAccount as savePostgresAccountHistory,
@@ -89,15 +90,15 @@ function AuthSlideCard({
   );
 }
 
-function formatRecentLogin(iso: string): string {
+function formatRecentLogin(iso: string, t: ReturnType<typeof useI18n>["t"]): string {
   const date = new Date(iso);
   const now = new Date();
   const days = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
   const time = formatCurrentDateTime(date, { hour: "2-digit", minute: "2-digit" });
-  if (days === 0) return `Today at ${time}`;
-  if (days === 1) return `Yesterday at ${time}`;
+  if (days === 0) return t("auth.relativeTime.todayAt", { time });
+  if (days === 1) return t("auth.relativeTime.yesterdayAt", { time });
   const shortDate = date.toLocaleDateString([], { month: "short", day: "numeric" });
-  return `${shortDate} at ${time}`;
+  return t("auth.relativeTime.shortDateAt", { date: shortDate, time });
 }
 
 function accountInitials(name: string): string {
@@ -156,6 +157,7 @@ export function PostgresLaunchView({
   onFirstAccountCreated,
   onOpenPostgresProjects,
 }: PostgresLaunchViewProps) {
+  const { t } = useI18n();
   const [superuserPassword, setSuperuserPassword] = useState("");
   const [initialAdminPassword, setInitialAdminPassword] = useState("");
   const [confirmInitialAdminPassword, setConfirmInitialAdminPassword] = useState("");
@@ -227,11 +229,11 @@ export function PostgresLaunchView({
     setError("");
     setNotice("");
     if (initialAdminPassword.length < 8) {
-      setError("Choose a PostgreSQL administrator password with at least 8 characters.");
+      setError(t("auth.postgresLaunch.chooseAdminPasswordMin"));
       return;
     }
     if (initialAdminPassword !== confirmInitialAdminPassword) {
-      setError("The PostgreSQL administrator passwords do not match.");
+      setError(t("auth.postgresLaunch.adminPasswordsMismatch"));
       return;
     }
 
@@ -257,10 +259,10 @@ export function PostgresLaunchView({
     const selected = await openDialog({
       multiple: false,
       directory: false,
-      title: "Choose KanQual upgrade backup",
+      title: t("auth.postgresLaunch.chooseUpgradeBackupDialog"),
       filters: [
         {
-          name: "KanQual upgrade backup",
+          name: t("auth.postgresLaunch.upgradeBackupFilter"),
           extensions: ["kanqual-upgrade-backup"],
         },
       ],
@@ -275,19 +277,19 @@ export function PostgresLaunchView({
     setError("");
     setNotice("");
     if (!restoreBackupPath.trim()) {
-      setError("Choose a KanQual upgrade backup file.");
+      setError(t("auth.postgresLaunch.chooseBackupFile"));
       return;
     }
     if (!restoreBackupPassword.trim()) {
-      setError("Enter the password for the upgrade backup.");
+      setError(t("auth.postgresLaunch.enterBackupPassword"));
       return;
     }
     if (restoreAdminPassword.length < 8) {
-      setError("Choose a new administrator password with at least 8 characters.");
+      setError(t("auth.postgresLaunch.chooseNewAdminPasswordMin"));
       return;
     }
     if (restoreAdminPassword !== confirmRestoreAdminPassword) {
-      setError("The new administrator passwords do not match.");
+      setError(t("auth.postgresLaunch.newAdminPasswordsMismatch"));
       return;
     }
 
@@ -323,7 +325,7 @@ export function PostgresLaunchView({
     setError("");
     setNotice("");
     if (!superuserPassword) {
-      setError("Enter the PostgreSQL administrator password to finish setup.");
+      setError(t("auth.postgresLaunch.enterAdminPasswordToFinish"));
       return;
     }
 
@@ -331,7 +333,7 @@ export function PostgresLaunchView({
     try {
       await onBootstrap(superuserPassword);
       setSuperuserPassword("");
-      setNotice("Database setup is complete.");
+      setNotice(t("auth.postgresLaunch.setupComplete"));
     } catch (bootstrapError) {
       setError(bootstrapError instanceof Error ? bootstrapError.message : String(bootstrapError));
     } finally {
@@ -345,19 +347,19 @@ export function PostgresLaunchView({
     setNotice("");
     const email = firstAccountEmail.trim().toLowerCase();
     if (!email) {
-      setError("Enter a username.");
+      setError(t("auth.postgresLaunch.enterUsername"));
       return;
     }
     if (/\s/.test(email)) {
-      setError("Usernames cannot contain spaces.");
+      setError(t("auth.postgresLaunch.usernameNoSpaces"));
       return;
     }
     if (firstAccountPassword.length < 8) {
-      setError("Choose a password with at least 8 characters.");
+      setError(t("auth.postgresLaunch.choosePasswordMin"));
       return;
     }
     if (firstAccountPassword !== confirmFirstAccountPassword) {
-      setError("The passwords do not match.");
+      setError(t("auth.postgresLaunch.passwordsMismatch"));
       return;
     }
 
@@ -423,49 +425,49 @@ export function PostgresLaunchView({
       <AuthSlideCard stage={launchStage}>
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
-          <div className="auth-brand">KanQual</div>
+          <div className="auth-brand">{t("app.loadingCard.productName")}</div>
         </div>
         <div className="form">
           {restoreSuccess ? (
             <div className="form" role="status" aria-live="polite">
               <div className="auth-admin-notice">
-                <strong>Import Complete</strong>
-                <span>KanQual finished importing the backup.</span>
+                <strong>{t("auth.postgresLaunch.importCompleteTitle")}</strong>
+                <span>{t("auth.postgresLaunch.importCompleteBody")}</span>
               </div>
               <div className="settings-diagnostics-grid settings-diagnostics-grid--compact">
                 <div>
-                  <span>Backup Version</span>
+                  <span>{t("auth.postgresLaunch.backupVersion")}</span>
                   <strong>{restoreSuccess.backupKanqualVersion}</strong>
                 </div>
                 <div>
-                  <span>Projects</span>
+                  <span>{t("auth.postgresLaunch.projects")}</span>
                   <strong>{restoreSuccess.projectCount}</strong>
                 </div>
                 <div>
-                  <span>Files</span>
+                  <span>{t("auth.postgresLaunch.files")}</span>
                   <strong>{restoreSuccess.storageFileCount}</strong>
                 </div>
                 <div>
-                  <span>Users</span>
+                  <span>{t("auth.postgresLaunch.users")}</span>
                   <strong>{restoreSuccess.userCount}</strong>
                 </div>
               </div>
               <div className="form-actions">
                 <button type="button" className="btn btn--primary" onClick={() => void finishRestoreSuccess()}>
-                  Done
+                  {t("common.done")}
                 </button>
               </div>
             </div>
           ) : showingFirstAccountSetup ? (
             <form onSubmit={handleFirstAccountSubmit} className="form">
               <div className="settings-warning settings-warning--danger">
-                Create your local KanQual user account.
+                {t("auth.postgresLaunch.firstAccountBody")}
                 <br />
                 <br />
-                This account is separate from the administrator password you just created.
+                {t("auth.postgresLaunch.firstAccountSeparate")}
               </div>
               <label className="form-label">
-                Username
+                {t("auth.postgresLaunch.username")}
                 <input
                   className="form-input"
                   type="text"
@@ -475,7 +477,7 @@ export function PostgresLaunchView({
                 />
               </label>
               <label className="form-label">
-                Password
+                {t("auth.form.password")}
                 <div className="password-input-wrap">
                   <input
                     className="form-input password-input-field"
@@ -488,17 +490,17 @@ export function PostgresLaunchView({
                   <button
                     type="button"
                     className="password-visibility-btn"
-                    aria-label={firstAccountPasswordVisible ? "Hide password" : "Show password"}
+                    aria-label={firstAccountPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                     aria-pressed={firstAccountPasswordVisible}
                     onClick={() => setFirstAccountPasswordVisible((current) => !current)}
                   >
                     {firstAccountPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                   </button>
                 </div>
-                <p className="password-requirement-note">Minimum 8 characters.</p>
+                <p className="password-requirement-note">{t("auth.postgresLaunch.minimumCharacters")}</p>
               </label>
               <label className="form-label">
-                Confirm Password
+                {t("auth.postgresLaunch.confirmPassword")}
                 <div className="password-input-wrap">
                   <input
                     className="form-input password-input-field"
@@ -510,7 +512,7 @@ export function PostgresLaunchView({
                   <button
                     type="button"
                     className="password-visibility-btn"
-                    aria-label={confirmFirstAccountPasswordVisible ? "Hide password" : "Show password"}
+                    aria-label={confirmFirstAccountPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                     aria-pressed={confirmFirstAccountPasswordVisible}
                     onClick={() => setConfirmFirstAccountPasswordVisible((current) => !current)}
                   >
@@ -520,7 +522,7 @@ export function PostgresLaunchView({
               </label>
               {firstAccountPasswordMismatch ? (
                 <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
-                  The password entries do not match.
+                  {t("auth.postgresLaunch.passwordEntriesDoNotMatch")}
                 </p>
               ) : null}
               <div className="form-actions">
@@ -535,16 +537,16 @@ export function PostgresLaunchView({
                     firstAccountPasswordMismatch
                   }
                 >
-                  {submitting ? "Creating..." : "Create account"}
+                  {submitting ? t("common.creating") : t("auth.form.createAccount")}
                 </button>
               </div>
             </form>
           ) : !bundledPreflightLoading && bundledPreflight && !bundledClusterInitialized && (
             <>
-              <div className="segmented-control modal-segmented-control" role="group" aria-label="First launch setup mode">
+              <div className="segmented-control modal-segmented-control" role="group" aria-label={t("auth.postgresLaunch.setupModeAria")}>
                 {[
-                  { value: "setup", label: "New" },
-                  { value: "restore", label: "Restore" },
+                  { value: "setup", label: t("auth.postgresLaunch.newSetup") },
+                  { value: "restore", label: t("auth.postgresLaunch.restoreSetup") },
                 ].map((option) => (
                   <button
                     key={option.value}
@@ -564,7 +566,7 @@ export function PostgresLaunchView({
               {firstRunSetupMode === "restore" ? (
                 <form onSubmit={handleRestoreUpgradeBackup} className="form">
                   <div className="settings-warning settings-warning--danger">
-                    Restore a KanQual upgrade backup into this fresh installation. The backup password only unlocks the file; set a new administrator password for this installation. Restored users must have their passwords reset by an administrator before signing in.
+                    {t("auth.postgresLaunch.restoreIntro")}
                   </div>
                   {bundledPreflight.issues.length ? (
                     <div className="settings-warning">
@@ -572,14 +574,14 @@ export function PostgresLaunchView({
                     </div>
                   ) : null}
                   <label className="form-label">
-                    Backup File
+                    {t("auth.postgresLaunch.backupFile")}
                     <div className="form-inline-action-row">
                       <input
                         className="form-input"
                         type="text"
                         value={restoreBackupPath}
                         readOnly
-                        placeholder="No backup selected"
+                        placeholder={t("auth.postgresLaunch.noBackupSelected")}
                       />
                       <button
                         type="button"
@@ -587,12 +589,12 @@ export function PostgresLaunchView({
                         onClick={() => void chooseRestoreBackupFile()}
                         disabled={submitting}
                       >
-                        Choose
+                        {t("auth.postgresLaunch.choose")}
                       </button>
                     </div>
                   </label>
                   <label className="form-label">
-                    Backup Password
+                    {t("auth.postgresLaunch.backupPassword")}
                     <div className="password-input-wrap">
                       <input
                         className="form-input password-input-field"
@@ -604,7 +606,7 @@ export function PostgresLaunchView({
                       <button
                         type="button"
                         className="password-visibility-btn"
-                        aria-label={restoreBackupPasswordVisible ? "Hide password" : "Show password"}
+                        aria-label={restoreBackupPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                         aria-pressed={restoreBackupPasswordVisible}
                         onClick={() => setRestoreBackupPasswordVisible((current) => !current)}
                       >
@@ -613,7 +615,7 @@ export function PostgresLaunchView({
                     </div>
                   </label>
                   <label className="form-label">
-                    New Administrator Password
+                    {t("auth.postgresLaunch.newAdminPassword")}
                     <div className="password-input-wrap">
                       <input
                         className="form-input password-input-field"
@@ -625,17 +627,17 @@ export function PostgresLaunchView({
                       <button
                         type="button"
                         className="password-visibility-btn"
-                        aria-label={restoreAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-label={restoreAdminPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                         aria-pressed={restoreAdminPasswordVisible}
                         onClick={() => setRestoreAdminPasswordVisible((current) => !current)}
                       >
                         {restoreAdminPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                       </button>
                     </div>
-                    <p className="password-requirement-note">Minimum 8 characters.</p>
+                    <p className="password-requirement-note">{t("auth.postgresLaunch.minimumCharacters")}</p>
                   </label>
                   <label className="form-label">
-                    Confirm Password
+                    {t("auth.postgresLaunch.confirmPassword")}
                     <div className="password-input-wrap">
                       <input
                         className="form-input password-input-field"
@@ -647,7 +649,7 @@ export function PostgresLaunchView({
                       <button
                         type="button"
                         className="password-visibility-btn"
-                        aria-label={confirmRestoreAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-label={confirmRestoreAdminPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                         aria-pressed={confirmRestoreAdminPasswordVisible}
                         onClick={() => setConfirmRestoreAdminPasswordVisible((current) => !current)}
                       >
@@ -657,7 +659,7 @@ export function PostgresLaunchView({
                   </label>
                   {restoreAdminPasswordMismatch ? (
                     <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
-                      The password entries do not match.
+                      {t("auth.postgresLaunch.passwordEntriesDoNotMatch")}
                     </p>
                   ) : null}
                   <div className="form-actions">
@@ -675,14 +677,14 @@ export function PostgresLaunchView({
                         restoreAdminPasswordMismatch
                       }
                     >
-                      {submitting ? "Restoring..." : "Restore"}
+                      {submitting ? t("common.restoring") : t("common.restore")}
                     </button>
                   </div>
                 </form>
               ) : (
                 <form onSubmit={handleInitializeBundledPostgres} className="form">
                   <div className="settings-warning settings-warning--danger">
-                    This is the first time KanQual is starting. Set an administrator password to finish setup. These credentials cannot be recovered if lost. Please make sure you retain them securely.
+                    {t("auth.postgresLaunch.firstStartIntro")}
                   </div>
                   {bundledPreflight.issues.length ? (
                     <div className="settings-warning">
@@ -690,7 +692,7 @@ export function PostgresLaunchView({
                     </div>
                   ) : null}
                   <label className="form-label">
-                    Administrator Password
+                    {t("auth.postgresLaunch.adminPassword")}
                     <div className="password-input-wrap">
                       <input
                         className="form-input password-input-field"
@@ -704,17 +706,17 @@ export function PostgresLaunchView({
                       <button
                         type="button"
                         className="password-visibility-btn"
-                        aria-label={initialAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-label={initialAdminPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                         aria-pressed={initialAdminPasswordVisible}
                         onClick={() => setInitialAdminPasswordVisible((current) => !current)}
                       >
                         {initialAdminPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                       </button>
                     </div>
-                    <p className="password-requirement-note">Minimum 8 characters.</p>
+                    <p className="password-requirement-note">{t("auth.postgresLaunch.minimumCharacters")}</p>
                   </label>
                   <label className="form-label">
-                    Confirm Password
+                    {t("auth.postgresLaunch.confirmPassword")}
                     <div className="password-input-wrap">
                       <input
                         className="form-input password-input-field"
@@ -727,7 +729,7 @@ export function PostgresLaunchView({
                       <button
                         type="button"
                         className="password-visibility-btn"
-                        aria-label={confirmInitialAdminPasswordVisible ? "Hide password" : "Show password"}
+                        aria-label={confirmInitialAdminPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                         aria-pressed={confirmInitialAdminPasswordVisible}
                         onClick={() => setConfirmInitialAdminPasswordVisible((current) => !current)}
                       >
@@ -737,7 +739,7 @@ export function PostgresLaunchView({
                   </label>
                   {initialAdminPasswordMismatch ? (
                     <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
-                      The password entries do not match.
+                      {t("auth.postgresLaunch.passwordEntriesDoNotMatch")}
                     </p>
                   ) : null}
                   <div className="form-actions">
@@ -746,7 +748,7 @@ export function PostgresLaunchView({
                       className="btn btn--primary"
                       disabled={loading || submitting || !bundledPreflight.canInitialize || initialAdminPasswordMismatch}
                     >
-                      {submitting ? "Submitting..." : "Submit"}
+                      {submitting ? t("common.submitting") : t("common.submit")}
                     </button>
                   </div>
                 </form>
@@ -757,10 +759,10 @@ export function PostgresLaunchView({
           {!showingFirstAccountSetup && bundledClusterInitialized && !bootstrapApplied && (
             <form onSubmit={handleBootstrapSubmit} className="form">
               <div className="settings-warning settings-warning--danger">
-                Database setup did not finish. Enter the administrator password you created when KanQual first started.
+                {t("auth.postgresLaunch.resumeSetupIntro")}
               </div>
               <label className="form-label">
-                Administrator Password
+                {t("auth.postgresLaunch.adminPassword")}
                 <div className="password-input-wrap">
                   <input
                     className="form-input password-input-field"
@@ -774,7 +776,7 @@ export function PostgresLaunchView({
                   <button
                     type="button"
                     className="password-visibility-btn"
-                    aria-label={superuserPasswordVisible ? "Hide password" : "Show password"}
+                    aria-label={superuserPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                     aria-pressed={superuserPasswordVisible}
                     onClick={() => setSuperuserPasswordVisible((current) => !current)}
                   >
@@ -784,7 +786,7 @@ export function PostgresLaunchView({
               </label>
               <div className="form-actions">
                 <button type="submit" className="btn btn--primary" disabled={loading || submitting}>
-                  {submitting ? "Finishing..." : "Finish setup"}
+                  {submitting ? t("auth.postgresLaunch.finishing") : t("auth.postgresLaunch.finishSetup")}
                 </button>
               </div>
             </form>
@@ -793,7 +795,7 @@ export function PostgresLaunchView({
           {!showingFirstAccountSetup && bootstrapApplied && !adminHandoffCompleted && (
             <>
               <div className="settings-warning settings-warning--danger">
-                Database setup is incomplete. Refresh the status, then finish setup if Kanqual asks for the administrator password again.
+                {t("auth.postgresLaunch.incompleteSetupIntro")}
               </div>
             </>
           )}
@@ -801,13 +803,13 @@ export function PostgresLaunchView({
           {!showingFirstAccountSetup && databaseReady && (
             <>
               <div className="settings-warning">
-                <strong>Ready</strong>
+                <strong>{t("auth.postgresLaunch.readyTitle")}</strong>
                 <br />
-                The bundled PostgreSQL runtime is ready. Continue into projects to sign in and open a workspace.
+                {t("auth.postgresLaunch.readyBody")}
               </div>
               <div className="form-actions">
                 <button type="button" className="btn btn--primary" onClick={onOpenPostgresProjects}>
-                  Open PostgreSQL projects
+                  {t("auth.postgresLaunch.openProjects")}
                 </button>
               </div>
             </>
@@ -833,6 +835,7 @@ export function PostgresAuthView({
   onAuthenticated,
   onFirstAccountCreated,
 }: PostgresAuthViewProps) {
+  const { t } = useI18n();
   const [gettingStartedHandoff, setGettingStartedHandoff] = useState(() => readGettingStartedHandoff());
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [signInStep, setSignInStep] = useState<"username" | "password">("username");
@@ -894,19 +897,19 @@ export function PostgresAuthView({
     setError("");
     const email = firstAccountEmail.trim().toLowerCase();
     if (!email) {
-      setError("Enter a username.");
+      setError(t("auth.postgresLaunch.enterUsername"));
       return;
     }
     if (/\s/.test(email)) {
-      setError("Usernames cannot contain spaces.");
+      setError(t("auth.postgresLaunch.usernameNoSpaces"));
       return;
     }
     if (password.length < 8) {
-      setError("Choose a password with at least 8 characters.");
+      setError(t("auth.postgresLaunch.choosePasswordMin"));
       return;
     }
     if (password !== confirmFirstAccountPassword) {
-      setError("The passwords do not match.");
+      setError(t("auth.postgresLaunch.passwordsMismatch"));
       return;
     }
 
@@ -947,7 +950,7 @@ export function PostgresAuthView({
 
     if (showAdminLogin) {
       if (!password) {
-        setError("Enter the PostgreSQL administrator password.");
+        setError(t("auth.postgresLaunch.enterAdminPassword"));
         return;
       }
       setSubmitting(true);
@@ -969,11 +972,11 @@ export function PostgresAuthView({
     const trimmedEmail = email.trim().toLowerCase();
     if (signInStep === "username") {
       if (!trimmedEmail) {
-        setError("Enter your username.");
+        setError(t("auth.postgresLaunch.enterYourUsername"));
         return;
       }
       if (/\s/.test(trimmedEmail)) {
-        setError("Usernames cannot contain spaces.");
+        setError(t("auth.postgresLaunch.usernameNoSpaces"));
         return;
       }
       setEmail(trimmedEmail);
@@ -984,15 +987,15 @@ export function PostgresAuthView({
     }
 
     if (!trimmedEmail) {
-      setError("Enter your username.");
+      setError(t("auth.postgresLaunch.enterYourUsername"));
       return;
     }
     if (/\s/.test(trimmedEmail)) {
-      setError("Usernames cannot contain spaces.");
+      setError(t("auth.postgresLaunch.usernameNoSpaces"));
       return;
     }
     if (!password) {
-      setError("Enter your password.");
+      setError(t("auth.postgresLaunch.enterPassword"));
       return;
     }
 
@@ -1034,17 +1037,17 @@ export function PostgresAuthView({
         <div className="auth-card" style={{ maxWidth: 720 }}>
           <div className="auth-brand-row">
             <img src="/logo.png" alt="" className="auth-brand-row-logo" />
-            <div className="auth-brand">KanQual</div>
+            <div className="auth-brand">{t("app.loadingCard.productName")}</div>
           </div>
           <form onSubmit={handleFirstAccountSubmit} className="form">
             <div className="settings-warning settings-warning--danger">
-              Create your local KanQual user account.
+              {t("auth.postgresLaunch.firstAccountBody")}
               <br />
               <br />
-              This account is separate from the administrator password you just created.
+              {t("auth.postgresLaunch.firstAccountSeparate")}
             </div>
             <label className="form-label">
-              Username
+              {t("auth.postgresLaunch.username")}
               <input
                 className="form-input"
                 type="text"
@@ -1055,7 +1058,7 @@ export function PostgresAuthView({
               />
             </label>
             <label className="form-label">
-              Password
+              {t("auth.form.password")}
               <div className="password-input-wrap">
                 <input
                   className="form-input password-input-field"
@@ -1067,17 +1070,17 @@ export function PostgresAuthView({
                 <button
                   type="button"
                   className="password-visibility-btn"
-                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  aria-label={passwordVisible ? t("common.hidePassword") : t("common.showPassword")}
                   aria-pressed={passwordVisible}
                   onClick={() => setPasswordVisible((current) => !current)}
                 >
                   {passwordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
                 </button>
               </div>
-              <p className="password-requirement-note">Minimum 8 characters.</p>
+              <p className="password-requirement-note">{t("auth.postgresLaunch.minimumCharacters")}</p>
             </label>
             <label className="form-label">
-              Confirm Password
+              {t("auth.postgresLaunch.confirmPassword")}
               <div className="password-input-wrap">
                 <input
                   className="form-input password-input-field"
@@ -1089,7 +1092,7 @@ export function PostgresAuthView({
                 <button
                   type="button"
                   className="password-visibility-btn"
-                  aria-label={confirmFirstAccountPasswordVisible ? "Hide password" : "Show password"}
+                  aria-label={confirmFirstAccountPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                   aria-pressed={confirmFirstAccountPasswordVisible}
                   onClick={() => setConfirmFirstAccountPasswordVisible((current) => !current)}
                 >
@@ -1099,7 +1102,7 @@ export function PostgresAuthView({
             </label>
             {firstAccountPasswordMismatch ? (
               <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
-                The password entries do not match.
+                {t("auth.postgresLaunch.passwordEntriesDoNotMatch")}
               </p>
             ) : null}
             {error ? <p className="auth-error">{error}</p> : null}
@@ -1115,7 +1118,7 @@ export function PostgresAuthView({
                   firstAccountPasswordMismatch
                 }
               >
-                {submitting ? "Creating..." : "Create account"}
+                {submitting ? t("common.creating") : t("auth.form.createAccount")}
               </button>
             </div>
           </form>
@@ -1130,18 +1133,18 @@ export function PostgresAuthView({
         <div className="auth-card" style={{ maxWidth: 720 }}>
           <div className="auth-brand-row">
             <img src="/logo.png" alt="" className="auth-brand-row-logo" />
-            <div className="auth-brand">KanQual</div>
+            <div className="auth-brand">{t("app.loadingCard.productName")}</div>
           </div>
           <form onSubmit={handleSubmit} className="form">
             <div className="auth-admin-notice">
-              <strong>Built-in local administrator</strong>
+              <strong>{t("auth.postgresSignIn.adminTitle")}</strong>
               <span>
-                Sign in with the administrator credentials you created when you first launched KanQual.
+                {t("auth.postgresSignIn.adminBody")}
               </span>
             </div>
 
             <label className="form-label">
-              PostgreSQL administrator password
+              {t("auth.postgresSignIn.adminPassword")}
               <div className="password-input-wrap">
                 <input
                   className="form-input password-input-field"
@@ -1154,7 +1157,7 @@ export function PostgresAuthView({
                 <button
                   type="button"
                   className="password-visibility-btn"
-                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  aria-label={passwordVisible ? t("common.hidePassword") : t("common.showPassword")}
                   aria-pressed={passwordVisible}
                   onClick={() => setPasswordVisible((current) => !current)}
                 >
@@ -1176,10 +1179,10 @@ export function PostgresAuthView({
                 }}
                 disabled={submitting}
               >
-                Back
+                {t("common.back")}
               </button>
               <button type="submit" className="btn btn--primary" disabled={submitting}>
-                {submitting ? "Please wait..." : "Sign in"}
+                {submitting ? t("auth.form.pleaseWait") : t("auth.form.signIn")}
               </button>
             </div>
           </form>
@@ -1197,16 +1200,16 @@ export function PostgresAuthView({
       >
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
-          <div className="auth-brand">KanQual</div>
+          <div className="auth-brand">{t("app.loadingCard.productName")}</div>
         </div>
         <form onSubmit={handleSubmit} className="form">
           {gettingStartedHandoff ? (
             <>
-              <GettingStartedGuideCallout title="Continue the guide" onDismiss={exitGettingStartedHandoff}>
+              <GettingStartedGuideCallout title={t("app.gettingStarted.continueTitle")} onDismiss={exitGettingStartedHandoff}>
                 {signInStep === "username" ? (
-                  <p>Enter the username you just created: {gettingStartedHandoff.temporaryUsername || "the new project user"}.</p>
+                  <p>{t("app.gettingStarted.signInUsernameBody", { username: gettingStartedHandoff.temporaryUsername || t("app.gettingStarted.newProjectUser") })}</p>
                 ) : (
-                  <p>Enter the temporary password you set for {gettingStartedHandoff.temporaryUsername || "the new project user"}.</p>
+                  <p>{t("app.gettingStarted.signInPasswordBody", { username: gettingStartedHandoff.temporaryUsername || t("app.gettingStarted.newProjectUser") })}</p>
                 )}
               </GettingStartedGuideCallout>
             </>
@@ -1214,7 +1217,7 @@ export function PostgresAuthView({
 
           {signInStep === "username" && recentAccounts.length > 0 ? (
             <div className="auth-recent-accounts">
-              <div className="auth-recent-accounts-title">Recent accounts</div>
+              <div className="auth-recent-accounts-title">{t("auth.postgresSignIn.recentAccounts")}</div>
               <ul className="account-list auth-recent-account-list">
                 {recentAccounts.map((account) => (
                   <li
@@ -1233,7 +1236,7 @@ export function PostgresAuthView({
                       <div className="account-name">{account.name}</div>
                       <div className="account-email">{account.email}</div>
                     </div>
-                    <div className="account-login-time">{formatRecentLogin(account.lastLogin)}</div>
+                    <div className="account-login-time">{formatRecentLogin(account.lastLogin, t)}</div>
                   </li>
                 ))}
               </ul>
@@ -1252,7 +1255,7 @@ export function PostgresAuthView({
 
           {signInStep === "username" ? (
             <label className="form-label">
-              Username
+              {t("auth.postgresSignIn.username")}
               <input
                 className="form-input"
                 type="text"
@@ -1270,7 +1273,7 @@ export function PostgresAuthView({
 
           {signInStep === "password" ? (
             <label className="form-label">
-              Password
+              {t("auth.postgresSignIn.password")}
               <div className="password-input-wrap">
                 <input
                   className="form-input password-input-field"
@@ -1283,7 +1286,7 @@ export function PostgresAuthView({
                 <button
                   type="button"
                   className="password-visibility-btn"
-                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  aria-label={passwordVisible ? t("common.hidePassword") : t("common.showPassword")}
                   aria-pressed={passwordVisible}
                   onClick={() => setPasswordVisible((current) => !current)}
                 >
@@ -1309,7 +1312,7 @@ export function PostgresAuthView({
                 }}
                 disabled={submitting}
               >
-                Back
+                {t("common.back")}
               </button>
             ) : (
               <button
@@ -1322,11 +1325,11 @@ export function PostgresAuthView({
                 }}
                 disabled={submitting}
               >
-                Administrator
+                {t("auth.postgresSignIn.administrator")}
               </button>
             )}
             <button type="submit" className="btn btn--primary" disabled={submitting}>
-              {submitting ? "Please wait..." : signInStep === "username" ? "Next" : "Sign in"}
+              {submitting ? t("auth.form.pleaseWait") : signInStep === "username" ? t("common.next") : t("auth.form.signIn")}
             </button>
           </div>
         </form>
@@ -1342,6 +1345,7 @@ export type PostgresWorkspaceModeChoiceViewProps = {
 export function PostgresWorkspaceModeChoiceView({
   onUseLocal,
 }: PostgresWorkspaceModeChoiceViewProps) {
+  const { t } = useI18n();
   const [showRemoteForm, setShowRemoteForm] = useState(false);
   const [remoteAddress, setRemoteAddress] = useState("");
   const [gettingStartedHandoff, setGettingStartedHandoff] = useState(() => readGettingStartedHandoff());
@@ -1365,13 +1369,13 @@ export function PostgresWorkspaceModeChoiceView({
       <AuthSlideCard stage={showRemoteForm ? "remote-connection" : "workspace-mode"}>
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
-          <div className="auth-brand">KanQual</div>
+          <div className="auth-brand">{t("app.loadingCard.productName")}</div>
         </div>
         {!showRemoteForm ? (
           <div className="form">
             {gettingStartedHandoff ? (
-              <GettingStartedGuideCallout title="Continue the guide" onDismiss={exitGettingStartedHandoff}>
-                <p>Choose Local so you can open the project that was just created on this machine.</p>
+              <GettingStartedGuideCallout title={t("app.gettingStarted.continueTitle")} onDismiss={exitGettingStartedHandoff}>
+                <p>{t("app.gettingStarted.chooseLocalBody")}</p>
               </GettingStartedGuideCallout>
             ) : null}
             <div className="mode-options mode-options--auth-card">
@@ -1381,13 +1385,13 @@ export function PostgresWorkspaceModeChoiceView({
                 onClick={handleUseLocal}
               >
                 <ComputerIcon className="mode-option-icon" />
-                <span className="mode-option-title">Local</span>
-                <span className="mode-option-desc">Work with projects stored on this machine.</span>
+                <span className="mode-option-title">{t("auth.workspaceMode.localTitle")}</span>
+                <span className="mode-option-desc">{t("auth.workspaceMode.localDescription")}</span>
               </button>
               <button type="button" className="mode-option" onClick={() => setShowRemoteForm(true)}>
                 <NetworkIcon className="mode-option-icon" />
-                <span className="mode-option-title">Remote</span>
-                <span className="mode-option-desc">Connect to a KanQual instance hosted somewhere else.</span>
+                <span className="mode-option-title">{t("auth.workspaceMode.remoteTitle")}</span>
+                <span className="mode-option-desc">{t("auth.workspaceMode.remoteDescription")}</span>
               </button>
             </div>
           </div>
@@ -1399,24 +1403,24 @@ export function PostgresWorkspaceModeChoiceView({
             }}
           >
             <label className="form-label">
-              KanQual address
+              {t("auth.workspaceMode.productAddress")}
               <input
                 className="form-input"
                 value={remoteAddress}
                 onChange={(event) => setRemoteAddress(event.target.value)}
-                placeholder="host.example.org"
+                placeholder={t("auth.workspaceMode.remotePlaceholder")}
                 autoFocus
               />
             </label>
             <p className="auth-hint">
-              Remote PostgreSQL connection setup is not wired yet.
+              {t("auth.workspaceMode.remoteNotWired")}
             </p>
             <div className="form-actions auth-actions--split">
               <button type="button" className="btn" onClick={() => setShowRemoteForm(false)}>
-                Back
+                {t("common.back")}
               </button>
               <button type="submit" className="btn btn--primary" disabled>
-                Connect
+                {t("auth.workspaceMode.connect")}
               </button>
             </div>
           </form>

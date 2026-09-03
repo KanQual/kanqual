@@ -22,8 +22,17 @@ import {
   type PostgresObjectFill,
   type PostgresObjectTypeShape,
 } from "../lib/postgresGraphics";
+import { useI18n } from "../i18n/provider";
 
 export type PostgresObjectGraphicMode = "select" | "upload";
+type PostgresObjectTypeModalTab = "details" | "graphics" | "attributes" | "timeline";
+
+function formatObjectTypeModalTab(tab: PostgresObjectTypeModalTab, t: ReturnType<typeof useI18n>["t"]): string {
+  if (tab === "details") return t("sharedModals.tabs.details");
+  if (tab === "graphics") return t("sharedModals.tabs.graphics");
+  if (tab === "attributes") return t("sharedModals.tabs.attributes");
+  return t("sharedModals.tabs.timeline");
+}
 
 function PostgresObjectTypeUploadGraphicControls(props: {
   effectiveOutlineColor: string;
@@ -32,11 +41,12 @@ function PostgresObjectTypeUploadGraphicControls(props: {
   onOutlineColorChange: Dispatch<SetStateAction<string>>;
   onOutlineWidthChange: Dispatch<SetStateAction<number>>;
 }) {
+  const { t } = useI18n();
   const effectiveOutlineWidth = normalizePostgresObjectOutlineWidth(props.outlineWidth);
   return (
     <>
       <label className="form-label">
-        Outline
+        {t("sharedModals.graphics.outline")}
         <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
           <input
             className="form-input form-input--color"
@@ -54,7 +64,7 @@ function PostgresObjectTypeUploadGraphicControls(props: {
         </div>
       </label>
       <label className="form-label timeline-group-opacity-control">
-        Outline Width
+        {t("sharedModals.graphics.outlineWidth")}
         <div className="timeline-group-slider-row">
           <input
             className="form-range"
@@ -86,13 +96,14 @@ function PostgresObjectTypeSelectGraphicControls(props: {
   onFillTransparencyChange: Dispatch<SetStateAction<number>>;
   onOutlineWidthChange: Dispatch<SetStateAction<number>>;
 }) {
+  const { t } = useI18n();
   const effectiveColor = normalizePostgresObjectTypeColor(props.color);
   const effectiveFillTransparency = normalizePostgresObjectFillTransparency(props.fillTransparency);
   const effectiveOutlineWidth = normalizePostgresObjectOutlineWidth(props.outlineWidth);
   return (
     <>
       <label className="form-label">
-        Shape
+        {t("sharedModals.graphics.shape")}
         <PostgresObjectShapePicker
           value={props.shape}
           onChange={(value) => props.onShapeChange((value || "rounded") as PostgresObjectTypeShape)}
@@ -104,8 +115,8 @@ function PostgresObjectTypeSelectGraphicControls(props: {
         />
       </label>
       <div className="source-graphics-setting-row">
-        <span className="form-label">Fill Style</span>
-        <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label="Object type fill style">
+        <span className="form-label">{t("sharedModals.graphics.fillStyle")}</span>
+        <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label={t("sharedModals.graphics.objectTypeFillStyle")}>
           {(["outline", "filled"] as const).map((option) => (
             <button
               key={option}
@@ -114,7 +125,7 @@ function PostgresObjectTypeSelectGraphicControls(props: {
               onClick={() => props.onFillChange(option)}
               aria-pressed={props.fill === option}
             >
-              {option === "outline" ? "Outline" : "Filled"}
+              {option === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
             </button>
           ))}
         </div>
@@ -122,7 +133,7 @@ function PostgresObjectTypeSelectGraphicControls(props: {
       {props.fill === "filled" ? (
         <>
           <label className="form-label">
-            Fill
+            {t("sharedModals.graphics.fill")}
             <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
               <input
                 className="form-input form-input--color"
@@ -140,7 +151,7 @@ function PostgresObjectTypeSelectGraphicControls(props: {
             </div>
           </label>
           <label className="form-label timeline-group-opacity-control">
-            Fill Transparency
+            {t("sharedModals.graphics.fillTransparency")}
             <div className="timeline-group-slider-row">
               <input
                 className="form-range"
@@ -157,7 +168,7 @@ function PostgresObjectTypeSelectGraphicControls(props: {
         </>
       ) : null}
       <label className="form-label">
-        Outline
+        {t("sharedModals.graphics.outline")}
         <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
           <input
             className="form-input form-input--color"
@@ -175,7 +186,7 @@ function PostgresObjectTypeSelectGraphicControls(props: {
         </div>
       </label>
       <label className="form-label timeline-group-opacity-control">
-        Outline Width
+        {t("sharedModals.graphics.outlineWidth")}
         <div className="timeline-group-slider-row">
           <input
             className="form-range"
@@ -197,9 +208,10 @@ function PostgresObjectTypeTimelineFields(props: {
   drafts: TypeAttributeDraft[];
   onChange: (role: TimelineFieldRole, value: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="postgres-attribute-modal-section">
-      <div className="postgres-attribute-modal-title">Timeline Fields</div>
+      <div className="postgres-attribute-modal-title">{t("sharedModals.tabs.timelineFields")}</div>
       <div className="case-detail-attributes-table-wrap">
         <table className="case-detail-attributes-table">
           <tbody>
@@ -217,11 +229,11 @@ function PostgresObjectTypeTimelineFields(props: {
                       value={selectedDraft?.localId ?? ""}
                       onChange={(event) => props.onChange(field.role, event.target.value)}
                     >
-                      <option value="">None</option>
+                      <option value="">{t("sharedModals.attributes.none")}</option>
                       {eligibleDrafts.map((draft) => (
-                        <option key={draft.localId} value={draft.localId}>{draft.name || "Untitled attribute"}</option>
+                        <option key={draft.localId} value={draft.localId}>{draft.name || t("sharedModals.attributes.untitledAttribute")}</option>
                       ))}
-                      <option value="__create__">Create new attribute...</option>
+                      <option value="__create__">{t("sharedModals.attributes.createNewAttribute")}</option>
                     </select>
                   </td>
                 </tr>
@@ -238,8 +250,8 @@ export function PostgresObjectTypeModal(props: {
   title: string;
   subtitle?: string;
   ariaLabel: string;
-  tab: "details" | "graphics" | "attributes" | "timeline";
-  setTab: Dispatch<SetStateAction<"details" | "graphics" | "attributes" | "timeline">>;
+  tab: PostgresObjectTypeModalTab;
+  setTab: Dispatch<SetStateAction<PostgresObjectTypeModalTab>>;
   submitLabel: string;
   projectStoragePath: string;
   submitting: boolean;
@@ -278,6 +290,7 @@ export function PostgresObjectTypeModal(props: {
   onDeleteAttribute: (localId: string) => void;
   onChangeValue: (attributeLocalId: string, rowId: string, value: string) => void;
 }) {
+  const { t } = useI18n();
   const effectiveOutlineColor =
     normalizeOptionalPostgresObjectTypeColor(props.outlineColor)
     || normalizePostgresObjectTypeColor(props.color);
@@ -304,14 +317,14 @@ export function PostgresObjectTypeModal(props: {
               className={`segmented-control-option ${props.tab === tab ? "segmented-control-option--active" : ""}`}
               onClick={() => props.setTab(tab)}
             >
-              {tab.slice(0, 1).toUpperCase() + tab.slice(1)}
+              {formatObjectTypeModalTab(tab, t)}
             </button>
           ))}
         </div>
         {props.tab === "details" ? (
           <>
             <label className="form-label">
-              Object type name
+              {t("sharedModals.objectModal.objectTypeName")}
               <input
                 className="form-input"
                 value={props.name}
@@ -320,7 +333,7 @@ export function PostgresObjectTypeModal(props: {
               />
             </label>
             <label className="form-label">
-              Description
+              {t("common.description")}
               <textarea
                 className="form-input form-textarea"
                 rows={3}
@@ -333,9 +346,9 @@ export function PostgresObjectTypeModal(props: {
           <div className="source-graphics-layout">
             <div className="source-graphics-controls">
               <label className="form-label">
-                Image
+                {t("sharedModals.graphics.image")}
                 <div style={{ display: "flex", justifyContent: "center" }}>
-                  <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label="Object type graphic source">
+                  <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label={t("sharedModals.graphics.objectTypeGraphicSource")}>
                     <button
                       type="button"
                       role="tab"
@@ -344,7 +357,7 @@ export function PostgresObjectTypeModal(props: {
                       onClick={() => props.onGraphicModeChange("select")}
                       disabled={disabled}
                     >
-                      Select
+                      {t("common.select")}
                     </button>
                     <button
                       type="button"
@@ -354,7 +367,7 @@ export function PostgresObjectTypeModal(props: {
                       onClick={() => props.onGraphicModeChange("upload")}
                       disabled={disabled}
                     >
-                      Upload
+                      {t("common.upload")}
                     </button>
                   </div>
                 </div>
@@ -367,7 +380,7 @@ export function PostgresObjectTypeModal(props: {
                     onClick={props.onImportImage}
                     disabled={disabled}
                   >
-                    {hasImage ? "Replace image" : "Upload Image"}
+                    {hasImage ? t("sharedModals.graphics.replaceImage") : t("sharedModals.graphics.uploadImage")}
                   </button>
                   {hasImage ? (
                     <button
@@ -376,7 +389,7 @@ export function PostgresObjectTypeModal(props: {
                       onClick={props.onRemoveImage}
                       disabled={disabled}
                     >
-                      Remove
+                      {t("common.remove")}
                     </button>
                   ) : null}
                 </div>
@@ -408,7 +421,7 @@ export function PostgresObjectTypeModal(props: {
               ) : null}
             </div>
             <PostgresObjectGraphicPreviewCard
-              label="Object type graphic preview"
+              label={t("sharedModals.graphics.objectTypePreview")}
               projectStoragePath={props.projectStoragePath}
               imageStoragePath={props.imageStoragePath}
               previewUrl={props.imagePreviewUrl ?? ""}
@@ -438,7 +451,7 @@ export function PostgresObjectTypeModal(props: {
             rows={props.attributeRows}
             values={props.attributeValues}
             disabled={props.submitting}
-            emptyDefinitionsLabel="No attributes for this object type yet."
+            emptyDefinitionsLabel={t("sharedModals.objectModal.noTypeAttributes")}
             emptyRowsLabel={props.emptyRowsLabel}
             onAddAttribute={props.onAddAttribute}
             onEditAttribute={props.onEditAttribute}
@@ -448,10 +461,10 @@ export function PostgresObjectTypeModal(props: {
         )}
         <div className="app-settings-modal-footer">
           <button type="button" className="btn" onClick={props.onClose} disabled={props.submitting}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" className="btn btn--primary" disabled={props.submitting}>
-            {props.submitting ? "Saving..." : props.submitLabel}
+            {props.submitting ? t("common.saving") : props.submitLabel}
           </button>
         </div>
       </form>

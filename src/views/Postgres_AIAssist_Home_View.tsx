@@ -35,6 +35,7 @@ import {
   type ProjectEmbeddingStoreStatus,
 } from "../lib/projectEmbeddings";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 import { HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 
@@ -209,22 +210,23 @@ function EmbeddingBuildModal({
   onClose: () => void;
   onRun: () => void;
 }) {
+  const { t } = useI18n();
   if (!open) return null;
 
   return (
     <SettingsModal
-      title={hasExistingIndex ? "Rebuild project embeddings" : "Build project embeddings"}
-      subtitle="AI Assist will index PostgreSQL project sources, objects, codes, annotations, and memos."
+      title={hasExistingIndex ? t("aiAssist.home.buildModal.rebuildProjectTitle") : t("aiAssist.home.buildModal.buildTitle")}
+      subtitle={t("aiAssist.home.buildModal.subtitle")}
       onClose={onClose}
       closeDisabled={busy}
       modalClassName="modal--wide"
     >
         <div className="app-settings-modal-body">
-          <p>This can take a while for larger projects. You can keep working while the build runs.</p>
+          <p>{t("aiAssist.home.buildModal.body")}</p>
         </div>
         <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
           <button type="button" className="btn btn--primary" onClick={onRun} disabled={busy}>
-            {busy ? "Starting..." : hasExistingIndex ? "Rebuild" : "Build"}
+            {busy ? t("aiAssist.home.buildModal.starting") : hasExistingIndex ? t("aiAssist.home.actions.rebuild") : t("aiAssist.home.buildModal.build")}
           </button>
         </div>
     </SettingsModal>
@@ -247,6 +249,7 @@ export function PostgresAiAssistHomeView({
   canManageProject,
   canManageEmbeddings,
 }: PostgresAiAssistHomeViewProps) {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<PostgresProjectAiAssistSettings>(DEFAULT_AI_ASSIST_SETTINGS);
   const [runtimeStatus, setRuntimeStatus] = useState<PostgresProjectAiAssistRuntimeStatus>(DEFAULT_AI_ASSIST_RUNTIME_STATUS);
   const [installationSettings, setInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
@@ -322,10 +325,10 @@ export function PostgresAiAssistHomeView({
           ? installationSettings.aiAssistPolicy.projectOverrides[project.id] ?? true
           : false;
   const runtimeConnectionModeLabel = llmConnectionMode === "none"
-    ? "None"
+    ? t("aiAssist.home.statuses.none")
     : llmConnectionMode === "cloud"
-      ? "Cloud"
-      : "Local";
+      ? t("aiAssist.home.statuses.cloud")
+      : t("aiAssist.home.statuses.local");
   const generationModelOptions = llmConnectionMode === "cloud"
     ? enabledCloudModelsForProvider.map((model) => ({
         id: model.modelId,
@@ -336,12 +339,12 @@ export function PostgresAiAssistHomeView({
         label: model.modelLabel,
       }));
   const embeddingRuntimeStatusLabel = embeddingDownloadPhase === "downloading"
-    ? "Downloading"
+    ? t("aiAssist.home.statuses.downloading")
     : embeddingDownloadPhase === "cancelling"
-      ? "Cancelling"
+      ? t("aiAssist.home.statuses.cancelling")
       : hasEmbeddingModel
-        ? "Downloaded"
-        : "None";
+        ? t("aiAssist.home.statuses.downloaded")
+        : t("aiAssist.home.statuses.none");
   const generationDefaultsAvailable = llmConnectionMode !== "none";
   const projectEmbeddingNeedsRerun = useMemo(() => {
     if (!isLocalWorkspace) {
@@ -725,7 +728,7 @@ export function PostgresAiAssistHomeView({
         },
       });
       setSettings(saved);
-      setNotice("Deleted project embeddings and disabled AI Assist.");
+      setNotice(t("aiAssist.home.messages.deletedProjectEmbeddingsAndDisabled"));
     } catch (deleteError) {
       setError(describeUnknownError(deleteError));
     } finally {
@@ -737,7 +740,7 @@ export function PostgresAiAssistHomeView({
     <div className="ai-assist-llm-model-selection-stack">
       <fieldset className="llm-settings-grid llm-settings-grid--single ai-assist-llm-model-selector" disabled={!settings.enabled || !canManageLlmSettings || !generationDefaultsAvailable} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         <label className="form-label">
-          LLM model
+          {t("aiAssist.home.labels.llmModel")}
           <select
             className="form-input"
             value={llmConnectionMode === "cloud" ? appSettings.llm.cloudSelectedModel : appSettings.llm.ollamaSelectedModel}
@@ -767,7 +770,7 @@ export function PostgresAiAssistHomeView({
             }}
             disabled={!settings.enabled || generationModelOptions.length === 0}
           >
-            <option value="">{generationModelOptions.length === 0 ? "No models loaded yet" : "Select model"}</option>
+            <option value="">{generationModelOptions.length === 0 ? t("aiAssist.home.messages.noModelsLoadedYet") : t("aiAssist.home.messages.selectModelShort")}</option>
             {generationModelOptions.map((model) => (
               <option key={model.id} value={model.id}>{model.label}</option>
             ))}
@@ -781,13 +784,13 @@ export function PostgresAiAssistHomeView({
     <div className="view home-view ai-assist-home-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>AI Assist</h1>
+          <h1>{t("aiAssist.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Open AI Assist help"
-            aria-label="Open AI Assist help"
+            title={t("aiAssist.home.openHelp")}
+            aria-label={t("aiAssist.home.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -795,18 +798,18 @@ export function PostgresAiAssistHomeView({
       </header>
 
       {helpOpen ? (
-        <SettingsModal title="AI Assist Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("aiAssist.home.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Use AI Assist Home to check project AI readiness, manage embeddings, and review the local or host-managed runtime used by AI workflows.
+              {t("aiAssist.home.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Device-level controls affect the AI runtime on this machine when editable. Project-level controls determine whether this project can use AI Assist and whether embeddings are ready.
+              {t("aiAssist.home.help.line2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -818,52 +821,52 @@ export function PostgresAiAssistHomeView({
       {!aiAssistAllowedByAdministrator ? (
         <section className="home-project-card ai-assist-home-card">
           <div className="home-project-card-header">
-            <h2>AI Assist unavailable</h2>
+            <h2>{t("aiAssist.home.messages.aiAssistUnavailable")}</h2>
           </div>
-          <p className="auth-hint">The administrator has disallowed AI Assist usage for this server or project.</p>
+          <p className="auth-hint">{t("aiAssist.home.messages.aiAssistUnavailableBody")}</p>
         </section>
       ) : (
       <div className="ai-assist-home-layout">
         <div className="ai-assist-home-info-column">
           <section className="home-project-card ai-assist-home-card ai-assist-home-status-card">
             <div className="home-project-card-header">
-              <h2>Device-Level Status</h2>
+              <h2>{t("aiAssist.home.labels.deviceLevel")} {t("aiAssist.home.labels.status")}</h2>
             </div>
             <div className="home-restricted-list">
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Embedding model</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.embeddingModel")}</span>
                 <span className={`home-restricted-value${(isLocalWorkspace ? hasEmbeddingModel : remoteEmbeddingModelInstalled) ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
                   {isLocalWorkspace
-                    ? (embeddingDownloadBusy ? `${embeddingDownloadPhase === "cancelling" ? "Cancelling" : "Downloading"} ${formatPercent(embeddingModelDownloadStatus?.progressPercent)}` : hasEmbeddingModel ? "Ready" : "Missing")
+                    ? (embeddingDownloadBusy ? `${embeddingDownloadPhase === "cancelling" ? t("aiAssist.home.statuses.cancelling") : t("aiAssist.home.statuses.downloading")} ${formatPercent(embeddingModelDownloadStatus?.progressPercent)}` : hasEmbeddingModel ? t("aiAssist.home.statuses.ready") : t("aiAssist.home.statuses.missing"))
                     : remoteEmbeddingModelInstalled == null
-                      ? "Checking"
+                      ? t("aiAssist.home.statuses.checking")
                       : remoteEmbeddingModelInstalled
-                        ? "Ready on host"
-                        : "Missing on host"}
+                        ? t("aiAssist.home.messages.readyOnHost")
+                        : t("aiAssist.home.messages.missingOnHost")}
                 </span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">{isLocalWorkspace ? "LLM runtime" : "Host LLM"}</span>
+                <span className="home-restricted-label">{isLocalWorkspace ? t("aiAssist.home.labels.llmRuntime") : t("aiAssist.home.labels.hostLlm")}</span>
                 <span className={`home-restricted-value${runtimeReady ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
                   {isLocalWorkspace
-                    ? (runtimeReady ? runtimeConnectionModeLabel : "Not configured")
+                    ? (runtimeReady ? runtimeConnectionModeLabel : t("aiAssist.home.messages.notConfigured"))
                     : remoteLlmEnabled == null
-                      ? "Checking"
+                      ? t("aiAssist.home.statuses.checking")
                       : remoteLlmEnabled
-                        ? (llmConnectionStatus === "live" ? "Connected" : "Not ready")
-                        : "Disabled"}
+                        ? (llmConnectionStatus === "live" ? t("aiAssist.home.statuses.connected") : t("aiAssist.home.statuses.notReady"))
+                        : t("aiAssist.home.statuses.disabled")}
                 </span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Selected model</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.selectedModel")}</span>
                 <span className={`home-restricted-value${(isLocalWorkspace ? selectedModel : remoteSelectedModel) ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
                   {isLocalWorkspace
-                    ? (selectedModel || "None selected")
+                    ? (selectedModel || t("aiAssist.home.statuses.noneSelected"))
                     : remoteSelectedModel == null
-                      ? "Checking"
+                      ? t("aiAssist.home.statuses.checking")
                   : remoteSelectedModel
-                        ? "Selected on host"
-                        : "None selected on host"}
+                        ? t("aiAssist.home.statuses.selectedOnHost")
+                        : t("aiAssist.home.messages.noneSelectedOnHost")}
                 </span>
               </div>
             </div>
@@ -871,50 +874,50 @@ export function PostgresAiAssistHomeView({
 
           <section className="home-project-card ai-assist-home-card ai-assist-home-status-card">
             <div className="home-project-card-header">
-              <h2>Project Readiness</h2>
+              <h2>{t("aiAssist.home.projectReadinessTitle")}</h2>
             </div>
             <div className="home-restricted-list">
               <div className="home-restricted-item">
-                <span className="home-restricted-label">AI Assist</span>
+                <span className="home-restricted-label">{t("aiAssist.title")}</span>
                 <span className={`home-restricted-value${settings.enabled ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                  {settings.enabled ? "Enabled" : "Disabled"}
+                  {settings.enabled ? t("aiAssist.home.statuses.enabled") : t("aiAssist.home.statuses.disabled")}
                 </span>
               </div>
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Embeddings</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.embeddings")}</span>
                 <span className={`home-restricted-value${indexStatus?.exists ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
                   {!isLocalWorkspace
                     ? remoteEmbeddingsReady == null
-                      ? "Checking"
+                      ? t("aiAssist.home.statuses.checking")
                       : remoteEmbeddingsReady
-                        ? "Built on host"
-                        : "Not built on host"
+                        ? t("aiAssist.home.messages.builtOnHost")
+                        : t("aiAssist.home.messages.notBuiltOnHost")
                     : buildBusy
-                      ? `${currentBuildPhase === "cancelling" ? "Cancelling" : "Building"} ${formatPercent(buildStatus?.progressPercent)}`
-                      : indexStatus?.exists ? "Built" : "Not built"}
+                      ? `${currentBuildPhase === "cancelling" ? t("aiAssist.home.statuses.cancelling") : t("aiAssist.home.statuses.building")} ${formatPercent(buildStatus?.progressPercent)}`
+                      : indexStatus?.exists ? t("aiAssist.home.messages.built") : t("aiAssist.home.statuses.notBuilt")}
                 </span>
               </div>
               {isLocalWorkspace ? (
                 <>
                   <div className="home-restricted-item">
-                    <span className="home-restricted-label">Last run</span>
+                    <span className="home-restricted-label">{t("aiAssist.home.labels.lastRun")}</span>
                     <span className="home-restricted-value">{formatDateTime(indexStatus?.generatedAtMs)}</span>
                   </div>
                 </>
               ) : (
                 <div className="home-restricted-item">
-                  <span className="home-restricted-label">Host checked</span>
-                  <span className="home-restricted-value">{runtimeStatus.hostCheckedAt || "Not checked yet"}</span>
+                  <span className="home-restricted-label">{t("aiAssist.home.labels.hostChecked")}</span>
+                  <span className="home-restricted-value">{runtimeStatus.hostCheckedAt || t("aiAssist.home.messages.notCheckedYet")}</span>
                 </div>
               )}
               <div className="home-restricted-item">
-                <span className="home-restricted-label">Rerun status</span>
+                <span className="home-restricted-label">{t("aiAssist.home.labels.rerunStatus")}</span>
                 <span className={`home-restricted-value${projectEmbeddingNeedsRerun ? " home-restricted-value--pending" : " home-restricted-value--ready"}`}>
                   {!isLocalWorkspace
                     ? remoteEmbeddingsReady == null
-                      ? "Checking"
-                      : remoteEmbeddingsReady ? "Up to date on host" : "Host run needed"
-                    : projectEmbeddingNeedsRerun ? "Rerun recommended" : "Up to date"}
+                      ? t("aiAssist.home.statuses.checking")
+                      : remoteEmbeddingsReady ? t("aiAssist.home.messages.upToDateOnHost") : t("aiAssist.home.messages.hostRunNeeded")
+                    : projectEmbeddingNeedsRerun ? t("aiAssist.home.statuses.rerunRecommended") : t("aiAssist.home.statuses.upToDate")}
                 </span>
               </div>
             </div>
@@ -923,10 +926,10 @@ export function PostgresAiAssistHomeView({
 
         <div className="ai-assist-home-actions-column">
           <div className="ai-assist-home-tabbar">
-            <div className="segmented-control" role="tablist" aria-label="Project AI Assist status">
+            <div className="segmented-control" role="tablist" aria-label={t("aiAssist.home.labels.projectAiAssistStatus")}>
               {([
-                { value: false, label: "Disabled" },
-                { value: true, label: "Enabled" },
+                { value: false, label: t("aiAssist.home.statuses.disabled") },
+                { value: true, label: t("aiAssist.home.statuses.enabled") },
               ] as const).map((option) => (
                 <button
                   key={String(option.value)}
@@ -944,7 +947,7 @@ export function PostgresAiAssistHomeView({
                 </button>
               ))}
             </div>
-            {!canManageProject ? <p className="auth-hint">Only project owners or the PostgreSQL administrator can change AI Assist availability.</p> : null}
+            {!canManageProject ? <p className="auth-hint">{t("aiAssist.home.messages.onlyOwnersOrAdminCanChangeAiAssist")}</p> : null}
           </div>
 
             <section className="ai-assist-home-action-group">
@@ -952,38 +955,38 @@ export function PostgresAiAssistHomeView({
                 <section className="home-project-card ai-assist-home-card">
                   <div className="home-project-card-header">
                     <div>
-                      <h2>Host Runtime</h2>
-                      <p className="ai-assist-card-subcopy">This project uses AI runtime services managed by the PostgreSQL host.</p>
+                      <h2>{t("aiAssist.home.labels.hostRuntime")}</h2>
+                      <p className="ai-assist-card-subcopy">{t("aiAssist.home.labels.hostRuntimeBody")}</p>
                     </div>
                   </div>
                   <div className="home-restricted-list">
                     <div className="home-restricted-item">
-                      <span className="home-restricted-label">Embedding model</span>
+                      <span className="home-restricted-label">{t("aiAssist.home.labels.embeddingModel")}</span>
                       <span className={`home-restricted-value${remoteEmbeddingModelInstalled ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                        {remoteEmbeddingModelInstalled == null ? "Checking" : remoteEmbeddingModelInstalled ? "Ready" : "Missing"}
+                        {remoteEmbeddingModelInstalled == null ? t("aiAssist.home.statuses.checking") : remoteEmbeddingModelInstalled ? t("aiAssist.home.statuses.ready") : t("aiAssist.home.statuses.missing")}
                       </span>
                     </div>
                     <div className="home-restricted-item">
-                      <span className="home-restricted-label">Host LLM</span>
+                      <span className="home-restricted-label">{t("aiAssist.home.labels.hostLlm")}</span>
                       <span className={`home-restricted-value${llmConnectionStatus === "live" ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                        {llmConnectionStatus === "checking" ? "Checking" : llmConnectionStatus === "live" ? "Connected" : "Not ready"}
+                        {llmConnectionStatus === "checking" ? t("aiAssist.home.statuses.checking") : llmConnectionStatus === "live" ? t("aiAssist.home.statuses.connected") : t("aiAssist.home.statuses.notReady")}
                       </span>
                     </div>
                     <div className="home-restricted-item">
-                      <span className="home-restricted-label">Selected model</span>
+                      <span className="home-restricted-label">{t("aiAssist.home.labels.selectedModel")}</span>
                       <span className={`home-restricted-value${remoteSelectedModel ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                        {remoteSelectedModel == null ? "Checking" : remoteSelectedModel ? "Selected on host" : "None selected on host"}
+                        {remoteSelectedModel == null ? t("aiAssist.home.statuses.checking") : remoteSelectedModel ? t("aiAssist.home.statuses.selectedOnHost") : t("aiAssist.home.messages.noneSelectedOnHost")}
                       </span>
                     </div>
                     <div className="home-restricted-item">
-                      <span className="home-restricted-label">Project embeddings</span>
+                      <span className="home-restricted-label">{t("aiAssist.home.labels.projectEmbeddings")}</span>
                       <span className={`home-restricted-value${remoteEmbeddingsReady ? " home-restricted-value--ready" : " home-restricted-value--pending"}`}>
-                        {remoteEmbeddingsReady == null ? "Checking" : remoteEmbeddingsReady ? "Ready" : "Not built"}
+                        {remoteEmbeddingsReady == null ? t("aiAssist.home.statuses.checking") : remoteEmbeddingsReady ? t("aiAssist.home.statuses.ready") : t("aiAssist.home.statuses.notBuilt")}
                       </span>
                     </div>
                     <div className="home-restricted-item">
-                      <span className="home-restricted-label">Checked at</span>
-                      <span className="home-restricted-value">{runtimeStatus.hostCheckedAt || "Not checked yet"}</span>
+                      <span className="home-restricted-label">{t("aiAssist.home.labels.checkedAt")}</span>
+                      <span className="home-restricted-value">{runtimeStatus.hostCheckedAt || t("aiAssist.home.messages.notCheckedYet")}</span>
                     </div>
                   </div>
                 </section>
@@ -996,29 +999,29 @@ export function PostgresAiAssistHomeView({
                 >
                   <div className="home-project-card-header">
                     <div>
-                      <h2>Embeddings</h2>
+                      <h2>{t("aiAssist.home.labels.embeddings")}</h2>
                     </div>
                   </div>
                   <div className="project-model-card">
                     <div>
                       <div className="project-model-name">{activeEmbeddingModelName}</div>
-                      <p className="project-model-description">Status: {embeddingRuntimeStatusLabel}</p>
+                      <p className="project-model-description">{t("aiAssist.home.labels.status")}: {embeddingRuntimeStatusLabel}</p>
                     </div>
                   </div>
                   <div className="project-model-card">
                     <div>
-                      <div className="project-model-name">Settings</div>
-                      <p className="project-model-description">Chunk size: {settings.embeddingChunkSize}</p>
-                      <p className="project-model-description">Overlap: {settings.embeddingOverlapSize}</p>
-                      <p className="project-model-description">Batch size: {settings.embeddingBatchSize}</p>
+                      <div className="project-model-name">{t("common.settings")}</div>
+                      <p className="project-model-description">{t("aiAssist.home.labels.chunkSize")}: {settings.embeddingChunkSize}</p>
+                      <p className="project-model-description">{t("aiAssist.home.labels.overlap")}: {settings.embeddingOverlapSize}</p>
+                      <p className="project-model-description">{t("aiAssist.home.labels.batchSize")}: {settings.embeddingBatchSize}</p>
                     </div>
                   </div>
-                  {!hasEmbeddingModel ? <div className="users-permission-note ai-assist-home-disabled-note">Download the embedding model first.</div> : null}
-                  {!isLocalWorkspace ? <div className="users-permission-note">Project embedding builds run on the PostgreSQL host for remote projects.</div> : null}
-                  {isLocalWorkspace && !canManageEmbeddings ? <div className="users-permission-note">Only project owners, editors, or the PostgreSQL administrator can manage embeddings.</div> : null}
+                  {!hasEmbeddingModel ? <div className="users-permission-note ai-assist-home-disabled-note">{t("aiAssist.home.messages.downloadModelFirst")}</div> : null}
+                  {!isLocalWorkspace ? <div className="users-permission-note">{t("aiAssist.home.messages.remoteEmbeddingBuildsOnHost")}</div> : null}
+                  {isLocalWorkspace && !canManageEmbeddings ? <div className="users-permission-note">{t("aiAssist.home.messages.onlyEmbeddingManagersCanManage")}</div> : null}
                   <div className="project-export-actions project-export-actions--modal" style={{ justifyContent: "space-between" }}>
                     <button type="button" className="btn" onClick={() => setActiveDeviceModal("embedding-tuning")} disabled={!settings.enabled || !hasEmbeddingModel}>
-                      Settings
+                      {t("common.settings")}
                     </button>
                     {indexStatus?.exists ? (
                       <button
@@ -1027,7 +1030,7 @@ export function PostgresAiAssistHomeView({
                         onClick={() => void handleDeleteEmbeddings()}
                         disabled={!settings.enabled || !isLocalWorkspace || buildBusy || submitting === "delete" || !canManageEmbeddings}
                       >
-                        {submitting === "delete" ? "Deleting..." : "Delete"}
+                        {submitting === "delete" ? t("aiAssist.home.statuses.deleting") : t("common.delete")}
                       </button>
                     ) : (
                       <button
@@ -1036,7 +1039,7 @@ export function PostgresAiAssistHomeView({
                         onClick={() => setBuildModalOpen(true)}
                         disabled={!settings.enabled || !isLocalWorkspace || buildBusy || !canManageEmbeddings}
                       >
-                        {buildBusy ? "Generating..." : "Generate"}
+                        {buildBusy ? t("aiAssist.home.buildModal.building") : t("aiAssist.home.buildModal.generate")}
                       </button>
                     )}
                   </div>
@@ -1047,11 +1050,11 @@ export function PostgresAiAssistHomeView({
               <section className="home-project-card ai-assist-home-card ai-assist-llm-connection-card" style={{ gridColumn: "1 / -1" }}>
                 <div className="home-project-card-header">
                   <div>
-                    <h2>LLM Connection</h2>
+                    <h2>{t("aiAssist.home.labels.llmConnection")}</h2>
                   </div>
                 </div>
                 <div className="settings-toggle-row settings-toggle-row--stacked settings-toggle-row--compact ai-assist-connection-mode-row">
-                  <div className="segmented-control ai-assist-connection-mode-toggle" role="tablist" aria-label="Connection mode">
+                  <div className="segmented-control ai-assist-connection-mode-toggle" role="tablist" aria-label={t("aiAssist.home.labels.connectionMode")}>
                     {(["local", "cloud"] as const).map((mode) => {
                       const modeUnavailable =
                         mode === "local"
@@ -1067,7 +1070,7 @@ export function PostgresAiAssistHomeView({
                           disabled={!settings.enabled || !canManageLlmSettings || modeUnavailable}
                           onClick={() => handleLlmConnectionModeChange(mode)}
                         >
-                          {mode === "local" ? "Local" : "Cloud"}
+                          {mode === "local" ? t("aiAssist.home.statuses.local") : t("aiAssist.home.statuses.cloud")}
                         </button>
                       );
                     })}
@@ -1078,7 +1081,7 @@ export function PostgresAiAssistHomeView({
                     {ollamaError ? <div className="form-error project-settings-error">{ollamaError}</div> : null}
                     <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!settings.enabled || !canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                       <label className="form-label">
-                        API provider
+                        {t("aiAssist.home.labels.apiProvider")}
                         <select className="form-input" value={appSettings.llm.localProvider} onChange={(event) => handleLocalProviderChange(event.target.value as LocalLlmProvider)}>
                           {enabledLocalProviderOptions.map((provider) => (
                             <option key={provider.value} value={provider.value}>{provider.label}</option>
@@ -1094,7 +1097,7 @@ export function PostgresAiAssistHomeView({
                     {cloudError ? <div className="form-error project-settings-error">{cloudError}</div> : null}
                     <fieldset className="llm-settings-grid llm-settings-grid--single" disabled={!settings.enabled || !canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
                       <label className="form-label">
-                        API provider
+                        {t("aiAssist.home.labels.apiProvider")}
                         <select className="form-input" value={appSettings.llm.cloudProvider} onChange={(event) => handleCloudProviderChange(event.target.value as CloudLlmProvider)}>
                           {enabledCloudProviderOptions.map((provider) => (
                             <option key={provider.value} value={provider.value}>{provider.label}</option>
@@ -1116,13 +1119,13 @@ export function PostgresAiAssistHomeView({
 
       <DeviceDetailsModal
         open={activeDeviceModal === "embedding-tuning"}
-        title={`${activeEmbeddingModelName} settings`}
+        title={t("aiAssist.home.modals.embeddingSettingsTitle", { model: activeEmbeddingModelName })}
         onClose={() => setActiveDeviceModal(null)}
       >
         <div className="llm-settings-grid llm-settings-grid--single">
           <label className="form-label">
-            Chunk size
-            <span className="settings-field-hint">Target characters per segment before overlap is applied.</span>
+            {t("aiAssist.home.labels.chunkSize")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.chunkSize")}</span>
             <input
               className="form-input"
               type="number"
@@ -1141,8 +1144,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Overlap size
-            <span className="settings-field-hint">Characters repeated across neighboring segments.</span>
+            {t("aiAssist.home.labels.overlapSize")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.overlapSize")}</span>
             <input
               className="form-input"
               type="number"
@@ -1156,8 +1159,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Batch size
-            <span className="settings-field-hint">Embedding requests grouped per batch.</span>
+            {t("aiAssist.home.labels.batchSize")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.batchSize")}</span>
             <input
               className="form-input"
               type="number"
@@ -1175,13 +1178,13 @@ export function PostgresAiAssistHomeView({
 
       <DeviceDetailsModal
         open={activeDeviceModal === "connection-settings"}
-        title="Connection settings"
+        title={t("aiAssist.home.modals.connectionSettings")}
         onClose={() => setActiveDeviceModal(null)}
       >
         <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <label className="form-label">
-            Protocol
-            <span className="settings-field-hint">Use https only when your local endpoint serves TLS.</span>
+            {t("aiAssist.home.labels.protocol")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.protocol")}</span>
             <select
               className="form-input"
               value={appSettings.llm.ollamaProtocol}
@@ -1198,8 +1201,8 @@ export function PostgresAiAssistHomeView({
             </select>
           </label>
           <label className="form-label">
-            Host URL
-            <span className="settings-field-hint">Hostname or IP for the local LLM server.</span>
+            {t("aiAssist.home.labels.hostUrl")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.hostUrl")}</span>
             <input
               className="form-input"
               type="text"
@@ -1211,8 +1214,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Port
-            <span className="settings-field-hint">Default Ollama port is 11434.</span>
+            {t("aiAssist.home.labels.port")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.port")}</span>
             <input
               className="form-input"
               type="number"
@@ -1231,8 +1234,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Request timeout
-            <span className="settings-field-hint">Seconds to wait while testing or generating.</span>
+            {t("aiAssist.home.labels.requestTimeout")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.requestTimeout")}</span>
             <input
               className="form-input"
               type="number"
@@ -1253,13 +1256,13 @@ export function PostgresAiAssistHomeView({
 
       <DeviceDetailsModal
         open={activeDeviceModal === "generation-defaults"}
-        title="Generation defaults"
+        title={t("aiAssist.home.modals.generationDefaults")}
         onClose={() => setActiveDeviceModal(null)}
       >
         <fieldset className="llm-settings-grid" disabled={!canManageLlmSettings} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <label className="form-label">
-            Temperature
-            <span className="settings-field-hint">Lower values make responses more consistent; higher values make them more varied.</span>
+            {t("aiAssist.home.labels.temperature")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.temperature")}</span>
             <input
               className="form-input"
               type="number"
@@ -1277,8 +1280,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Context window
-            <span className="settings-field-hint">Maximum context tokens requested from the generation model.</span>
+            {t("aiAssist.home.labels.contextWindow")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.contextWindow")}</span>
             <input
               className="form-input"
               type="number"
@@ -1295,8 +1298,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Keep alive minutes
-            <span className="settings-field-hint">How long the local model should remain loaded after use.</span>
+            {t("aiAssist.home.labels.keepAliveMinutes")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.keepAliveMinutes")}</span>
             <input
               className="form-input"
               type="number"
@@ -1313,8 +1316,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Relevant segment shortlist
-            <span className="settings-field-hint">How many candidate segments retrieval should inspect.</span>
+            {t("aiAssist.home.labels.relevantSegmentShortlist")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.relevantSegmentShortlist")}</span>
             <input
               className="form-input"
               type="number"
@@ -1338,8 +1341,8 @@ export function PostgresAiAssistHomeView({
             />
           </label>
           <label className="form-label">
-            Relevant segments returned
-            <span className="settings-field-hint">Maximum retrieval matches inserted into generation prompts.</span>
+            {t("aiAssist.home.labels.relevantSegmentsReturned")}
+            <span className="settings-field-hint">{t("aiAssist.home.fieldHints.relevantSegmentsReturned")}</span>
             <input
               className="form-input"
               type="number"

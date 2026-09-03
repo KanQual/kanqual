@@ -9,6 +9,7 @@ import { LoadingCard } from "./components/LoadingCard";
 import { EyeIcon, EyeOffIcon } from "./components/AppIcons";
 import { GettingStartedGuideCallout } from "./components/GettingStartedGuideCallout";
 import { AuthProvider } from "./context/AuthContext";
+import { useI18n } from "./i18n/provider";
 import { I18nProvider } from "./i18n";
 import { readAppSettings, saveAppSettings } from "./lib/appSettings";
 import { clearGettingStartedHandoff, readGettingStartedHandoff, updateGettingStartedHandoff } from "./lib/gettingStartedGuide";
@@ -122,6 +123,7 @@ function PostgresForcePasswordChangeView({
   currentPassword?: string;
   onPasswordChanged: (status: PostgresAuthStatus) => void;
 }) {
+  const { t } = useI18n();
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [newPasswordVisible, setNewPasswordVisible] = useState(false);
@@ -140,19 +142,19 @@ function PostgresForcePasswordChangeView({
     event.preventDefault();
     setError("");
     if (!currentPassword) {
-      setError("Sign in again before changing this password.");
+      setError(t("app.forcePassword.signInAgain"));
       return;
     }
     if (!newPassword || !confirmPassword) {
-      setError("Choose a new password.");
+      setError(t("app.forcePassword.chooseNewPassword"));
       return;
     }
     if (newPassword.length < 8) {
-      setError("Choose a password with at least 8 characters.");
+      setError(t("app.forcePassword.passwordTooShort"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError("The new passwords do not match.");
+      setError(t("app.forcePassword.passwordsDoNotMatch"));
       return;
     }
     setSaving(true);
@@ -184,23 +186,23 @@ function PostgresForcePasswordChangeView({
       >
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
-          <div className="auth-brand">KanQual</div>
+          <div className="auth-brand">{t("app.loadingCard.productName")}</div>
         </div>
         <form className="form" onSubmit={handleSubmit}>
-          <h2 className="auth-panel-title">Change Password</h2>
+          <h2 className="auth-panel-title">{t("app.forcePassword.title")}</h2>
           {gettingStartedHandoff ? (
             <>
-              <GettingStartedGuideCallout title="Continue the guide" onDismiss={exitGettingStartedGuide}>
-                <p>Replace the temporary password with one you will use for this project account.</p>
+              <GettingStartedGuideCallout title={t("app.gettingStarted.continueTitle")} onDismiss={exitGettingStartedGuide}>
+                <p>{t("app.gettingStarted.forcePasswordBody")}</p>
               </GettingStartedGuideCallout>
             </>
           ) : null}
           <p className="auth-hint">
-            This account was created with a temporary password. Choose a new password before continuing.
+            {t("app.forcePassword.temporaryNotice")}
           </p>
-          <p className="auth-hint">Signed in as {session.user.username}</p>
+          <p className="auth-hint">{t("app.forcePassword.signedInAs", { email: session.user.username })}</p>
           <label className="form-label">
-            New password
+            {t("app.forcePassword.newPassword")}
             <div className="password-input-wrap">
               <input
                 className="form-input password-input-field"
@@ -214,7 +216,7 @@ function PostgresForcePasswordChangeView({
               <button
                 type="button"
                 className="password-visibility-btn"
-                aria-label={newPasswordVisible ? "Hide password" : "Show password"}
+                aria-label={newPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                 aria-pressed={newPasswordVisible}
                 onClick={() => setNewPasswordVisible((current) => !current)}
                 disabled={saving}
@@ -222,10 +224,10 @@ function PostgresForcePasswordChangeView({
                 {newPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
               </button>
             </div>
-            <p className="password-requirement-note">Minimum 8 characters.</p>
+            <p className="password-requirement-note">{t("app.forcePassword.minimumCharacters")}</p>
           </label>
           <label className="form-label">
-            Confirm password
+            {t("app.forcePassword.confirmPassword")}
             <div className="password-input-wrap">
               <input
                 className="form-input password-input-field"
@@ -238,7 +240,7 @@ function PostgresForcePasswordChangeView({
               <button
                 type="button"
                 className="password-visibility-btn"
-                aria-label={confirmPasswordVisible ? "Hide password" : "Show password"}
+                aria-label={confirmPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
                 aria-pressed={confirmPasswordVisible}
                 onClick={() => setConfirmPasswordVisible((current) => !current)}
                 disabled={saving}
@@ -249,7 +251,7 @@ function PostgresForcePasswordChangeView({
           </label>
           {passwordMismatch ? (
             <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
-              The password entries do not match.
+              {t("app.forcePassword.passwordEntriesDoNotMatch")}
             </p>
           ) : null}
           {error ? <p className="auth-error">{error}</p> : null}
@@ -259,7 +261,7 @@ function PostgresForcePasswordChangeView({
               className="btn btn--primary"
               disabled={saving || !currentPassword || newPassword.length < 8 || !confirmPassword || passwordMismatch}
             >
-              {saving ? "Saving..." : "Save"}
+              {saving ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </form>
@@ -311,6 +313,14 @@ function AuthLoadingFallback() {
   );
 }
 
+function StartupIntroFallback() {
+  return (
+    <div className="auth-screen">
+      <LoadingCard startupIntro version={packageJson.version} />
+    </div>
+  );
+}
+
 function PostgresStartupErrorCard({
   error,
   retrying,
@@ -320,19 +330,21 @@ function PostgresStartupErrorCard({
   retrying: boolean;
   onRetry: () => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="auth-screen">
       <div className="auth-card auth-card--startup">
         <div className="auth-brand-row">
           <img src="/logo.png" alt="" className="auth-brand-row-logo" />
-          <div className="auth-brand">KanQual</div>
+          <div className="auth-brand">{t("app.loadingCard.productName")}</div>
         </div>
         <div className="form" style={{ width: "100%" }}>
-          <h2 className="auth-panel-title">Could Not Start</h2>
+          <h2 className="auth-panel-title">{t("app.startupError.title")}</h2>
           <p className="auth-error">{error}</p>
           <div className="form-actions" style={{ justifyContent: "flex-end" }}>
             <button type="button" className="btn btn--primary" onClick={onRetry} disabled={retrying}>
-              {retrying ? "Retrying..." : "Retry"}
+              {retrying ? t("common.retrying") : t("common.retry")}
             </button>
           </div>
         </div>
@@ -368,6 +380,7 @@ function AuthGate() {
   const [postgresStatusLoaded, setPostgresStatusLoaded] = useState(false);
   const [postgresAuthStatus, setPostgresAuthStatus] = useState<PostgresAuthStatus | null>(null);
   const [postgresAuthLoaded, setPostgresAuthLoaded] = useState(false);
+  const [startupIntroComplete, setStartupIntroComplete] = useState(false);
   const [postgresStartupError, setPostgresStartupError] = useState("");
   const [postgresInstallationSettings, setPostgresInstallationSettings] = useState<PostgresInstallationSettings | null>(null);
   const [pendingFirstRunSession, setPendingFirstRunSession] = useState<PostgresAuthSession | null>(null);
@@ -375,6 +388,15 @@ function AuthGate() {
   const [workspaceModeSelected, setWorkspaceModeSelected] = useState(false);
   const [adminOpenedProject, setAdminOpenedProject] = useState<PostgresProject | null>(null);
   const [availableUpdate, setAvailableUpdate] = useState<ReleaseCheckResult | null>(null);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setStartupIntroComplete(true);
+    }, 10000);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -562,6 +584,10 @@ function AuthGate() {
     && postgresStatus.bootstrapApplied
     && postgresStatus.adminHandoffCompleted
   );
+
+  if (!startupIntroComplete) {
+    return <StartupIntroFallback />;
+  }
 
   if (!postgresStatusLoaded || (postgresAuthReady && !postgresAuthLoaded)) {
     return <AuthLoadingFallback />;

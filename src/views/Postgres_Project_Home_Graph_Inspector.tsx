@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { useI18n } from "../i18n/provider";
 import type { PostgresAnnotationSummary } from "../lib/postgres";
 
 let postgresHomePdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
@@ -24,11 +25,11 @@ function resolvePostgresStoragePath(projectStoragePath: string, relativeStorageP
   return `${projectStoragePath.replace(/[\\/]+$/, "")}/${normalizedRelativePath.replace(/^\/+/, "")}`;
 }
 
-function canvasToPostgresBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob> {
+function canvasToPostgresBlob(canvas: HTMLCanvasElement, mimeType: string, renderFailedMessage: string, quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (!blob) {
-        reject(new Error("Could not render image preview."));
+        reject(new Error(renderFailedMessage));
         return;
       }
       resolve(blob);
@@ -53,6 +54,7 @@ export function PostgresHomeAnnotationImagePreview({
   sourceKind: string;
   imageRegion: NonNullable<PostgresAnnotationSummary["imageRegion"]>;
 }) {
+  const { t } = useI18n();
   const [imageUrl, setImageUrl] = useState("");
   const [loadError, setLoadError] = useState("");
   const resolvedPath = resolvePostgresStoragePath(projectStoragePath, sourceStoragePath);
@@ -64,7 +66,7 @@ export function PostgresHomeAnnotationImagePreview({
     setLoadError("");
     setImageUrl("");
     if (!resolvedPath) {
-      setLoadError("Image source file is not available.");
+      setLoadError(t("projectCore.graph.imageSourceUnavailable"));
       return;
     }
 
@@ -78,11 +80,11 @@ export function PostgresHomeAnnotationImagePreview({
       const viewport = page.getViewport({ scale: 1.6 });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      if (!context) throw new Error(t("projectCore.graph.preparePdfPreviewFailed"));
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       await page.render({ canvas, canvasContext: context, viewport }).promise;
-      const blob = await canvasToPostgresBlob(canvas, "image/png");
+      const blob = await canvasToPostgresBlob(canvas, "image/png", t("projectCore.graph.renderImagePreviewFailed"));
       return URL.createObjectURL(blob);
     }
 
@@ -96,14 +98,14 @@ export function PostgresHomeAnnotationImagePreview({
         setImageUrl(objectUrl);
       })
       .catch((error) => {
-        if (active) setLoadError(error instanceof Error ? error.message : "Could not load image annotation preview.");
+        if (active) setLoadError(error instanceof Error ? error.message : t("projectCore.graph.loadAnnotationPreviewFailed"));
       });
 
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [imageRegion, isPdf, resolvedPath]);
+  }, [imageRegion, isPdf, resolvedPath, t]);
 
   const safeRegionWidth = Math.max(imageRegion.width, 1);
   const safeRegionHeight = Math.max(imageRegion.height, 1);
@@ -114,8 +116,8 @@ export function PostgresHomeAnnotationImagePreview({
     <div className="postgres-explore-inspector-preview">
       <div className="annotation-excerpt annotation-excerpt--clip">
         <div className="annotation-excerpt-label">
-          {isPdf ? `Page ${imageRegion.pageNumber ?? 1} - ` : ""}
-          {Math.round(imageRegion.width)} x {Math.round(imageRegion.height)} px
+          {isPdf ? `${t("projectCore.graph.pageLabel", { page: imageRegion.pageNumber ?? 1 })} - ` : ""}
+          {t("projectCore.graph.regionSize", { width: Math.round(imageRegion.width), height: Math.round(imageRegion.height) })}
         </div>
         {loadError ? (
           <p className="auth-error" style={{ margin: 0 }}>{loadError}</p>
@@ -126,7 +128,7 @@ export function PostgresHomeAnnotationImagePreview({
           >
             <img
               src={imageUrl}
-              alt="Annotation region preview"
+              alt={t("projectCore.graph.annotationRegionPreview")}
               style={{
                 width: `${(safeImageWidth / safeRegionWidth) * 100}%`,
                 height: `${(safeImageHeight / safeRegionHeight) * 100}%`,
@@ -135,7 +137,7 @@ export function PostgresHomeAnnotationImagePreview({
             />
           </div>
         ) : (
-          <p className="users-guide-copy" style={{ margin: 0 }}>Loading annotation preview...</p>
+          <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectCore.graph.loadingAnnotationPreview")}</p>
         )}
       </div>
     </div>

@@ -238,7 +238,7 @@ export function NewCodeModal({
               className="form-input"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="e.g. Resilience"
+              placeholder={t("projectCodebook.modal.codeNamePlaceholder")}
               required
               autoFocus
             />

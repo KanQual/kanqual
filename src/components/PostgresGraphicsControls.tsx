@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useI18n } from "../i18n/provider";
 import {
   POSTGRES_OBJECT_FILL_OPTIONS,
   POSTGRES_OBJECT_TYPE_DEFAULT_FILL_TRANSPARENCY,
@@ -23,6 +24,48 @@ import {
   type PostgresSourceObjectVisualKey,
 } from "../lib/postgresGraphics";
 import { usePostgresStoredImageUrl } from "../lib/postgresStoredImages";
+
+function formatObjectShapeLabel(value: string, fallback: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const labels: Record<string, string> = {
+    rounded: t("sharedModals.graphics.shapes.rounded"),
+    circle: t("sharedModals.graphics.shapes.circle"),
+    diamond: t("sharedModals.graphics.shapes.diamond"),
+    triangle: t("sharedModals.graphics.shapes.triangle"),
+    hexagon: t("sharedModals.graphics.shapes.hexagon"),
+    capsule: t("sharedModals.graphics.shapes.capsule"),
+    star: t("sharedModals.graphics.shapes.star"),
+  };
+  return labels[value] ?? fallback;
+}
+
+function formatObjectFillLabel(value: string, fallback: string, t: ReturnType<typeof useI18n>["t"]): string {
+  if (value === "outline") return t("sharedModals.graphics.outline");
+  if (value === "filled") return t("sharedModals.graphics.filled");
+  return fallback;
+}
+
+function formatLineShapeLabel(value: string, fallback: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const labels: Record<string, string> = {
+    solid: t("sharedModals.graphics.lineShapes.solid"),
+    dashed: t("sharedModals.graphics.lineShapes.dashed"),
+    long_dashed: t("sharedModals.graphics.lineShapes.longDashed"),
+    short_dashed: t("sharedModals.graphics.lineShapes.shortDashed"),
+    dotted: t("sharedModals.graphics.lineShapes.dotted"),
+    loose_dotted: t("sharedModals.graphics.lineShapes.looseDotted"),
+    dash_dot: t("sharedModals.graphics.lineShapes.dashDot"),
+    dash_dot_dot: t("sharedModals.graphics.lineShapes.dashDotDot"),
+  };
+  return labels[value] ?? fallback;
+}
+
+function formatArrowheadLabel(value: string, fallback: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const labels: Record<string, string> = {
+    one_sided: t("sharedModals.graphics.arrowheadOptions.oneSided"),
+    double_sided: t("sharedModals.graphics.arrowheadOptions.doubleSided"),
+    none: t("sharedModals.graphics.arrowheadOptions.none"),
+  };
+  return labels[value] ?? fallback;
+}
 
 export function RelationshipTypeLinePreview(props: {
   lineShape: PostgresRelationshipLineShape;
@@ -149,9 +192,10 @@ export function PostgresObjectShapePicker(props: {
   allowInherit?: boolean;
   inheritLabel?: string;
 }) {
+  const { t } = useI18n();
   const { value, onChange, allowInherit = false, inheritLabel = "Inherit" } = props;
   return (
-    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Shape selection">
+    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label={t("sharedModals.graphics.shapeSelection")}>
       {allowInherit ? (
         <button
           type="button"
@@ -172,7 +216,7 @@ export function PostgresObjectShapePicker(props: {
               style={{ opacity: 0.72 }}
             />
           </div>
-          <span className="shape-picker-label">{inheritLabel}</span>
+          <span className="shape-picker-label">{inheritLabel === "Inherit" ? t("common.inherit") : inheritLabel}</span>
         </button>
       ) : null}
       {POSTGRES_OBJECT_TYPE_SHAPE_OPTIONS.map((option) => (
@@ -182,7 +226,7 @@ export function PostgresObjectShapePicker(props: {
           className={`shape-picker-option${value === option.value ? " shape-picker-option--selected" : ""}`}
           onClick={() => onChange(option.value)}
           aria-pressed={value === option.value}
-          title={option.label}
+          title={formatObjectShapeLabel(option.value, option.label, t)}
         >
           <div className="shape-picker-preview" aria-hidden="true">
             <ObjectShapeSwatch
@@ -196,7 +240,7 @@ export function PostgresObjectShapePicker(props: {
               outlineWidth={2}
             />
           </div>
-          <span className="shape-picker-label">{option.label}</span>
+          <span className="shape-picker-label">{formatObjectShapeLabel(option.value, option.label, t)}</span>
         </button>
       ))}
     </div>
@@ -212,6 +256,7 @@ export function PostgresObjectFillPicker(props: {
   allowInherit?: boolean;
   inheritLabel?: string;
 }) {
+  const { t } = useI18n();
   const {
     value,
     onChange,
@@ -222,7 +267,7 @@ export function PostgresObjectFillPicker(props: {
     inheritLabel = "Inherit",
   } = props;
   return (
-    <div className="shape-picker-grid" role="radiogroup" aria-label="Fill selection">
+    <div className="shape-picker-grid" role="radiogroup" aria-label={t("sharedModals.graphics.fillSelection")}>
       {allowInherit ? (
         <button
           type="button"
@@ -240,7 +285,7 @@ export function PostgresObjectFillPicker(props: {
               style={{ opacity: 0.72 }}
             />
           </div>
-          <span className="shape-picker-label">{inheritLabel}</span>
+          <span className="shape-picker-label">{inheritLabel === "Inherit" ? t("common.inherit") : inheritLabel}</span>
         </button>
       ) : null}
       {POSTGRES_OBJECT_FILL_OPTIONS.map((option) => (
@@ -250,7 +295,7 @@ export function PostgresObjectFillPicker(props: {
           className={`shape-picker-option${value === option.value ? " shape-picker-option--selected" : ""}`}
           onClick={() => onChange(option.value)}
           aria-pressed={value === option.value}
-          title={option.label}
+          title={formatObjectFillLabel(option.value, option.label, t)}
           style={{
             borderColor: value === option.value ? previewColor : hexToRgba(previewColor, 0.22),
             background: `linear-gradient(180deg, ${hexToRgba(previewColor, value === option.value ? 0.16 : 0.08)}, rgba(255, 255, 255, 0.96))`,
@@ -267,7 +312,7 @@ export function PostgresObjectFillPicker(props: {
               minHeight={getObjectShapePreviewStyle(previewShape).minHeight}
             />
           </div>
-          <span className="shape-picker-label">{option.label}</span>
+          <span className="shape-picker-label">{formatObjectFillLabel(option.value, option.label, t)}</span>
         </button>
       ))}
     </div>
@@ -281,9 +326,10 @@ export function PostgresRelationshipLineShapePicker(props: {
   allowInherit?: boolean;
   inheritLabel?: string;
 }) {
+  const { t } = useI18n();
   const { value, onChange, allowInherit = false, inheritLabel = "Inherit" } = props;
   return (
-    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Line shape selection">
+    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label={t("sharedModals.graphics.lineShapeSelection")}>
       {allowInherit ? (
         <button
           type="button"
@@ -296,7 +342,7 @@ export function PostgresRelationshipLineShapePicker(props: {
               <line x1="4" y1="9" x2="42" y2="9" stroke={POSTGRES_RELATIONSHIP_PICKER_PREVIEW_COLOR} strokeWidth="3" strokeDasharray="5 5" />
             </svg>
           </div>
-          <span className="shape-picker-label">{inheritLabel}</span>
+          <span className="shape-picker-label">{inheritLabel === "Inherit" ? t("common.inherit") : inheritLabel}</span>
         </button>
       ) : null}
       {POSTGRES_RELATIONSHIP_LINE_SHAPE_OPTIONS.map((option) => (
@@ -306,7 +352,7 @@ export function PostgresRelationshipLineShapePicker(props: {
           className={`shape-picker-option${value === option.value ? " shape-picker-option--selected" : ""}`}
           onClick={() => onChange(option.value)}
           aria-pressed={value === option.value}
-          title={option.label}
+          title={formatLineShapeLabel(option.value, option.label, t)}
         >
           <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
             <svg width="46" height="18" viewBox="0 0 46 18">
@@ -321,7 +367,7 @@ export function PostgresRelationshipLineShapePicker(props: {
               />
             </svg>
           </div>
-          <span className="shape-picker-label">{option.label}</span>
+          <span className="shape-picker-label">{formatLineShapeLabel(option.value, option.label, t)}</span>
         </button>
       ))}
     </div>
@@ -335,9 +381,10 @@ export function PostgresRelationshipArrowheadPicker(props: {
   allowInherit?: boolean;
   inheritLabel?: string;
 }) {
+  const { t } = useI18n();
   const { value, onChange, allowInherit = false, inheritLabel = "Inherit" } = props;
   return (
-    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Arrowhead selection">
+    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label={t("sharedModals.graphics.arrowheadSelection")}>
       {allowInherit ? (
         <button
           type="button"
@@ -350,7 +397,7 @@ export function PostgresRelationshipArrowheadPicker(props: {
               <line x1="4" y1="9" x2="42" y2="9" stroke={POSTGRES_RELATIONSHIP_PICKER_PREVIEW_COLOR} strokeWidth="2" strokeDasharray="5 5" />
             </svg>
           </div>
-          <span className="shape-picker-label">{inheritLabel}</span>
+          <span className="shape-picker-label">{inheritLabel === "Inherit" ? t("common.inherit") : inheritLabel}</span>
         </button>
       ) : null}
       {POSTGRES_RELATIONSHIP_ARROWHEAD_OPTIONS.map((option) => (
@@ -360,7 +407,7 @@ export function PostgresRelationshipArrowheadPicker(props: {
           className={`shape-picker-option${value === option.value ? " shape-picker-option--selected" : ""}`}
           onClick={() => onChange(option.value)}
           aria-pressed={value === option.value}
-          title={option.label}
+          title={formatArrowheadLabel(option.value, option.label, t)}
         >
           <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
             <svg width="46" height="18" viewBox="0 0 46 18">
@@ -384,7 +431,7 @@ export function PostgresRelationshipArrowheadPicker(props: {
               />
             </svg>
           </div>
-          <span className="shape-picker-label">{option.label}</span>
+          <span className="shape-picker-label">{formatArrowheadLabel(option.value, option.label, t)}</span>
         </button>
       ))}
     </div>
@@ -407,6 +454,7 @@ export function PostgresRelationshipEndpointRestrictionColumn(props: {
   onChange: (value: string[]) => void;
   projectStoragePath: string;
 }) {
+  const { t } = useI18n();
   const { title, items, value, onChange, projectStoragePath } = props;
   const selected = new Set(value);
   return (
@@ -414,14 +462,14 @@ export function PostgresRelationshipEndpointRestrictionColumn(props: {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
           <span style={{ fontWeight: 700, color: "#1f2933" }}>{title}</span>
-          <span className="auth-hint" style={{ margin: 0 }}>{`${value.length} selected`}</span>
+          <span className="auth-hint" style={{ margin: 0 }}>{t("sharedModals.graphics.selectedCount", { count: value.length })}</span>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button type="button" className="btn btn--small" onClick={() => onChange(items.map((item) => item.id))}>
-            All
+            {t("common.all")}
           </button>
           <button type="button" className="btn btn--small" onClick={() => onChange([])}>
-            Clear
+            {t("common.clear")}
           </button>
         </div>
       </div>
@@ -438,7 +486,7 @@ export function PostgresRelationshipEndpointRestrictionColumn(props: {
         }}
       >
         {items.length === 0 ? (
-          <p className="auth-hint" style={{ margin: 0 }}>No options available.</p>
+          <p className="auth-hint" style={{ margin: 0 }}>{t("sharedModals.graphics.noOptions")}</p>
         ) : items.map((item) => {
           const checked = selected.has(item.id);
           const accentColor = item.color || POSTGRES_RELATIONSHIP_DEFAULT_COLOR;
@@ -509,6 +557,7 @@ export function PostgresObjectGraphicPreviewCard(props: {
   sourceVisualKey?: PostgresSourceObjectVisualKey | null;
   empty?: boolean;
 }) {
+  const { t } = useI18n();
   const {
     label,
     projectStoragePath,
@@ -527,7 +576,7 @@ export function PostgresObjectGraphicPreviewCard(props: {
   const displayImageUrl = previewUrl || imageUrl;
   return (
     <div className="source-graphics-preview-card" aria-label={label}>
-      <span className="form-label">Preview</span>
+      <span className="form-label">{t("common.preview")}</span>
       <div className="source-graphics-preview-stage">
         {empty ? null : displayImageUrl ? (
           <img
@@ -564,9 +613,10 @@ export function PostgresRelationshipGraphicPreviewCard(props: {
   arrowhead: PostgresRelationshipArrowhead;
   color: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="source-graphics-preview-card" aria-label={props.label}>
-      <span className="form-label">Preview</span>
+      <span className="form-label">{t("common.preview")}</span>
       <div className="source-graphics-preview-stage">
         <div className="relationship-graphics-preview-line">
           <RelationshipTypeLinePreview

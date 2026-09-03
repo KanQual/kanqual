@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SettingsModal } from "./SettingsModal";
+import { useI18n } from "../i18n/provider";
 import { getPostgresImageMimeType } from "../lib/postgresStoredImages";
 
 export type PostgresImageUploadDraft = {
@@ -34,6 +35,11 @@ type PostgresImageCropDragState = {
   imageWidth: number;
   imageHeight: number;
   displayScale: number;
+};
+
+export type PostgresImageCropErrorMessages = {
+  loadFailed: string;
+  prepareFailed: string;
 };
 
 export const POSTGRES_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -92,22 +98,22 @@ export function getPostgresCropRect(
   return { x, y, width, height };
 }
 
-export function loadPostgresImageElement(src: string): Promise<HTMLImageElement> {
+export function loadPostgresImageElement(src: string, messages: Pick<PostgresImageCropErrorMessages, "loadFailed">): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Could not load the selected image for cropping."));
+    image.onerror = () => reject(new Error(messages.loadFailed));
     image.src = src;
   });
 }
 
-export function canvasToPostgresBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob> {
+export function canvasToPostgresBlob(canvas: HTMLCanvasElement, mimeType: string, prepareFailedMessage: string, quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) {
         resolve(blob);
       } else {
-        reject(new Error("Could not prepare the cropped image."));
+        reject(new Error(prepareFailedMessage));
       }
     }, mimeType, quality);
   });
@@ -125,8 +131,9 @@ export async function cropPostgresImageUpload(
   sizePercent: number,
   xPercent: number,
   yPercent: number,
+  messages: PostgresImageCropErrorMessages,
 ): Promise<PostgresImageUploadDraft> {
-  const image = await loadPostgresImageElement(upload.previewUrl);
+  const image = await loadPostgresImageElement(upload.previewUrl, messages);
   const crop = getPostgresCropRect(image.naturalWidth, image.naturalHeight, aspect, sizePercent, xPercent, yPercent);
   const maxOutputDimension = 1600;
   const outputScale = Math.min(1, maxOutputDimension / Math.max(crop.width, crop.height));
@@ -134,7 +141,7 @@ export async function cropPostgresImageUpload(
   canvas.width = Math.max(1, Math.round(crop.width * outputScale));
   canvas.height = Math.max(1, Math.round(crop.height * outputScale));
   const context = canvas.getContext("2d");
-  if (!context) throw new Error("Could not prepare the cropped image.");
+  if (!context) throw new Error(messages.prepareFailed);
   context.drawImage(
     image,
     crop.x,
@@ -148,7 +155,7 @@ export async function cropPostgresImageUpload(
   );
   const sourceMimeType = getPostgresImageMimeType(upload.originalFileName);
   const outputMimeType = sourceMimeType === "image/jpeg" || sourceMimeType === "image/webp" ? sourceMimeType : "image/png";
-  const blob = await canvasToPostgresBlob(canvas, outputMimeType, 0.9);
+  const blob = await canvasToPostgresBlob(canvas, outputMimeType, messages.prepareFailed, 0.9);
   const bytes = new Uint8Array(await blob.arrayBuffer());
   return {
     originalFileName: getPostgresCroppedImageFileName(upload.originalFileName, outputMimeType),
@@ -166,6 +173,7 @@ export function PostgresImageCropModal(props: {
   onUseCrop: () => void;
   busy: boolean;
 }) {
+  const { t } = useI18n();
   const { draft, onDraftChange, onCancel, onUseFullImage, onUseCrop, busy } = props;
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [cropDragState, setCropDragState] = useState<PostgresImageCropDragState | null>(null);
@@ -202,7 +210,7 @@ export function PostgresImageCropModal(props: {
 
   useEffect(() => {
     let active = true;
-    void loadPostgresImageElement(draft.upload.previewUrl)
+    void loadPostgresImageElement(draft.upload.previewUrl, { loadFailed: t("sharedModals.imageCrop.loadFailed") })
       .then((image) => {
         if (active) setImageDimensions({ width: image.naturalWidth, height: image.naturalHeight });
       })
@@ -212,7 +220,7 @@ export function PostgresImageCropModal(props: {
     return () => {
       active = false;
     };
-  }, [draft.upload.previewUrl]);
+  }, [draft.upload.previewUrl, t]);
 
   const updateDraft = (patch: Partial<PostgresImageCropDraft>) => {
     onDraftChange({ ...draft, ...patch, error: patch.error ?? "" });
@@ -313,7 +321,7 @@ export function PostgresImageCropModal(props: {
 
   return (
     <SettingsModal
-      title="Use image"
+      title={t("sharedModals.imageCrop.title")}
       onClose={onCancel}
       closeDisabled={busy}
       modalClassName="modal--wide"
@@ -321,16 +329,16 @@ export function PostgresImageCropModal(props: {
     >
       <div className="app-settings-modal-body">
         <p className="auth-hint" style={{ marginTop: 0 }}>
-          Keep the full image or select a region to use for this object graphic.
+          {t("sharedModals.imageCrop.description")}
         </p>
-        <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label="Image region mode">
+        <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label={t("sharedModals.imageCrop.regionMode")}>
           <button
             type="button"
             className={`segmented-control-option ${draft.mode === "full" ? "segmented-control-option--active" : ""}`}
             onClick={() => updateDraft({ mode: "full" })}
             disabled={busy}
           >
-            Full image
+            {t("sharedModals.imageCrop.fullImage")}
           </button>
           <button
             type="button"
@@ -343,7 +351,7 @@ export function PostgresImageCropModal(props: {
             })}
             disabled={busy}
           >
-            Select region
+            {t("sharedModals.imageCrop.selectRegion")}
           </button>
         </div>
         <div
@@ -394,7 +402,7 @@ export function PostgresImageCropModal(props: {
                 />
                 <div
                   role="img"
-                  aria-label="Selected image region"
+                  aria-label={t("sharedModals.imageCrop.selectedRegion")}
                   onPointerDown={(event) => {
                     if (event.currentTarget === event.target) startCropDrag(event, "move");
                   }}
@@ -474,7 +482,7 @@ export function PostgresImageCropModal(props: {
             {draft.mode === "crop" ? (
               <>
                 <label className="form-label">
-                  Aspect
+                  {t("sharedModals.imageCrop.aspect")}
                   <select
                     className="form-input"
                     value={draft.aspect}
@@ -486,19 +494,19 @@ export function PostgresImageCropModal(props: {
                     })}
                     disabled={busy}
                   >
-                    <option value="original">Original</option>
-                    <option value="1:1">Square</option>
+                    <option value="original">{t("sharedModals.imageCrop.original")}</option>
+                    <option value="1:1">{t("sharedModals.imageCrop.square")}</option>
                     <option value="4:3">4:3</option>
                     <option value="16:9">16:9</option>
                   </select>
                 </label>
                 <p className="auth-hint" style={{ margin: 0 }}>
-                  Drag the box to move it. Drag the corner handle to resize it.
+                  {t("sharedModals.imageCrop.dragHelp")}
                 </p>
               </>
             ) : (
               <p className="auth-hint" style={{ margin: 0 }}>
-                The original file will be uploaded without cropping.
+                {t("sharedModals.imageCrop.fullImageHelp")}
               </p>
             )}
             {draft.error ? <p className="modal-warning-text" style={{ margin: 0 }}>{draft.error}</p> : null}
@@ -507,15 +515,15 @@ export function PostgresImageCropModal(props: {
       </div>
         <div className="app-settings-modal-footer">
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </button>
           {draft.mode === "full" ? (
             <button type="button" className="btn btn--primary" onClick={onUseFullImage} disabled={busy}>
-              Use full image
+              {t("sharedModals.imageCrop.useFullImage")}
             </button>
           ) : (
             <button type="button" className="btn btn--primary" onClick={onUseCrop} disabled={busy}>
-              {busy ? "Cropping..." : "Use selected region"}
+              {busy ? t("sharedModals.imageCrop.cropping") : t("sharedModals.imageCrop.useSelectedRegion")}
             </button>
           )}
         </div>

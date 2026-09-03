@@ -9,6 +9,7 @@ import {
 } from "../lib/postgresCanvasGraph";
 import { DownloadIcon, FitCornersIcon, HelpIcon, LayoutNetworkIcon, PlusIcon, ZoomIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
+import { useI18n } from "../i18n/provider";
 import type {
   PostgresCanvasNodeState,
   PostgresObject,
@@ -377,6 +378,7 @@ export function PostgresExploreCanvasView({
   fitOnVisibleKey?: number;
   autoLayoutOnVisibleKey?: number;
 }) {
+  const { t } = useI18n();
   const cyContainerRef = useRef<HTMLDivElement | null>(null);
   const zoomControlRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<CytoscapeCore | null>(null);
@@ -707,8 +709,8 @@ export function PostgresExploreCanvasView({
         object: selectedObject,
         objectTypeRecord: selectedObjectTypeRecord,
       }) ?? {
-        title: selectedObject.title.trim() || "Untitled object",
-        itemType: "Object",
+        title: selectedObject.title.trim() || t("projectCore.graph.untitledObject"),
+        itemType: t("projectCore.entities.object"),
         typeDetail: selectedObject.objectType.trim() || selectedObjectTypeRecord?.name || "",
         attributes: selectedObject.attributeValues
           .filter((value) => value.value.trim())
@@ -721,8 +723,8 @@ export function PostgresExploreCanvasView({
           relationship: selectedRelationship,
           relationshipTypeRecord: selectedRelationshipTypeRecord,
         }) ?? {
-          title: selectedRelationship.relationshipType.trim() || "Relationship",
-          itemType: "Relationship",
+          title: selectedRelationship.relationshipType.trim() || t("projectCore.graph.relationship"),
+          itemType: t("projectCore.entities.relationship"),
           typeDetail: selectedRelationship.relationshipType.trim() || selectedRelationshipTypeRecord?.name || "",
           attributes: selectedRelationship.attributeValues
             .filter((value) => value.value.trim())
@@ -850,7 +852,7 @@ export function PostgresExploreCanvasView({
         </>
       ) : (
         <p className="postgres-explore-inspector-text">
-          Select an object or relationship to inspect it here.
+          {t("projectCore.graph.selectItemToInspect")}
         </p>
       )}
     </section>
@@ -1482,15 +1484,15 @@ export function PostgresExploreCanvasView({
                     className={`btn ${zoomIsCustomized ? "btn--primary" : "btn--ghost"}`}
                     onClick={() => setZoomMenuOpen((current) => !current)}
                     aria-expanded={zoomMenuOpen}
-                    aria-label={zoomMenuOpen ? "Hide zoom control" : "Show zoom control"}
-                    title="Zoom"
+                    aria-label={zoomMenuOpen ? t("projectCore.graph.hideZoom") : t("projectCore.graph.showZoom")}
+                    title={t("projectCore.graph.zoom")}
                   >
                     <ZoomIcon className="postgres-explore-canvas-control-icon" />
                   </button>
                   {zoomMenuOpen ? (
                     <div className="postgres-explore-zoom-menu">
                       <label className="postgres-explore-zoom-slider-label" htmlFor="postgres-explore-zoom-slider">
-                        <span>Zoom</span>
+                        <span>{t("projectCore.graph.zoom")}</span>
                         <strong>{zoomPercent}%</strong>
                       </label>
                       <input
@@ -1514,8 +1516,8 @@ export function PostgresExploreCanvasView({
                           updateConnectorHandleRef.current();
                           updateResizeHandleRef.current();
                         }}
-                        aria-label="Fit canvas"
-                        title="Fit canvas"
+                        aria-label={t("projectCore.graph.fitCanvas")}
+                        title={t("projectCore.graph.fitCanvas")}
                       >
                         <FitCornersIcon className="postgres-explore-canvas-control-icon" />
                       </button>
@@ -1527,8 +1529,8 @@ export function PostgresExploreCanvasView({
                   className={`btn ${autoLayoutIsCustomized ? "btn--primary" : "btn--ghost"}`}
                   onClick={() => void handleAutoLayout()}
                   disabled={layoutRunning || Object.keys(canvasNodes).length === 0}
-                  aria-label={layoutRunning ? "Auto layout running" : "Auto layout"}
-                  title={layoutRunning ? "Auto layout running" : "Auto layout"}
+                  aria-label={layoutRunning ? t("projectCore.graph.autoLayoutRunning") : t("projectCore.graph.autoLayout")}
+                  title={layoutRunning ? t("projectCore.graph.autoLayoutRunning") : t("projectCore.graph.autoLayout")}
                 >
                   <LayoutNetworkIcon className="postgres-explore-canvas-control-icon" />
                 </button>
@@ -1540,8 +1542,8 @@ export function PostgresExploreCanvasView({
                     setGraphExportModalOpen(true);
                   }}
                   disabled={Object.keys(canvasNodes).length === 0}
-                  aria-label="Export graph"
-                  title="Export graph"
+                  aria-label={t("projectCore.graph.exportGraph")}
+                  title={t("projectCore.graph.exportGraph")}
                 >
                   <DownloadIcon className="postgres-explore-canvas-control-icon" />
                 </button>

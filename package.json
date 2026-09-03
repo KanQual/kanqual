@@ -13,6 +13,7 @@
     "fetch:bundled-postgres": "node scripts/fetch-bundled-postgres.mjs",
     "prepare:bundled-postgres": "node scripts/stage-bundled-postgres.mjs",
     "prepare:bundled-postgres:strict": "node scripts/stage-bundled-postgres.mjs --strict",
+    "audit:hardcoded-ui-text": "node scripts/audit-hardcoded-ui-text.mjs",
     "check:locales": "node scripts/check-locales.mjs",
     "validate:roles": "node scripts/validate-role-matrix.mjs",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",

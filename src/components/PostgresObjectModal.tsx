@@ -23,8 +23,17 @@ import {
   resolvePostgresObjectOutlineColor,
   resolvePostgresObjectShape,
 } from "../lib/postgresGraphics";
+import { useI18n } from "../i18n/provider";
 
 export type PostgresObjectInstanceGraphicMode = "inherit" | "select" | "upload";
+export type PostgresObjectModalTab = "details" | "graphics" | "attributes" | "timeline";
+
+function formatObjectModalTab(tab: PostgresObjectModalTab, t: ReturnType<typeof useI18n>["t"]): string {
+  if (tab === "details") return t("sharedModals.tabs.details");
+  if (tab === "graphics") return t("sharedModals.tabs.graphics");
+  if (tab === "attributes") return t("sharedModals.tabs.attributes");
+  return t("sharedModals.tabs.timeline");
+}
 
 export type PostgresObjectGraphicModeConfig = {
   setMode: Dispatch<SetStateAction<PostgresObjectInstanceGraphicMode>>;
@@ -42,8 +51,8 @@ export type PostgresObjectGraphicModeConfig = {
 export function PostgresObjectModal(config: {
   title: string;
   ariaLabel: string;
-  tab: "details" | "graphics" | "attributes" | "timeline";
-  setTab: Dispatch<SetStateAction<"details" | "graphics" | "attributes" | "timeline">>;
+  tab: PostgresObjectModalTab;
+  setTab: Dispatch<SetStateAction<PostgresObjectModalTab>>;
   submitLabel: string;
   objectTypes: PostgresObjectType[];
   projectStoragePath: string;
@@ -86,6 +95,7 @@ export function PostgresObjectModal(config: {
   onNewObjectType?: () => void;
   hideEmptyUploadPreview?: boolean;
 }) {
+  const { t } = useI18n();
   const inheritedColor = normalizePostgresObjectTypeColor(config.selectedType?.color || "");
   const inheritedOutlineColor = resolvePostgresObjectOutlineColor(
     { colorOverride: "", outlineColorOverride: "" },
@@ -140,34 +150,34 @@ export function PostgresObjectModal(config: {
             className={`segmented-control-option ${config.tab === "details" ? "segmented-control-option--active" : ""}`}
             onClick={() => config.setTab("details")}
           >
-            Details
+            {formatObjectModalTab("details", t)}
           </button>
           <button
             type="button"
             className={`segmented-control-option ${config.tab === "graphics" ? "segmented-control-option--active" : ""}`}
             onClick={() => config.setTab("graphics")}
           >
-            Graphics
+            {formatObjectModalTab("graphics", t)}
           </button>
           <button
             type="button"
             className={`segmented-control-option ${config.tab === "attributes" ? "segmented-control-option--active" : ""}`}
             onClick={() => config.setTab("attributes")}
           >
-            Attributes
+            {formatObjectModalTab("attributes", t)}
           </button>
           <button
             type="button"
             className={`segmented-control-option ${config.tab === "timeline" ? "segmented-control-option--active" : ""}`}
             onClick={() => config.setTab("timeline")}
           >
-            Timeline
+            {formatObjectModalTab("timeline", t)}
           </button>
         </div>
         {config.tab === "details" ? (
           <>
             <label className="form-label">
-              Object type
+              {t("sharedModals.objectModal.objectType")}
               <select
                 className="form-input"
                 value={config.objectTypeId}
@@ -180,21 +190,21 @@ export function PostgresObjectModal(config: {
                 }}
                 autoFocus
               >
-                <option value="" disabled>Select an object type</option>
+                <option value="" disabled>{t("sharedModals.objectModal.selectObjectType")}</option>
                 {config.objectTypes.map((objectType) => (
                   <option key={objectType.id} value={objectType.id}>{objectType.name}</option>
                 ))}
                 {config.onNewObjectType ? (
-                  <option value="__new_object_type__">Add new object type...</option>
+                  <option value="__new_object_type__">{t("sharedModals.objectModal.addObjectType")}</option>
                 ) : null}
               </select>
             </label>
             <label className="form-label">
-              Title
+              {t("sharedModals.objectModal.title")}
               <input className="form-input" value={config.titleValue} onChange={(event) => config.setTitleValue(event.target.value)} />
             </label>
             <label className="form-label">
-              Description
+              {t("common.description")}
               <textarea className="form-input form-textarea" rows={3} value={config.descriptionValue} onChange={(event) => config.setDescriptionValue(event.target.value)} />
             </label>
           </>
@@ -202,7 +212,7 @@ export function PostgresObjectModal(config: {
           <div className="source-graphics-layout">
             <div className="source-graphics-controls">
               <div style={{ display: "flex", justifyContent: "center" }}>
-                <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label="Object graphic source">
+                <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label={t("sharedModals.graphics.objectGraphicSource")}>
                   <button
                     type="button"
                     role="tab"
@@ -211,7 +221,7 @@ export function PostgresObjectModal(config: {
                     onClick={() => setGraphicMode("inherit")}
                     disabled={disabled}
                   >
-                    Inherit
+                    {t("common.inherit")}
                   </button>
                   <button
                     type="button"
@@ -221,7 +231,7 @@ export function PostgresObjectModal(config: {
                     onClick={() => setGraphicMode("select")}
                     disabled={disabled}
                   >
-                    Select
+                    {t("common.select")}
                   </button>
                   <button
                     type="button"
@@ -231,13 +241,13 @@ export function PostgresObjectModal(config: {
                     onClick={() => setGraphicMode("upload", false)}
                     disabled={disabled}
                   >
-                    Upload
+                    {t("common.upload")}
                   </button>
                 </div>
               </div>
               {config.graphicMode === "inherit" ? (
                 <p className="auth-hint" style={{ margin: "4px 0 0", textAlign: "center" }}>
-                  This object will inherit its graphical elements from its object type.
+                  {t("sharedModals.graphics.inheritObjectHelp")}
                 </p>
               ) : config.graphicMode === "upload" ? (
                 <>
@@ -248,7 +258,7 @@ export function PostgresObjectModal(config: {
                       onClick={config.onImportImage}
                       disabled={disabled || !config.onImportImage}
                     >
-                      {hasUploadedObjectImage ? "Replace image" : "Upload Image"}
+                      {hasUploadedObjectImage ? t("sharedModals.graphics.replaceImage") : t("sharedModals.graphics.uploadImage")}
                     </button>
                     {hasUploadedObjectImage ? (
                       <button
@@ -257,13 +267,13 @@ export function PostgresObjectModal(config: {
                         onClick={config.onRemoveImage}
                         disabled={disabled || !config.onRemoveImage}
                       >
-                        Remove
+                        {t("common.remove")}
                       </button>
                     ) : null}
                   </div>
                   {showObjectUploadDetails ? (
                     <label className="form-label">
-                      Outline
+                      {t("sharedModals.graphics.outline")}
                       <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                         <input
                           className="form-input form-input--color"
@@ -285,7 +295,7 @@ export function PostgresObjectModal(config: {
               ) : (
                 <>
                   <label className="form-label">
-                    Shape
+                    {t("sharedModals.graphics.shape")}
                     <PostgresObjectShapePicker
                       value={effectiveShape}
                       onChange={(value) => config.setShapeOverride(value === inheritedShape ? "" : value)}
@@ -297,8 +307,8 @@ export function PostgresObjectModal(config: {
                     />
                   </label>
                   <div className="source-graphics-setting-row">
-                    <span className="form-label">Fill Style</span>
-                    <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label="Object fill style">
+                    <span className="form-label">{t("sharedModals.graphics.fillStyle")}</span>
+                    <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label={t("sharedModals.graphics.objectFillStyle")}>
                       {(["outline", "filled"] as const).map((option) => (
                         <button
                           key={option}
@@ -307,7 +317,7 @@ export function PostgresObjectModal(config: {
                           onClick={() => config.setFillOverride(option === inheritedFill ? "" : option)}
                           aria-pressed={effectiveFill === option}
                         >
-                          {option === "outline" ? "Outline" : "Filled"}
+                          {option === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
                         </button>
                       ))}
                     </div>
@@ -315,7 +325,7 @@ export function PostgresObjectModal(config: {
                   {effectiveFill === "filled" ? (
                     <>
                       <label className="form-label">
-                        Fill
+                        {t("sharedModals.graphics.fill")}
                         <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                           <input
                             className="form-input form-input--color"
@@ -333,7 +343,7 @@ export function PostgresObjectModal(config: {
                         </div>
                       </label>
                       <label className="form-label timeline-group-opacity-control">
-                        Fill Transparency
+                        {t("sharedModals.graphics.fillTransparency")}
                         <div className="timeline-group-slider-row">
                           <input
                             className="form-range"
@@ -353,7 +363,7 @@ export function PostgresObjectModal(config: {
                     </>
                   ) : null}
                   <label className="form-label">
-                    Outline
+                    {t("sharedModals.graphics.outline")}
                     <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
                       <input
                         className="form-input form-input--color"
@@ -371,7 +381,7 @@ export function PostgresObjectModal(config: {
                     </div>
                   </label>
                   <label className="form-label timeline-group-opacity-control">
-                    Outline Width
+                    {t("sharedModals.graphics.outlineWidth")}
                     <div className="timeline-group-slider-row">
                       <input
                         className="form-range"
@@ -392,7 +402,7 @@ export function PostgresObjectModal(config: {
               )}
             </div>
             <PostgresObjectGraphicPreviewCard
-              label="Object graphic preview"
+              label={t("sharedModals.graphics.objectPreview")}
               projectStoragePath={config.projectStoragePath}
               imageStoragePath={effectiveImageStoragePath}
               previewUrl={config.imagePreviewUrl ?? ""}
@@ -451,7 +461,7 @@ export function PostgresObjectModal(config: {
             </div>
           ) : (
             <p className="auth-hint" style={{ marginTop: 0 }}>
-              No timeline fields have been configured for this object type yet.
+              {t("sharedModals.objectModal.noTimelineFields")}
             </p>
           )
         ) : config.attributeDefinitions.length > 0 ? (
@@ -494,15 +504,15 @@ export function PostgresObjectModal(config: {
           </div>
         ) : (
           <p className="auth-hint" style={{ marginTop: 0 }}>
-            No shared attributes for this relationship type yet.
+            {t("sharedModals.objectModal.noSharedAttributes")}
           </p>
         )}
         <div className="app-settings-modal-footer">
           <button type="button" className="btn" onClick={config.onClose} disabled={config.submitting}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" className="btn btn--primary" disabled={config.submitting}>
-            {config.submitting ? "Saving..." : config.submitLabel}
+            {config.submitting ? t("common.saving") : config.submitLabel}
           </button>
         </div>
       </form>

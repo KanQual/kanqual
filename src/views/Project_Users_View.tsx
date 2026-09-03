@@ -291,7 +291,7 @@ function UserDetail({
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
             >
-              Actions
+              {t("projectUsers.userDetail.actions")}
             </button>
             {menuOpen && (
               <div className="context-menu user-detail-menu" role="menu">
@@ -1336,7 +1336,7 @@ export function UsersView() {
                 {loading && (
                   <tr>
                     <td colSpan={6} className="users-td-msg">
-                      Loading...
+                      {t("projectUsers.loading")}
                     </td>
                   </tr>
                 )}
@@ -1389,14 +1389,14 @@ export function UsersView() {
                 {activityLoading && (
                   <tr>
                     <td colSpan={ACTIVITY_COLS.length} className="users-td-msg">
-                      Loading activity...
+                      {t("projectUsers.loadingActivity")}
                     </td>
                   </tr>
                 )}
                 {!activityLoading && activityRows.length === 0 && (
                   <tr>
                     <td colSpan={ACTIVITY_COLS.length} className="users-td-msg">
-                      No user activity yet.
+                      {t("projectUsers.noUserActivity")}
                     </td>
                   </tr>
                 )}

@@ -16,6 +16,7 @@ import {
 } from "../lib/postgres";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 import { ArrowLeftIcon, HelpIcon, PlusIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { orderedCodesWithDepth } from "./Postgres_Source_Coding_Shared";
@@ -103,11 +104,24 @@ function mediaTypeFromFileExtension(ext: string): string | null {
   return null;
 }
 
-function annotationTooltipContent(annotation: PostgresAnnotationSummary): { title: string; body: string } {
+function annotationTooltipContent(
+  annotation: PostgresAnnotationSummary,
+  labels: {
+    annotatedText: string;
+    audioClip: string;
+    videoClip: string;
+    pdfRegion: string;
+    imageRegion: string;
+    annotation: string;
+    unavailable: string;
+    pageRegion: (page: number, width: number, height: number) => string;
+    region: (width: number, height: number) => string;
+  },
+): { title: string; body: string } {
   const quote = annotation.quote.trim();
   if (quote) {
     return {
-      title: "Annotated Text",
+      title: labels.annotatedText,
       body: quote,
     };
   }
@@ -116,7 +130,7 @@ function annotationTooltipContent(annotation: PostgresAnnotationSummary): { titl
     const start = typeof annotation.timeStartMs === "number" ? formatMediaMilliseconds(annotation.timeStartMs) : "-";
     const end = typeof annotation.timeEndMs === "number" ? formatMediaMilliseconds(annotation.timeEndMs) : "-";
     return {
-      title: annotation.sourceKind === "audio" ? "Audio Clip" : "Video Clip",
+      title: annotation.sourceKind === "audio" ? labels.audioClip : labels.videoClip,
       body: `${start} - ${end}`,
     };
   }
@@ -124,14 +138,16 @@ function annotationTooltipContent(annotation: PostgresAnnotationSummary): { titl
   if ((annotation.sourceKind === "image" || annotation.sourceKind === "pdf") && annotation.imageRegion) {
     const region = annotation.imageRegion;
     return {
-      title: annotation.sourceKind === "pdf" ? "PDF Region" : "Image Region",
-      body: `${annotation.sourceKind === "pdf" ? `Page ${region.pageNumber ?? 1} - ` : ""}${Math.round(region.width)} x ${Math.round(region.height)} px`,
+      title: annotation.sourceKind === "pdf" ? labels.pdfRegion : labels.imageRegion,
+      body: annotation.sourceKind === "pdf"
+        ? labels.pageRegion(region.pageNumber ?? 1, Math.round(region.width), Math.round(region.height))
+        : labels.region(Math.round(region.width), Math.round(region.height)),
     };
   }
 
   return {
-    title: "Annotation",
-    body: "No annotation content is available for this annotation.",
+    title: labels.annotation,
+    body: labels.unavailable,
   };
 }
 
@@ -144,6 +160,7 @@ function MemoAnnotationMediaPreview({
   source: PostgresSource | null;
   projectStoragePath?: string;
 }) {
+  const { t } = useI18n();
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const resolvedPath = resolveProjectStoragePath(projectStoragePath, source?.storagePath);
@@ -169,7 +186,7 @@ function MemoAnnotationMediaPreview({
       if (sourceKind !== "pdf") {
         return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
       }
-      if (!region) throw new Error("No PDF region is available for this annotation.");
+      if (!region) throw new Error(t("analysisMemos.annotationPreview.pdfRegionUnavailable"));
       const pdfjsLib = await loadPdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
       const safePage = Math.min(Math.max(region.pageNumber ?? 1, 1), pdf.numPages);
@@ -177,14 +194,14 @@ function MemoAnnotationMediaPreview({
       const viewport = page.getViewport({ scale: 1.6 });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      if (!context) throw new Error(t("analysisMemos.annotationPreview.pdfPreviewPrepareFailed"));
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       await page.render({ canvas, canvasContext: context, viewport }).promise;
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((nextBlob) => {
           if (nextBlob) resolve(nextBlob);
-          else reject(new Error("Could not render the PDF page preview."));
+          else reject(new Error(t("analysisMemos.annotationPreview.pdfPreviewRenderFailed")));
         }, "image/png");
       });
       return URL.createObjectURL(blob);
@@ -208,18 +225,18 @@ function MemoAnnotationMediaPreview({
           if (current) URL.revokeObjectURL(current);
           return null;
         });
-        setLoadError(error instanceof Error ? error.message : "Could not load annotation media.");
+        setLoadError(error instanceof Error ? error.message : t("analysisMemos.annotationPreview.mediaLoadFailed"));
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [mediaType, region, resolvedPath, sourceKind]);
+  }, [mediaType, region, resolvedPath, sourceKind, t]);
 
   if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
   if (loadError) return <p className="postgres-memo-annotation-tooltip-error">{loadError}</p>;
-  if (!mediaUrl) return <p className="postgres-memo-annotation-tooltip-loading">Loading media...</p>;
+  if (!mediaUrl) return <p className="postgres-memo-annotation-tooltip-loading">{t("analysisMemos.annotationPreview.loadingMedia")}</p>;
 
   if (sourceKind === "audio") {
     return (
@@ -256,7 +273,7 @@ function MemoAnnotationMediaPreview({
       >
         <img
           src={mediaUrl}
-          alt="Annotation region"
+          alt={t("analysisMemos.annotationPreview.annotationRegionAlt")}
           style={{
             width: `${(safeImageWidth / safeRegionWidth) * 100}%`,
             height: `${(safeImageHeight / safeRegionHeight) * 100}%`,
@@ -388,6 +405,7 @@ export function PostgresMemosView({
   initialCodeIds?: string[] | null;
   onInitialDraftHandled?: () => void;
 }) {
+  const { t } = useI18n();
   const [memos, setMemos] = useState<PostgresMemo[]>([]);
   const [sources, setSources] = useState<PostgresSource[]>([]);
   const [codes, setCodes] = useState<PostgresCode[]>([]);
@@ -416,11 +434,11 @@ export function PostgresMemosView({
       setAnnotations(snapshot.annotations);
       setMemos(memoRows);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load memos.");
+      setError(loadError instanceof Error ? loadError.message : t("analysisMemos.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   useEffect(() => {
     void load();
@@ -595,7 +613,17 @@ export function PostgresMemosView({
     const annotationsOpen = !collapsedSelectorCards.has("annotations");
     const hoveredAnnotation = annotationTooltip ? annotationById.get(annotationTooltip.annotationId) : null;
     const hoveredAnnotationSource = hoveredAnnotation ? sourceById.get(hoveredAnnotation.sourceId) : null;
-    const hoveredAnnotationContent = hoveredAnnotation ? annotationTooltipContent(hoveredAnnotation) : null;
+    const hoveredAnnotationContent = hoveredAnnotation ? annotationTooltipContent(hoveredAnnotation, {
+      annotatedText: t("analysisMemos.annotationPreview.annotatedText"),
+      audioClip: t("analysisMemos.annotationPreview.audioClip"),
+      videoClip: t("analysisMemos.annotationPreview.videoClip"),
+      pdfRegion: t("analysisMemos.annotationPreview.pdfRegion"),
+      imageRegion: t("analysisMemos.annotationPreview.imageRegion"),
+      annotation: t("analysisMemos.annotationPreview.annotation"),
+      unavailable: t("analysisMemos.annotationPreview.unavailable"),
+      pageRegion: (page, width, height) => t("analysisMemos.annotationPreview.pageRegion", { page, width, height }),
+      region: (width, height) => t("analysisMemos.annotationPreview.region", { width, height }),
+    }) : null;
 
     return (
       <div className="view doc-detail-view postgres-memo-editor-view">
@@ -609,18 +637,18 @@ export function PostgresMemosView({
                 setEditorDraft(null);
               }}
               disabled={submitting}
-              title="Back to memos"
-              aria-label="Back to memos"
+              title={t("analysisMemos.actions.backToMemosLower")}
+              aria-label={t("analysisMemos.actions.backToMemosLower")}
             >
               <ArrowLeftIcon className="code-text-header-back-icon" />
             </button>
-            <h1>Memo Builder</h1>
+            <h1>{t("analysisMemos.editor.title")}</h1>
             <button
               type="button"
               className="users-help-icon-btn"
               onClick={() => setHelpOpen(true)}
-              title="Open memo builder help"
-              aria-label="Open memo builder help"
+              title={t("analysisMemos.editor.openHelp")}
+              aria-label={t("analysisMemos.editor.openHelp")}
             >
               <HelpIcon className="users-help-icon" />
             </button>
@@ -632,7 +660,7 @@ export function PostgresMemosView({
               onClick={() => void handleSaveMemo()}
               disabled={submitting}
             >
-              {submitting ? "Saving..." : "Save"}
+              {submitting ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </header>
@@ -640,18 +668,18 @@ export function PostgresMemosView({
         {error ? <div className="error-banner">{error}</div> : null}
 
         {helpOpen ? (
-          <SettingsModal title="Memo Builder Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+          <SettingsModal title={t("analysisMemos.editor.helpTitle")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
             <div className="app-settings-modal-body">
               <p className="users-guide-copy">
-                Write a memo, attach relevant sources, annotations, codes, or objects, and save it as project context.
+                {t("analysisMemos.editor.helpLine1")}
               </p>
               <p className="users-guide-copy">
-                Use the left column to choose linked material and the editor to draft the memo body. Linked context keeps the note connected to the evidence or concepts that prompted it.
+                {t("analysisMemos.editor.helpLine2")}
               </p>
             </div>
             <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
               <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
           </SettingsModal>
@@ -666,13 +694,13 @@ export function PostgresMemosView({
                 aria-expanded={codesOpen}
                 onClick={() => toggleSelectorCard("codes")}
               >
-                <span className="annotate-card-title">Codes{draftCodes.length > 0 ? ` (${draftCodes.length})` : ""}</span>
+                <span className="annotate-card-title">{t("analysisMemos.table.codes")}{draftCodes.length > 0 ? ` (${draftCodes.length})` : ""}</span>
                 <span className="postgres-memo-collapse-indicator">{codesOpen ? "▼" : "▶"}</span>
               </button>
               {codesOpen ? (
                 <div className="postgres-memo-select-list">
                   {codes.length === 0 ? (
-                    <p className="case-card-empty">No codes yet.</p>
+                    <p className="case-card-empty">{t("analysisMemos.empty.noCodesYet")}</p>
                   ) : (
                     codeTree.map(({ code, depth }) => (
                       <label
@@ -702,19 +730,19 @@ export function PostgresMemosView({
                 aria-expanded={sourcesOpen}
                 onClick={() => toggleSelectorCard("sources")}
               >
-                <span className="annotate-card-title">Sources{draftSources.length > 0 ? ` (${draftSources.length})` : ""}</span>
+                <span className="annotate-card-title">{t("projectCore.sources.title")}{draftSources.length > 0 ? ` (${draftSources.length})` : ""}</span>
                 <span className="postgres-memo-collapse-indicator">{sourcesOpen ? "▼" : "▶"}</span>
               </button>
               {sourcesOpen ? (
                 <div className="postgres-memo-select-list postgres-memo-source-table">
                   {sources.length === 0 ? (
-                    <p className="case-card-empty">No sources yet.</p>
+                    <p className="case-card-empty">{t("analysisMemos.empty.noSourcesYet")}</p>
                   ) : (
                     <>
                       <div className="postgres-memo-source-table-header">
                         <span />
-                        <span>Source title</span>
-                        <span>Type</span>
+                        <span>{t("analysisMemos.editor.sourceTitle")}</span>
+                        <span>{t("analysisMemos.editor.type")}</span>
                       </div>
                       {sources.map((source) => (
                         <label
@@ -744,20 +772,20 @@ export function PostgresMemosView({
                 aria-expanded={annotationsOpen}
                 onClick={() => toggleSelectorCard("annotations")}
               >
-                <span className="annotate-card-title">Annotations{draftAnnotations.length > 0 ? ` (${draftAnnotations.length})` : ""}</span>
+                <span className="annotate-card-title">{t("analysisMemos.detail.annotations")}{draftAnnotations.length > 0 ? ` (${draftAnnotations.length})` : ""}</span>
                 <span className="postgres-memo-collapse-indicator">{annotationsOpen ? "▼" : "▶"}</span>
               </button>
               {annotationsOpen ? (
                 <div className="postgres-memo-select-list postgres-memo-annotation-table">
                   {annotations.length === 0 ? (
-                    <p className="case-card-empty">No annotations yet.</p>
+                    <p className="case-card-empty">{t("analysisMemos.empty.noAnnotationsYet")}</p>
                   ) : (
                     <>
                       <div className="postgres-memo-annotation-table-header">
                         <span />
                         <span>ID</span>
-                        <span>Source</span>
-                        <span>Type</span>
+                        <span>{t("analysisMemos.editor.sourceFallback")}</span>
+                        <span>{t("analysisMemos.editor.type")}</span>
                       </div>
                       {annotations.map((annotation) => {
                         const source = sourceById.get(annotation.sourceId);
@@ -777,7 +805,7 @@ export function PostgresMemosView({
                               onChange={() => setEditorDraft((current) => current ? { ...current, annotationIds: toggleInSet(current.annotationIds, annotation.id) } : current)}
                             />
                             <span className="postgres-memo-annotation-id">{formatAnnotationDisplayId(annotation.displayId)}</span>
-                            <span className="postgres-memo-annotation-source-title">{source?.title ?? "Source"}</span>
+                            <span className="postgres-memo-annotation-source-title">{source?.title ?? t("analysisMemos.editor.sourceFallback")}</span>
                             <span className="postgres-memo-annotation-source-type">{formatSourceType(source?.sourceKind)}</span>
                           </label>
                         );
@@ -792,24 +820,24 @@ export function PostgresMemosView({
           <div className="annotate-main postgres-memo-editor-main">
             <div className="annotate-card postgres-memo-title-card">
               <div className="annotate-card-header">
-                <span className="annotate-card-title">Memo title</span>
+                <span className="annotate-card-title">{t("analysisMemos.editor.memoTitle")}</span>
               </div>
               <input
                 className="memo-editor-title-input"
                 value={editorDraft.title}
                 onChange={(event) => setEditorDraft((current) => current ? { ...current, title: event.target.value } : current)}
-                placeholder="Memo title"
+                placeholder={t("analysisMemos.editor.memoTitle")}
               />
             </div>
 
             <div className="annotate-card postgres-memo-affiliations-card">
               <div className="annotate-card-header">
-                <span className="annotate-card-title">Affiliations</span>
+                <span className="annotate-card-title">{t("analysisMemos.editor.affiliations")}</span>
               </div>
               <div className="postgres-memo-affiliation-grid">
                 <div>
-                  <h3>Codes</h3>
-                  {draftCodes.length === 0 ? <p className="case-card-empty">No linked codes.</p> : (
+                  <h3>{t("analysisMemos.table.codes")}</h3>
+                  {draftCodes.length === 0 ? <p className="case-card-empty">{t("analysisMemos.editor.noLinkedCodes")}</p> : (
                     <div className="postgres-memo-chip-list">
                       {draftCodes.map((code) => (
                         <span key={code.id} className="postgres-memo-chip">
@@ -817,8 +845,8 @@ export function PostgresMemosView({
                             type="button"
                             className="postgres-memo-chip-remove"
                             onClick={() => removeDraftAffiliation("codeIds", code.id)}
-                            title={`Remove ${code.label}`}
-                            aria-label={`Remove ${code.label}`}
+                            title={t("analysisMemos.editor.removeItem", { label: code.label })}
+                            aria-label={t("analysisMemos.editor.removeItem", { label: code.label })}
                           >
                             x
                           </button>
@@ -830,8 +858,8 @@ export function PostgresMemosView({
                   )}
                 </div>
                 <div>
-                  <h3>Sources</h3>
-                  {draftSources.length === 0 ? <p className="case-card-empty">No linked sources.</p> : (
+                  <h3>{t("projectCore.sources.title")}</h3>
+                  {draftSources.length === 0 ? <p className="case-card-empty">{t("analysisMemos.editor.noLinkedSources")}</p> : (
                     <div className="postgres-memo-chip-list">
                       {draftSources.map((source) => (
                         <span key={source.id} className="postgres-memo-chip">
@@ -839,8 +867,8 @@ export function PostgresMemosView({
                             type="button"
                             className="postgres-memo-chip-remove"
                             onClick={() => removeDraftAffiliation("sourceIds", source.id)}
-                            title={`Remove ${source.title}`}
-                            aria-label={`Remove ${source.title}`}
+                            title={t("analysisMemos.editor.removeItem", { label: source.title })}
+                            aria-label={t("analysisMemos.editor.removeItem", { label: source.title })}
                           >
                             x
                           </button>
@@ -851,8 +879,8 @@ export function PostgresMemosView({
                   )}
                 </div>
                 <div>
-                  <h3>Annotations</h3>
-                  {draftAnnotations.length === 0 ? <p className="case-card-empty">No linked annotations.</p> : (
+                  <h3>{t("analysisMemos.detail.annotations")}</h3>
+                  {draftAnnotations.length === 0 ? <p className="case-card-empty">{t("analysisMemos.editor.noLinkedAnnotations")}</p> : (
                     <div className="postgres-memo-affiliation-list">
                       {draftAnnotations.map((annotation) => (
                         <span
@@ -867,8 +895,8 @@ export function PostgresMemosView({
                             type="button"
                             className="postgres-memo-chip-remove"
                             onClick={() => removeDraftAffiliation("annotationIds", annotation.id)}
-                            title={`Remove ${formatAnnotationDisplayId(annotation.displayId)}`}
-                            aria-label={`Remove ${formatAnnotationDisplayId(annotation.displayId)}`}
+                            title={t("analysisMemos.editor.removeItem", { label: formatAnnotationDisplayId(annotation.displayId) })}
+                            aria-label={t("analysisMemos.editor.removeItem", { label: formatAnnotationDisplayId(annotation.displayId) })}
                           >
                             x
                           </button>
@@ -883,7 +911,7 @@ export function PostgresMemosView({
 
             <div className="annotate-card annotate-card--grow postgres-memo-body-card">
               <div className="annotate-card-header">
-                <span className="annotate-card-title">Memo text</span>
+                <span className="annotate-card-title">{t("analysisMemos.editor.memoText")}</span>
               </div>
               <MemoRichTextEditor
                 key={editorDraft.memoId ?? "new"}
@@ -910,7 +938,7 @@ export function PostgresMemosView({
           >
             <div className="postgres-memo-annotation-tooltip-header">
               <strong>{formatAnnotationDisplayId(hoveredAnnotation.displayId)}</strong>
-              <span>{hoveredAnnotationSource?.title ?? "Source"} | {formatSourceType(hoveredAnnotationSource?.sourceKind ?? hoveredAnnotation.sourceKind)}</span>
+              <span>{hoveredAnnotationSource?.title ?? t("analysisMemos.editor.sourceFallback")} | {formatSourceType(hoveredAnnotationSource?.sourceKind ?? hoveredAnnotation.sourceKind)}</span>
             </div>
             <div className="postgres-memo-annotation-tooltip-card">
               <span className="postgres-memo-annotation-tooltip-label">{hoveredAnnotationContent.title}</span>
@@ -923,7 +951,7 @@ export function PostgresMemosView({
             </div>
             {hoveredAnnotation.note.trim() ? (
               <div className="postgres-memo-annotation-tooltip-note">
-                <span className="postgres-memo-annotation-tooltip-label">Note</span>
+                <span className="postgres-memo-annotation-tooltip-label">{t("analysisMemos.editor.note")}</span>
                 <p>{hoveredAnnotation.note}</p>
               </div>
             ) : null}
@@ -937,13 +965,13 @@ export function PostgresMemosView({
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Memos</h1>
+          <h1>{t("analysisMemos.pageTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Open memos help"
-            aria-label="Open memos help"
+            title={t("analysisMemos.showHelp")}
+            aria-label={t("analysisMemos.showHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -951,18 +979,18 @@ export function PostgresMemosView({
       </header>
 
       {helpOpen ? (
-        <SettingsModal title="Memos Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("analysisMemos.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Create and edit analytic memos, link them to sources, annotations, codes, and objects, and use the memo table to review saved notes across the project.
+              {t("analysisMemos.help.line1")}
             </p>
             <p className="users-guide-copy">
-              Memo creation and editing are role-limited. Linked context helps keep notes connected to the material that prompted them.
+              {t("analysisMemos.help.line3")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -974,7 +1002,7 @@ export function PostgresMemosView({
       <div className="postgres-memo-table-shell">
         <section className="home-project-card project-table-card postgres-memo-table-card">
           <div className="project-table-card-header">
-            <h2>Memos</h2>
+            <h2>{t("analysisMemos.pageTitle")}</h2>
             {canManageMemos ? (
               <button
                 type="button"
@@ -984,8 +1012,8 @@ export function PostgresMemosView({
                   setNotice(null);
                   setEditorDraft(createEmptyDraft());
                 }}
-                title="New memo"
-                aria-label="New memo"
+                title={t("analysisMemos.actions.newMemoShort")}
+                aria-label={t("analysisMemos.actions.newMemoShort")}
               >
                 <PlusIcon className="project-table-header-icon" />
               </button>
@@ -995,20 +1023,20 @@ export function PostgresMemosView({
           <table className="users-table">
             <thead>
               <tr>
-                <th className="users-th">Memo title</th>
-                <th className="users-th">Affiliations</th>
-                <th className="users-th">Saved</th>
-                <th className="users-th">Created by</th>
+                <th className="users-th">{t("analysisMemos.editor.memoTitle")}</th>
+                <th className="users-th">{t("analysisMemos.editor.affiliations")}</th>
+                <th className="users-th">{t("reportsLanding.saved")}</th>
+                <th className="users-th">{t("reportsLanding.createdBy")}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="users-td" colSpan={4}>Loading memos...</td>
+                  <td className="users-td" colSpan={4}>{t("analysisMemos.empty.loadingMemos")}</td>
                 </tr>
               ) : memos.length === 0 ? (
                 <tr>
-                  <td className="users-td-msg" colSpan={4}>No memos yet.</td>
+                  <td className="users-td-msg" colSpan={4}>{t("analysisMemos.empty.noMemos")}</td>
                 </tr>
               ) : (
                 memos.map((memo) => {
@@ -1027,7 +1055,7 @@ export function PostgresMemosView({
                       </td>
                       <td className="users-td">{affiliationCount}</td>
                       <td className="users-td">{formatMemoDate(memo.updatedAt)}</td>
-                      <td className="users-td">{memo.createdByName || "Unknown author"}</td>
+                      <td className="users-td">{memo.createdByName || t("analysisMemos.editor.unknownAuthor")}</td>
                     </tr>
                   );
                 })
@@ -1039,16 +1067,16 @@ export function PostgresMemosView({
       </div>
 
       {deleteMemoId ? (
-        <SettingsModal title="Delete Memo" onClose={() => setDeleteMemoId(null)} closeDisabled={submitting}>
+        <SettingsModal title={t("analysisMemos.deleteModal.title")} onClose={() => setDeleteMemoId(null)} closeDisabled={submitting}>
           <div className="app-settings-modal-body">
-            <p>This will permanently remove the memo and its source, annotation, code, and object links.</p>
+            <p>{t("analysisMemos.deleteModal.warning")}</p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn" onClick={() => setDeleteMemoId(null)} disabled={submitting}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button type="button" className="btn btn--danger" onClick={() => void handleDeleteMemo()} disabled={submitting}>
-              {submitting ? "Deleting..." : "Delete memo"}
+              {submitting ? t("analysisMemos.statuses.deleting") : t("analysisMemos.actions.deleteMemoLower")}
             </button>
           </div>
         </SettingsModal>

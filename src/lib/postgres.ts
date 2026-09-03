@@ -4,6 +4,7 @@ import type {
   ProjectEmbeddingBuildStatus,
   ProjectEmbeddingStoreStatus,
 } from "./projectEmbeddings";
+import type { LocaleCode } from "../i18n/types";
 
 export const POSTGRES_PROJECT_CHANGED_EVENT = "postgres-project-changed";
 
@@ -328,7 +329,7 @@ export type PostgresUserPreferences = {
   density: "comfortable" | "compact";
   fontSize: "small" | "normal" | "large";
   sourceTextSizePx: number;
-  locale: "en";
+  locale: LocaleCode;
   recentProjectLimit: number;
   gettingStartedState: {
     dismissed: boolean;

@@ -10,6 +10,7 @@ import { formatCurrentDateTime } from "../i18n/formatters";
 import { LoadingCard } from "../components/LoadingCard";
 import { ArrowLeftIcon, HelpIcon, PlusIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
+import { useI18n } from "../i18n/provider";
 import type { CodeReportKind, CodeReportRow, CodeReportSnapshot } from "./Reports_Codes_View";
 import type { CoderReportKind, CoderReportRow, CoderReportSnapshot } from "./Reports_Users_View";
 import type { ReportRow as AnnotationReportRow, ReportSnapshot as AnnotationReportSnapshot } from "./Reports_Annotations_View";
@@ -49,70 +50,12 @@ type PostgresReportsViewProps = {
   projectStoragePath?: string;
 };
 
-const REPORT_TYPES: ReportTypeOption[] = [
-  {
-    id: "annotations",
-    title: "Annotation Report",
-    description: "Filter annotations and export excerpt, grouping, sorting, and statistics views.",
-  },
-  {
-    id: "code-co-occurrences",
-    title: "Code Co-occurrence",
-    description: "Build co-occurrence matrices that show which selected codes appear together.",
-  },
-  {
-    id: "code-frequencies",
-    title: "Code Frequency",
-    description: "Count and compare how often selected codes appear across sources, cases, and coders.",
-  },
-  {
-    id: "user-activity",
-    title: "User Activity",
-    description: "Review coder output, source coverage, code usage, and recent project activity.",
-  },
-  {
-    id: "user-agreement",
-    title: "User Agreement",
-    description: "Inspect overlap and agreement signals across coders for selected project material.",
-  },
-  {
-    id: "user-comparison",
-    title: "User Comparison",
-    description: "Compare coding patterns across users by code, source, and selected filters.",
-  },
-];
-
-const NEW_REPORT_OPTIONS: Array<{
+type NewReportOption = {
   id: string;
   title: string;
   description: string;
   builder: ActiveReportBuilder;
-}> = [
-  {
-    id: "annotations",
-    title: "Annotation Report",
-    description: "Filter annotations and export excerpt, grouping, sorting, and statistics views.",
-    builder: { type: "annotation" },
-  },
-  {
-    id: "code-frequencies",
-    title: "Code Frequency",
-    description: "Count and compare how often selected codes appear across sources, cases, and coders.",
-    builder: { type: "code", kind: "frequencies" },
-  },
-  {
-    id: "code-co-occurrences",
-    title: "Code Co-occurrence",
-    description: "Build co-occurrence matrices that show which selected codes appear together.",
-    builder: { type: "code", kind: "summary" },
-  },
-  {
-    id: "user-activity",
-    title: "User Activity",
-    description: "Review coder output, source coverage, code usage, and recent project activity.",
-    builder: { type: "user", kind: "activity" },
-  },
-];
+};
 
 function formatReportDate(value: string): string {
   if (!value) return "-";
@@ -129,12 +72,12 @@ function formatReportDate(value: string): string {
   }
 }
 
-function formatReportType(value: string): string {
+function formatReportType(value: string, genericReport: string, genericCodeReport: string, genericUserReport: string, genericAnnotationReport: string): string {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "code" || normalized === "code-report") return "Code report";
-  if (normalized === "user" || normalized === "coder" || normalized === "coder-report") return "User report";
-  if (normalized === "annotation" || normalized === "annotations") return "Annotation report";
-  if (!normalized) return "Report";
+  if (normalized === "code" || normalized === "code-report") return genericCodeReport;
+  if (normalized === "user" || normalized === "coder" || normalized === "coder-report") return genericUserReport;
+  if (normalized === "annotation" || normalized === "annotations") return genericAnnotationReport;
+  if (!normalized) return genericReport;
   return normalized
     .split(/[-_\s]+/)
     .filter(Boolean)
@@ -142,9 +85,17 @@ function formatReportType(value: string): string {
     .join(" ");
 }
 
-function formatSpecificReportType(report: PostgresReport): string {
+function formatSpecificReportType(
+  report: PostgresReport,
+  reportTypes: ReportTypeOption[],
+  genericReport: string,
+  genericCodeReport: string,
+  genericUserReport: string,
+  genericAnnotationReport: string,
+): string {
   const filterType = getReportFilterType(report);
-  return REPORT_TYPES.find((type) => type.id === filterType)?.title ?? formatReportType(report.reportType);
+  return reportTypes.find((type) => type.id === filterType)?.title
+    ?? formatReportType(report.reportType, genericReport, genericCodeReport, genericUserReport, genericAnnotationReport);
 }
 
 function parseReportSnapshotKind(report: PostgresReport): string | null {
@@ -254,6 +205,7 @@ function ReportBuilderShell({
   onBack: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   const [helpOpen, setHelpOpen] = useState(false);
 
   return (
@@ -264,8 +216,8 @@ function ReportBuilderShell({
             type="button"
             className="code-text-header-back-button"
             onClick={onBack}
-            title="Back to reports"
-            aria-label="Back to reports"
+            title={t("reportsLanding.backToReports")}
+            aria-label={t("reportsLanding.backToReports")}
           >
             <ArrowLeftIcon className="code-text-header-back-icon" />
           </button>
@@ -274,26 +226,26 @@ function ReportBuilderShell({
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title={`Open ${title.toLowerCase()} help`}
-            aria-label={`Open ${title.toLowerCase()} help`}
+            title={t("reportsLanding.builderOpenHelp", { title: title.toLowerCase() })}
+            aria-label={t("reportsLanding.builderOpenHelp", { title: title.toLowerCase() })}
           >
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </header>
       {helpOpen ? (
-        <SettingsModal title={`${title} Help`} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("reportsLanding.builderHelpTitle", { title })} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Choose the report scope, adjust filters and display options, then save the report when the output matches what you need.
+              {t("reportsLanding.builderHelpLine1")}
             </p>
             <p className="users-guide-copy">
-              Saved reports can be reopened, exported, or used as the starting point for another report with the same settings.
+              {t("reportsLanding.builderHelpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -306,6 +258,7 @@ function ReportBuilderShell({
 }
 
 export function PostgresReportsView({ projectId, projectStoragePath }: PostgresReportsViewProps) {
+  const { t } = useI18n();
   const [activeBuilder, setActiveBuilder] = useState<ActiveReportBuilder | null>(null);
   const [showNewReportModal, setShowNewReportModal] = useState(false);
   const [selectedReportTypeFilter, setSelectedReportTypeFilter] = useState<ReportTypeFilter>("all");
@@ -315,6 +268,64 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
   const [loadingReports, setLoadingReports] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const reportTypes = useMemo<ReportTypeOption[]>(() => [
+    {
+      id: "annotations",
+      title: t("reportsLanding.reportTypesList.annotations.title"),
+      description: t("reportsLanding.reportTypesList.annotations.description"),
+    },
+    {
+      id: "code-co-occurrences",
+      title: t("reportsLanding.reportTypesList.codeCoOccurrences.title"),
+      description: t("reportsLanding.reportTypesList.codeCoOccurrences.description"),
+    },
+    {
+      id: "code-frequencies",
+      title: t("reportsLanding.reportTypesList.codeFrequencies.title"),
+      description: t("reportsLanding.reportTypesList.codeFrequencies.description"),
+    },
+    {
+      id: "user-activity",
+      title: t("reportsLanding.reportTypesList.userActivity.title"),
+      description: t("reportsLanding.reportTypesList.userActivity.description"),
+    },
+    {
+      id: "user-agreement",
+      title: t("reportsLanding.reportTypesList.userAgreement.title"),
+      description: t("reportsLanding.reportTypesList.userAgreement.description"),
+    },
+    {
+      id: "user-comparison",
+      title: t("reportsLanding.reportTypesList.userComparison.title"),
+      description: t("reportsLanding.reportTypesList.userComparison.description"),
+    },
+  ], [t]);
+  const newReportOptions = useMemo<NewReportOption[]>(() => [
+    {
+      id: "annotations",
+      title: t("reportsLanding.reportTypesList.annotations.title"),
+      description: t("reportsLanding.reportTypesList.annotations.description"),
+      builder: { type: "annotation" },
+    },
+    {
+      id: "code-frequencies",
+      title: t("reportsLanding.reportTypesList.codeFrequencies.title"),
+      description: t("reportsLanding.reportTypesList.codeFrequencies.description"),
+      builder: { type: "code", kind: "frequencies" },
+    },
+    {
+      id: "code-co-occurrences",
+      title: t("reportsLanding.reportTypesList.codeCoOccurrences.title"),
+      description: t("reportsLanding.reportTypesList.codeCoOccurrences.description"),
+      builder: { type: "code", kind: "summary" },
+    },
+    {
+      id: "user-activity",
+      title: t("reportsLanding.reportTypesList.userActivity.title"),
+      description: t("reportsLanding.reportTypesList.userActivity.description"),
+      builder: { type: "user", kind: "activity" },
+    },
+  ], [t]);
 
   const loadReports = useCallback(async () => {
     setLoadingReports(true);
@@ -323,11 +334,11 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       const nextReports = await listPostgresReports(projectId);
       setReports(nextReports);
     } catch (error) {
-      setReportError(error instanceof Error ? error.message : "Unable to load saved reports.");
+      setReportError(error instanceof Error ? error.message : t("reportsLanding.unableToLoadReports"));
     } finally {
       setLoadingReports(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   useEffect(() => {
     void loadReports();
@@ -354,7 +365,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
   }, [loadReports, projectId]);
 
   const reportTypeSummaries = useMemo(
-    () => REPORT_TYPES.map((type) => ({
+    () => reportTypes.map((type) => ({
       ...type,
       count: reports.filter((report) => getReportFilterType(report) === type.id).length,
     })).sort((left, right) => {
@@ -369,7 +380,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       }
       return reportTypeSortDir === "asc" ? comparison : -comparison;
     }),
-    [reportTypeSortCol, reportTypeSortDir, reports],
+    [reportTypeSortCol, reportTypeSortDir, reportTypes, reports],
   );
 
   function handleReportTypeSort(column: ReportTypeSortCol) {
@@ -400,7 +411,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
   function handleOpenSavedReport(report: PostgresReport) {
     const builder = makeSavedReportBuilder(report);
     if (!builder) {
-      setReportError(`Unable to open "${report.title}" because its saved report data could not be read.`);
+      setReportError(t("reportsLanding.unableToOpenReport", { title: report.title }));
       return;
     }
     setReportError(null);
@@ -409,7 +420,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
 
   if (activeBuilder?.type === "code") {
     const kind = activeBuilder.kind ?? activeBuilder.savedReport?.snapshot.kind ?? "frequencies";
-    const title = kind === "frequencies" ? "Code Frequency Report" : "Code Co-Occurrence Report";
+    const title = kind === "frequencies" ? t("reportsLanding.builderTitles.codeFrequency") : t("reportsLanding.builderTitles.codeCoOccurrence");
     return (
       <ReportBuilderShell title={title} onBack={backToReportsLanding}>
         <Suspense fallback={<ReportBuilderLoading />}>
@@ -426,7 +437,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
 
   if (activeBuilder?.type === "user") {
     const kind = activeBuilder.kind ?? activeBuilder.savedReport?.snapshot.kind ?? "activity";
-    const title = kind === "activity" ? "User Activity Report" : "User Reports";
+    const title = kind === "activity" ? t("reportsLanding.builderTitles.userActivity") : t("reportsLanding.builderTitles.userReports");
     return (
       <ReportBuilderShell title={title} onBack={backToReportsLanding}>
         <Suspense fallback={<ReportBuilderLoading />}>
@@ -443,7 +454,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
 
   if (activeBuilder?.type === "annotation") {
     return (
-      <ReportBuilderShell title="Annotation Report Builder" onBack={backToReportsLanding}>
+      <ReportBuilderShell title={t("reportsLanding.builderTitles.annotation")} onBack={backToReportsLanding}>
         <Suspense fallback={<ReportBuilderLoading />}>
           <LegacyAnnotationReportsViewLazy
             initialNewReportOpen={!activeBuilder.savedReport}
@@ -461,13 +472,13 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
     <div className="view users-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Reports</h1>
+          <h1>{t("reportsLanding.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Open reports help"
-            aria-label="Open reports help"
+            title={t("reportsLanding.openHelp")}
+            aria-label={t("reportsLanding.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -475,18 +486,18 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       </header>
 
       {helpOpen ? (
-        <SettingsModal title="Reports Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("reportsLanding.helpTitle")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Use Reports to create, reopen, and manage saved code, annotation, and user reports for the current project.
+              {t("reportsLanding.helpLine1")}
             </p>
             <p className="users-guide-copy">
-              Select a report type on the left to filter saved reports, or start a new report from the available report builders.
+              {t("reportsLanding.helpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -527,7 +538,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 18 }}>Report types</h2>
+                <h2 style={{ margin: 0, fontSize: 18 }}>{t("reportsLanding.reportTypes")}</h2>
               </div>
             </div>
 
@@ -540,7 +551,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                       style={{ width: "76%" }}
                       onClick={() => handleReportTypeSort("type")}
                     >
-                      Type
+                      {t("reportsLanding.type")}
                       <span className="users-sort-icon">
                         {reportTypeSortCol === "type" ? (reportTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
@@ -550,7 +561,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                       style={{ width: "24%" }}
                       onClick={() => handleReportTypeSort("count")}
                     >
-                      Count
+                      {t("reportsLanding.count")}
                       <span className="users-sort-icon">
                         {reportTypeSortCol === "count" ? (reportTypeSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
@@ -578,7 +589,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                         }
                       }}
                     >
-                      All reports
+                      {t("reportsLanding.allReports")}
                     </td>
                     <td className="users-td users-td--muted">{reports.length}</td>
                   </tr>
@@ -629,13 +640,13 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
         >
           <div className="home-project-card project-table-card">
             <div className="project-table-card-header">
-              <h2>Saved reports</h2>
+              <h2>{t("reportsLanding.savedReports")}</h2>
               <button
                 type="button"
                 className="btn btn--primary project-table-header-icon-button"
                 onClick={() => setShowNewReportModal(true)}
-                title="New report"
-                aria-label="New report"
+                title={t("reportsLanding.newReport")}
+                aria-label={t("reportsLanding.newReport")}
               >
                 <PlusIcon className="project-table-header-icon" />
               </button>
@@ -647,20 +658,20 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
               <table className="users-table">
                 <thead>
                   <tr>
-                    <th className="users-th">Report title</th>
-                    <th className="users-th">Type</th>
-                    <th className="users-th">Saved</th>
-                    <th className="users-th">Created by</th>
+                    <th className="users-th">{t("reportsLanding.reportTitle")}</th>
+                    <th className="users-th">{t("reportsLanding.type")}</th>
+                    <th className="users-th">{t("reportsLanding.saved")}</th>
+                    <th className="users-th">{t("reportsLanding.createdBy")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loadingReports ? (
                     <tr>
-                      <td className="users-td-msg" colSpan={4}>Loading reports...</td>
+                      <td className="users-td-msg" colSpan={4}>{t("reportsLanding.loadingReports")}</td>
                     </tr>
                   ) : sortedReports.length === 0 ? (
                     <tr>
-                      <td className="users-td-msg" colSpan={4}>No reports yet.</td>
+                      <td className="users-td-msg" colSpan={4}>{t("reportsLanding.noReportsYet")}</td>
                     </tr>
                   ) : (
                     sortedReports.map((report) => (
@@ -680,7 +691,14 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                         <td className="users-td">
                           <strong>{report.title}</strong>
                         </td>
-                        <td className="users-td">{formatSpecificReportType(report)}</td>
+                        <td className="users-td">{formatSpecificReportType(
+                          report,
+                          reportTypes,
+                          t("reportsLanding.genericReport"),
+                          t("reportsLanding.genericCodeReport"),
+                          t("reportsLanding.genericUserReport"),
+                          t("reportsLanding.genericAnnotationReport"),
+                        )}</td>
                         <td className="users-td">{formatReportDate(report.updatedAt || report.createdAt)}</td>
                         <td className="users-td">{report.createdByName || "-"}</td>
                       </tr>
@@ -694,7 +712,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
       </div>
 
       {showNewReportModal ? (
-        <SettingsModal title="New Report" onClose={() => setShowNewReportModal(false)}>
+        <SettingsModal title={t("reportsLanding.newReportTitle")} onClose={() => setShowNewReportModal(false)}>
           <div className="app-settings-modal-body">
             <div
               style={{
@@ -704,7 +722,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
                 marginTop: 16,
               }}
             >
-              {NEW_REPORT_OPTIONS.map((option) => (
+              {newReportOptions.map((option) => (
                 <button
                   key={option.id}
                   type="button"
@@ -722,7 +740,7 @@ export function PostgresReportsView({ projectId, projectStoragePath }: PostgresR
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn" onClick={() => setShowNewReportModal(false)}>
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
         </SettingsModal>

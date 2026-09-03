@@ -452,6 +452,7 @@ function AnnotationMediaPreview({
   source?: ProjectDocument | null;
   projectStoragePath?: string;
 }) {
+  const { t } = useI18n();
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const sourceKind = (annotation.sourceKind || source?.type || "").trim().toLowerCase();
@@ -479,7 +480,7 @@ function AnnotationMediaPreview({
       if (sourceKind !== "pdf") {
         return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
       }
-      if (!cropRegion) throw new Error("No PDF region is available for this annotation.");
+      if (!cropRegion) throw new Error(t("analysisMemos.annotationPreview.pdfRegionUnavailable"));
       const pdfjsLib = await loadPdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
       const safePage = Math.min(Math.max(cropRegion.pageNumber ?? 1, 1), pdf.numPages);
@@ -487,14 +488,14 @@ function AnnotationMediaPreview({
       const viewport = page.getViewport({ scale: 1.6 });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      if (!context) throw new Error(t("analysisMemos.annotationPreview.pdfPreviewPrepareFailed"));
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       await page.render({ canvas, canvasContext: context, viewport }).promise;
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((nextBlob) => {
           if (nextBlob) resolve(nextBlob);
-          else reject(new Error("Could not render the PDF page preview."));
+          else reject(new Error(t("analysisMemos.annotationPreview.pdfPreviewRenderFailed")));
         }, "image/png");
       });
       return URL.createObjectURL(blob);
@@ -518,14 +519,14 @@ function AnnotationMediaPreview({
           if (current) URL.revokeObjectURL(current);
           return null;
         });
-        setLoadError(error instanceof Error ? error.message : "Could not load annotation media.");
+        setLoadError(error instanceof Error ? error.message : t("analysisMemos.annotationPreview.mediaLoadFailed"));
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [mediaType, region, resolvedPath, sourceKind]);
+  }, [mediaType, region, resolvedPath, sourceKind, t]);
 
   if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
 
@@ -533,7 +534,16 @@ function AnnotationMediaPreview({
     ? `${typeof annotation.timeStartMs === "number" ? formatMediaMilliseconds(annotation.timeStartMs) : "-"} - ${typeof annotation.timeEndMs === "number" ? formatMediaMilliseconds(annotation.timeEndMs) : "-"}`
     : null;
   const regionLabel = region
-    ? `${sourceKind === "pdf" ? `Page ${region.pageNumber ?? 1} - ` : ""}${Math.round(region.width)} x ${Math.round(region.height)} px`
+    ? sourceKind === "pdf"
+      ? t("reportsAnnotations.pageRegion", {
+        page: region.pageNumber ?? 1,
+        width: Math.round(region.width),
+        height: Math.round(region.height),
+      })
+      : t("reportsAnnotations.region", {
+        width: Math.round(region.width),
+        height: Math.round(region.height),
+      })
     : null;
 
   return (
@@ -546,7 +556,7 @@ function AnnotationMediaPreview({
       {loadError ? (
         <p className="auth-error" style={{ margin: 0 }}>{loadError}</p>
       ) : !mediaUrl ? (
-        <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>Loading media...</p>
+        <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>{t("reportsAnnotations.loadingMedia")}</p>
       ) : sourceKind === "audio" ? (
         <audio controls preload="metadata" src={mediaUrl} style={{ width: "100%" }} />
       ) : sourceKind === "video" ? (
@@ -564,7 +574,7 @@ function AnnotationMediaPreview({
         >
           <img
             src={mediaUrl}
-            alt={`${sourceKind === "pdf" ? "PDF" : "Image"} annotation region`}
+            alt={sourceKind === "pdf" ? t("reportsAnnotations.pdfAnnotationRegionAlt") : t("reportsAnnotations.imageAnnotationRegionAlt")}
             style={{
               display: "block",
               width: `${(Math.max(region.imageWidth, region.width, 1) / Math.max(region.width, 1)) * 100}%`,
@@ -575,7 +585,7 @@ function AnnotationMediaPreview({
           />
         </div>
       ) : (
-        <img src={mediaUrl} alt="Annotation media" style={{ display: "block", width: "min(100%, 680px)", borderRadius: 6 }} />
+        <img src={mediaUrl} alt={t("reportsAnnotations.annotationMediaAlt")} style={{ display: "block", width: "min(100%, 680px)", borderRadius: 6 }} />
       )}
     </div>
   );
@@ -2016,7 +2026,7 @@ function ReportPage({
               <div key={item.id} style={{ border: "1px solid var(--color-border)", borderRadius: 10, padding: 12, background: "var(--color-surface-alt)" }}>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{item.name}</div>
                 {stat?.minNumber == null || stat.maxNumber == null ? (
-                  <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No numeric values are available for this attribute yet.</div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsAnnotations.filterEditors.noNumericValues")}</div>
                 ) : (
                   <>
                     <div style={{ position: "relative", height: 34, marginBottom: 10 }}>
@@ -2064,7 +2074,7 @@ function ReportPage({
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                        <span style={{ color: "var(--color-text-muted)" }}>Minimum</span>
+                        <span style={{ color: "var(--color-text-muted)" }}>{t("reportsAnnotations.filterEditors.minimum")}</span>
                         <input
                           className="form-input"
                           type="number"
@@ -2077,7 +2087,7 @@ function ReportPage({
                         />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                        <span style={{ color: "var(--color-text-muted)" }}>Maximum</span>
+                        <span style={{ color: "var(--color-text-muted)" }}>{t("reportsAnnotations.filterEditors.maximum")}</span>
                         <input
                           className="form-input"
                           type="number"
@@ -2101,7 +2111,7 @@ function ReportPage({
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{item.name}</div>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                   <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>From</span>
+                    <span style={{ color: "var(--color-text-muted)" }}>{t("reportsAnnotations.filterEditors.from")}</span>
                     <input
                       className="form-input"
                       type="datetime-local"
@@ -2113,7 +2123,7 @@ function ReportPage({
                     />
                   </label>
                   <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>To</span>
+                    <span style={{ color: "var(--color-text-muted)" }}>{t("reportsAnnotations.filterEditors.to")}</span>
                     <input
                       className="form-input"
                       type="datetime-local"
@@ -2140,7 +2150,7 @@ function ReportPage({
               </div>
               <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-surface)" }}>
                 {(stat?.textValues ?? []).length === 0 ? (
-                  <div style={{ padding: 10, fontSize: 12, color: "var(--color-text-muted)" }}>No text values are available for this attribute yet.</div>
+                  <div style={{ padding: 10, fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsAnnotations.filterEditors.noTextValues")}</div>
                 ) : (
                   <ul className="code-list">
                     {(stat?.textValues ?? []).map((value) => (
@@ -3292,8 +3302,8 @@ function ReportPage({
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
-                    aria-label="Filter objects"
-                    title="Filter objects"
+                    aria-label={t("reportsAnnotations.filterObjects")}
+                    title={t("reportsAnnotations.filterObjects")}
                     onClick={(e) => { e.stopPropagation(); setShowCaseAttributeFilters(true); }}
                   >
                     <FilterIcon className="filter-icon-svg" />
@@ -3324,9 +3334,9 @@ function ReportPage({
                       </colgroup>
                       <thead>
                         <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
-                          <th aria-label="Select object" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
-                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
-                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                          <th aria-label={t("reportsAnnotations.selectObject")} style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>{t("reportsAnnotations.typeColumn")}</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>{t("reportsAnnotations.titleColumn")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3377,8 +3387,8 @@ function ReportPage({
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
-                    aria-label="Filter sources"
-                    title="Filter sources"
+                    aria-label={t("reportsAnnotations.filterSources")}
+                    title={t("reportsAnnotations.filterSources")}
                     onClick={(e) => { e.stopPropagation(); setShowDocumentAttributeFilters(true); }}
                   >
                     <FilterIcon className="filter-icon-svg" />
@@ -3397,7 +3407,7 @@ function ReportPage({
                 )}
                 <div className="code-list" style={{ padding: 0 }}>
                   {reportDocs.length === 0 ? (
-                    <div className="code-list-empty">No sources.</div>
+                    <div className="code-list-empty">{t("reportsAnnotations.empty.noDocuments")}</div>
                   ) : (
                     <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
                       <colgroup>
@@ -3407,9 +3417,9 @@ function ReportPage({
                       </colgroup>
                       <thead>
                         <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
-                          <th aria-label="Select source" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
-                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
-                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                          <th aria-label={t("reportsAnnotations.selectSource")} style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>{t("reportsAnnotations.typeColumn")}</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>{t("reportsAnnotations.titleColumn")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3477,7 +3487,7 @@ function ReportPage({
                   {dataLoading ? (
                     <div className="code-list-empty">{t("reportsAnnotations.loadingEllipsis")}</div>
                   ) : displayRelationshipItems.length === 0 ? (
-                    <div className="code-list-empty">No relationships.</div>
+                    <div className="code-list-empty">{t("reportsAnnotations.empty.noRelationships")}</div>
                   ) : (
                     <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "var(--text-xs)" }}>
                     <colgroup>
@@ -3488,7 +3498,7 @@ function ReportPage({
                     </colgroup>
                     <thead>
                       <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
-                        <th aria-label="Select relationship" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                        <th aria-label={t("reportsAnnotations.selectRelationship")} style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
                         {[
                           ["relationshipType", "Type"],
                           ["object1Name", "Object 1"],
@@ -3582,7 +3592,7 @@ function ReportPage({
                 )}
                 <ul className="code-list" style={{ overflowY: "auto", flex: 1 }}>
                   {reportCodes.length === 0
-                    ? <li className="code-list-empty">No codes.</li>
+                    ? <li className="code-list-empty">{t("reportsAnnotations.empty.noCodes")}</li>
                     : codeTree.map(({ code: c, depth }) => (
                         <li key={c.id} className="code-item"
                           style={{ cursor: isFrozen ? "default" : "pointer" }}
@@ -3737,7 +3747,7 @@ function ReportPage({
                     padding: "1px 6px", color: "var(--color-text-muted)",
                     letterSpacing: "0.05em",
                   }}>
-                    Frozen
+                    {t("reportsAnnotations.frozen")}
                   </span>
                 </span>
               )}
@@ -3762,14 +3772,14 @@ function ReportPage({
                 <>
                   {!isFrozen && editor && (
                     <div className="report-description-toolbar" style={{ padding: "0 14px 10px" }}>
-                      <button className={`rte-btn${editor.isActive("bold")        ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run(); }} title="Bold">B</button>
-                      <button className={`rte-btn${editor.isActive("italic")      ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleItalic().run(); }} title="Italic"><em>I</em></button>
-                      <button className={`rte-btn${editor.isActive("strike")      ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleStrike().run(); }} title="Strikethrough"><s>S</s></button>
+                      <button className={`rte-btn${editor.isActive("bold")        ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run(); }} title={t("reportsCommon.richText.bold")}>B</button>
+                      <button className={`rte-btn${editor.isActive("italic")      ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleItalic().run(); }} title={t("reportsCommon.richText.italic")}><em>I</em></button>
+                      <button className={`rte-btn${editor.isActive("strike")      ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleStrike().run(); }} title={t("reportsCommon.richText.strikethrough")}><s>S</s></button>
                       <span className="rte-divider" />
-                      <button className={`rte-btn${editor.isActive("bulletList")  ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run(); }} title="Bullet list">≡</button>
-                      <button className={`rte-btn${editor.isActive("orderedList") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleOrderedList().run(); }} title="Numbered list">1.</button>
+                      <button className={`rte-btn${editor.isActive("bulletList")  ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run(); }} title={t("reportsCommon.richText.bulletList")}>≡</button>
+                      <button className={`rte-btn${editor.isActive("orderedList") ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleOrderedList().run(); }} title={t("reportsCommon.richText.numberedList")}>1.</button>
                       <span className="rte-divider" />
-                      <button className={`rte-btn${editor.isActive("blockquote")  ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBlockquote().run(); }} title="Blockquote">"</button>
+                      <button className={`rte-btn${editor.isActive("blockquote")  ? " rte-btn--active" : ""}`} onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBlockquote().run(); }} title={t("reportsCommon.richText.blockquote")}>"</button>
                     </div>
                   )}
                   <EditorContent editor={editor} />
@@ -3780,11 +3790,11 @@ function ReportPage({
 
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Filters</span>
+              <span className="annotate-card-title">{t("reportsAnnotations.filtersTitle")}</span>
             </div>
             <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
               {!hasActiveFilters ? (
-                <div style={{ color: "var(--color-text-muted)" }}>All selected objects and sources are included.</div>
+                <div style={{ color: "var(--color-text-muted)" }}>{t("reportsAnnotations.allSelectedObjectsAndSources")}</div>
               ) : (
                 <>
                   {activeCaseFilterDetails.length > 0 && (
@@ -3893,7 +3903,7 @@ function ReportPage({
                   {dataLoading ? (
                     <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsAnnotations.loadingEllipsis")}</p>
                   ) : filteredAnns.length === 0 ? (
-                    <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No statistics data for the current filters.</p>
+                    <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{t("reportsAnnotations.empty.noStatsForFilters")}</p>
                   ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -3904,7 +3914,7 @@ function ReportPage({
                             </div>
                           </div>
                           {annotationFrequencyStats.length === 0 ? (
-                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No annotation frequency data for the current filters.</p>
+                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>{t("reportsAnnotations.empty.noAnnotationFrequencyForFilters")}</p>
                           ) : (
                             <Suspense
                               fallback={
@@ -3939,7 +3949,7 @@ function ReportPage({
                             </div>
                           </div>
                           {annotationDocumentStats.length === 0 ? (
-                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No document frequency data for the current filters.</p>
+                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>{t("reportsAnnotations.empty.noDocumentFrequencyForFilters")}</p>
                           ) : (
                             <Suspense
                               fallback={
@@ -3974,7 +3984,7 @@ function ReportPage({
                             </div>
                           </div>
                           {coverageStats.rows.length === 0 ? (
-                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>No coverage data for the current filters.</p>
+                            <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>{t("reportsAnnotations.empty.noCoverageForFilters")}</p>
                           ) : (
                             <Suspense
                               fallback={
@@ -4092,7 +4102,7 @@ function ReportPage({
                     <label className="toggle-switch" style={{ marginBottom: 0 }}>
                       <input type="checkbox" checked={showContext} onChange={(e) => setShowContext(e.target.checked)} />
                       <span className="toggle-track"><span className="toggle-thumb" /></span>
-                      <span style={{ fontSize: 11 }}>Context</span>
+                      <span style={{ fontSize: 11 }}>{t("reportsAnnotations.context")}</span>
                     </label>
                     {showContext && (
                       <>
@@ -4188,7 +4198,7 @@ function ReportPage({
             {!isFrozen && !dataLoading && caseTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>Object Type</div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{t("reportsAnnotations.objectType")}</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set(caseTypeOptions))}>{t("reportsCodes.actions.all")}</button>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
@@ -4267,7 +4277,7 @@ function ReportPage({
             {!isFrozen && !dataLoading && documentTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>Source Type</div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{t("reportsAnnotations.sourceType")}</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set(documentTypeOptions))}>{t("reportsCodes.actions.all")}</button>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
@@ -4461,7 +4471,7 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      if (!postgresProjectId) throw new Error("Reports are not available outside a project workspace.");
+      if (!postgresProjectId) throw new Error(t("reportsCommon.projectWorkspaceRequired"));
       await deletePostgresReport(postgresProjectId, confirmDelete.id);
       setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
       setConfirmDelete(null);
@@ -4536,7 +4546,7 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
           <button
             type="button"
             className="users-help-icon-btn"
-            aria-label="Show annotation reports help"
+            aria-label={t("reportsAnnotations.openHelp")}
             title={t("reportsAnnotations.openHelp")}
             onClick={() => setHelpOpen(true)}
           >

@@ -8,6 +8,7 @@ import {
   type PostgresRelationshipEndpointOption,
   type PostgresRelationshipModalTab,
 } from "./PostgresRelationshipModal";
+import { useI18n } from "../i18n/provider";
 
 type RelationshipDraftModalProps = {
   relationshipTypes: PostgresRelationshipType[];
@@ -54,15 +55,16 @@ export function PostgresHomeRelationshipModals(props: {
   onNewRelationshipTypeFromCreate: () => void;
   onNewRelationshipTypeFromEdit: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
       {props.createOpen ? (
         <PostgresRelationshipModal
-          title="Create relationship"
-          ariaLabel="Create relationship tabs"
+          title={t("sharedModals.relationshipModal.createTitle")}
+          ariaLabel={t("sharedModals.relationshipModal.createTabs")}
           tab={props.createTab}
           setTab={props.setCreateTab}
-          submitLabel="Add relationship"
+          submitLabel={t("sharedModals.relationshipModal.addRelationship")}
           relationshipTypes={props.createDraft.relationshipTypes}
           relationshipTypeId={props.createDraft.relationshipTypeId}
           setRelationshipTypeId={props.createDraft.setRelationshipTypeId}
@@ -95,11 +97,11 @@ export function PostgresHomeRelationshipModals(props: {
       ) : null}
       {props.editingRelationshipId ? (
         <PostgresRelationshipModal
-          title="Edit relationship"
-          ariaLabel="Edit relationship tabs"
+          title={t("sharedModals.relationshipModal.editTitle")}
+          ariaLabel={t("sharedModals.relationshipModal.editTabs")}
           tab={props.editTab}
           setTab={props.setEditTab}
-          submitLabel="Save"
+          submitLabel={t("common.save")}
           relationshipTypes={props.editDraft.relationshipTypes}
           relationshipTypeId={props.editDraft.relationshipTypeId}
           setRelationshipTypeId={props.editDraft.setRelationshipTypeId}

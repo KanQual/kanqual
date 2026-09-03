@@ -16,6 +16,7 @@ import {
 } from "../lib/postgres";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { PostgresSourceCodebookCard } from "./Postgres_Source_Coding_Shared";
+import { useI18n } from "../i18n/provider";
 
 type AnalysisId = "conceptual-summary" | "decomposition" | "position" | "most-typical-annotation" | "most-unique-annotation";
 
@@ -52,32 +53,12 @@ type AnalysisState = {
   result: AnalysisResult | null;
 };
 
-const ANALYSIS_OPTIONS: Array<{ id: AnalysisId; title: string; description: string }> = [
-  {
-    id: "conceptual-summary",
-    title: "Conceptual Summary",
-    description: "Summarize what the selected code represents across its annotations.",
-  },
-  {
-    id: "decomposition",
-    title: "Code Decomposition",
-    description: "Look for sub-clusters, outliers, and internal tensions.",
-  },
-  {
-    id: "position",
-    title: "Code Position",
-    description: "Review how this code fits in the codebook hierarchy.",
-  },
-  {
-    id: "most-typical-annotation",
-    title: "Most Typical Annotations",
-    description: "Find annotations that best exemplify the code.",
-  },
-  {
-    id: "most-unique-annotation",
-    title: "Most Unique Annotations",
-    description: "Find annotations that are most distinct within the code.",
-  },
+const ANALYSIS_OPTION_IDS: AnalysisId[] = [
+  "conceptual-summary",
+  "decomposition",
+  "position",
+  "most-typical-annotation",
+  "most-unique-annotation",
 ];
 
 function emptyAnalysisState(): AnalysisState {
@@ -142,7 +123,7 @@ function parseSnapshot(row: PostgresAiAnalysis): AnalysisSnapshot | null {
     if (!parsed || typeof parsed !== "object" || parsed.reportType !== "ai-analysis") return null;
     const candidate = parsed as Record<string, unknown>;
     const selectedAnalysisIds = Array.isArray(candidate.selectedAnalysisIds)
-      ? candidate.selectedAnalysisIds.filter((id): id is AnalysisId => ANALYSIS_OPTIONS.some((option) => option.id === id))
+      ? candidate.selectedAnalysisIds.filter((id): id is AnalysisId => ANALYSIS_OPTION_IDS.includes(id))
       : [];
     const results = (candidate.results && typeof candidate.results === "object" ? candidate.results : {}) as Partial<Record<AnalysisId, AnalysisResult>>;
     return {
@@ -200,6 +181,7 @@ export function PostgresAIAssistAnalyzeView({
   canUseAiAnalyzeTools: boolean;
   onOpenAnnotation: (target: { sourceId: string; annotationId: string }) => void;
 }) {
+  const { t } = useI18n();
   const [codes, setCodes] = useState<PostgresCode[]>([]);
   const [annotations, setAnnotations] = useState<PostgresAnnotationSummary[]>([]);
   const [sourceNameById, setSourceNameById] = useState<Record<string, string>>({});
@@ -230,6 +212,33 @@ export function PostgresAIAssistAnalyzeView({
   const savedAnalysisContextMenuRef = useRef<HTMLDivElement | null>(null);
   const citationLinkRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const savedAnalysisContextMenuStyle = useViewportContextMenuStyle(savedAnalysisContextMenu, savedAnalysisContextMenuRef);
+  const analysisOptions = useMemo<Array<{ id: AnalysisId; title: string; description: string }>>(() => [
+    {
+      id: "conceptual-summary",
+      title: t("aiAssist.analyze.options.conceptualSummary.title"),
+      description: t("aiAssist.analyze.options.conceptualSummary.description"),
+    },
+    {
+      id: "decomposition",
+      title: t("aiAssist.analyze.options.decomposition.title"),
+      description: t("aiAssist.analyze.options.decomposition.description"),
+    },
+    {
+      id: "position",
+      title: t("aiAssist.analyze.options.position.title"),
+      description: t("aiAssist.analyze.options.position.description"),
+    },
+    {
+      id: "most-typical-annotation",
+      title: t("aiAssist.analyze.options.mostTypicalAnnotation.title"),
+      description: t("aiAssist.analyze.options.mostTypicalAnnotation.description"),
+    },
+    {
+      id: "most-unique-annotation",
+      title: t("aiAssist.analyze.options.mostUniqueAnnotation.title"),
+      description: t("aiAssist.analyze.options.mostUniqueAnnotation.description"),
+    },
+  ], [t]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -246,7 +255,7 @@ export function PostgresAIAssistAnalyzeView({
       setSavedAnalyses(analyses);
       setAiAssistEnabled(aiSettings.enabled);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load AI analyses.");
+      setError(loadError instanceof Error ? loadError.message : t("aiAssist.analyze.errors.couldNotLoad"));
     } finally {
       setLoading(false);
     }
@@ -303,7 +312,7 @@ export function PostgresAIAssistAnalyzeView({
       .map((annotation) => ({
         id: annotation.id,
         sourceId: annotation.sourceId,
-        sourceName: sourceNameById[annotation.sourceId] || "Unknown source",
+        sourceName: sourceNameById[annotation.sourceId] || t("aiAssist.analyze.unknownSource"),
         quote: annotation.quote,
       }));
   }, [annotations, selectedCodeId, sourceNameById]);
@@ -366,7 +375,7 @@ export function PostgresAIAssistAnalyzeView({
 
   async function runAnalysis(id: AnalysisId, settings: PostgresInstallationSettings) {
     if (!selectedCode) return;
-    const option = ANALYSIS_OPTIONS.find((entry) => entry.id === id);
+    const option = analysisOptions.find((entry) => entry.id === id);
     const runtime = buildRuntimeRequest(settings);
     const annotationInputs = selectedAnnotationRefs.map((ref) => ({
       quote: ref.quote,
@@ -388,7 +397,7 @@ export function PostgresAIAssistAnalyzeView({
           busy: false,
           error: "",
           result: {
-            title: option?.title ?? "Conceptual Summary",
+            title: option?.title ?? t("aiAssist.analyze.options.conceptualSummary.title"),
             body: compactText(insights ? `${summary}\n\nKey Insights\n${insights}` : summary),
             model: response.model,
             baseUrl: response.baseUrl,
@@ -401,7 +410,7 @@ export function PostgresAIAssistAnalyzeView({
           busy: false,
           error: "",
           result: {
-            title: option?.title ?? "Code Decomposition",
+            title: option?.title ?? t("aiAssist.analyze.options.decomposition.title"),
             body: compactText(response.content),
             model: response.model,
             baseUrl: response.baseUrl,
@@ -419,7 +428,7 @@ export function PostgresAIAssistAnalyzeView({
           busy: false,
           error: "",
           result: {
-            title: option?.title ?? "Code Position",
+            title: option?.title ?? t("aiAssist.analyze.options.position.title"),
             body: compactText(response.content),
             model: response.model,
             baseUrl: response.baseUrl,
@@ -441,7 +450,7 @@ export function PostgresAIAssistAnalyzeView({
           busy: false,
           error: "",
           result: {
-            title: option?.title ?? "Annotation Analysis",
+            title: option?.title ?? t("aiAssist.analyze.analysis"),
             body: items.map((item, index) => `${index + 1}. ${item.ref.sourceName}\n"${item.ref.quote}"${item.reasoning ? `\n${item.reasoning}` : ""}`).join("\n\n"),
             model: response.model,
             baseUrl: response.baseUrl,
@@ -452,7 +461,7 @@ export function PostgresAIAssistAnalyzeView({
     } catch (runError) {
       setAnalysisState(id, {
         busy: false,
-        error: runError instanceof Error ? runError.message : "Could not run analysis.",
+        error: runError instanceof Error ? runError.message : t("aiAssist.analyze.errors.couldNotRun"),
         result: null,
       });
     }
@@ -463,7 +472,7 @@ export function PostgresAIAssistAnalyzeView({
     const settings = await getPostgresInstallationSettings();
     if (settings.llm.connectionMode === "none") {
       for (const id of selectedAnalyses) {
-        setAnalysisState(id, { busy: false, error: "Choose an LLM connection before running code analysis.", result: null });
+        setAnalysisState(id, { busy: false, error: t("aiAssist.analyze.errors.chooseConnection"), result: null });
       }
       return;
     }
@@ -487,7 +496,7 @@ export function PostgresAIAssistAnalyzeView({
 
   async function handleSave() {
     if (!selectedCode || !hasAnyResult || hasBusyAnalysis) return;
-    const title = saveName.trim() || `${selectedCode.label} Analysis`;
+    const title = saveName.trim() || t("aiAssist.analyze.defaultAnalysisTitle", { code: selectedCode.label });
     setSaving(true);
     setSaveError("");
     try {
@@ -508,7 +517,7 @@ export function PostgresAIAssistAnalyzeView({
       setSaveName("");
       await loadData();
     } catch (saveErrorValue) {
-      setSaveError(saveErrorValue instanceof Error ? saveErrorValue.message : "Could not save analysis.");
+      setSaveError(saveErrorValue instanceof Error ? saveErrorValue.message : t("aiAssist.analyze.errors.couldNotSave"));
     } finally {
       setSaving(false);
     }
@@ -518,7 +527,7 @@ export function PostgresAIAssistAnalyzeView({
     setSavedAnalysisContextMenu(null);
     const snapshot = parseSnapshot(row);
     if (!snapshot) {
-      setError("The saved analysis snapshot could not be read.");
+      setError(t("aiAssist.analyze.errors.unreadableSnapshot"));
       return;
     }
     setLoadedAnalysis(row);
@@ -531,7 +540,7 @@ export function PostgresAIAssistAnalyzeView({
       "most-typical-annotation": emptyAnalysisState(),
       "most-unique-annotation": emptyAnalysisState(),
     };
-    for (const id of ANALYSIS_OPTIONS.map((option) => option.id)) {
+    for (const id of ANALYSIS_OPTION_IDS) {
       const result = snapshot.results[id];
       if (result) nextStates[id] = { busy: false, error: "", result };
     }
@@ -550,33 +559,33 @@ export function PostgresAIAssistAnalyzeView({
       }
       await loadData();
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Could not delete analysis.");
+      setError(deleteError instanceof Error ? deleteError.message : t("aiAssist.analyze.errors.couldNotDelete"));
     } finally {
       setDeleteBusyId(null);
     }
   }
 
   if (!canUseAiAnalyzeTools) {
-    return <div className="view"><div className="empty-state"><p>You do not have permission to use AI code analysis tools.</p></div></div>;
+    return <div className="view"><div className="empty-state"><p>{t("aiAssist.analyze.noPermission")}</p></div></div>;
   }
 
   if (!aiAssistEnabled) {
-    return <div className="view"><div className="empty-state"><p>Enable AI Assist in project settings before running code analysis.</p></div></div>;
+    return <div className="view"><div className="empty-state"><p>{t("aiAssist.analyze.enableAiAssist")}</p></div></div>;
   }
 
   return (
     <div className="view annotate-view ai-assisted-coding-annotate-view">
       <div className="annotate-back-bar">
         <div className="users-title-wrap">
-          <h1>Analyze Codes</h1>
-          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} title="About Analyze Codes" aria-label="About Analyze Codes">
+          <h1>{t("aiAssist.analyze.title")}</h1>
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} title={t("aiAssist.analyze.openHelp")} aria-label={t("aiAssist.analyze.openHelp")}>
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
       </div>
 
       {error ? <p className="users-error">{error}</p> : null}
-      {loading ? <p className="users-guide-copy">Loading code analyses...</p> : null}
+      {loading ? <p className="users-guide-copy">{t("aiAssist.analyze.loading")}</p> : null}
 
       <div className="annotate-layout ai-assisted-coding-annotate-layout ai-assisted-coding-analyze-layout">
         <div className="annotate-left">
@@ -590,12 +599,12 @@ export function PostgresAIAssistAnalyzeView({
 
           <div className="annotate-card" style={{ marginTop: 16 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Saved Analyses</span>
+              <span className="annotate-card-title">{t("aiAssist.analyze.savedAnalyses")}</span>
               <button
                 type="button"
                 className="btn btn--small ai-saved-new-icon-button"
-                aria-label="New analysis"
-                title="New analysis"
+                aria-label={t("aiAssist.analyze.newAnalysis")}
+                title={t("aiAssist.analyze.newAnalysis")}
                 onClick={() => {
                   setLoadedAnalysis(null);
                   setSelectedCodeId(null);
@@ -609,7 +618,7 @@ export function PostgresAIAssistAnalyzeView({
             <div className="ai-chat-list">
               {savedAnalyses.length === 0 ? (
                 <div className="empty-state ai-chat-empty-state">
-                  <p>No saved analyses.</p>
+                  <p>{t("aiAssist.analyze.noSavedAnalyses")}</p>
                 </div>
               ) : savedAnalyses.map((row) => (
                 <button
@@ -623,7 +632,7 @@ export function PostgresAIAssistAnalyzeView({
                   }}
                 >
                     <strong>{row.title}</strong>
-                    <span>{row.createdByName || "Unknown"} · {formatDate(row.createdAt)}</span>
+                    <span>{row.createdByName || t("aiAssist.analyze.unknown")} · {formatDate(row.createdAt)}</span>
                 </button>
               ))}
             </div>
@@ -639,7 +648,7 @@ export function PostgresAIAssistAnalyzeView({
                 }}
                 disabled={deleteBusyId === savedAnalysisContextMenu.analysisId}
               >
-                Delete analysis
+                {t("aiAssist.analyze.deleteAnalysis")}
               </button>
             </div>
           ) : null}
@@ -648,9 +657,9 @@ export function PostgresAIAssistAnalyzeView({
         <div className="annotate-main">
           <div className="annotate-card annotate-card--grow ai-analyze-results-card">
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Analysis</span>
+              <span className="annotate-card-title">{t("aiAssist.analyze.analysis")}</span>
               {loadedAnalysis ? (
-                <span className="backup-field-hint">Saved</span>
+                <span className="backup-field-hint">{t("aiAssist.analyze.saved")}</span>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <input
@@ -658,11 +667,11 @@ export function PostgresAIAssistAnalyzeView({
                     style={{ width: 220, height: 30 }}
                     value={saveName}
                     onChange={(event) => setSaveName(event.target.value)}
-                    placeholder={selectedCode ? `${selectedCode.label} Analysis` : "Analysis name"}
+                    placeholder={selectedCode ? t("aiAssist.analyze.defaultAnalysisTitle", { code: selectedCode.label }) : t("aiAssist.analyze.analysisName")}
                     disabled={!hasAnyResult || saving}
                   />
                   <button type="button" className="btn btn--small btn--primary" onClick={() => void handleSave()} disabled={!hasAnyResult || hasBusyAnalysis || saving}>
-                    {saving ? "Saving..." : "Save"}
+                    {saving ? t("aiAssist.analyze.saving") : t("aiAssist.analyze.save")}
                   </button>
                 </div>
               )}
@@ -681,8 +690,8 @@ export function PostgresAIAssistAnalyzeView({
                   <span className="doc-inline-disclosure-chevron" aria-hidden="true">
                     {analysisTypesOpen ? "\u25be" : "\u25b8"}
                   </span>
-                  <span className="doc-inline-disclosure-label">Analysis Types</span>
-                  <span className="ai-analyze-inline-badge">{selectedAnalyses.size} selected</span>
+                  <span className="doc-inline-disclosure-label">{t("aiAssist.analyze.analysisTypes")}</span>
+                  <span className="ai-analyze-inline-badge">{t("aiAssist.analyze.selectedCount", { count: selectedAnalyses.size })}</span>
                 </button>
                 <div className="ai-segments-header-actions">
                   {!isReadOnly ? (
@@ -692,7 +701,7 @@ export function PostgresAIAssistAnalyzeView({
                       onClick={() => void handleRunSelected()}
                       disabled={!selectedCode || selectedAnalyses.size === 0 || selectedAnnotationRefs.length === 0 || hasBusyAnalysis}
                     >
-                      {hasBusyAnalysis ? "Running" : "Run Selected"}
+                      {hasBusyAnalysis ? t("aiAssist.analyze.running") : t("aiAssist.analyze.runSelected")}
                     </button>
                   ) : null}
                 </div>
@@ -702,15 +711,15 @@ export function PostgresAIAssistAnalyzeView({
                   <div className="ai-segments-summary">
                     {selectedCode ? (
                       <>
-                        <span className="ai-segments-summary-label">Selected code</span>
+                        <span className="ai-segments-summary-label">{t("aiAssist.analyze.selectedCode")}</span>
                         <span className="ai-segments-summary-value">{selectedCode.label}</span>
                       </>
                     ) : (
-                      <span className="annotation-list-empty">Select one code before running an analysis.</span>
+                      <span className="annotation-list-empty">{t("aiAssist.analyze.selectOneCode")}</span>
                     )}
                   </div>
                   <div className="ai-analyze-options">
-                    {ANALYSIS_OPTIONS.map((option) => {
+                    {analysisOptions.map((option) => {
                       const state = states[option.id];
                       const selected = selectedAnalyses.has(option.id);
                       return (
@@ -724,7 +733,7 @@ export function PostgresAIAssistAnalyzeView({
                               </div>
                             </button>
                             <span className={`ai-analyze-option-status ai-analyze-option-status--${state.busy ? "busy" : state.error ? "error" : state.result ? "done" : "idle"}`}>
-                              {state.busy ? "Running" : state.error ? "Error" : state.result ? "Done" : ""}
+                              {state.busy ? t("aiAssist.analyze.running") : state.error ? t("aiAssist.analyze.statusError") : state.result ? t("aiAssist.analyze.statusDone") : ""}
                             </span>
                           </div>
                         </div>
@@ -732,7 +741,7 @@ export function PostgresAIAssistAnalyzeView({
                     })}
                   </div>
                   {selectedCode && selectedAnnotationRefs.length === 0 ? (
-                    <p className="form-error project-settings-error">This code has no annotations yet.</p>
+                    <p className="form-error project-settings-error">{t("aiAssist.analyze.codeHasNoAnnotations")}</p>
                   ) : null}
                 </div>
               ) : null}
@@ -740,12 +749,12 @@ export function PostgresAIAssistAnalyzeView({
 
             {!hasAnyResult && !hasBusyAnalysis ? (
               <div className="ai-attribute-placeholder">
-                <p>Select a code, choose one or more analyses, and run them.</p>
+                <p>{t("aiAssist.analyze.placeholder")}</p>
               </div>
             ) : null}
 
             <div className="ai-analyze-result">
-              {ANALYSIS_OPTIONS.map((option) => {
+              {analysisOptions.map((option) => {
                 const state = states[option.id];
                 if (!state.busy && !state.error && !state.result) return null;
                 return (
@@ -759,7 +768,7 @@ export function PostgresAIAssistAnalyzeView({
                     {state.busy ? (
                       <div className="ai-segments-search-state ai-analyze-inline-progress">
                         <div className="ai-segments-progress" aria-hidden="true"><span className="ai-segments-progress-bar" /></div>
-                        <div className="ai-segments-search-copy">Running analysis...</div>
+                        <div className="ai-segments-search-copy">{t("aiAssist.analyze.runningAnalysis")}</div>
                       </div>
                     ) : null}
                     {state.error ? <div className="form-error project-settings-error">{state.error}</div> : null}
@@ -772,12 +781,12 @@ export function PostgresAIAssistAnalyzeView({
                             (_ref, citationIndex) => handleInlineCitationClick(option.id, citationIndex),
                           )}
                         </p>
-                        <p className="backup-field-hint ai-analyze-result-meta">Generated with {state.result.model}</p>
+                        <p className="backup-field-hint ai-analyze-result-meta">{t("aiAssist.analyze.generatedWith", { model: state.result.model })}</p>
                         {state.result.annotationRefs.length > 0 ? (
                           <div className="ai-chat-citations ai-chat-citations--collapsible ai-analyze-citations">
                             <div className="ai-chat-citations-toggle">
                               <div className="ai-chat-citations-title">
-                                <strong>Citations</strong>
+                                <strong>{t("aiAssist.analyze.citations")}</strong>
                                 <span>{state.result.annotationRefs.length}</span>
                               </div>
                               <button
@@ -785,7 +794,7 @@ export function PostgresAIAssistAnalyzeView({
                                 className="btn ai-chat-citations-toggle-btn"
                                 onClick={() => toggleCitationOpen(option.id)}
                               >
-                                {openCitationIds[option.id] ? "Hide" : "Show"}
+                                {openCitationIds[option.id] ? t("aiAssist.chat.hideCitations") : t("aiAssist.chat.showCitations")}
                               </button>
                             </div>
                             {openCitationIds[option.id] ? (
@@ -806,7 +815,7 @@ export function PostgresAIAssistAnalyzeView({
                                       title={ref.quote}
                                     >
                                       <span className="ai-chat-citation-number">[{index + 1}]</span>
-                                      <span className="ai-chat-citation-kind ai-chat-citation-kind--annotation">Annotation:</span>
+                                      <span className="ai-chat-citation-kind ai-chat-citation-kind--annotation">{t("aiAssist.analyze.annotationPrefix")}</span>
                                       <span className="ai-chat-citation-line">
                                         <strong>{ref.sourceName}</strong>
                                         <small>{ref.quote}</small>
@@ -830,43 +839,43 @@ export function PostgresAIAssistAnalyzeView({
 
       {citationModal ? (
         <SettingsModal
-          title={`Citation [${citationModal.index + 1}]`}
-          subtitle="Annotation"
+          title={t("aiAssist.analyze.citationTitle", { number: citationModal.index + 1 })}
+          subtitle={t("aiAssist.analyze.annotation")}
           onClose={() => setCitationModal(null)}
           modalClassName="modal--wide ai-citation-detail-modal"
         >
             <div className="ai-citation-detail-body">
               <div className="ai-citation-detail-summary">
-                <span>Source</span>
+                <span>{t("aiAssist.analyze.source")}</span>
                 <strong>{citationModal.ref.sourceName}</strong>
               </div>
               <div className="ai-citation-detail-text">
-                <span>Annotation</span>
+                <span>{t("aiAssist.analyze.annotation")}</span>
                 <p>{citationModal.ref.quote}</p>
               </div>
               <div className="ai-citation-detail-grid">
                 <div>
-                  <span>Annotation ID</span>
+                  <span>{t("aiAssist.analyze.annotationId")}</span>
                   <strong>{citationModal.ref.id}</strong>
                 </div>
                 <div>
-                  <span>Source ID</span>
+                  <span>{t("aiAssist.analyze.sourceId")}</span>
                   <strong>{citationModal.ref.sourceId}</strong>
                 </div>
               </div>
             </div>
             <div className="project-export-actions project-export-actions--modal ai-citation-detail-actions">
               <button type="button" className="btn btn--primary" onClick={handleOpenAnalyzeCitationFromModal}>
-                Open
+                {t("aiAssist.analyze.open")}
               </button>
             </div>
         </SettingsModal>
       ) : null}
 
       {helpOpen ? (
-        <SettingsModal title="Analyze Codes" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("aiAssist.analyze.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
-            <p className="users-guide-copy">Select a code, choose one or more analysis actions, run grounded AI analyses, and open citations back in the coding view.</p>
+            <p className="users-guide-copy">{t("aiAssist.analyze.help.line1")}</p>
           </div>
         </SettingsModal>
       ) : null}

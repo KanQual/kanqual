@@ -455,7 +455,7 @@ export function PostgresSourceImageCodingView({
           const viewport = page.getViewport({ scale: 1.6 });
           const canvas = document.createElement("canvas");
           const context = canvas.getContext("2d");
-          if (!context) throw new Error("Could not prepare the PDF page preview.");
+          if (!context) throw new Error(t("sourceCoding.image.pdfPreviewPrepareFailed"));
           canvas.width = Math.ceil(viewport.width);
           canvas.height = Math.ceil(viewport.height);
           await page.render({ canvas, canvasContext: context, viewport }).promise;
@@ -463,7 +463,7 @@ export function PostgresSourceImageCodingView({
           const blob = await new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((nextBlob) => {
               if (nextBlob) resolve(nextBlob);
-              else reject(new Error("Could not render the PDF page preview."));
+              else reject(new Error(t("sourceCoding.image.pdfPreviewRenderFailed")));
             }, "image/png");
           });
           objectUrl = URL.createObjectURL(blob);
@@ -518,7 +518,7 @@ export function PostgresSourceImageCodingView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isImageSource, isPdfSource, resolvedFilePath, selectedPdfPage]);
+  }, [isImageSource, isPdfSource, resolvedFilePath, selectedPdfPage, t]);
 
   useEffect(() => {
     const imageElement = imageRef.current;
@@ -831,13 +831,13 @@ export function PostgresSourceImageCodingView({
           >
             <ArrowLeftIcon className="code-text-header-back-icon" />
           </button>
-          <h1>Code {codingSourceLabel}</h1>
+          <h1>{t("sourceCoding.image.title", { label: codingSourceLabel })}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title={`Open code ${codingSourceName} help`}
-            aria-label={`Open code ${codingSourceName} help`}
+            title={t("sourceCoding.image.openHelp", { name: codingSourceName })}
+            aria-label={t("sourceCoding.image.openHelp", { name: codingSourceName })}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -848,26 +848,26 @@ export function PostgresSourceImageCodingView({
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Codebook</span>
+              <span className="annotate-card-title">{t("sourceCoding.common.codebook")}</span>
               <button
                 type="button"
                 className="codebook-icon-action"
                 onClick={() => setNewCodeOpen(true)}
                 disabled={!canCreateCodes || !onCreateCode || saving}
-                aria-label="New code"
-                title={canCreateCodes && onCreateCode ? "New code" : "You do not have permission to create codes."}
+                aria-label={t("sourceCoding.common.newCode")}
+                title={canCreateCodes && onCreateCode ? t("sourceCoding.common.newCode") : t("sourceCoding.common.noCodeCreatePermission")}
               >
                 +
               </button>
             </div>
             {pendingSelection ? (
               <div className="codebook-selection-hint">
-                Select a code to apply it to the current image region.
+                {t("sourceCoding.image.selectCodeHint")}
               </div>
             ) : null}
             <ul className="code-list">
               {codes.length === 0 ? (
-                <li className="code-list-empty">No codes yet.</li>
+                <li className="code-list-empty">{t("sourceCoding.common.noCodesYet")}</li>
               ) : (
                 visibleCodes.map(({ code, depth, hasChildren }) => (
                   <li
@@ -892,7 +892,7 @@ export function PostgresSourceImageCodingView({
                           event.stopPropagation();
                           toggleCollapsedCode(code.id);
                         }}
-                        title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
+                        title={collapsedCodeIds.has(code.id) ? t("sourceCoding.common.expand") : t("sourceCoding.common.collapse")}
                       >
                         {collapsedCodeIds.has(code.id) ? "\u25b6" : "\u25bc"}
                       </button>
@@ -941,10 +941,10 @@ export function PostgresSourceImageCodingView({
                         onClick={() => setSelectedPdfPage((current) => Math.max(1, current - 1))}
                         disabled={selectedPdfPage <= 1 || imagePreviewLoading}
                       >
-                        Prev
+                        {t("sourceCoding.image.previousPage")}
                       </button>
                       <span className="users-guide-copy" style={{ margin: 0, whiteSpace: "nowrap" }}>
-                        Page {selectedPdfPage} / {pdfPageCount}
+                        {t("sourceCoding.image.page")} {selectedPdfPage} / {pdfPageCount}
                       </span>
                       <button
                         type="button"
@@ -952,7 +952,7 @@ export function PostgresSourceImageCodingView({
                         onClick={() => setSelectedPdfPage((current) => Math.min(pdfPageCount, current + 1))}
                         disabled={selectedPdfPage >= pdfPageCount || imagePreviewLoading}
                       >
-                        Next
+                        {t("sourceCoding.image.nextPage")}
                       </button>
                     </>
                   ) : null}
@@ -987,12 +987,12 @@ export function PostgresSourceImageCodingView({
             <div style={{ marginTop: 12, marginBottom: 12 }}>
               {sourceLockConflict?.reason === "kicked" ? (
                 <p className="users-guide-copy" style={{ margin: 0 }}>
-                  {sourceLockConflict.userName || "A project editor"} removed your source lock. Return to the source list or reacquire access before annotating again.
+                  {t("sourceCoding.common.sourceLockRemoved", { userName: sourceLockConflict.userName || t("sourceCoding.common.projectEditor") })}
                 </p>
               ) : sourceLockConflict?.reason === "locked" ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    {sourceLockConflict.userName || "Another user"} is currently annotating this source.
+                    {t("sourceCoding.common.sourceLockHeld", { userName: sourceLockConflict.userName || t("sourceCoding.common.anotherUser") })}
                   </p>
                   {canKickSourceLocks ? (
                     <button
@@ -1001,24 +1001,24 @@ export function PostgresSourceImageCodingView({
                       onClick={() => void onKickSourceLock(sourceLockConflict)}
                       disabled={saving || lockSyncing}
                     >
-                      {lockSyncing ? "Updating..." : "Take Lock"}
+                      {lockSyncing ? t("sourceCoding.common.updating") : t("sourceCoding.common.takeLock")}
                     </button>
                   ) : null}
                 </div>
               ) : canEditAnnotations ? null : (
                 <p className="users-guide-copy" style={{ margin: 0 }}>
-                  {lockSyncing ? "Claiming the source lock for annotation..." : "This source is currently read-only in the coding workspace."}
+                  {lockSyncing ? t("sourceCoding.common.claimingSourceLock") : t("sourceCoding.common.readOnlyWorkspace")}
                 </p>
               )}
             </div>
 
             {imagePreviewLoading ? (
-              <p className="users-guide-copy" style={{ margin: 0 }}>Loading image preview...</p>
+              <p className="users-guide-copy" style={{ margin: 0 }}>{t("sourceCoding.image.loadingPreview")}</p>
             ) : imagePreviewError ? (
               <div style={{ display: "grid", gap: 8 }}>
                 <p className="auth-error" style={{ margin: 0 }}>{imagePreviewError}</p>
                 <p className="users-guide-copy" style={{ margin: 0 }}>
-                  The image file is stored with this source, but its preview could not be opened.
+                  {t("sourceCoding.image.previewOpenFailed")}
                 </p>
               </div>
             ) : imagePreviewUrl ? (
@@ -1217,7 +1217,7 @@ export function PostgresSourceImageCodingView({
                 </div>
               </div>
             ) : (
-              <p className="case-card-empty">No image preview is available for this source.</p>
+              <p className="case-card-empty">{t("sourceCoding.image.noPreview")}</p>
             )}
           </div>
         </div>
@@ -1235,7 +1235,7 @@ export function PostgresSourceImageCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Edit code
+              {t("sourceCoding.common.editCode")}
             </button>
           ) : null}
           {canManageMemos ? (
@@ -1246,7 +1246,7 @@ export function PostgresSourceImageCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Memo about code
+              {t("sourceCoding.common.memoAboutCode")}
             </button>
           ) : null}
           {canCreateCodes && onCreateCode ? (
@@ -1259,7 +1259,7 @@ export function PostgresSourceImageCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Add child code
+              {t("sourceCoding.common.addChildCode")}
             </button>
           ) : null}
           {canCreateCodes && onDeleteCode ? (
@@ -1271,7 +1271,7 @@ export function PostgresSourceImageCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Delete code
+              {t("sourceCoding.common.deleteCode")}
             </button>
           ) : null}
         </div>
@@ -1297,8 +1297,8 @@ export function PostgresSourceImageCodingView({
       {childCodeParentRow ? (
         <NewCodeModal
           allCodes={codebookRows}
-          title="Add Child Code"
-          submitLabel="Create Code"
+          title={t("sourceCoding.common.addChildCodeTitle")}
+          submitLabel={t("sourceCoding.common.createCode")}
           initialParentId={childCodeParentRow.id}
           onSubmit={async (payload) => {
             if (!onCreateCode || !canCreateCodes) return;
@@ -1317,8 +1317,8 @@ export function PostgresSourceImageCodingView({
       {editingCodeRow ? (
         <NewCodeModal
           allCodes={codebookRows}
-          title="Edit Code"
-          submitLabel="Save Changes"
+          title={t("sourceCoding.common.editCodeTitle")}
+          submitLabel={t("sourceCoding.common.saveChanges")}
           initialLabel={editingCodeRow.label}
           initialDescription={editingCodeRow.description}
           initialColor={editingCodeRow.color}
@@ -1339,40 +1339,40 @@ export function PostgresSourceImageCodingView({
       ) : null}
 
       {helpOpen ? (
-        <SettingsModal title={`Code ${codingSourceLabel} Help`} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("sourceCoding.image.helpTitle", { label: codingSourceLabel })} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Draw a region on the {codingSourceName}, choose one or more codes, and save it as a coded annotation.
+              {t("sourceCoding.image.helpLine1")}
             </p>
             <p className="users-guide-copy">
-              Use zoom, {isPdfSource ? "page selection, " : ""}region handles, annotation filters, and the annotation panel to review or edit {codingSourceName} annotations.
+              {t("sourceCoding.image.helpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
       ) : null}
 
       {deletingCodeRow ? (
-        <SettingsModal title="Delete Code" onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
+        <SettingsModal title={t("sourceCoding.common.deleteCodeTitle")} onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
           <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Delete <strong>{deletingCodeRow.label}</strong>?
+              {t("common.delete")} <strong>{deletingCodeRow.label}</strong>?
             </p>
             <p className="modal-warning-text">
-              This removes the code from the codebook and clears it from existing annotations.
+              {t("sourceCoding.common.deleteCodeWarning")}
             </p>
             {deleteCodeError ? <p className="auth-error">{deleteCodeError}</p> : null}
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
-              {deletingCode ? "Deleting..." : "Delete Code"}
+              {deletingCode ? t("sourceCoding.common.deleting") : t("sourceCoding.common.deleteCodeTitle")}
             </button>
           </div>
         </SettingsModal>
@@ -1393,7 +1393,7 @@ export function PostgresSourceImageCodingView({
 
       {pendingSelection && canEditAnnotations ? (
         <AnnotationEditorModal
-          title="New Annotation"
+          title={t("sourceCoding.common.newAnnotation")}
           codeOptions={codeOptions}
           selection={pendingSelection}
           saving={saving}
@@ -1411,7 +1411,7 @@ export function PostgresSourceImageCodingView({
 
       {editingAnnotation && canEditAnnotations ? (
         <AnnotationEditorModal
-          title="Edit Annotation"
+          title={t("sourceCoding.common.editAnnotation")}
           codeOptions={codeOptions}
           selection={{
             startOffset: editingAnnotation.startOffset ?? 0,
@@ -1420,7 +1420,10 @@ export function PostgresSourceImageCodingView({
             anchorKind: editingAnnotation.anchorKind,
             imageRegion: editingAnnotation.imageRegion,
             displayLabel: editingAnnotation.imageRegion
-              ? `Region ${Math.round(editingAnnotation.imageRegion.width)} x ${Math.round(editingAnnotation.imageRegion.height)} px`
+              ? t("sourceCoding.common.regionSize", {
+                width: Math.round(editingAnnotation.imageRegion.width),
+                height: Math.round(editingAnnotation.imageRegion.height),
+              })
               : undefined,
           }}
           initialAnnotation={editingAnnotation}

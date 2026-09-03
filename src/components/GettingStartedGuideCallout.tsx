@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRightToLine } from "lucide-react";
+import { useI18n } from "../i18n/provider";
 
 function renderGuidePortal(content: ReactNode) {
   if (typeof document !== "undefined" && document.body) {
@@ -28,31 +29,32 @@ export function GettingStartedGuideCallout({
   spotlight?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const { t } = useI18n();
 
   const content = collapsed ? (
     <button
       type="button"
       className="getting-started-guide-tab"
       onClick={() => setCollapsed(false)}
-      aria-label={`Open guide: ${title}`}
+      aria-label={t("app.gettingStarted.openGuide", { title })}
       title={title}
     >
-      Guide
+      {t("app.gettingStarted.guide")}
     </button>
   ) : (
     <aside
       className={`getting-started-callout${spotlight ? " getting-started-spotlight-target getting-started-callout--spotlight" : ""}`}
       aria-live="polite"
-      aria-label="Getting started guide"
+      aria-label={t("app.gettingStarted.guideAria")}
     >
       <div className="getting-started-callout-header">
-        <span>Guide</span>
+        <span>{t("app.gettingStarted.guide")}</span>
         <button
           type="button"
           className="getting-started-callout-collapse"
           onClick={() => setCollapsed(true)}
-          aria-label="Collapse guide"
-          title="Collapse guide"
+          aria-label={t("app.gettingStarted.collapseGuide")}
+          title={t("app.gettingStarted.collapseGuide")}
         >
           <ArrowRightToLine
             aria-hidden="true"
@@ -69,7 +71,7 @@ export function GettingStartedGuideCallout({
         {actions}
         {onDismiss ? (
           <button type="button" className="btn" onClick={onDismiss}>
-            Exit guide
+            {t("app.gettingStarted.exitGuide")}
           </button>
         ) : null}
       </div>

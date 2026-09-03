@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 import {
   listPostgresAttributeValueHistory,
   type PostgresAttributeValueHistoryEntry,
@@ -16,13 +17,13 @@ export type PostgresAttributeValueHistoryTarget = {
   attributeName: string;
 };
 
-function formatAction(action: string): string {
+function formatAction(action: string, t: ReturnType<typeof useI18n>["t"]): string {
   const normalized = action.trim().toLowerCase();
-  if (normalized === "set") return "Set";
-  if (normalized === "clear") return "Cleared";
-  if (normalized === "accept") return "Accepted";
-  if (normalized === "edit") return "Edited";
-  if (normalized === "reject") return "Rejected";
+  if (normalized === "set") return t("sharedModals.attributes.actions.set");
+  if (normalized === "clear") return t("sharedModals.attributes.actions.clear");
+  if (normalized === "accept") return t("sharedModals.attributes.actions.accept");
+  if (normalized === "edit") return t("sharedModals.attributes.actions.edit");
+  if (normalized === "reject") return t("sharedModals.attributes.actions.reject");
   return action.trim() || "-";
 }
 
@@ -46,6 +47,7 @@ export function PostgresAttributeValueHistoryModal({
   target: PostgresAttributeValueHistoryTarget;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [entries, setEntries] = useState<PostgresAttributeValueHistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -65,7 +67,7 @@ export function PostgresAttributeValueHistoryModal({
       })
       .catch((historyError) => {
         if (!cancelled) {
-          setError(historyError instanceof Error ? historyError.message : "Failed to load attribute value history.");
+          setError(historyError instanceof Error ? historyError.message : t("sharedModals.attributes.loadHistoryFailed"));
         }
       })
       .finally(() => {
@@ -74,48 +76,48 @@ export function PostgresAttributeValueHistoryModal({
     return () => {
       cancelled = true;
     };
-  }, [target.attributeDefinitionId, target.ownerId, target.ownerKind, target.projectId]);
+  }, [t, target.attributeDefinitionId, target.ownerId, target.ownerKind, target.projectId]);
 
   const ownerLabel = useMemo(() => {
     const kindLabel = target.ownerKind.slice(0, 1).toUpperCase() + target.ownerKind.slice(1);
-    return `${kindLabel}: ${target.ownerName || target.ownerId}`;
-  }, [target.ownerId, target.ownerKind, target.ownerName]);
+    return t("sharedModals.attributes.ownerLabel", { kind: kindLabel, name: target.ownerName || target.ownerId });
+  }, [t, target.ownerId, target.ownerKind, target.ownerName]);
 
   return (
     <SettingsModal
-      title="Attribute value history"
-      subtitle={`${target.attributeName} · ${ownerLabel}`}
+      title={t("sharedModals.attributes.historyTitle")}
+      subtitle={t("sharedModals.attributes.historySubtitle", { attributeName: target.attributeName, ownerLabel })}
       onClose={onClose}
       modalClassName="modal--wide"
     >
       <div className="app-settings-modal-body">
         {loading ? (
-          <p className="case-card-empty">Loading history...</p>
+          <p className="case-card-empty">{t("sharedModals.attributes.loadingHistory")}</p>
         ) : error ? (
           <p className="auth-error">{error}</p>
         ) : entries.length === 0 ? (
-          <p className="case-card-empty">No changes have been recorded for this value yet.</p>
+          <p className="case-card-empty">{t("sharedModals.attributes.emptyHistory")}</p>
         ) : (
           <div className="users-table-wrap attribute-history-table-wrap">
             <table className="users-table attribute-history-table">
               <thead>
                 <tr>
-                  <th className="users-th attribute-history-col-date">Changed</th>
-                  <th className="users-th attribute-history-col-action">Action</th>
-                  <th className="users-th attribute-history-col-value">Previous</th>
-                  <th className="users-th attribute-history-col-value">New</th>
-                  <th className="users-th attribute-history-col-ai">AI</th>
-                  <th className="users-th attribute-history-col-user">User</th>
+                  <th className="users-th attribute-history-col-date">{t("sharedModals.attributes.changed")}</th>
+                  <th className="users-th attribute-history-col-action">{t("sharedModals.attributes.action")}</th>
+                  <th className="users-th attribute-history-col-value">{t("sharedModals.attributes.previous")}</th>
+                  <th className="users-th attribute-history-col-value">{t("sharedModals.attributes.new")}</th>
+                  <th className="users-th attribute-history-col-ai">{t("sharedModals.attributes.ai")}</th>
+                  <th className="users-th attribute-history-col-user">{t("sharedModals.attributes.user")}</th>
                 </tr>
               </thead>
               <tbody>
                 {entries.map((entry) => (
                   <tr key={entry.id} className="users-row">
                     <td className="users-td users-td--muted">{formatChangedAt(entry.changedAt)}</td>
-                    <td className="users-td">{formatAction(entry.aiAssistAction || entry.changeAction)}</td>
+                    <td className="users-td">{formatAction(entry.aiAssistAction || entry.changeAction, t)}</td>
                     <td className="users-td">{formatValue(entry.previousValue)}</td>
                     <td className="users-td">{formatValue(entry.newValue)}</td>
-                    <td className="users-td">{entry.aiAssistRelated ? "Yes" : "No"}</td>
+                    <td className="users-td">{entry.aiAssistRelated ? t("common.yes") : t("common.no")}</td>
                     <td className="users-td users-td--muted">{entry.changedByName || "-"}</td>
                   </tr>
                 ))}

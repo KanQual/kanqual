@@ -1,4 +1,5 @@
 import { SettingsModal } from "./SettingsModal";
+import { useI18n } from "../i18n/provider";
 
 export type PostgresHomeCanvasAppearanceDraft = {
   backgroundColor: string;
@@ -21,6 +22,7 @@ export function PostgresCanvasAppearanceModal(props: {
   onReset: () => void;
   onDone: () => void;
 }) {
+  const { t } = useI18n();
   const {
     draft,
     saving,
@@ -34,14 +36,14 @@ export function PostgresCanvasAppearanceModal(props: {
 
   return (
     <SettingsModal
-      title="Edit canvas"
+      title={t("sharedModals.canvas.editTitle")}
       onClose={onDone}
       closeDisabled={saving}
     >
       <div className="form app-settings-modal-body">
         <div className="timeline-appearance-grid">
           <label className="form-label">
-            Background
+            {t("sharedModals.canvas.background")}
             <div className="timeline-group-color-control">
               <input
                 className="form-input form-input--color"
@@ -59,7 +61,7 @@ export function PostgresCanvasAppearanceModal(props: {
             </div>
           </label>
           <label className="form-label">
-            Gridlines
+            {t("sharedModals.canvas.gridlines")}
             <div className="timeline-group-color-control">
               <input
                 className="form-input form-input--color"
@@ -79,10 +81,10 @@ export function PostgresCanvasAppearanceModal(props: {
         </div>
         <div className="timeline-group-setting-row">
           <div>
-            <span className="form-label">Gridlines</span>
-            <div className="settings-row-desc">Show or hide gridlines behind graph canvases</div>
+            <span className="form-label">{t("sharedModals.canvas.gridlines")}</span>
+            <div className="settings-row-desc">{t("sharedModals.canvas.gridlinesDescription")}</div>
           </div>
-          <div className="segmented-control timeline-group-setting-control" role="tablist" aria-label="Canvas gridlines">
+          <div className="segmented-control timeline-group-setting-control" role="tablist" aria-label={t("sharedModals.canvas.gridlinesAria")}>
             <button
               type="button"
               role="tab"
@@ -91,7 +93,7 @@ export function PostgresCanvasAppearanceModal(props: {
               onClick={() => onDraftChange({ gridEnabled: true })}
               disabled={saving}
             >
-              Show
+              {t("sharedModals.canvas.show")}
             </button>
             <button
               type="button"
@@ -101,15 +103,15 @@ export function PostgresCanvasAppearanceModal(props: {
               onClick={() => onDraftChange({ gridEnabled: false })}
               disabled={saving}
             >
-              Hide
+              {t("sharedModals.canvas.hide")}
             </button>
           </div>
         </div>
         <fieldset disabled={!draft.gridEnabled || saving} style={{ border: 0, margin: 0, padding: 0 }}>
           <div className="settings-row">
             <div>
-              <div className="settings-row-label">Gridline Density</div>
-              <div className="settings-row-desc">Distance between canvas gridlines</div>
+              <div className="settings-row-label">{t("sharedModals.canvas.gridlineDensity")}</div>
+              <div className="settings-row-desc">{t("sharedModals.canvas.gridlineDensityDescription")}</div>
             </div>
             <div className="slider-control">
               <input
@@ -133,7 +135,7 @@ export function PostgresCanvasAppearanceModal(props: {
           onClick={onReset}
           disabled={saving}
         >
-          Reset
+          {t("common.reset")}
         </button>
         <button
           type="button"
@@ -141,7 +143,7 @@ export function PostgresCanvasAppearanceModal(props: {
           onClick={onDone}
           disabled={saving}
         >
-          {saving ? "Saving..." : "Done"}
+          {saving ? t("common.saving") : t("common.done")}
         </button>
       </div>
     </SettingsModal>

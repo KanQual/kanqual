@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { DeleteIcon, HelpIcon, PlusIcon, ProcessTranscriptIcon } from "../components/AppIcons";
 import { buildProcessedTranscriptContent } from "../components/ProcessedTranscriptView";
 import { SettingsModal } from "../components/SettingsModal";
+import { useI18n } from "../i18n/provider";
 import {
   collectSpeakerSummaries,
   DEFAULT_PROCESSED_DOCUMENT_REVIEW_LENSES,
@@ -143,6 +144,7 @@ function ReviewResultsPanel({
   registerReviewSegmentElement: (index: number, element: HTMLElement | null) => void;
   onActivateReviewSegment: (index: number) => void;
 }) {
+  const { t } = useI18n();
   const [newSpeakerSegmentKeys, setNewSpeakerSegmentKeys] = useState<Set<string>>(new Set());
 
   function updateReviewSegment(index: number, updates: Partial<TranscriptProcessingSegment>) {
@@ -210,7 +212,7 @@ function ReviewResultsPanel({
             <div className="ai-process-doc-segment-list">
               {reviewSegments.length === 0 ? (
                 <div className="empty-state ai-process-doc-empty">
-                  <p>No segments remain.</p>
+                  <p>{t("aiAssist.processSources.noSegmentsRemain")}</p>
                 </div>
               ) : (
                 reviewSegments.map((segment, index) => {
@@ -237,15 +239,15 @@ function ReviewResultsPanel({
                             event.stopPropagation();
                             removeReviewSegment(index);
                           }}
-                          title="Delete segment"
-                          aria-label="Delete segment"
+                          title={t("aiAssist.processSources.deleteSegment")}
+                          aria-label={t("aiAssist.processSources.deleteSegment")}
                         >
                           <DeleteIcon className="ai-process-doc-segment-delete-icon" />
                         </button>
                         <div className="ai-process-doc-segment-two-col">
                           <div className="ai-process-doc-segment-controls">
                             <label className="form-label ai-process-doc-segment-tag-select">
-                              Tag
+                              {t("aiAssist.processSources.tag")}
                               <select
                                 className="form-select"
                                 value={segment.segmentType}
@@ -258,18 +260,18 @@ function ReviewResultsPanel({
                                   });
                                 }}
                               >
-                                <option value="metadata">Metadata</option>
-                                <option value="question">Question</option>
-                                <option value="answer">Answer</option>
+                                <option value="metadata">{t("aiAssist.processSources.metadata")}</option>
+                                <option value="question">{t("aiAssist.processSources.question")}</option>
+                                <option value="answer">{t("aiAssist.processSources.answer")}</option>
                               </select>
                             </label>
                             {segment.segmentType !== "metadata" && segmentContainsTimestamp(segment) ? (
-                              <span className="role-badge role-badge--viewer">Timestamp</span>
+                              <span className="role-badge role-badge--viewer">{t("aiAssist.processSources.timestamp")}</span>
                             ) : null}
                             {segment.segmentType !== "metadata" ? (
                               <div className="ai-process-doc-speaker-field">
                                 <label className="form-label">
-                                  Speaker
+                                  {t("aiAssist.processSources.speaker")}
                                   <select
                                     className="form-select"
                                     value={isNewSpeaker ? "__new__" : segment.speakerId.trim()}
@@ -290,25 +292,25 @@ function ReviewResultsPanel({
                                     }}
                                   >
                                     <option value="" disabled>
-                                      Select speaker
+                                      {t("aiAssist.processSources.selectSpeaker")}
                                     </option>
                                     {speakerOptions.map((speaker) => (
                                       <option key={speaker} value={speaker}>
                                         {speaker}
                                       </option>
                                     ))}
-                                    <option value="__new__">Enter new speaker...</option>
+                                    <option value="__new__">{t("aiAssist.processSources.enterNewSpeaker")}</option>
                                   </select>
                                 </label>
                                 {isNewSpeaker ? (
                                   <label className="form-label">
-                                    New speaker
+                                    {t("aiAssist.processSources.newSpeaker")}
                                     <input
                                       className="form-input"
                                       value={segment.speakerId}
                                       disabled={!editable}
                                       onChange={(event) => updateReviewSegment(index, { speakerId: event.target.value })}
-                                      placeholder="Speaker label"
+                                      placeholder={t("aiAssist.processSources.speakerLabel")}
                                     />
                                   </label>
                                 ) : null}
@@ -319,7 +321,7 @@ function ReviewResultsPanel({
                             ) : null}
                           </div>
                           <label className="form-label ai-process-doc-segment-text-field">
-                            Text contents
+                            {t("aiAssist.processSources.textContents")}
                             <textarea
                               className="form-input ai-process-doc-segment-textarea"
                               value={segment.text}
@@ -337,8 +339,8 @@ function ReviewResultsPanel({
                             className="ai-process-doc-segment-insert-button"
                             disabled={!editable}
                             onClick={() => insertReviewSegment(index)}
-                            title="Add segment here"
-                            aria-label="Add segment here"
+                            title={t("aiAssist.processSources.addSegmentHere")}
+                            aria-label={t("aiAssist.processSources.addSegmentHere")}
                           >
                             <PlusIcon className="ai-process-doc-segment-insert-icon" />
                           </button>
@@ -500,6 +502,7 @@ export function PostgresAiAssistProcessSourcesView({
   canUseAiProcessDocuments: boolean;
   canReviewProcessedDocuments: boolean;
 }) {
+  const { t } = useI18n();
   const [sources, setSources] = useState<PostgresSource[]>([]);
   const [reviews, setReviews] = useState<PostgresProcessedDocumentReview[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
@@ -575,16 +578,16 @@ export function PostgresAiAssistProcessSourcesView({
     () => [
       {
         key: "raw" as const,
-        label: "Text Sources",
+        label: t("aiAssist.processSources.textSources"),
         count: processableSources.length,
       },
       {
         key: "processed" as const,
-        label: "Transcripts",
+        label: t("aiAssist.processSources.title"),
         count: reviewRecords.length,
       },
     ],
-    [processableSources.length, reviewRecords.length],
+    [processableSources.length, reviewRecords.length, t],
   );
   const selectedReviewSpeakerSummaries = useMemo(
     () => collectSpeakerSummaries(selectedReviewSegments.filter(isNavigableSpeakerSegment)),
@@ -843,7 +846,7 @@ export function PostgresAiAssistProcessSourcesView({
     if (!selectedReviewRecord || !canReviewProcessedDocuments) return;
     const nextName = exportName.trim();
     if (!nextName) {
-      setExportError("Enter a source name.");
+      setExportError(t("aiAssist.processSources.enterSourceName"));
       return;
     }
 
@@ -852,7 +855,7 @@ export function PostgresAiAssistProcessSourcesView({
     try {
       const processedTranscript = buildProcessedTranscriptContent(selectedReviewSegments);
       if (!processedTranscript.content.trim()) {
-        throw new Error("The reviewed transcript has no text to export.");
+        throw new Error(t("aiAssist.processSources.reviewedTranscriptEmpty"));
       }
 
       const createdSource = await createPostgresSource({
@@ -1061,18 +1064,18 @@ export function PostgresAiAssistProcessSourcesView({
       <div className="view ai-process-doc-view ai-process-doc-view--reviewing">
         <div className="workspace-back-row">
           <button type="button" className="btn" onClick={() => setReviewWorkspaceOpen(false)}>
-            Back to Process Sources
+            {t("aiAssist.processSources.backToProcessSources")}
           </button>
         </div>
         <header className="view-header">
           <div className="users-title-wrap">
-            <h1>Processed Source Review</h1>
+            <h1>{t("aiAssist.processSources.reviewTitle")}</h1>
             <button
               type="button"
               className="users-help-icon-btn"
               onClick={() => setHelpOpen(true)}
-              title="Open help"
-              aria-label="Open help"
+              title={t("aiAssist.processSources.openHelp")}
+              aria-label={t("aiAssist.processSources.openHelp")}
             >
               <HelpIcon className="users-help-icon" />
             </button>
@@ -1084,7 +1087,7 @@ export function PostgresAiAssistProcessSourcesView({
               disabled={saveReviewBusy || !canReviewProcessedDocuments || !selectedReviewRecord}
               onClick={() => void handleSaveReview()}
             >
-              {saveReviewBusy ? "Saving" : "Save"}
+              {saveReviewBusy ? t("aiAssist.processSources.saving") : t("aiAssist.processSources.save")}
             </button>
             <button
               type="button"
@@ -1098,11 +1101,11 @@ export function PostgresAiAssistProcessSourcesView({
               onClick={openExportModal}
               title={
                 selectedReviewRecord && selectedReviewRecord.processingStatus !== "completed"
-                  ? "Only completed processed sources can be exported."
+                  ? t("aiAssist.processSources.onlyCompletedCanExport")
                   : undefined
               }
             >
-              {selectedReviewRecord?.exportedToProject ? "Exported" : "Export to Project"}
+              {selectedReviewRecord?.exportedToProject ? t("aiAssist.processSources.exported") : t("aiAssist.processSources.exportToProject")}
             </button>
           </div>
         </header>
@@ -1113,14 +1116,14 @@ export function PostgresAiAssistProcessSourcesView({
               <div className="surface-card ai-process-doc-review-list-card">
                 {!selectedReviewRecord ? (
                   <div className="empty-state ai-process-doc-review-empty">
-                    <p>Select a processed source to review its speakers.</p>
+                    <p>{t("aiAssist.processSources.selectProcessedSource")}</p>
                   </div>
                 ) : (
                   <div
                     className="ai-process-doc-review-side-tabs"
-                    aria-label="Segment summary"
+                    aria-label={t("aiAssist.processSources.segmentSummary")}
                   >
-                    <div className="segmented-control ai-process-doc-review-side-tablist" role="tablist" aria-label="Review side panel">
+                    <div className="segmented-control ai-process-doc-review-side-tablist" role="tablist" aria-label={t("aiAssist.processSources.reviewSidePanel")}>
                       <button
                         type="button"
                         role="tab"
@@ -1128,7 +1131,7 @@ export function PostgresAiAssistProcessSourcesView({
                         className={selectedReviewSideTab === "speakers" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                         onClick={() => setSelectedReviewSideTab("speakers")}
                       >
-                        Speakers
+                        {t("aiAssist.processSources.speakers")}
                       </button>
                       <button
                         type="button"
@@ -1137,18 +1140,18 @@ export function PostgresAiAssistProcessSourcesView({
                         className={selectedReviewSideTab === "anonymization" ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                         onClick={() => setSelectedReviewSideTab("anonymization")}
                       >
-                        Anon.
+                        {t("aiAssist.processSources.anonymizedShort")}
                       </button>
                     </div>
 
                     {selectedReviewSideTab === "speakers" ? (
-                      <div className="ai-process-doc-summary-strip ai-process-doc-review-side-panel" aria-label="Speaker summary">
+                      <div className="ai-process-doc-summary-strip ai-process-doc-review-side-panel" aria-label={t("aiAssist.processSources.speakerSummary")}>
                         <div className="ai-process-doc-review-summary" style={{ marginBottom: 4 }}>
                           <strong>{selectedReviewNavigationCards.length}</strong>
-                          <span>{selectedReviewNavigationCards.length === 1 ? "segment group" : "segment groups"}</span>
+                          <span>{selectedReviewNavigationCards.length === 1 ? t("aiAssist.processSources.segmentGroupSingular") : t("aiAssist.processSources.segmentGroupPlural")}</span>
                         </div>
                         {selectedReviewNavigationCards.length === 0 ? (
-                          <p className="surface-card-description" style={{ margin: 0 }}>No speakers detected.</p>
+                          <p className="surface-card-description" style={{ margin: 0 }}>{t("aiAssist.processSources.noSpeakersDetected")}</p>
                         ) : (
                           selectedReviewNavigationCards.map((card) => {
                             const segmentIndices = selectedReviewNavigationSegmentIndices.get(card.id) ?? [];
@@ -1178,8 +1181,8 @@ export function PostgresAiAssistProcessSourcesView({
                                     className="btn btn--sm"
                                     disabled={!canNavigateUp}
                                     onClick={() => navigateSpeakerSegment(card.id, -1)}
-                                    title="Previous segment"
-                                    aria-label={`Previous segment for ${card.label}`}
+                                    title={t("aiAssist.processSources.previousSegment")}
+                                    aria-label={t("aiAssist.processSources.previousSegmentFor", { speaker: card.label })}
                                   >
                                     ↑
                                   </button>
@@ -1188,8 +1191,8 @@ export function PostgresAiAssistProcessSourcesView({
                                     className="btn btn--sm"
                                     disabled={!canNavigateDown}
                                     onClick={() => navigateSpeakerSegment(card.id, 1)}
-                                    title="Next segment"
-                                    aria-label={`Next segment for ${card.label}`}
+                                    title={t("aiAssist.processSources.nextSegment")}
+                                    aria-label={t("aiAssist.processSources.nextSegmentFor", { speaker: card.label })}
                                   >
                                     ↓
                                   </button>
@@ -1200,10 +1203,10 @@ export function PostgresAiAssistProcessSourcesView({
                         )}
                       </div>
                     ) : (
-                      <div className="ai-process-doc-review-side-panel" aria-label="Anonymization candidates">
-                        <div className="surface-card-title" style={{ marginBottom: 8 }}>Speakers</div>
+                      <div className="ai-process-doc-review-side-panel" aria-label={t("aiAssist.processSources.anonymizationCandidates")}>
+                        <div className="surface-card-title" style={{ marginBottom: 8 }}>{t("aiAssist.processSources.speakers")}</div>
                         {selectedReviewSpeakerLabelCounts.length === 0 ? (
-                          <p className="surface-card-description" style={{ margin: 0 }}>No speaker labels are currently assigned.</p>
+                          <p className="surface-card-description" style={{ margin: 0 }}>{t("aiAssist.processSources.noSpeakerLabels")}</p>
                         ) : (
                           <div className="ai-process-doc-speaker-label-list">
                             {selectedReviewSpeakerLabelCounts.map((speaker) => (
@@ -1221,15 +1224,15 @@ export function PostgresAiAssistProcessSourcesView({
                           </div>
                         )}
                         <div className="ai-process-doc-side-separator" />
-                        <div className="surface-card-title" style={{ marginBottom: 8 }}>Proper nouns</div>
+                        <div className="surface-card-title" style={{ marginBottom: 8 }}>{t("aiAssist.processSources.properNouns")}</div>
                         {selectedReviewProperNounCandidates.length === 0 ? (
-                          <p className="surface-card-description" style={{ margin: 0 }}>No proper nouns were detected.</p>
+                          <p className="surface-card-description" style={{ margin: 0 }}>{t("aiAssist.processSources.noProperNouns")}</p>
                         ) : (
                           <div className="ai-process-doc-proper-noun-list">
                             {selectedReviewProperNounCandidates.map((candidate, index) => (
                               <div key={`${candidate.text}-${index}`} className="ai-process-doc-summary-chip ai-process-doc-proper-noun-card">
                                 <strong>{candidate.text}</strong>
-                                <small>Transcript text</small>
+                                <small>{t("aiAssist.processSources.transcriptText")}</small>
                               </div>
                             ))}
                           </div>
@@ -1245,15 +1248,20 @@ export function PostgresAiAssistProcessSourcesView({
               <div className="surface-card ai-process-doc-review-detail-card">
                 {!selectedReviewRecord ? (
                   <div className="empty-state ai-process-doc-review-empty">
-                    <p>Select a processed source to review its segments and named entities.</p>
+                    <p>{t("aiAssist.processSources.selectProcessedSourceFull")}</p>
                   </div>
                 ) : (
                   <>
                     <div className="ai-process-doc-review-modal-header ai-process-doc-review-modal-header--with-summary">
                       <div>
-                        <h2>{selectedReviewRecord.sourceTitle || "Untitled source"}</h2>
+                        <h2>{selectedReviewRecord.sourceTitle || t("aiAssist.processSources.untitledSource")}</h2>
                         <p className="surface-card-description">
-                          {selectedReviewRecord.model || "Unknown model"} · {selectedReviewRecord.processedChunkCount}/{selectedReviewRecord.chunkCount} chunks · {formatProcessedReviewDate(selectedReviewRecord.updatedAt)}
+                          {t("aiAssist.processSources.reviewSummary", {
+                            model: selectedReviewRecord.model || t("aiAssist.processDocuments.review.unknownModel"),
+                            processed: selectedReviewRecord.processedChunkCount,
+                            total: selectedReviewRecord.chunkCount,
+                            updated: formatProcessedReviewDate(selectedReviewRecord.updatedAt),
+                          })}
                         </p>
                       </div>
                     </div>
@@ -1261,7 +1269,7 @@ export function PostgresAiAssistProcessSourcesView({
                     {saveReviewError ? <div className="form-error project-settings-error">{saveReviewError}</div> : null}
                     {selectedReviewRecord.processingStatus === "partial" ? (
                       <div className="users-permission-note" style={{ marginBottom: 12 }}>
-                        Partial run: {selectedReviewRecord.processedChunkCount} of {selectedReviewRecord.chunkCount} chunks completed.
+                        {t("aiAssist.processSources.partialRun", { completed: selectedReviewRecord.processedChunkCount, total: selectedReviewRecord.chunkCount })}
                         {selectedReviewRecord.processingError ? ` ${selectedReviewRecord.processingError}` : ""}
                       </div>
                     ) : null}
@@ -1286,10 +1294,10 @@ export function PostgresAiAssistProcessSourcesView({
         </div>
 
         {helpOpen ? (
-          <SettingsModal title="Processed Source Review" onClose={() => setHelpOpen(false)} modalClassName="modal--help modal--wide">
+          <SettingsModal title={t("aiAssist.processSources.help.reviewTitle")} onClose={() => setHelpOpen(false)} modalClassName="modal--help modal--wide">
             <div className="app-settings-modal-body">
               <p className="users-guide-copy">
-                Choose a processed source, inspect extracted entities and segments, edit Tags, Speakers, and Text, then save the reviewed output.
+                {t("aiAssist.processSources.help.reviewLine1")}
               </p>
             </div>
           </SettingsModal>
@@ -1297,7 +1305,7 @@ export function PostgresAiAssistProcessSourcesView({
 
         {editingSpeakerLabel ? (
           <SettingsModal
-            title="Edit Speaker Label"
+            title={t("aiAssist.processSources.editSpeakerLabel")}
             onClose={() => {
               setEditingSpeakerLabel("");
               setEditingSpeakerLabelValue("");
@@ -1305,10 +1313,10 @@ export function PostgresAiAssistProcessSourcesView({
           >
             <div className="app-settings-modal-body">
               <p className="surface-card-description">
-                Rename "{editingSpeakerLabel}" across all matching segments in this processed source.
+                {t("aiAssist.processSources.renameSpeaker", { speaker: editingSpeakerLabel })}
               </p>
               <label className="form-label">
-                Speaker label
+                {t("aiAssist.processSources.speakerLabel")}
                 <input
                   className="form-input"
                   value={editingSpeakerLabelValue}
@@ -1324,18 +1332,18 @@ export function PostgresAiAssistProcessSourcesView({
                 disabled={!editingSpeakerLabelValue.trim() || !canReviewProcessedDocuments}
                 onClick={applySpeakerLabelEdit}
               >
-                Apply
+                {t("aiAssist.processSources.apply")}
               </button>
             </div>
           </SettingsModal>
         ) : null}
 
         {exportModalOpen && selectedReviewRecord ? (
-          <SettingsModal title="Export Processed Source" onClose={() => setExportModalOpen(false)} closeDisabled={exportBusy}>
+          <SettingsModal title={t("aiAssist.processSources.exportProcessedSource")} onClose={() => setExportModalOpen(false)} closeDisabled={exportBusy}>
             <div className="app-settings-modal-body">
               <div className="form">
                 <label className="form-label">
-                  Name
+                  {t("aiAssist.processSources.name")}
                   <input
                     className="form-input"
                     value={exportName}
@@ -1344,7 +1352,7 @@ export function PostgresAiAssistProcessSourcesView({
                   />
                 </label>
                 <label className="form-label">
-                  Description
+                  {t("aiAssist.processSources.description")}
                   <textarea
                     className="form-input"
                     rows={5}
@@ -1353,11 +1361,11 @@ export function PostgresAiAssistProcessSourcesView({
                   />
                 </label>
                 <div className="ai-process-doc-lens ai-process-doc-lens--export-option">
-                  <span>Copy source attributes from the raw text source</span>
-                  <div className="segmented-control" role="tablist" aria-label="Copy source attributes">
+                  <span>{t("aiAssist.processSources.copySourceAttributes")}</span>
+                  <div className="segmented-control" role="tablist" aria-label={t("aiAssist.processSources.copySourceAttributes")}>
                     {([
-                      { label: "Disabled", value: false },
-                      { label: "Enabled", value: true },
+                      { label: t("aiAssist.home.statuses.disabled"), value: false },
+                      { label: t("aiAssist.home.statuses.enabled"), value: true },
                     ] as const).map((option) => (
                       <button
                         key={option.label}
@@ -1383,7 +1391,7 @@ export function PostgresAiAssistProcessSourcesView({
                 onClick={() => void handleExportToProject()}
                 disabled={exportBusy || !exportName.trim() || !canReviewProcessedDocuments}
               >
-                {exportBusy ? "Exporting" : "Export"}
+                {exportBusy ? t("aiAssist.processSources.exporting") : t("aiAssist.processSources.export")}
               </button>
             </div>
           </SettingsModal>
@@ -1396,13 +1404,13 @@ export function PostgresAiAssistProcessSourcesView({
     <div className="view users-view ai-process-doc-view">
       <header className="view-header">
         <div className="users-title-wrap">
-          <h1>Transcripts</h1>
+          <h1>{t("aiAssist.processSources.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Open help"
-            aria-label="Open help"
+            title={t("aiAssist.processSources.openHelp")}
+            aria-label={t("aiAssist.processSources.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -1414,9 +1422,9 @@ export function PostgresAiAssistProcessSourcesView({
               className="btn btn--primary"
               disabled={!canReviewProcessedDocuments || reviewRecords.length === 0}
               onClick={openReviewWorkspace}
-              title={!canReviewProcessedDocuments ? "You do not have permission to review processed sources for this project." : undefined}
+              title={!canReviewProcessedDocuments ? t("aiAssist.processSources.noPermissionToReviewSources") : undefined}
             >
-              Open Review
+              {t("aiAssist.processSources.openReview")}
             </button>
           ) : null}
         </div>
@@ -1460,7 +1468,7 @@ export function PostgresAiAssistProcessSourcesView({
             >
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <h2 style={{ margin: 0, fontSize: 18 }}>Source Types</h2>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>{t("aiAssist.processSources.sourceTypes")}</h2>
                 </div>
               </div>
             </div>
@@ -1469,8 +1477,8 @@ export function PostgresAiAssistProcessSourcesView({
               <table className="users-table" style={{ tableLayout: "fixed" }}>
                 <thead>
                   <tr>
-                    <th className="users-th" style={{ width: "62%" }}>Group</th>
-                    <th className="users-th" style={{ width: "38%" }}>Count</th>
+                    <th className="users-th" style={{ width: "62%" }}>{t("aiAssist.processSources.group")}</th>
+                    <th className="users-th" style={{ width: "38%" }}>{t("aiAssist.processSources.count")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1523,15 +1531,15 @@ export function PostgresAiAssistProcessSourcesView({
         >
           <div className="home-project-card ai-process-doc-source-card">
             <div className="ai-process-doc-source-card-header">
-              <h2>{selectedProcessGroup === "raw" ? "Text Sources" : "Transcripts"}</h2>
+              <h2>{selectedProcessGroup === "raw" ? t("aiAssist.processSources.textSources") : t("aiAssist.processSources.title")}</h2>
               {selectedProcessGroup === "raw" ? (
                 <button
                   type="button"
                   className="btn btn--primary ai-process-doc-process-icon-button"
                   disabled={busy || selectedSourceIds.length === 0 || !canUseAiProcessDocuments}
                   onClick={() => setProcessModalOpen(true)}
-                  title={!canUseAiProcessDocuments ? "You do not have permission to process sources for this project." : busy ? "Processing selected sources" : "Process selected sources"}
-                  aria-label={busy ? "Processing selected sources" : "Process selected sources"}
+                  title={!canUseAiProcessDocuments ? t("aiAssist.processSources.noPermissionToProcessSources") : busy ? t("aiAssist.processSources.processingSelectedSources") : t("aiAssist.processSources.processSelectedSources")}
+                  aria-label={busy ? t("aiAssist.processSources.processingSelectedSources") : t("aiAssist.processSources.processSelectedSources")}
                 >
                   <ProcessTranscriptIcon className="ai-process-doc-process-icon" />
                 </button>
@@ -1548,29 +1556,29 @@ export function PostgresAiAssistProcessSourcesView({
                 {selectedProcessGroup === "raw" ? (
                   <tr>
                     <th className="users-th" style={{ width: "8%" }} />
-                    <th className="users-th" style={{ width: "44%" }}>Source</th>
-                    <th className="users-th" style={{ width: "18%" }}>Type</th>
-                    <th className="users-th" style={{ width: "14%" }}>Status</th>
-                    <th className="users-th" style={{ width: "16%" }}>Updated</th>
+                    <th className="users-th" style={{ width: "44%" }}>{t("aiAssist.processSources.source")}</th>
+                    <th className="users-th" style={{ width: "18%" }}>{t("aiAssist.processSources.type")}</th>
+                    <th className="users-th" style={{ width: "14%" }}>{t("aiAssist.processSources.status")}</th>
+                    <th className="users-th" style={{ width: "16%" }}>{t("aiAssist.processSources.updated")}</th>
                   </tr>
                 ) : (
                   <tr>
-                    <th className="users-th" style={{ width: "42%" }}>Source</th>
-                    <th className="users-th" style={{ width: "18%" }}>Status</th>
-                    <th className="users-th" style={{ width: "16%" }}>Chunks</th>
-                    <th className="users-th" style={{ width: "24%" }}>Processed</th>
+                    <th className="users-th" style={{ width: "42%" }}>{t("aiAssist.processSources.source")}</th>
+                    <th className="users-th" style={{ width: "18%" }}>{t("aiAssist.processSources.status")}</th>
+                    <th className="users-th" style={{ width: "16%" }}>{t("aiAssist.processSources.chunks")}</th>
+                    <th className="users-th" style={{ width: "24%" }}>{t("aiAssist.processSources.processed")}</th>
                   </tr>
                 )}
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={selectedProcessGroup === "raw" ? 5 : 4} className="users-td-msg">Loading sources...</td>
+                    <td colSpan={selectedProcessGroup === "raw" ? 5 : 4} className="users-td-msg">{t("aiAssist.processSources.loadingSources")}</td>
                   </tr>
                 ) : selectedProcessGroup === "raw" ? (
                   processableSources.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="users-td-msg">No raw text sources available.</td>
+                      <td colSpan={5} className="users-td-msg">{t("aiAssist.processSources.noRawTextSources")}</td>
                     </tr>
                   ) : (
                     processableSources.map((source) => {
@@ -1598,8 +1606,8 @@ export function PostgresAiAssistProcessSourcesView({
                               onClick={(event) => event.stopPropagation()}
                             />
                           </td>
-                          <td className="users-td users-td--name">{source.title || "Untitled source"}</td>
-                          <td className="users-td users-td--muted">{source.sourceKind || "Text"}</td>
+                          <td className="users-td users-td--name">{source.title || t("aiAssist.processSources.untitledSource")}</td>
+                          <td className="users-td users-td--muted">{source.sourceKind || t("aiAssist.processSources.text")}</td>
                           <td className="users-td users-td--muted">{status}</td>
                           <td className="users-td users-td--muted">{formatProcessedReviewDate(source.updatedAt)}</td>
                         </tr>
@@ -1608,7 +1616,7 @@ export function PostgresAiAssistProcessSourcesView({
                   )
                 ) : reviewRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="users-td-msg">No processed sources yet.</td>
+                    <td colSpan={4} className="users-td-msg">{t("aiAssist.processSources.noProcessedSources")}</td>
                   </tr>
                 ) : (
                   reviewRecords.map((record) => (
@@ -1621,7 +1629,7 @@ export function PostgresAiAssistProcessSourcesView({
                       }}
                       style={{ cursor: "pointer" }}
                     >
-                      <td className="users-td users-td--name">{record.sourceTitle || "Untitled source"}</td>
+                      <td className="users-td users-td--name">{record.sourceTitle || t("aiAssist.processSources.untitledSource")}</td>
                       <td className="users-td users-td--muted">
                         {record.status === "reviewed"
                           ? "reviewed"
@@ -1644,21 +1652,21 @@ export function PostgresAiAssistProcessSourcesView({
           </div>
           {selectedProcessGroup === "raw" && selectedSourceIds.length > 0 ? (
             <div className="ai-process-doc-home-copy" style={{ justifyContent: "flex-end" }}>
-              <span>{selectedSourceIds.length} selected</span>
+              <span>{t("aiAssist.processSources.selectedCount", { count: selectedSourceIds.length })}</span>
             </div>
           ) : selectedProcessGroup === "processed" ? (
             <div className="ai-process-doc-home-copy" style={{ justifyContent: "flex-end" }}>
-              <span>{pendingReviewCount} pending review</span>
+              <span>{t("aiAssist.processSources.pendingReviewCount", { count: pendingReviewCount })}</span>
             </div>
           ) : null}
         </section>
       </div>
 
       {helpOpen ? (
-        <SettingsModal title="Process into Transcript" onClose={() => setHelpOpen(false)} modalClassName="modal--help modal--wide">
+        <SettingsModal title={t("aiAssist.processSources.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help modal--wide">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Choose text sources, process them with AI Assist, then review extracted transcript structure and names before using those outputs elsewhere in the project.
+              {t("aiAssist.processSources.help.line1")}
             </p>
           </div>
         </SettingsModal>
@@ -1666,7 +1674,7 @@ export function PostgresAiAssistProcessSourcesView({
 
       {processModalOpen ? (
         <SettingsModal
-          title="Process into Transcript"
+          title={t("aiAssist.processSources.processTitle")}
           onClose={() => setProcessModalOpen(false)}
           closeDisabled={busy}
           modalClassName="modal--wide ai-process-doc-modal"
@@ -1677,7 +1685,7 @@ export function PostgresAiAssistProcessSourcesView({
                 <div className="surface-card">
                   <div className="surface-card-header">
                     <div>
-                      <div className="surface-card-title">Settings</div>
+                      <div className="surface-card-title">{t("aiAssist.processSources.settings")}</div>
                     </div>
                   </div>
                   <div className="ai-process-doc-lenses">

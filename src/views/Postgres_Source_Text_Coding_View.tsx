@@ -213,12 +213,12 @@ export function PostgresSourceTextCodingView({
   const deletingCodeRow = deletingCodeId ? codebookRows.find((code) => code.id === deletingCodeId) ?? null : null;
   const filteredAnnotations = useMemo(
     () => annotations.filter((annotation) => {
-      const userKey = annotation.createdByName || "Unknown";
+      const userKey = annotation.createdByName || t("sourceCoding.common.unknown");
       if (hiddenUserIds.has(userKey)) return false;
       if (annotation.codeIds.some((codeId) => hiddenCodeIds.has(codeId))) return false;
       return true;
     }),
-    [annotations, hiddenCodeIds, hiddenUserIds],
+    [annotations, hiddenCodeIds, hiddenUserIds, t],
   );
   const annotationCountByCodeId = useMemo(() => {
     const counts = new Map<string, number>();
@@ -710,18 +710,18 @@ export function PostgresSourceTextCodingView({
             type="button"
             className="code-text-header-back-button"
             onClick={onBack}
-            title="Back"
-            aria-label="Back"
+            title={t("common.back")}
+            aria-label={t("common.back")}
           >
             <ArrowLeftIcon className="code-text-header-back-icon" />
           </button>
-          <h1>Code Text</h1>
+          <h1>{t("sourceCoding.text.title")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Open code text help"
-            aria-label="Open code text help"
+            title={t("sourceCoding.text.openHelp")}
+            aria-label={t("sourceCoding.text.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -731,14 +731,11 @@ export function PostgresSourceTextCodingView({
       {gettingStartedCreateCodeActive ? (
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
-          <GettingStartedGuideCallout title="Create a code">
+          <GettingStartedGuideCallout title={t("app.gettingStarted.createCodeTitle")}>
             {newCodeOpen ? (
-              <p>
-                Give the code a name. For now, you can ignore the description, parent code, and color. Click Create Code
-                when you are ready.
-              </p>
+              <p>{t("app.gettingStarted.createCodeModalBody")}</p>
             ) : (
-              <p>Click the plus button in the Codebook panel to create your first code for this project.</p>
+              <p>{t("app.gettingStarted.createCodeButtonBody")}</p>
             )}
           </GettingStartedGuideCallout>
         </>
@@ -747,11 +744,11 @@ export function PostgresSourceTextCodingView({
       {gettingStartedAssignCodeActive ? (
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
-          <GettingStartedGuideCallout title="Assign the code">
+          <GettingStartedGuideCallout title={t("app.gettingStarted.assignCodeTitle")}>
             {pendingSelection ? (
-              <p>Click the new code in the Codebook panel to apply it to the selected text.</p>
+              <p>{t("app.gettingStarted.applyCodeBody")}</p>
             ) : (
-              <p>Select a short text segment in the source.</p>
+              <p>{t("app.gettingStarted.selectTextBody")}</p>
             )}
           </GettingStartedGuideCallout>
         </>
@@ -761,7 +758,7 @@ export function PostgresSourceTextCodingView({
         <>
           <div className="getting-started-spotlight-overlay" aria-hidden="true" />
           <GettingStartedGuideCallout
-            title="Basic guide complete"
+            title={t("app.gettingStarted.completeTitle")}
             spotlight
             actions={(
               <button
@@ -769,14 +766,11 @@ export function PostgresSourceTextCodingView({
                 className="btn btn--primary"
                 onClick={() => void onGettingStartedStateChange?.({ completed: true, step: "completed" })}
               >
-                Finish guide
+                {t("app.gettingStarted.finishGuide")}
               </button>
             )}
           >
-            <p>
-              That completes this basic guide. Explore how to build out your projects, generate reports, and use AI
-              Assist when you are ready.
-            </p>
+            <p>{t("app.gettingStarted.completeBody")}</p>
           </GettingStartedGuideCallout>
         </>
       ) : null}
@@ -785,7 +779,7 @@ export function PostgresSourceTextCodingView({
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Codebook</span>
+              <span className="annotate-card-title">{t("sourceCoding.common.codebook")}</span>
               <button
                 type="button"
                 className={`codebook-icon-action${gettingStartedCreateCodeActive && !newCodeOpen ? " getting-started-spotlight-target codebook-icon-action--getting-started" : ""}`}
@@ -793,20 +787,20 @@ export function PostgresSourceTextCodingView({
                   setNewCodeOpen(true);
                 }}
                 disabled={!canCreateCodes || !onCreateCode || saving}
-                aria-label="New code"
-                title={canCreateCodes && onCreateCode ? "New code" : "You do not have permission to create codes."}
+                aria-label={t("sourceCoding.common.newCode")}
+                title={canCreateCodes && onCreateCode ? t("sourceCoding.common.newCode") : t("sourceCoding.common.noCodeCreatePermission")}
               >
                 +
               </button>
             </div>
             {pendingSelection ? (
               <div className="codebook-selection-hint">
-                Select a code to apply it to the current text selection.
+                {t("sourceCoding.text.selectCodeHint")}
               </div>
             ) : null}
             <ul className="code-list">
               {codes.length === 0 ? (
-                <li className="code-list-empty">No codes yet.</li>
+                <li className="code-list-empty">{t("sourceCoding.common.noCodesYet")}</li>
               ) : (
                 visibleCodes.map(({ code, depth, hasChildren }) => (
                   <li
@@ -831,7 +825,7 @@ export function PostgresSourceTextCodingView({
                           event.stopPropagation();
                           toggleCollapsedCode(code.id);
                         }}
-                        title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
+                        title={collapsedCodeIds.has(code.id) ? t("sourceCoding.common.expand") : t("sourceCoding.common.collapse")}
                       >
                         {collapsedCodeIds.has(code.id) ? "\u25b6" : "\u25bc"}
                       </button>
@@ -876,7 +870,7 @@ export function PostgresSourceTextCodingView({
                     <button
                       type="button"
                       className="processed-transcript-outline-btn"
-                      aria-label="Show transcript outline"
+                      aria-label={t("sourceCoding.text.showTranscriptOutline")}
                       aria-expanded={outlineOpen}
                       onClick={() => setOutlineOpen((open) => !open)}
                     >
@@ -918,8 +912,8 @@ export function PostgresSourceTextCodingView({
                         className="source-content-search-input"
                         value={textSearchQuery}
                         onChange={(event) => setTextSearchQuery(event.target.value)}
-                        placeholder="Search text"
-                        aria-label="Search source text"
+                        placeholder={t("sourceCoding.text.searchText")}
+                        aria-label={t("sourceCoding.text.searchSourceText")}
                       />
                       <span className="source-content-search-count">
                         {activeTextSearchQuery
@@ -933,8 +927,8 @@ export function PostgresSourceTextCodingView({
                         className="btn btn--small source-content-search-nav"
                         onClick={goToPreviousTextSearchMatch}
                         disabled={textSearchMatches.length === 0}
-                        aria-label="Previous search match"
-                        title="Previous"
+                        aria-label={t("sourceCoding.text.previousSearchMatch")}
+                        title={t("sourceCoding.text.previous")}
                       >
                         {"\u2191"}
                       </button>
@@ -943,8 +937,8 @@ export function PostgresSourceTextCodingView({
                         className="btn btn--small source-content-search-nav"
                         onClick={goToNextTextSearchMatch}
                         disabled={textSearchMatches.length === 0}
-                        aria-label="Next search match"
-                        title="Next"
+                        aria-label={t("sourceCoding.text.nextSearchMatch")}
+                        title={t("sourceCoding.text.next")}
                       >
                         {"\u2193"}
                       </button>
@@ -954,8 +948,8 @@ export function PostgresSourceTextCodingView({
                     type="button"
                     className="btn btn--small source-content-search-toggle"
                     onClick={() => setTextSearchOpen((open) => !open)}
-                    aria-label={textSearchOpen ? "Close text search" : "Search source text"}
-                    title={textSearchOpen ? "Close search" : "Search"}
+                    aria-label={textSearchOpen ? t("sourceCoding.text.closeTextSearch") : t("sourceCoding.text.searchSourceText")}
+                    title={textSearchOpen ? t("sourceCoding.text.closeSearch") : t("sourceCoding.text.search")}
                   >
                     <ZoomIcon />
                   </button>
@@ -969,8 +963,8 @@ export function PostgresSourceTextCodingView({
                   type="button"
                   className="doc-toolbar-filter-btn"
                   onClick={() => setFiltersOpen(true)}
-                  aria-label="Filters"
-                  title="Filters"
+                  aria-label={t("sourceCoding.common.filters")}
+                  title={t("sourceCoding.common.filters")}
                 >
                   <FilterIcon className="filter-icon-svg" />
                 </button>
@@ -980,12 +974,12 @@ export function PostgresSourceTextCodingView({
             <div style={{ marginTop: 12, marginBottom: 12 }}>
               {sourceLockConflict?.reason === "kicked" ? (
                 <p className="users-guide-copy" style={{ margin: 0 }}>
-                  {sourceLockConflict.userName || "A project editor"} removed your source lock. Return to the source list or reacquire access before annotating again.
+                  {t("sourceCoding.common.sourceLockRemoved", { userName: sourceLockConflict.userName || t("sourceCoding.common.projectEditor") })}
                 </p>
               ) : sourceLockConflict?.reason === "locked" ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    {sourceLockConflict.userName || "Another user"} is currently annotating this source.
+                    {t("sourceCoding.common.sourceLockHeld", { userName: sourceLockConflict.userName || t("sourceCoding.common.anotherUser") })}
                   </p>
                   {canKickSourceLocks ? (
                     <button
@@ -994,13 +988,13 @@ export function PostgresSourceTextCodingView({
                       onClick={() => void onKickSourceLock(sourceLockConflict)}
                       disabled={saving || lockSyncing}
                     >
-                      {lockSyncing ? "Updating..." : "Take Lock"}
+                      {lockSyncing ? t("sourceCoding.common.updating") : t("sourceCoding.common.takeLock")}
                     </button>
                   ) : null}
                 </div>
               ) : canEditAnnotations ? null : (
                 <p className="users-guide-copy" style={{ margin: 0 }}>
-                  {lockSyncing ? "Claiming the source lock for annotation..." : "This source is currently read-only in the coding workspace."}
+                  {lockSyncing ? t("sourceCoding.common.claimingSourceLock") : t("sourceCoding.common.readOnlyWorkspace")}
                 </p>
               )}
             </div>
@@ -1066,7 +1060,7 @@ export function PostgresSourceTextCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Edit code
+              {t("sourceCoding.common.editCode")}
             </button>
           ) : null}
           {canManageMemos ? (
@@ -1077,7 +1071,7 @@ export function PostgresSourceTextCodingView({
               setCodeContextMenu(null);
             }}
           >
-            Memo about code
+            {t("sourceCoding.common.memoAboutCode")}
           </button>
           ) : null}
           {canCreateCodes && onCreateCode ? (
@@ -1090,7 +1084,7 @@ export function PostgresSourceTextCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Add child code
+              {t("sourceCoding.common.addChildCode")}
             </button>
           ) : null}
           {canCreateCodes && onDeleteCode ? (
@@ -1102,7 +1096,7 @@ export function PostgresSourceTextCodingView({
                 setCodeContextMenu(null);
               }}
           >
-            Delete code
+            {t("sourceCoding.common.deleteCode")}
           </button>
           ) : null}
         </div>
@@ -1144,7 +1138,7 @@ export function PostgresSourceTextCodingView({
             });
           }}
           onSelectAllUsers={() => setHiddenUserIds(new Set())}
-          onClearUsers={() => setHiddenUserIds(new Set(annotations.map((annotation) => annotation.createdByName || "Unknown")))}
+          onClearUsers={() => setHiddenUserIds(new Set(annotations.map((annotation) => annotation.createdByName || t("sourceCoding.common.unknown"))))}
           onSelectAllCodes={() => setHiddenCodeIds(new Set())}
           onClearCodes={() => setHiddenCodeIds(new Set(codes.map((code) => code.id)))}
           onClose={() => setFiltersOpen(false)}
@@ -1152,18 +1146,18 @@ export function PostgresSourceTextCodingView({
       ) : null}
 
       {helpOpen ? (
-        <SettingsModal title="Code Text Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("sourceCoding.text.helpTitle")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Select text in the source, choose a code from the codebook, and review the resulting annotation in the annotation panel.
+              {t("sourceCoding.text.helpLine1")}
             </p>
             <p className="users-guide-copy">
-              Use filters, search, annotation stripes, and text size controls to navigate longer sources. Source locks and project permissions determine whether you can edit annotations or codes.
+              {t("sourceCoding.text.helpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -1196,8 +1190,8 @@ export function PostgresSourceTextCodingView({
       {childCodeParentRow ? (
         <NewCodeModal
           allCodes={codebookRows}
-          title="Add Child Code"
-          submitLabel="Create Code"
+          title={t("sourceCoding.common.addChildCodeTitle")}
+          submitLabel={t("sourceCoding.common.createCode")}
           initialParentId={childCodeParentRow.id}
           onSubmit={async (payload) => {
             if (!onCreateCode || !canCreateCodes) return;
@@ -1216,8 +1210,8 @@ export function PostgresSourceTextCodingView({
       {editingCodeRow ? (
         <NewCodeModal
           allCodes={codebookRows}
-          title="Edit Code"
-          submitLabel="Save Changes"
+          title={t("sourceCoding.common.editCodeTitle")}
+          submitLabel={t("sourceCoding.common.saveChanges")}
           initialLabel={editingCodeRow.label}
           initialDescription={editingCodeRow.description}
           initialColor={editingCodeRow.color}
@@ -1238,22 +1232,22 @@ export function PostgresSourceTextCodingView({
       ) : null}
 
       {deletingCodeRow ? (
-        <SettingsModal title="Delete Code" onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
+        <SettingsModal title={t("sourceCoding.common.deleteCodeTitle")} onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
           <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Delete <strong>{deletingCodeRow.label}</strong>?
+              {t("common.delete")} <strong>{deletingCodeRow.label}</strong>?
             </p>
             <p className="modal-warning-text">
-              This removes the code from the codebook and clears it from existing annotations.
+              {t("sourceCoding.common.deleteCodeWarning")}
             </p>
             {deleteCodeError ? <p className="auth-error">{deleteCodeError}</p> : null}
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
-              {deletingCode ? "Deleting..." : "Delete Code"}
+              {deletingCode ? t("sourceCoding.common.deleting") : t("sourceCoding.common.deleteCodeTitle")}
             </button>
           </div>
         </SettingsModal>
@@ -1261,7 +1255,7 @@ export function PostgresSourceTextCodingView({
 
       {editingAnnotation && canEditAnnotations ? (
         <AnnotationEditorModal
-          title="Edit Annotation"
+          title={t("sourceCoding.common.editAnnotation")}
           codeOptions={codeOptions}
           selection={{
             startOffset: editingAnnotation.startOffset ?? 0,

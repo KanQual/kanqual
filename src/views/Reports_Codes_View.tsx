@@ -912,12 +912,12 @@ function FrequencyReportCard({
               checked={collapseChildCodes}
               onChange={(event) => setCollapseChildCodes(event.target.checked)}
             />
-            Collapse child codes
+            {t("reportsCodes.collapseChildCodes")}
           </label>
         )}
       </div>
       <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div className="segmented-control" role="tablist" aria-label={`${section.title} frequency view`} style={{ alignSelf: "center" }}>
+        <div className="segmented-control" role="tablist" aria-label={section.title} style={{ alignSelf: "center" }}>
           {frequencyViewOptions.map((option) => (
             <button
               key={option.key}
@@ -944,7 +944,7 @@ function FrequencyReportCard({
               </thead>
               <tbody>
                 {tableRows.length === 0 || displayBuckets.length === 0 ? (
-                  <tr><td colSpan={displayBuckets.length + 1} className="users-td-msg">No selected items.</td></tr>
+                  <tr><td colSpan={displayBuckets.length + 1} className="users-td-msg">{t("reportsCodes.noSelectedItems")}</td></tr>
                 ) : tableRows.map((row) => (
                   <tr key={row.id} className="users-row">
                     <td className="users-td users-td--name">{row.label}</td>
@@ -960,9 +960,9 @@ function FrequencyReportCard({
 
         {viewMode === "chart" && (
           tableRows.length === 0 || displayBuckets.length === 0 ? (
-            <div className="users-td-msg">No selected items.</div>
+            <div className="users-td-msg">{t("reportsCodes.noSelectedItems")}</div>
           ) : (
-            <Suspense fallback={<div className="users-td-msg">Loading chart...</div>}>
+            <Suspense fallback={<div className="users-td-msg">{t("reportsCodes.loadingChart")}</div>}>
               {isFacetedFrequencyCard ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   {facetChartOptions.map((facet) => (
@@ -1018,7 +1018,7 @@ function FrequencyReportCard({
             <table className="users-table">
               <thead>
                 <tr>
-                  <th className="users-th" style={{ minWidth: 160 }}>Code</th>
+                  <th className="users-th" style={{ minWidth: 160 }}>{t("reportsCodes.singleEntity.code")}</th>
                   {tableRows.map((row) => (
                     <th
                       key={row.id}
@@ -1039,7 +1039,7 @@ function FrequencyReportCard({
               </thead>
               <tbody>
                 {matrix.length === 0 ? (
-                  <tr><td colSpan={tableRows.length + 1} className="users-td-msg">Select codes to build the matrix.</td></tr>
+                  <tr><td colSpan={tableRows.length + 1} className="users-td-msg">{t("reportsCodes.selectCodesToBuildMatrix")}</td></tr>
                 ) : matrix.map((row) => (
                   <tr key={row.bucket.id} className="users-row">
                     <td className="users-td users-td--name">
@@ -1117,7 +1117,7 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
                 checked={collapseChildCodes}
                 onChange={(event) => setCollapseChildCodes(event.target.checked)}
               />
-              Collapse child codes
+              {t("reportsCodes.collapseChildCodes")}
             </label>
           )}
         </div>
@@ -1178,13 +1178,13 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
                 setCollapseChildCodes(event.target.checked);
               }}
             />
-            Collapse child codes
+            {t("reportsCodes.collapseChildCodes")}
           </label>
         )}
       </div>
       <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 16 }}>
         {section.matrices.length === 0 ? (
-          <div className="users-td-msg">Select codes to build the matrix.</div>
+          <div className="users-td-msg">{t("reportsCodes.selectCodesToBuildMatrix")}</div>
         ) : section.matrices.map((sourceMatrix) => {
           const matrix = canCollapseChildCodes
             ? aggregateCoOccurrenceMatrix(sourceMatrix, codes, collapseChildCodes)
@@ -1204,7 +1204,7 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
                 <table className="users-table">
                   <thead>
                     <tr>
-                      <th className="users-th" style={{ minWidth: 150 }}>Code</th>
+                      <th className="users-th" style={{ minWidth: 150 }}>{t("reportsCodes.singleEntity.code")}</th>
                       {matrix.codes.map((code) => (
                         <th key={code.id} className="users-th" style={{ minWidth: 110 }}>{code.label}</th>
                       ))}
@@ -1212,7 +1212,7 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
                   </thead>
                   <tbody>
                     {matrix.codes.length === 0 ? (
-                      <tr><td colSpan={matrix.codes.length + 1} className="users-td-msg">Select codes to build the matrix.</td></tr>
+                      <tr><td colSpan={matrix.codes.length + 1} className="users-td-msg">{t("reportsCodes.selectCodesToBuildMatrix")}</td></tr>
                     ) : matrix.codes.map((rowCode, rowIndex) => (
                       <tr key={rowCode.id} className="users-row">
                         <td className="users-td users-td--name">
@@ -1285,7 +1285,7 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
                 <span className="annotation-hover-tooltip-swatch" style={{ background: cellTooltip.colColor }} />
                 {cellTooltip.colLabel}: {cellTooltip.value}
               </div>
-              <div className="annotation-hover-tooltip-quote">No matching sources</div>
+                <div className="annotation-hover-tooltip-quote">{t("reportsCodes.noMatchingSources")}</div>
             </div>
           ) : (
             <>
@@ -2542,7 +2542,7 @@ function CodeReportCreationPage({
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                        <span style={{ color: "var(--color-text-muted)" }}>Minimum</span>
+                        <span style={{ color: "var(--color-text-muted)" }}>{t("reportsCodes.filterEditors.minimum")}</span>
                         <input
                           className="form-input"
                           type="number"
@@ -2555,7 +2555,7 @@ function CodeReportCreationPage({
                         />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                        <span style={{ color: "var(--color-text-muted)" }}>Maximum</span>
+                        <span style={{ color: "var(--color-text-muted)" }}>{t("reportsCodes.filterEditors.maximum")}</span>
                         <input
                           className="form-input"
                           type="number"
@@ -2579,7 +2579,7 @@ function CodeReportCreationPage({
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{item.name}</div>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                   <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>From</span>
+                    <span style={{ color: "var(--color-text-muted)" }}>{t("reportsCodes.filterEditors.from")}</span>
                     <input
                       className="form-input"
                       type="datetime-local"
@@ -2591,7 +2591,7 @@ function CodeReportCreationPage({
                     />
                   </label>
                   <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, fontSize: 12 }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>To</span>
+                    <span style={{ color: "var(--color-text-muted)" }}>{t("reportsCodes.filterEditors.to")}</span>
                     <input
                       className="form-input"
                       type="datetime-local"
@@ -3856,9 +3856,9 @@ function CodeReportCreationPage({
                       </colgroup>
                       <thead>
                         <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
-                          <th aria-label="Select object" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
-                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
-                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                          <th aria-label={t("reportsCodes.selectObject")} style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>{t("reportsCodes.typeColumn")}</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>{t("reportsCodes.titleColumn")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3932,9 +3932,9 @@ function CodeReportCreationPage({
                       </colgroup>
                       <thead>
                         <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
-                          <th aria-label="Select source" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
-                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>Type</th>
-                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>Title</th>
+                          <th aria-label={t("reportsCodes.selectSource")} style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th style={{ padding: "6px 6px 6px 4px", fontWeight: 600 }}>{t("reportsCodes.typeColumn")}</th>
+                          <th style={{ padding: "6px 6px", fontWeight: 600 }}>{t("reportsCodes.titleColumn")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3998,7 +3998,7 @@ function CodeReportCreationPage({
                       </colgroup>
                       <thead>
                         <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
-                          <th aria-label="Select relationship" style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
+                          <th aria-label={t("reportsCodes.selectRelationship")} style={{ padding: "6px 2px 6px 8px", fontWeight: 600 }} />
                           {[
                             ["relationshipType", "Type"],
                             ["object1Name", "Object 1"],
@@ -4164,9 +4164,9 @@ function CodeReportCreationPage({
                   className="btn btn--secondary project-table-header-icon-button report-title-action-button"
                   title={
                     !isFrozen
-                      ? "Only saved reports can be exported"
+                      ? t("reportsCodes.exportSavedOnly")
                       : !canExportReports
-                        ? "You do not have permission to export reports"
+                        ? t("reportsCodes.exportDenied")
                         : t("reportsCodes.exportTitle")
                   }
                   disabled={!isFrozen || !canExportReports}
@@ -4192,8 +4192,8 @@ function CodeReportCreationPage({
                     className="btn btn--primary project-table-header-icon-button report-title-action-button"
                     onClick={handleSave}
                     disabled={saving || !canStartReports}
-                    title={saving ? "Saving..." : "Save"}
-                    aria-label={saving ? "Saving..." : "Save"}
+                    title={saving ? t("reportsCodes.actions.saving") : t("reportsCodes.actions.save")}
+                    aria-label={saving ? t("reportsCodes.actions.saving") : t("reportsCodes.actions.save")}
                   >
                     <SaveIcon className="project-table-header-icon" />
                   </button>
@@ -4260,11 +4260,11 @@ function CodeReportCreationPage({
 
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Filters</span>
+              <span className="annotate-card-title">{t("reportsCodes.filtersTitle")}</span>
             </div>
             <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
               {!hasActiveFilters ? (
-                <div style={{ color: "var(--color-text-muted)" }}>All selected objects and sources are included.</div>
+                <div style={{ color: "var(--color-text-muted)" }}>{t("reportsCodes.allSelectedObjectsAndSources")}</div>
               ) : (
                 <>
                   {activeCaseFilterDetails.length > 0 && (
@@ -4384,7 +4384,7 @@ function CodeReportCreationPage({
             {!isFrozen && !loadingFilters && caseTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>Object Type</div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{t("reportsCodes.objectType")}</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set(caseTypeOptions))}>{t("reportsCodes.actions.all")}</button>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelCaseTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
@@ -4465,7 +4465,7 @@ function CodeReportCreationPage({
             {!isFrozen && !loadingFilters && documentTypeOptions.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>Source Type</div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{t("reportsCodes.sourceType")}</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set(documentTypeOptions))}>{t("reportsCodes.actions.all")}</button>
                     <button className="btn" style={{ fontSize: 11, padding: "1px 8px" }} onClick={() => setSelDocTypes(new Set())}>{t("reportsCodes.actions.clear")}</button>
@@ -4645,7 +4645,7 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      if (!postgresProjectId) throw new Error("Reports are not available outside a project workspace.");
+      if (!postgresProjectId) throw new Error(t("reportsCommon.projectWorkspaceRequired"));
       await deletePostgresReport(postgresProjectId, confirmDelete.id);
       setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
       setConfirmDelete(null);

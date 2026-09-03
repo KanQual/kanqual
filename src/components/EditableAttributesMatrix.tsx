@@ -1,5 +1,6 @@
 import type { SharedAttributeDataType } from "./AttributeValuesModal";
 import { DeleteIcon, EditIcon, PlusIcon } from "./AppIcons";
+import { useI18n } from "../i18n/provider";
 
 export type EditableAttributeMatrixDefinition = {
   id: string;
@@ -45,17 +46,18 @@ export function EditableAttributesMatrix({
   onDeleteAttribute: (definitionId: string) => void;
   onChangeValue: (definitionId: string, rowId: string, value: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="postgres-attribute-modal-section editable-attributes-matrix-section">
       <div className="editable-attributes-matrix-header">
-        <div className="postgres-attribute-modal-title">Attributes</div>
+        <div className="postgres-attribute-modal-title">{t("sharedModals.attributes.title")}</div>
         <button
           type="button"
           className="btn btn--primary project-table-header-icon-button"
           onClick={onAddAttribute}
           disabled={disabled}
-          title="Add attribute"
-          aria-label="Add attribute"
+          title={t("sharedModals.attributes.add")}
+          aria-label={t("sharedModals.attributes.add")}
         >
           <PlusIcon className="project-table-header-icon" />
         </button>
@@ -71,7 +73,7 @@ export function EditableAttributesMatrix({
                 <div className="editable-attributes-matrix-definition-card-body">
                   <strong>{definition.name}</strong>
                   <span>{definition.dataType}</span>
-                  <span>{definition.description || (definition.options.length > 0 ? definition.options.join(", ") : "No description")}</span>
+                  <span>{definition.description || (definition.options.length > 0 ? definition.options.join(", ") : t("sharedModals.attributes.noDescription"))}</span>
                 </div>
                 <span className="editable-attributes-matrix-column-actions">
                   <button
@@ -79,8 +81,8 @@ export function EditableAttributesMatrix({
                     className="btn editable-attributes-matrix-column-action"
                     onClick={() => onEditAttribute(definition.id)}
                     disabled={disabled}
-                    title={`Edit ${definition.name}`}
-                    aria-label={`Edit ${definition.name}`}
+                    title={t("sharedModals.attributes.edit", { name: definition.name })}
+                    aria-label={t("sharedModals.attributes.edit", { name: definition.name })}
                   >
                     <EditIcon className="editable-attributes-matrix-column-action-icon" />
                   </button>
@@ -89,8 +91,8 @@ export function EditableAttributesMatrix({
                     className="btn editable-attributes-matrix-column-action editable-attributes-matrix-column-action--danger"
                     onClick={() => onDeleteAttribute(definition.id)}
                     disabled={disabled}
-                    title={`Delete ${definition.name}`}
-                    aria-label={`Delete ${definition.name}`}
+                    title={t("sharedModals.attributes.delete", { name: definition.name })}
+                    aria-label={t("sharedModals.attributes.delete", { name: definition.name })}
                   >
                     <DeleteIcon className="editable-attributes-matrix-column-action-icon" />
                   </button>
@@ -104,7 +106,7 @@ export function EditableAttributesMatrix({
           <table className="users-table editable-attributes-matrix-table">
             <thead>
               <tr>
-                <th className="users-th editable-attributes-matrix-name-col">Name</th>
+                <th className="users-th editable-attributes-matrix-name-col">{t("sharedModals.attributes.nameColumn")}</th>
                 {definitions.map((definition) => (
                   <th key={definition.id} className="users-th editable-attributes-matrix-attribute-col">
                     <div className="editable-attributes-matrix-column-header">
@@ -115,8 +117,8 @@ export function EditableAttributesMatrix({
                           className="btn editable-attributes-matrix-column-action"
                           onClick={() => onEditAttribute(definition.id)}
                           disabled={disabled}
-                          title={`Edit ${definition.name}`}
-                          aria-label={`Edit ${definition.name}`}
+                          title={t("sharedModals.attributes.edit", { name: definition.name })}
+                          aria-label={t("sharedModals.attributes.edit", { name: definition.name })}
                         >
                           <EditIcon className="editable-attributes-matrix-column-action-icon" />
                         </button>
@@ -125,8 +127,8 @@ export function EditableAttributesMatrix({
                           className="btn editable-attributes-matrix-column-action editable-attributes-matrix-column-action--danger"
                           onClick={() => onDeleteAttribute(definition.id)}
                           disabled={disabled}
-                          title={`Delete ${definition.name}`}
-                          aria-label={`Delete ${definition.name}`}
+                          title={t("sharedModals.attributes.delete", { name: definition.name })}
+                          aria-label={t("sharedModals.attributes.delete", { name: definition.name })}
                         >
                           <DeleteIcon className="editable-attributes-matrix-column-action-icon" />
                         </button>

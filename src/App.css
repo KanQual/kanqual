@@ -1103,6 +1103,13 @@ body {
   text-align: center;
 }
 
+.loading-card--startup-intro {
+  flex-direction: row;
+  justify-content: center;
+  gap: 18px;
+  text-align: left;
+}
+
 .loading-card-bg-logo {
   position: absolute;
   top: 0;
@@ -1116,12 +1123,26 @@ body {
   user-select: none;
 }
 
+.loading-card-intro-logo {
+  width: 118px;
+  max-width: 34%;
+  height: auto;
+  flex: 0 0 auto;
+  opacity: 0.92;
+}
+
 .loading-card-content {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  max-width: 360px;
+}
+
+.loading-card-content--startup-intro {
+  align-items: flex-start;
+  max-width: 190px;
 }
 
 .loading-card-title {
@@ -1129,6 +1150,44 @@ body {
   color: var(--color-text);
   font-size: var(--text-lg);
   font-weight: 700;
+}
+
+.loading-card-version {
+  margin: 8px 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.loading-card-description {
+  margin: 18px 0 0;
+  color: var(--color-text);
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+.loading-card-byline {
+  margin: 18px 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+@media (max-width: 620px) {
+  .loading-card--startup-intro {
+    flex-direction: column;
+    gap: 18px;
+    text-align: center;
+  }
+
+  .loading-card-intro-logo {
+    max-width: 180px;
+    width: 42vw;
+  }
+
+  .loading-card-content--startup-intro {
+    align-items: center;
+  }
 }
 
 .auth-card-transition-shell {
@@ -13520,6 +13579,19 @@ input[type="password"].form-input::-ms-clear {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   white-space: normal;
+}
+
+.ai-chat-context-option small.ai-chat-context-relationship-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ai-chat-context-relationship-icon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  stroke-width: 2;
 }
 
 .ai-chat-context-option-badge {

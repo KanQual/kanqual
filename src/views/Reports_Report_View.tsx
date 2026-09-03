@@ -3,8 +3,10 @@ import { useStore } from "../context/StoreContext";
 import { HelpIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { formatCurrentDateTime } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
 
 export function ReportView() {
+  const { t } = useI18n();
   const {
     activeProject,
     codes,
@@ -17,7 +19,7 @@ export function ReportView() {
   if (!activeProject) {
     return (
       <div className="view">
-        <div className="empty-state">Open a project first.</div>
+        <div className="empty-state">{t("reportSummary.openProjectFirst")}</div>
       </div>
     );
   }
@@ -50,23 +52,23 @@ export function ReportView() {
   function handleExport() {
     const lines: string[] = [
       `# Report: ${project.name}`,
-      `Generated: ${formatCurrentDateTime(new Date())}`,
+      `${t("reportSummary.generated")}: ${formatCurrentDateTime(new Date())}`,
       "",
-      "## Summary",
-      `Documents: ${documents.length}`,
-      `Total annotations: ${projectAnnotations.length}`,
-      `Memos: ${memos.length}`,
+      `## ${t("reportSummary.summary")}`,
+      `${t("reportSummary.documents")}: ${documents.length}`,
+      `${t("reportSummary.totalAnnotations")}: ${projectAnnotations.length}`,
+      `${t("reportSummary.memos")}: ${memos.length}`,
       "",
-      "## Annotation Counts by Code",
+      `## ${t("reportSummary.annotationCountsByCode")}`,
       ...codes.map((c) => `- ${c.label}: ${countByCode[c.id] ?? 0}`),
       "",
-      "## By Document",
+      `## ${t("reportSummary.byDocument")}`,
     ];
 
     for (const { doc, entries } of docBreakdown) {
       lines.push(`\n### ${doc.name}`);
       if (entries.length === 0) {
-        lines.push("No annotations.");
+        lines.push(t("reportSummary.noAnnotations"));
       }
       for (const entry of entries) {
         lines.push(`\n**${entry.code}** (${entry.quotes.length})`);
@@ -77,10 +79,10 @@ export function ReportView() {
     }
 
     if (memos.length > 0) {
-      lines.push("", "## Memos");
+      lines.push("", `## ${t("reportSummary.memos")}`);
       for (const memo of memos) {
         lines.push(`\n### ${memo.title}`);
-        lines.push(memo.body || "*(empty)*");
+        lines.push(memo.body || t("reportSummary.emptyMemo"));
       }
     }
 
@@ -97,39 +99,39 @@ export function ReportView() {
     <div className="view report-view">
       <header className="view-header">
         <div className="view-title-with-help">
-          <h1>Report - {project.name}</h1>
-          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label="Open report help">
+          <h1>{t("reportSummary.title", { projectName: project.name })}</h1>
+          <button type="button" className="users-help-icon-btn" onClick={() => setHelpOpen(true)} aria-label={t("reportSummary.openHelp")}>
             <HelpIcon className="users-help-icon" />
           </button>
         </div>
         <button className="btn btn--primary" onClick={handleExport}>
-          Export as Markdown
+          {t("reportSummary.exportMarkdown")}
         </button>
       </header>
 
       <div className="report-summary-cards">
         <div className="summary-card">
           <div className="summary-card-value">{documents.length}</div>
-          <div className="summary-card-label">Documents</div>
+          <div className="summary-card-label">{t("reportSummary.documents")}</div>
         </div>
         <div className="summary-card">
           <div className="summary-card-value">{projectAnnotations.length}</div>
-          <div className="summary-card-label">Annotations</div>
+          <div className="summary-card-label">{t("reportSummary.annotations")}</div>
         </div>
         <div className="summary-card">
           <div className="summary-card-value">{codes.length}</div>
-          <div className="summary-card-label">Codes</div>
+          <div className="summary-card-label">{t("reportSummary.codes")}</div>
         </div>
         <div className="summary-card">
           <div className="summary-card-value">{memos.length}</div>
-          <div className="summary-card-label">Memos</div>
+          <div className="summary-card-label">{t("reportSummary.memos")}</div>
         </div>
       </div>
 
       <section className="report-section">
-        <h2>Annotation Counts by Code</h2>
+        <h2>{t("reportSummary.annotationCountsByCode")}</h2>
         {codes.length === 0 ? (
-          <p className="report-empty">No codes defined.</p>
+          <p className="report-empty">{t("reportSummary.noCodesDefined")}</p>
         ) : (
           <ul className="report-code-list">
             {codes.map((code) => {
@@ -160,12 +162,12 @@ export function ReportView() {
       </section>
 
       <section className="report-section">
-        <h2>By Document</h2>
+        <h2>{t("reportSummary.byDocument")}</h2>
         {docBreakdown.map(({ doc, entries }) => (
           <div key={doc.id} className="report-doc">
             <h3>{doc.name}</h3>
             {entries.length === 0 ? (
-              <p className="report-empty">No annotations.</p>
+              <p className="report-empty">{t("reportSummary.noAnnotations")}</p>
             ) : (
               entries.map((entry) => (
                 <div key={entry.code} className="report-doc-code">
@@ -189,23 +191,23 @@ export function ReportView() {
 
       {helpOpen && (
         <SettingsModal
-          title="Report Help"
+          title={t("reportSummary.helpTitle")}
           onClose={() => setHelpOpen(false)}
           modalClassName="modal--help"
         >
           <div className="app-settings-modal-body">
             <p className="settings-section-desc">
-              Review summary cards, inspect code-count comparisons, inspect document-level quotation breakdowns, and export the report as markdown.
+              {t("reportSummary.helpIntro")}
             </p>
             <ul className="settings-help-list">
-              <li>Use this page as a lightweight project-wide summary report. Read the overall counts first, then move into the code and document breakdowns for detail.</li>
-              <li>This is a synthesized readout of existing project content, not a separate editable report-configuration page.</li>
-              <li>Current project content such as codes, annotations, documents, and memos, plus export-as-markdown behavior, affect what appears here.</li>
+              <li>{t("reportSummary.helpLine1")}</li>
+              <li>{t("reportSummary.helpLine2")}</li>
+              <li>{t("reportSummary.helpLine3")}</li>
             </ul>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>

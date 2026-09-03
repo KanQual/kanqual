@@ -7,6 +7,7 @@ import {
 } from "../lib/timelineAttributeUi";
 import { ArrowLeftRightIcon } from "./AppIcons";
 import { SettingsModal } from "./SettingsModal";
+import { useI18n } from "../i18n/provider";
 
 export type PostgresRelationshipEndpointOption = {
   key: string;
@@ -24,20 +25,44 @@ const RELATIONSHIP_PICKER_PREVIEW_COLOR = "#64748b";
 const RELATIONSHIP_LINE_WEIGHT_MIN = 1;
 const RELATIONSHIP_LINE_WEIGHT_MAX = 16;
 const LINE_SHAPE_OPTIONS = [
-  { value: "solid", label: "Solid" },
-  { value: "dashed", label: "Dashed" },
-  { value: "long_dashed", label: "Long dash" },
-  { value: "short_dashed", label: "Short dash" },
-  { value: "dotted", label: "Dotted" },
-  { value: "loose_dotted", label: "Loose dots" },
-  { value: "dash_dot", label: "Dash-dot" },
-  { value: "dash_dot_dot", label: "Dash-dot-dot" },
+  { value: "solid" },
+  { value: "dashed" },
+  { value: "long_dashed" },
+  { value: "short_dashed" },
+  { value: "dotted" },
+  { value: "loose_dotted" },
+  { value: "dash_dot" },
+  { value: "dash_dot_dot" },
 ] as const;
 const ARROWHEAD_OPTIONS = [
-  { value: "one_sided", label: "One-sided" },
-  { value: "double_sided", label: "Double-sided" },
-  { value: "none", label: "No arrows" },
+  { value: "one_sided" },
+  { value: "double_sided" },
+  { value: "none" },
 ] as const;
+
+function formatRelationshipModalTab(tab: PostgresRelationshipModalTab, t: ReturnType<typeof useI18n>["t"]): string {
+  if (tab === "details") return t("sharedModals.tabs.details");
+  if (tab === "graphics") return t("sharedModals.tabs.graphics");
+  if (tab === "attributes") return t("sharedModals.tabs.attributes");
+  return t("sharedModals.tabs.timeline");
+}
+
+function formatLineShapeOption(value: string, t: ReturnType<typeof useI18n>["t"]): string {
+  if (value === "solid") return t("sharedModals.graphics.lineShapes.solid");
+  if (value === "dashed") return t("sharedModals.graphics.lineShapes.dashed");
+  if (value === "long_dashed") return t("sharedModals.graphics.lineShapes.longDashed");
+  if (value === "short_dashed") return t("sharedModals.graphics.lineShapes.shortDashed");
+  if (value === "dotted") return t("sharedModals.graphics.lineShapes.dotted");
+  if (value === "loose_dotted") return t("sharedModals.graphics.lineShapes.looseDotted");
+  if (value === "dash_dot") return t("sharedModals.graphics.lineShapes.dashDot");
+  return t("sharedModals.graphics.lineShapes.dashDotDot");
+}
+
+function formatArrowheadOption(value: string, t: ReturnType<typeof useI18n>["t"]): string {
+  if (value === "one_sided") return t("sharedModals.graphics.arrowheadOptions.oneSided");
+  if (value === "double_sided") return t("sharedModals.graphics.arrowheadOptions.doubleSided");
+  return t("sharedModals.graphics.arrowheadOptions.none");
+}
 
 function normalizeColor(value: string): string {
   const trimmed = value.trim();
@@ -66,12 +91,13 @@ function RelationshipGraphicPreviewCard(props: {
   arrowhead: string;
   color: string;
 }) {
+  const { t } = useI18n();
   const strokeWidth = relationshipStrokeWidth(props.lineWeight);
   const lineStartX = props.arrowhead === "double_sided" ? 24 : 16;
   const lineEndX = props.arrowhead === "none" ? 184 : 176;
   return (
-    <div className="source-graphics-preview-card" aria-label="Relationship graphic preview">
-      <span className="form-label">Preview</span>
+    <div className="source-graphics-preview-card" aria-label={t("sharedModals.graphics.relationshipPreview")}>
+      <span className="form-label">{t("common.preview")}</span>
       <div className="source-graphics-preview-stage">
         <svg aria-hidden="true" viewBox="0 0 200 80" width="200" height="80" className="relationship-graphics-preview-svg">
           <line
@@ -103,6 +129,7 @@ function RelationshipEndpointSingleSelect({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const { t } = useI18n();
   const [sortKey, setSortKey] = useState<"name" | "type">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const selectedRowRef = useRef<HTMLTableRowElement | null>(null);
@@ -142,19 +169,19 @@ function RelationshipEndpointSingleSelect({
             <tr>
               <th className="users-th" style={{ width: "62%" }} aria-sort={sortKey === "name" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
                 <button type="button" className="users-th-sort" onClick={() => handleSort("name")}>
-                  Name<span className="users-sort-icon">{sortIcon("name")}</span>
+                  {t("common.name")}<span className="users-sort-icon">{sortIcon("name")}</span>
                 </button>
               </th>
               <th className="users-th" style={{ width: "38%" }} aria-sort={sortKey === "type" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
                 <button type="button" className="users-th-sort" onClick={() => handleSort("type")}>
-                  Type<span className="users-sort-icon">{sortIcon("type")}</span>
+                  {t("sharedModals.relationshipModal.type")}<span className="users-sort-icon">{sortIcon("type")}</span>
                 </button>
               </th>
             </tr>
           </thead>
           <tbody>
             {sortedOptions.length === 0 ? (
-              <tr><td className="users-td-msg" colSpan={2}>No matching endpoints.</td></tr>
+              <tr><td className="users-td-msg" colSpan={2}>{t("sharedModals.relationshipModal.noMatchingEndpoints")}</td></tr>
             ) : sortedOptions.map((option) => (
               <tr
                 key={option.key}
@@ -175,6 +202,7 @@ function RelationshipEndpointSingleSelect({
 }
 
 function OverrideHeader({ label, inherited, onReset }: { label: string; inherited: boolean; onReset: () => void }) {
+  const { t } = useI18n();
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -193,11 +221,11 @@ function OverrideHeader({ label, inherited, onReset }: { label: string; inherite
             background: inherited ? "rgba(82, 96, 109, 0.12)" : "rgba(53, 80, 112, 0.12)",
           }}
         >
-          {inherited ? "Inherited" : "Custom"}
+          {inherited ? t("sharedModals.graphics.inherited") : t("sharedModals.graphics.custom")}
         </span>
-        {inherited ? <span className="auth-hint" style={{ margin: 0 }}>From relationship type</span> : null}
+        {inherited ? <span className="auth-hint" style={{ margin: 0 }}>{t("sharedModals.graphics.fromRelationshipType")}</span> : null}
       </div>
-      {!inherited ? <button type="button" className="btn btn--ghost" onClick={onReset}>Reset to inherited</button> : null}
+      {!inherited ? <button type="button" className="btn btn--ghost" onClick={onReset}>{t("sharedModals.graphics.resetToInherited")}</button> : null}
     </div>
   );
 }
@@ -273,6 +301,7 @@ export function PostgresRelationshipModal({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onNewRelationshipType?: () => void;
 }) {
+  const { t } = useI18n();
   const inheritedColor = normalizeColor(selectedType?.color || "");
   const effectiveColor = colorOverride.trim() ? normalizeColor(colorOverride) : inheritedColor;
   const inheritedLineShape = selectedType?.lineShape || "solid";
@@ -295,7 +324,7 @@ export function PostgresRelationshipModal({
     const toIsValid = availableToEndpoints.some((option) => option.key === toEndpointKey);
     if (!relationshipTypeId || !fromIsValid || !toIsValid) {
       event.preventDefault();
-      setValidationWarning("The selected endpoints do not work with this relationship type. Choose valid From and To endpoints before saving.");
+      setValidationWarning(t("sharedModals.relationshipModal.invalidEndpoints"));
       setTab("details");
       return;
     }
@@ -333,14 +362,14 @@ export function PostgresRelationshipModal({
                 className={`segmented-control-option ${tab === nextTab ? "segmented-control-option--active" : ""}`}
                 onClick={() => setTab(nextTab)}
               >
-                {nextTab.slice(0, 1).toUpperCase() + nextTab.slice(1)}
+                {formatRelationshipModalTab(nextTab, t)}
               </button>
             ))}
           </div>
           {tab === "details" ? (
             <>
               <label className="form-label">
-                Relationship type
+                {t("sharedModals.relationshipModal.relationshipType")}
                 <select
                   className="form-input"
                   value={relationshipTypeId}
@@ -354,11 +383,11 @@ export function PostgresRelationshipModal({
                   }}
                   autoFocus
                 >
-                  <option value="">Select relationship type</option>
+                  <option value="">{t("sharedModals.relationshipModal.selectRelationshipType")}</option>
                   {relationshipTypes.map((relationshipType) => (
                     <option key={relationshipType.id} value={relationshipType.id}>{relationshipType.name}</option>
                   ))}
-                  <option value="__new_relationship_type__">Add new relationship type...</option>
+                  <option value="__new_relationship_type__">{t("sharedModals.relationshipModal.addRelationshipType")}</option>
                 </select>
               </label>
               <div
@@ -369,7 +398,7 @@ export function PostgresRelationshipModal({
                   alignItems: "start",
                 }}
               >
-                <RelationshipEndpointSingleSelect label="From" options={availableFromEndpoints} value={fromEndpointKey} onChange={(value) => {
+                <RelationshipEndpointSingleSelect label={t("sharedModals.relationshipModal.from")} options={availableFromEndpoints} value={fromEndpointKey} onChange={(value) => {
                   setValidationWarning("");
                   setFromEndpointKey(value);
                 }} />
@@ -387,8 +416,8 @@ export function PostgresRelationshipModal({
                     className="btn btn--secondary"
                     onClick={handleSwapEndpoints}
                     disabled={submitting || !fromEndpointKey || !toEndpointKey}
-                    aria-label="Switch from and to endpoints"
-                    title="Switch from and to endpoints"
+                    aria-label={t("sharedModals.relationshipModal.switchEndpoints")}
+                    title={t("sharedModals.relationshipModal.switchEndpoints")}
                     style={{
                       width: 24,
                       height: 24,
@@ -401,13 +430,13 @@ export function PostgresRelationshipModal({
                     <ArrowLeftRightIcon />
                   </button>
                 </div>
-                <RelationshipEndpointSingleSelect label="To" options={availableToEndpoints} value={toEndpointKey} onChange={(value) => {
+                <RelationshipEndpointSingleSelect label={t("sharedModals.relationshipModal.to")} options={availableToEndpoints} value={toEndpointKey} onChange={(value) => {
                   setValidationWarning("");
                   setToEndpointKey(value);
                 }} />
               </div>
               <label className="form-label">
-                Description
+                {t("common.description")}
                 <textarea className="form-input form-textarea" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} />
               </label>
             </>
@@ -416,7 +445,7 @@ export function PostgresRelationshipModal({
               <div className="source-graphics-layout">
                 <div className="source-graphics-controls">
               <div style={{ display: "flex", justifyContent: "center" }}>
-                <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label="Relationship graphic source">
+                <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label={t("sharedModals.graphics.relationshipGraphicSource")}>
                   {(["inherit", "select"] as const).map((mode) => (
                     <button
                       key={mode}
@@ -427,52 +456,52 @@ export function PostgresRelationshipModal({
                       onClick={() => handleGraphicModeChange(mode)}
                       disabled={submitting}
                     >
-                      {mode.slice(0, 1).toUpperCase() + mode.slice(1)}
+                      {mode === "inherit" ? t("common.inherit") : t("common.select")}
                     </button>
                   ))}
                 </div>
               </div>
               {graphicMode === "inherit" ? (
                 <p className="auth-hint" style={{ margin: "4px 0 0", textAlign: "center" }}>
-                  This relationship will inherit its graphical elements from its relationship type.
+                  {t("sharedModals.graphics.inheritRelationshipHelp")}
                 </p>
               ) : (
                 <>
                   <label className="form-label">
-                    <OverrideHeader label="Color" inherited={!colorOverride.trim()} onReset={() => setColorOverride("")} />
+                    <OverrideHeader label={t("common.color")} inherited={!colorOverride.trim()} onReset={() => setColorOverride("")} />
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <input className="form-input form-input--color" type="color" value={effectiveColor} onChange={(event) => setColorOverride(event.target.value)} />
                       <input className="form-input" value={!colorOverride.trim() ? inheritedColor : colorOverride} onChange={(event) => setColorOverride(event.target.value)} style={{ flex: "0 0 148px", fontFamily: "monospace" }} />
                     </div>
                   </label>
                   <label className="form-label">
-                    <OverrideHeader label="Line shape" inherited={!lineShapeOverride.trim()} onReset={() => setLineShapeOverride("")} />
-                    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Line shape selection">
+                    <OverrideHeader label={t("sharedModals.graphics.lineShape")} inherited={!lineShapeOverride.trim()} onReset={() => setLineShapeOverride("")} />
+                    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label={t("sharedModals.graphics.lineShapeSelection")}>
                       {LINE_SHAPE_OPTIONS.map((option) => (
                         <button key={option.value} type="button" className={`shape-picker-option${effectiveLineShape === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setLineShapeOverride(option.value === inheritedLineShape ? "" : option.value)}>
                           <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
                             <svg width="46" height="18" viewBox="0 0 46 18"><line x1="4" y1="9" x2="42" y2="9" stroke={RELATIONSHIP_PICKER_PREVIEW_COLOR} strokeWidth="3" strokeDasharray={strokeDasharray(option.value)} /></svg>
                           </div>
-                          <span className="shape-picker-label">{option.label}</span>
+                          <span className="shape-picker-label">{formatLineShapeOption(option.value, t)}</span>
                         </button>
                       ))}
                     </div>
                   </label>
                   <label className="form-label">
-                    <OverrideHeader label="Arrowheads" inherited={!arrowheadOverride.trim()} onReset={() => setArrowheadOverride("")} />
-                    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label="Arrowhead selection">
+                    <OverrideHeader label={t("sharedModals.graphics.arrowheads")} inherited={!arrowheadOverride.trim()} onReset={() => setArrowheadOverride("")} />
+                    <div className="shape-picker-grid shape-picker-grid--compact-shapes" role="radiogroup" aria-label={t("sharedModals.graphics.arrowheadSelection")}>
                       {ARROWHEAD_OPTIONS.map((option) => (
                         <button key={option.value} type="button" className={`shape-picker-option${effectiveArrowhead === option.value ? " shape-picker-option--selected" : ""}`} onClick={() => setArrowheadOverride(option.value === inheritedArrowhead ? "" : option.value)}>
                           <div className="shape-picker-preview shape-picker-preview--line" aria-hidden="true">
                             <svg width="46" height="18" viewBox="0 0 46 18"><line x1="4" y1="9" x2="42" y2="9" stroke={RELATIONSHIP_PICKER_PREVIEW_COLOR} strokeWidth="2" markerEnd={option.value !== "none" ? "url(#arrow-shared)" : undefined} markerStart={option.value === "double_sided" ? "url(#arrow-shared)" : undefined} /><defs><marker id="arrow-shared" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={RELATIONSHIP_PICKER_PREVIEW_COLOR} /></marker></defs></svg>
                           </div>
-                          <span className="shape-picker-label">{option.label}</span>
+                          <span className="shape-picker-label">{formatArrowheadOption(option.value, t)}</span>
                         </button>
                       ))}
                     </div>
                   </label>
                   <label className="form-label timeline-group-opacity-control">
-                    <OverrideHeader label="Line weight" inherited={lineWeightOverride == null} onReset={() => setLineWeightOverride(null)} />
+                    <OverrideHeader label={t("sharedModals.graphics.lineWeight")} inherited={lineWeightOverride == null} onReset={() => setLineWeightOverride(null)} />
                     <div className="timeline-group-slider-row">
                       <input
                         className="form-range"
@@ -527,7 +556,7 @@ export function PostgresRelationshipModal({
                 </table>
               </div>
             ) : (
-              <p className="auth-hint" style={{ marginTop: 0 }}>No timeline fields have been configured for this relationship type yet.</p>
+              <p className="auth-hint" style={{ marginTop: 0 }}>{t("sharedModals.relationshipModal.noTimelineFields")}</p>
             )
           ) : attributeDefinitions.length > 0 ? (
             <div className="case-detail-attributes-table-wrap">
@@ -552,13 +581,13 @@ export function PostgresRelationshipModal({
               </table>
             </div>
           ) : (
-            <p className="auth-hint" style={{ marginTop: 0 }}>No shared attributes for this relationship type yet.</p>
+            <p className="auth-hint" style={{ marginTop: 0 }}>{t("sharedModals.relationshipModal.noSharedAttributes")}</p>
           )}
           {validationWarning ? <p className="auth-error">{validationWarning}</p> : error ? <p className="auth-error">{error}</p> : null}
         </div>
         <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="submit" className="btn btn--primary" disabled={submitting || submitDisabled}>
-              {submitting ? "Saving..." : submitLabel}
+              {submitting ? t("common.saving") : submitLabel}
             </button>
         </div>
       </form>

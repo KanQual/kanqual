@@ -194,6 +194,7 @@ function AnnotationClipPlayer({
   previewUrl: string | null;
   mediaType: string | null;
 }) {
+  const { t } = useI18n();
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const startSeconds = Math.max(0, (annotation.timeStartMs ?? 0) / 1000);
   const clipLabel = annotation.timeStartMs != null && annotation.timeEndMs != null
@@ -217,7 +218,7 @@ function AnnotationClipPlayer({
           ref={mediaRef as RefObject<HTMLVideoElement>}
           preload="metadata"
           onLoadedMetadata={handleLoadedMetadata}
-          aria-label="Video clip preview"
+          aria-label={t("sourceCoding.media.videoClipPreview")}
           className="annotation-excerpt-media annotation-excerpt-media--video"
         >
           <source src={previewUrl} type={mediaType ?? undefined} />
@@ -1094,13 +1095,13 @@ export function PostgresSourceMediaCodingView({
           >
             <ArrowLeftIcon className="code-text-header-back-icon" />
           </button>
-          <h1>{mediaKind === "audio" ? "Code Audio" : "Code Video"}</h1>
+          <h1>{mediaKind === "audio" ? t("sourceCoding.media.codeAudio") : t("sourceCoding.media.codeVideo")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title={`Open code ${mediaKind} help`}
-            aria-label={`Open code ${mediaKind} help`}
+            title={t("sourceCoding.media.openHelp", { kind: mediaKind })}
+            aria-label={t("sourceCoding.media.openHelp", { kind: mediaKind })}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -1111,14 +1112,14 @@ export function PostgresSourceMediaCodingView({
         <div className="annotate-left" style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
           <div className="annotate-card" style={{ flexShrink: 0 }}>
             <div className="annotate-card-header">
-              <span className="annotate-card-title">Codebook</span>
+              <span className="annotate-card-title">{t("sourceCoding.common.codebook")}</span>
               <button
                 type="button"
                 className="codebook-icon-action"
                 onClick={() => setNewCodeOpen(true)}
                 disabled={!canCreateCodes || !onCreateCode || saving}
-                aria-label="New code"
-                title={canCreateCodes && onCreateCode ? "New code" : "You do not have permission to create codes."}
+                aria-label={t("sourceCoding.common.newCode")}
+                title={canCreateCodes && onCreateCode ? t("sourceCoding.common.newCode") : t("sourceCoding.common.noCodeCreatePermission")}
               >
                 +
               </button>
@@ -1126,13 +1127,13 @@ export function PostgresSourceMediaCodingView({
             {pendingSelection ? (
               <div className="codebook-selection-hint">
                 <span>
-                  Select one or more codes for this clip.
+                  {t("sourceCoding.media.selectClipCodes")}
                 </span>
               </div>
             ) : null}
             <ul className="code-list">
               {codes.length === 0 ? (
-                <li className="code-list-empty">No codes yet.</li>
+                <li className="code-list-empty">{t("sourceCoding.common.noCodesYet")}</li>
               ) : (
                 visibleCodes.map(({ code, depth, hasChildren }) => (
                   <li
@@ -1157,7 +1158,7 @@ export function PostgresSourceMediaCodingView({
                           event.stopPropagation();
                           toggleCollapsedCode(code.id);
                         }}
-                        title={collapsedCodeIds.has(code.id) ? "Expand" : "Collapse"}
+                        title={collapsedCodeIds.has(code.id) ? t("sourceCoding.common.expand") : t("sourceCoding.common.collapse")}
                       >
                         {collapsedCodeIds.has(code.id) ? "\u25b6" : "\u25bc"}
                       </button>
@@ -1203,12 +1204,12 @@ export function PostgresSourceMediaCodingView({
               <div style={{ marginTop: 12, marginBottom: 12 }}>
                 {sourceLockConflict?.reason === "kicked" ? (
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    {sourceLockConflict.userName || "A project editor"} removed your source lock. Return to the source list or reacquire access before annotating again.
+                    {t("sourceCoding.common.sourceLockRemoved", { userName: sourceLockConflict.userName || t("sourceCoding.common.projectEditor") })}
                   </p>
                 ) : sourceLockConflict?.reason === "locked" ? (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                     <p className="users-guide-copy" style={{ margin: 0 }}>
-                      {sourceLockConflict.userName || "Another user"} is currently annotating this source.
+                      {t("sourceCoding.common.sourceLockHeld", { userName: sourceLockConflict.userName || t("sourceCoding.common.anotherUser") })}
                     </p>
                     {canKickSourceLocks ? (
                       <button
@@ -1217,25 +1218,25 @@ export function PostgresSourceMediaCodingView({
                         onClick={() => void onKickSourceLock(sourceLockConflict)}
                         disabled={saving || lockSyncing}
                       >
-                        {lockSyncing ? "Updating..." : "Take Lock"}
+                        {lockSyncing ? t("sourceCoding.common.updating") : t("sourceCoding.common.takeLock")}
                       </button>
                     ) : null}
                   </div>
                 ) : (
                   <p className="users-guide-copy" style={{ margin: 0 }}>
-                    {lockSyncing ? "Claiming the source lock for annotation..." : `This ${mediaKind} source is currently read-only in the coding workspace.`}
+                    {lockSyncing ? t("sourceCoding.common.claimingSourceLock") : t("sourceCoding.common.readOnlyWorkspace")}
                   </p>
                 )}
               </div>
             ) : null}
 
             {previewLoading ? (
-              <p className="users-guide-copy" style={{ margin: 0 }}>Loading {mediaKind} preview...</p>
+              <p className="users-guide-copy" style={{ margin: 0 }}>{t("sourceCoding.media.loadingPreview", { kind: mediaKind })}</p>
             ) : previewError ? (
               <div style={{ display: "grid", gap: 8 }}>
                 <p className="auth-error" style={{ margin: 0 }}>{previewError}</p>
                 <p className="users-guide-copy" style={{ margin: 0 }}>
-                  The {mediaKind} file is stored with this source, but its preview could not be opened.
+                  {t("sourceCoding.media.previewOpenFailed", { kind: mediaKind })}
                 </p>
               </div>
             ) : previewUrl ? (
@@ -1281,14 +1282,14 @@ export function PostgresSourceMediaCodingView({
                       <span className="doc-name">{row.name}</span>
                     </div>
                     <div className="media-player-video-waveform-row media-player-audio-waveform-row">
-                      <div className="media-player-video-waveform-square" aria-label="Audio transport controls">
+                      <div className="media-player-video-waveform-square" aria-label={t("sourceCoding.media.audioTransportControls")}>
                         <button
                           type="button"
                           className="media-player-video-square-play"
                           onClick={toggleMediaPlayback}
                           disabled={!mediaElement}
-                          aria-label={isPlaying ? "Pause" : "Play"}
-                          title={isPlaying ? "Pause" : "Play"}
+                          aria-label={isPlaying ? t("common.pause") : t("common.play")}
+                          title={isPlaying ? t("common.pause") : t("common.play")}
                         >
                           {isPlaying ? <PauseIcon /> : <PlayIcon />}
                         </button>
@@ -1298,8 +1299,8 @@ export function PostgresSourceMediaCodingView({
                             className="media-player-video-square-step"
                             onClick={() => seekMediaBySeconds(-5)}
                             disabled={!mediaElement}
-                            title="Back 5 seconds"
-                            aria-label="Back 5 seconds"
+                            title={t("sourceCoding.media.backFiveSeconds")}
+                            aria-label={t("sourceCoding.media.backFiveSeconds")}
                           >
                             <BackFiveIcon />
                           </button>
@@ -1308,8 +1309,8 @@ export function PostgresSourceMediaCodingView({
                             className="media-player-video-square-step"
                             onClick={() => seekMediaBySeconds(-0.1)}
                             disabled={!mediaElement}
-                            title="Back 0.1 seconds"
-                            aria-label="Back 0.1 seconds"
+                            title={t("sourceCoding.media.backFineStep")}
+                            aria-label={t("sourceCoding.media.backFineStep")}
                           >
                             <FineBackIcon />
                           </button>
@@ -1318,8 +1319,8 @@ export function PostgresSourceMediaCodingView({
                             className="media-player-video-square-step"
                             onClick={() => seekMediaBySeconds(0.1)}
                             disabled={!mediaElement}
-                            title="Forward 0.1 seconds"
-                            aria-label="Forward 0.1 seconds"
+                            title={t("sourceCoding.media.forwardFineStep")}
+                            aria-label={t("sourceCoding.media.forwardFineStep")}
                           >
                             <FineForwardIcon />
                           </button>
@@ -1328,14 +1329,14 @@ export function PostgresSourceMediaCodingView({
                             className="media-player-video-square-step"
                             onClick={() => seekMediaBySeconds(5)}
                             disabled={!mediaElement}
-                            title="Forward 5 seconds"
-                            aria-label="Forward 5 seconds"
+                            title={t("sourceCoding.media.forwardFiveSeconds")}
+                            aria-label={t("sourceCoding.media.forwardFiveSeconds")}
                           >
                             <ForwardFiveIcon />
                           </button>
                         </div>
                       </div>
-                      <div className="media-player-video-waveform-side-rect" aria-label="Audio secondary controls">
+                      <div className="media-player-video-waveform-side-rect" aria-label={t("sourceCoding.media.audioSecondaryControls")}>
                         <div
                           className={`media-player-video-side-cluster media-player-zoom-cluster${zoomControlOpen ? " is-zoom-open" : ""}`}
                           onPointerEnter={openZoomControl}
@@ -1348,13 +1349,13 @@ export function PostgresSourceMediaCodingView({
                             className="media-player-video-side-control media-player-zoom-fit-button"
                             disabled={!zoomUiState.canFit}
                             onClick={() => mediaTimelineRef.current?.fitToWaveform()}
-                            aria-label="Fit waveform"
-                            title="Fit waveform"
+                            aria-label={t("sourceCoding.media.fitWaveform")}
+                            title={t("sourceCoding.media.fitWaveform")}
                           >
                             <ZoomFitIcon />
                           </button>
-                          <div className="media-player-zoom-popout" aria-label="Waveform zoom">
-                            <div className="media-player-zoom-meter" aria-label={`Zoom ${zoomUiState.zoomPercent}%`}>
+                          <div className="media-player-zoom-popout" aria-label={t("sourceCoding.media.waveformZoom")}>
+                            <div className="media-player-zoom-meter" aria-label={`${t("sourceCoding.media.waveformZoom")} ${zoomUiState.zoomPercent}%`}>
                               <input
                                 type="range"
                                 min="100"
@@ -1363,7 +1364,7 @@ export function PostgresSourceMediaCodingView({
                                 value={zoomSliderValue}
                                 onChange={(event) => mediaTimelineRef.current?.setZoomPercent(Number(event.target.value))}
                                 className="media-player-zoom-range"
-                                aria-label={`Waveform zoom level, ${zoomUiState.zoomPercent}%`}
+                                aria-label={`${t("sourceCoding.media.waveformZoom")}, ${zoomUiState.zoomPercent}%`}
                                 style={{
                                   background: `linear-gradient(90deg, #4b5563 0%, #4b5563 ${zoomSliderFillPercent}%, rgba(53, 80, 112, 0.14) ${zoomSliderFillPercent}%, rgba(53, 80, 112, 0.14) 100%)`,
                                 }}
@@ -1385,13 +1386,13 @@ export function PostgresSourceMediaCodingView({
                               const currentIndex = PLAYBACK_SPEED_OPTIONS.findIndex((rate) => Math.abs(rate - playbackRate) < 0.01);
                               setMediaPlaybackRate(PLAYBACK_SPEED_OPTIONS[(currentIndex + 1) % PLAYBACK_SPEED_OPTIONS.length]);
                             }}
-                            aria-label={`Playback speed ${playbackRateLabel}`}
-                            title="Playback speed"
+                            aria-label={`${t("sourceCoding.media.playbackSpeed")} ${playbackRateLabel}`}
+                            title={t("sourceCoding.media.playbackSpeed")}
                           >
                             {playbackRateLabel}
                           </button>
-                          <div className="media-player-speed-popout" aria-label="Playback speed">
-                            <div className="media-player-speed-meter" aria-label={`Playback speed ${playbackRateLabel}`}>
+                          <div className="media-player-speed-popout" aria-label={t("sourceCoding.media.playbackSpeed")}>
+                            <div className="media-player-speed-meter" aria-label={`${t("sourceCoding.media.playbackSpeed")} ${playbackRateLabel}`}>
                               <input
                                 type="range"
                                 min="0"
@@ -1403,7 +1404,7 @@ export function PostgresSourceMediaCodingView({
                                   if (nextRate != null) setMediaPlaybackRate(nextRate);
                                 }}
                                 className="media-player-speed-range"
-                                aria-label={`Playback speed, ${playbackRateLabel}`}
+                                aria-label={`${t("sourceCoding.media.playbackSpeed")}, ${playbackRateLabel}`}
                                 style={{
                                   background: `linear-gradient(90deg, #4b5563 0%, #4b5563 ${playbackSpeedFillPercent}%, rgba(53, 80, 112, 0.14) ${playbackSpeedFillPercent}%, rgba(53, 80, 112, 0.14) 100%)`,
                                 }}
@@ -1423,12 +1424,12 @@ export function PostgresSourceMediaCodingView({
                             className="media-player-video-side-control"
                             onClick={toggleMediaMuted}
                             disabled={!mediaElement}
-                            title="Volume"
-                            aria-label="Volume"
+                            title={t("sourceCoding.media.volume")}
+                            aria-label={t("sourceCoding.media.volume")}
                           >
                             <VolumeIcon muted={isMuted || volumeLevel <= 0} />
                           </button>
-                          <div className="media-player-volume-popout" aria-label="Volume">
+                          <div className="media-player-volume-popout" aria-label={t("sourceCoding.media.volume")}>
                             <input
                               type="range"
                               min="0"
@@ -1437,7 +1438,7 @@ export function PostgresSourceMediaCodingView({
                               value={volumeLevel}
                               onChange={(event) => setMediaVolume(Number(event.target.value))}
                               className="media-player-volume-range media-player-native-volume-range"
-                              aria-label={`Volume ${volumeSliderFillPercent}%`}
+                              aria-label={`${t("sourceCoding.media.volume")} ${volumeSliderFillPercent}%`}
                               style={{
                                 background: `linear-gradient(90deg, #4b5563 0%, #4b5563 ${volumeSliderFillPercent}%, rgba(53, 80, 112, 0.14) ${volumeSliderFillPercent}%, rgba(53, 80, 112, 0.14) 100%)`,
                               }}
@@ -1488,14 +1489,14 @@ export function PostgresSourceMediaCodingView({
                         onZoomUiStateChange={setZoomUiState}
                       />
                       {!activeClipRange ? (
-                        <div className="media-player-video-waveform-actions media-player-audio-waveform-actions" aria-label="Audio clip actions">
+                        <div className="media-player-video-waveform-actions media-player-audio-waveform-actions" aria-label={t("sourceCoding.media.audioClipActions")}>
                           <button
                             type="button"
                             onClick={createSelectionFromCurrentTime}
                             disabled={!canEditAnnotations}
                             className="media-player-video-action-button media-player-video-action-button--primary"
-                            aria-label="New clip"
-                            title="New clip"
+                            aria-label={t("sourceCoding.media.newClip")}
+                            title={t("sourceCoding.media.newClip")}
                           >
                             <NewClipIcon />
                           </button>
@@ -1504,10 +1505,10 @@ export function PostgresSourceMediaCodingView({
                     </div>
                   </div>
                   {activeClipRange ? (
-                    <div className="media-player-video-action-card" aria-label="Audio clip actions">
-                      <div className="media-player-video-clip-fields" aria-label="Active clip details">
+                    <div className="media-player-video-action-card" aria-label={t("sourceCoding.media.audioClipActions")}>
+                      <div className="media-player-video-clip-fields" aria-label={t("sourceCoding.media.activeClipDetails")}>
                         <div className="media-player-video-clip-field media-player-video-clip-code-row">
-                          <span className="media-player-video-clip-field-label">Codes</span>
+                          <span className="media-player-video-clip-field-label">{t("sourceCoding.common.codes")}</span>
                           <div className="media-player-video-clip-code-list">
                             {activeClipCodes.length > 0 ? (
                               activeClipCodes.map((code) => (
@@ -1525,20 +1526,20 @@ export function PostgresSourceMediaCodingView({
                                       removeActiveClipCode(code.id);
                                     }}
                                     disabled={!canEditAnnotations || saving}
-                                    aria-label={`Remove ${code.label} from clip`}
-                                    title={`Remove ${code.label}`}
+                                    aria-label={t("sourceCoding.media.removeCodeFromClip", { codeLabel: code.label })}
+                                    title={t("sourceCoding.media.removeCode", { codeLabel: code.label })}
                                   >
                                     <CloseIcon className="media-player-video-clip-code-remove-icon" />
                                   </button>
                                 </span>
                               ))
                             ) : (
-                              <span className="media-player-video-clip-muted">Not coded</span>
+                              <span className="media-player-video-clip-muted">{t("sourceCoding.media.notCoded")}</span>
                             )}
                           </div>
                         </div>
                         <label className="media-player-video-clip-field">
-                          <span className="media-player-video-clip-field-label">Start</span>
+                          <span className="media-player-video-clip-field-label">{t("sourceCoding.media.start")}</span>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -1550,7 +1551,7 @@ export function PostgresSourceMediaCodingView({
                           />
                         </label>
                         <label className="media-player-video-clip-field">
-                          <span className="media-player-video-clip-field-label">End</span>
+                          <span className="media-player-video-clip-field-label">{t("sourceCoding.media.end")}</span>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -1562,14 +1563,14 @@ export function PostgresSourceMediaCodingView({
                           />
                         </label>
                       </div>
-                      <div className="media-player-video-clip-save-stack" aria-label="Active clip save controls">
+                      <div className="media-player-video-clip-save-stack" aria-label={t("sourceCoding.media.activeClipSaveControls")}>
                         <button
                           type="button"
                           className="media-player-video-clip-action-button media-player-video-clip-action-button--save"
                           onClick={() => void acceptActiveClipChanges()}
                           disabled={!activeClipHasCodes || !canEditAnnotations || saving}
-                          aria-label="Save clip"
-                          title="Save"
+                          aria-label={t("sourceCoding.media.saveClip")}
+                          title={t("common.save")}
                         >
                           <AcceptClipIcon />
                         </button>
@@ -1578,8 +1579,8 @@ export function PostgresSourceMediaCodingView({
                           className="media-player-video-clip-action-button media-player-video-clip-action-button--cancel"
                           onClick={clearActiveClipSelection}
                           disabled={saving}
-                          aria-label="Cancel clip edits"
-                          title="Cancel"
+                          aria-label={t("sourceCoding.media.cancelClipEdits")}
+                          title={t("common.cancel")}
                         >
                           <CloseIcon className="media-player-video-clip-action-close-icon" />
                         </button>
@@ -1589,7 +1590,7 @@ export function PostgresSourceMediaCodingView({
                 </div>
               </div>
             ) : (
-              <p className="case-card-empty">No {mediaKind} preview is available for this source.</p>
+              <p className="case-card-empty">{t("sourceCoding.media.noPreview", { kind: mediaKind })}</p>
             )}
           </div>
         </div>
@@ -1607,7 +1608,7 @@ export function PostgresSourceMediaCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Edit code
+              {t("sourceCoding.common.editCode")}
             </button>
           ) : null}
           {canManageMemos ? (
@@ -1618,7 +1619,7 @@ export function PostgresSourceMediaCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Memo about code
+              {t("sourceCoding.common.memoAboutCode")}
             </button>
           ) : null}
           {canCreateCodes && onCreateCode ? (
@@ -1631,7 +1632,7 @@ export function PostgresSourceMediaCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Add child code
+              {t("sourceCoding.common.addChildCode")}
             </button>
           ) : null}
           {canCreateCodes && onDeleteCode ? (
@@ -1643,7 +1644,7 @@ export function PostgresSourceMediaCodingView({
                 setCodeContextMenu(null);
               }}
             >
-              Delete code
+              {t("sourceCoding.common.deleteCode")}
             </button>
           ) : null}
         </div>
@@ -1651,21 +1652,21 @@ export function PostgresSourceMediaCodingView({
 
       {helpOpen ? (
         <SettingsModal
-          title={mediaKind === "audio" ? "Code Audio Help" : "Code Video Help"}
+          title={mediaKind === "audio" ? t("sourceCoding.media.helpTitleAudio") : t("sourceCoding.media.helpTitleVideo")}
           onClose={() => setHelpOpen(false)}
           modalClassName="modal--help"
         >
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Play the source, select a time range in the waveform, choose codes, and save the range as a coded annotation.
+              {t("sourceCoding.media.helpLine1")}
             </p>
             <p className="users-guide-copy">
-              Use zoom, playback speed, volume, clip controls, and annotation filters to navigate longer media. Source locks and project permissions determine whether you can edit clips or codes.
+              {t("sourceCoding.media.helpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -1692,8 +1693,8 @@ export function PostgresSourceMediaCodingView({
       {childCodeParentRow ? (
         <NewCodeModal
           allCodes={codebookRows}
-          title="Add Child Code"
-          submitLabel="Create Code"
+          title={t("sourceCoding.common.addChildCodeTitle")}
+          submitLabel={t("sourceCoding.common.createCode")}
           initialParentId={childCodeParentRow.id}
           onSubmit={async (payload) => {
             if (!onCreateCode || !canCreateCodes) return;
@@ -1713,8 +1714,8 @@ export function PostgresSourceMediaCodingView({
       {editingCodeRow ? (
         <NewCodeModal
           allCodes={codebookRows}
-          title="Edit Code"
-          submitLabel="Save Changes"
+          title={t("sourceCoding.common.editCodeTitle")}
+          submitLabel={t("sourceCoding.common.saveChanges")}
           initialLabel={editingCodeRow.label}
           initialDescription={editingCodeRow.description}
           initialColor={editingCodeRow.color}
@@ -1735,22 +1736,22 @@ export function PostgresSourceMediaCodingView({
       ) : null}
 
       {deletingCodeRow ? (
-        <SettingsModal title="Delete Code" onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
+        <SettingsModal title={t("sourceCoding.common.deleteCodeTitle")} onClose={() => setDeletingCodeId(null)} closeDisabled={deletingCode}>
           <div className="app-settings-modal-body">
             <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              Delete <strong>{deletingCodeRow.label}</strong>?
+              {t("common.delete")} <strong>{deletingCodeRow.label}</strong>?
             </p>
             <p className="modal-warning-text">
-              This removes the code from the codebook and clears it from existing annotations.
+              {t("sourceCoding.common.deleteCodeWarning")}
             </p>
             {deleteCodeError ? <p className="auth-error">{deleteCodeError}</p> : null}
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn" onClick={() => setDeletingCodeId(null)} disabled={deletingCode}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button type="button" className="btn btn--danger" onClick={() => void handleConfirmDeleteCode()} disabled={deletingCode}>
-              {deletingCode ? "Deleting..." : "Delete Code"}
+              {deletingCode ? t("sourceCoding.common.deleting") : t("sourceCoding.common.deleteCodeTitle")}
             </button>
           </div>
         </SettingsModal>
@@ -1771,7 +1772,7 @@ export function PostgresSourceMediaCodingView({
 
       {editingAnnotation && canEditAnnotations ? (
         <AnnotationEditorModal
-          title="Edit Annotation"
+          title={t("sourceCoding.common.editAnnotation")}
           codeOptions={codeOptions}
           selection={{
             startOffset: editingAnnotation.startOffset ?? 0,

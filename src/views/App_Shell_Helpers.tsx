@@ -52,6 +52,7 @@ type AppErrorBoundaryState = {
 };
 
 type AppErrorBoundaryCopy = {
+  productName: string;
   title: string;
   body: string;
   stackTitle: string;
@@ -115,7 +116,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode; copy: AppErrorBo
     return (
       <div className="auth-screen">
         <div className="auth-card" style={{ maxWidth: 760 }}>
-          <div className="auth-brand">Kanqual</div>
+          <div className="auth-brand">{this.props.copy.productName}</div>
           <h2 className="auth-panel-title">{this.props.copy.title}</h2>
           <p className="auth-hint">{this.props.copy.body}</p>
           <p className="auth-error">{this.state.errorMessage}</p>
@@ -153,6 +154,7 @@ export function AppErrorBoundaryWithI18n({ children }: { children: ReactNode }) 
   return (
     <AppErrorBoundary
       copy={{
+        productName: t("app.loadingCard.productNameSentenceCase"),
         title: t("app.errorBoundary.title"),
         body: t("app.errorBoundary.body"),
         stackTitle: t("app.errorBoundary.stackTitle"),
@@ -395,7 +397,7 @@ export function ForcePasswordChangeView() {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <div className="auth-brand">Kanqual</div>
+        <div className="auth-brand">{t("app.loadingCard.productNameSentenceCase")}</div>
         <p className="auth-tagline">{t("app.forcePassword.tagline")}</p>
         <form onSubmit={handleSubmit} className="form">
           <h2 className="auth-panel-title">{t("app.forcePassword.title")}</h2>
@@ -612,6 +614,7 @@ export function PostgresProjectSnapshotWarningBanner({
 }: {
   activeProject: PostgresProject | null;
 }) {
+  const { t } = useI18n();
   const [issue, setIssue] = useState<ProjectBackupBannerIssue | null>(null);
 
   useEffect(() => {
@@ -658,12 +661,12 @@ export function PostgresProjectSnapshotWarningBanner({
   const toneClass = issue.kind === "failed" ? "embedding-build-banner--error" : "embedding-build-banner--warning";
   const title =
     issue.kind === "failed"
-      ? "Project snapshot failed"
-      : "Project snapshot interrupted";
+      ? t("app.backupBanner.snapshotFailedTitle")
+      : t("app.backupBanner.snapshotInterruptedTitle");
   const detail =
     issue.kind === "failed"
-      ? "Review project snapshots and create a fresh snapshot when possible."
-      : "Review project snapshots and create a fresh snapshot if needed.";
+      ? t("app.backupBanner.snapshotFailedDetail")
+      : t("app.backupBanner.snapshotInterruptedDetail");
 
   function openSnapshotSettings() {
     sessionStorage.setItem("kanqual:open-project-settings-modal", "backups");
@@ -681,8 +684,8 @@ export function PostgresProjectSnapshotWarningBanner({
         type="button"
         className="embedding-build-banner-close"
         onClick={dismissSnapshotWarning}
-        aria-label="Dismiss"
-        title="Dismiss"
+        aria-label={t("common.dismiss")}
+        title={t("common.dismiss")}
       >
         <CloseIcon className="embedding-build-banner-close-icon" />
       </button>
@@ -693,7 +696,7 @@ export function PostgresProjectSnapshotWarningBanner({
       </div>
       <div className="embedding-build-banner-actions">
         <button type="button" className="btn btn--primary" onClick={openSnapshotSettings}>
-          Snapshots
+          {t("app.backupBanner.snapshotsAction")}
         </button>
       </div>
     </div>
@@ -742,7 +745,7 @@ export function PostgresEmbeddingModelDownloadBanner() {
       ? {
           ...nextStatus,
           phase: "cancelling" as const,
-          message: nextStatus.message ?? "Cancelling download...",
+          message: nextStatus.message ?? t("app.embeddingDownload.cancellingDownload"),
         }
       : nextStatus;
     const nextIsActive = normalizedStatus.phase === "downloading" || normalizedStatus.phase === "cancelling";
@@ -867,8 +870,8 @@ export function PostgresEmbeddingModelDownloadBanner() {
       currentFile: null,
       progressPercent: null,
       message: retryRequest.kind === "custom"
-        ? `Preparing download from ${retryRequest.modelUrl}...`
-        : "Preparing download...",
+        ? t("app.embeddingDownload.preparingCustom", { modelUrl: retryRequest.modelUrl })
+        : t("app.embeddingDownload.preparing"),
     };
     applyNextStatus(preparingStatus);
     try {
@@ -951,7 +954,7 @@ export function PostgresEmbeddingModelDownloadBanner() {
           </button>
         ) : phase === "error" && retryRequest ? (
           <button type="button" className="btn btn--primary" onClick={() => void handleRetry()}>
-            Retry
+            {t("common.retry")}
           </button>
         ) : (
           null

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useI18n } from "../i18n/provider";
 import { getActivePresetId, getAppDefaults, getPresets, type Theme, type ThemePreset } from "../theme";
 
 function ThemePreviewThumbnail({ theme }: { theme: Theme }) {
@@ -48,22 +49,23 @@ export function ActiveThemePreviewRow({
   theme: Theme;
   onEdit: () => void;
 }) {
+  const { t } = useI18n();
   const activeTheme = useMemo(() => {
     const activePresetId = getActivePresetId();
     const activePreset = activePresetId ? getPresets().find((preset) => preset.id === activePresetId) : null;
     return {
-      name: activePreset?.name || (theme === "dark" ? "Dark" : "Light"),
+      name: activePreset?.name || (theme === "dark" ? t("sharedModals.theme.dark") : t("sharedModals.theme.light")),
       preset: activePreset ?? null,
     };
-  }, [theme]);
+  }, [t, theme]);
 
   return (
     <div className="settings-row settings-row--theme-preview">
       <div className="settings-row-info">
-        <div className="settings-row-label">Theme</div>
+        <div className="settings-row-label">{t("sharedModals.theme.activeTheme")}</div>
       </div>
       <div className="active-theme-preview-row">
-        <div className="active-theme-preview-card" aria-label={`Active theme: ${activeTheme.name}`}>
+        <div className="active-theme-preview-card" aria-label={t("sharedModals.theme.activeThemeAria", { name: activeTheme.name })}>
           {activeTheme.preset ? (
             <ThemePresetPreviewThumbnail preset={activeTheme.preset} />
           ) : (
@@ -72,7 +74,7 @@ export function ActiveThemePreviewRow({
           <div className="active-theme-preview-name">{activeTheme.name}</div>
         </div>
         <button type="button" className="btn" onClick={onEdit}>
-          Edit theme
+          {t("sharedModals.theme.editTheme")}
         </button>
       </div>
     </div>

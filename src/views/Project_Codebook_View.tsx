@@ -115,6 +115,7 @@ function CodebookAnnotationMediaPreview({
   annotation: AnnotationRow;
   projectStoragePath?: string;
 }) {
+  const { t } = useI18n();
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -143,7 +144,7 @@ function CodebookAnnotationMediaPreview({
       if (sourceKind !== "pdf") {
         return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
       }
-      if (!region) throw new Error("No PDF region is available for this annotation.");
+      if (!region) throw new Error(t("projectCodebook.errors.pdfRegionUnavailable"));
       const pdfjsLib = await loadCodebookPdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
       const safePage = Math.min(Math.max(region.pageNumber ?? 1, 1), pdf.numPages);
@@ -151,14 +152,14 @@ function CodebookAnnotationMediaPreview({
       const viewport = page.getViewport({ scale: 1.6 });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Could not prepare the PDF page preview.");
+      if (!context) throw new Error(t("projectCodebook.errors.pdfPreviewPrepareFailed"));
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       await page.render({ canvas, canvasContext: context, viewport }).promise;
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((nextBlob) => {
           if (nextBlob) resolve(nextBlob);
-          else reject(new Error("Could not render the PDF page preview."));
+          else reject(new Error(t("projectCodebook.errors.pdfPreviewRenderFailed")));
         }, "image/png");
       });
       return URL.createObjectURL(blob);
@@ -182,18 +183,18 @@ function CodebookAnnotationMediaPreview({
           if (current) URL.revokeObjectURL(current);
           return null;
         });
-        setLoadError(error instanceof Error ? error.message : "Could not load annotation media.");
+        setLoadError(error instanceof Error ? error.message : t("projectCodebook.errors.annotationMediaLoadFailed"));
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [mediaType, region, resolvedPath, sourceKind]);
+  }, [mediaType, region, resolvedPath, sourceKind, t]);
 
   if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
   if (loadError) return <p className="code-ann-media-error">{loadError}</p>;
-  if (!mediaUrl) return <p className="code-ann-media-loading">Loading media...</p>;
+  if (!mediaUrl) return <p className="code-ann-media-loading">{t("projectCodebook.detail.loadingMedia")}</p>;
 
   function handleLoadedMetadata() {
     if (!mediaRef.current || startMs == null) return;
@@ -252,7 +253,7 @@ function CodebookAnnotationMediaPreview({
         >
           <img
             src={mediaUrl}
-            alt="Coded annotation region"
+            alt={t("projectCodebook.detail.codedAnnotationRegion")}
             style={{
               width: `${(safeImageWidth / safeRegionWidth) * 100}%`,
               height: `${(safeImageHeight / safeRegionHeight) * 100}%`,
@@ -493,7 +494,7 @@ export function CodebookView({
     if (!confirmDelete) return;
     setDeleteLoading(true);
     try {
-      if (!activeProjectId) throw new Error("Project is required to delete a code.");
+      if (!activeProjectId) throw new Error(t("projectCodebook.errors.projectRequiredDeleteCode"));
       await deletePostgresCode(activeProjectId, confirmDelete.id);
       setRows((prev) => prev
         .filter((r) => r.id !== confirmDelete.id)

@@ -6,6 +6,7 @@ import {
   Suspense,
   lazy,
 } from "react";
+import { useI18n } from "../i18n/provider";
 import { FilterIcon } from "../components/FilterIcon";
 import { CodeIcon, FitCornersIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon } from "../components/AppIcons";
 import type {
@@ -91,6 +92,7 @@ function ProjectHomeCanvasSelectorCard({
   onClear?: () => void;
   emptyText: string;
 }) {
+  const { t } = useI18n();
   return (
     <section className="home-project-card project-home-selector-card">
       <div
@@ -122,7 +124,7 @@ function ProjectHomeCanvasSelectorCard({
           <button
             type="button"
             className="project-home-selector-collapse-btn"
-            aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+            aria-label={collapsed ? t("projectCore.graph.expand", { title }) : t("projectCore.graph.collapse", { title })}
           >
             {collapsed ? "▶" : "▼"}
           </button>
@@ -132,16 +134,16 @@ function ProjectHomeCanvasSelectorCard({
         <>
           {(onSelectAll || onClear) && rows.length > 0 ? (
             <div className="project-home-selector-actions">
-              {onSelectAll ? <button type="button" className="btn" onClick={onSelectAll}>All</button> : null}
-              {onClear ? <button type="button" className="btn" onClick={onClear}>Clear</button> : null}
+              {onSelectAll ? <button type="button" className="btn" onClick={onSelectAll}>{t("common.all")}</button> : null}
+              {onClear ? <button type="button" className="btn" onClick={onClear}>{t("common.clear")}</button> : null}
             </div>
           ) : null}
           <div className="users-table-wrap project-home-selector-table-wrap">
             <table className="users-table project-home-selector-table">
               <thead>
                 <tr>
-                  <th className="users-th" style={{ width: "72%" }}>Name</th>
-                  <th className="users-th" style={{ width: "28%" }}>Count</th>
+                  <th className="users-th" style={{ width: "72%" }}>{t("common.name")}</th>
+                  <th className="users-th" style={{ width: "28%" }}>{t("projectCore.entities.count")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,6 +190,7 @@ function ProjectHomeCanvasSizeSection({
   onResize: (nodeIds: string[], scale: number) => void;
   emptyText: string;
 }) {
+  const { t } = useI18n();
   return (
     <section className="home-project-card project-home-selector-card project-home-size-section">
       <div
@@ -219,7 +222,7 @@ function ProjectHomeCanvasSizeSection({
           <button
             type="button"
             className="project-home-selector-collapse-btn"
-            aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+            aria-label={collapsed ? t("projectCore.graph.expand", { title }) : t("projectCore.graph.collapse", { title })}
           >
             {collapsed ? "▶" : "▼"}
           </button>
@@ -230,9 +233,9 @@ function ProjectHomeCanvasSizeSection({
           <table className="users-table project-home-selector-table project-home-size-table">
             <thead>
               <tr>
-                <th className="users-th" style={{ width: "52%" }}>Name</th>
-                <th className="users-th" style={{ width: "16%" }}>Count</th>
-                <th className="users-th" style={{ width: "32%" }}>Size</th>
+                <th className="users-th" style={{ width: "52%" }}>{t("common.name")}</th>
+                <th className="users-th" style={{ width: "16%" }}>{t("projectCore.entities.count")}</th>
+                <th className="users-th" style={{ width: "32%" }}>{t("projectCore.entities.size")}</th>
               </tr>
             </thead>
             <tbody>
@@ -254,7 +257,7 @@ function ProjectHomeCanvasSizeSection({
                         step={5}
                         value={row.sizePercent}
                         onChange={(event) => onResize(row.nodeIds, Number(event.target.value) / 100)}
-                        aria-label={`Resize ${row.label}`}
+                        aria-label={t("projectCore.graph.resize", { label: row.label })}
                       />
                       <span className="project-home-size-slider-value">{row.sizePercent}%</span>
                     </div>
@@ -457,6 +460,7 @@ export function PostgresProjectHomeGraphView({
   drawCanvasToolbar?: ReactNode;
   autoLayoutOnVisibleKey?: number;
 }) {
+  const { t } = useI18n();
   const renderGraphCreateControl = () => (
     <div className="project-home-canvas-create-control project-home-canvas-create-control--dock" ref={createControlRef}>
       <button
@@ -468,7 +472,7 @@ export function PostgresProjectHomeGraphView({
           setCreateMenuOpen((current) => !current);
         }}
         aria-expanded={createMenuOpen}
-        aria-label={createMenuOpen ? "Close create menu" : "Create project item"}
+        aria-label={createMenuOpen ? t("projectCore.graph.closeCreateMenu") : t("projectCore.graph.createProjectItem")}
       >
         <PlusIcon className="project-home-canvas-create-icon" />
       </button>
@@ -483,8 +487,8 @@ export function PostgresProjectHomeGraphView({
               onCreateSource();
             }}
             disabled={!canManageSources}
-            aria-label="Add source"
-            title="Source"
+            aria-label={t("projectCore.graph.addSource")}
+            title={t("projectCore.entities.source")}
           >
             <SourceIcon className="project-home-canvas-create-action-icon" />
           </button>
@@ -497,8 +501,8 @@ export function PostgresProjectHomeGraphView({
               onCreateObject();
             }}
             disabled={!canManageSources}
-            aria-label="Add object"
-            title="Object"
+            aria-label={t("projectCore.graph.addObject")}
+            title={t("projectCore.entities.object")}
           >
             <ObjectIcon className="project-home-canvas-create-action-icon" />
           </button>
@@ -511,8 +515,8 @@ export function PostgresProjectHomeGraphView({
               onCreateRelationship();
             }}
             disabled={!canManageSources}
-            aria-label="Add relationship"
-            title="Relationship"
+            aria-label={t("projectCore.graph.addRelationship")}
+            title={t("projectCore.entities.relationship")}
           >
             <RelationshipIcon className="project-home-canvas-create-action-icon" />
           </button>
@@ -525,8 +529,8 @@ export function PostgresProjectHomeGraphView({
               onCreateCode();
             }}
             disabled={!canManageAnnotations}
-            aria-label="Add code"
-            title="Code"
+            aria-label={t("projectCore.graph.addCode")}
+            title={t("projectCore.entities.code")}
           >
             <CodeIcon className="project-home-canvas-create-action-icon" />
           </button>
@@ -572,8 +576,8 @@ export function PostgresProjectHomeGraphView({
                       className={`btn ${filteringActive ? "btn--primary" : "btn--ghost"}`}
                       onClick={() => setFilterDrawerOpen((current) => !current)}
                       aria-expanded={filterDrawerOpen}
-                      aria-label={filterDrawerOpen ? "Hide canvas filters" : "Show canvas filters"}
-                      title="Canvas filters"
+                      aria-label={filterDrawerOpen ? t("projectCore.graph.hideFilters") : t("projectCore.graph.showFilters")}
+                      title={t("projectCore.graph.canvasFilters")}
                     >
                       <FilterIcon className="postgres-explore-canvas-control-icon" />
                     </button>
@@ -581,7 +585,7 @@ export function PostgresProjectHomeGraphView({
                       <div className="project-home-filter-drawer">
                         <div className="home-primary-column postgres-experiment-home-primary-column project-home-selector-column project-home-selector-column--drawer">
                           <ProjectHomeCanvasSelectorCard
-                            title="Sources"
+                            title={t("projectCore.entities.sources")}
                             count={sourceCount}
                             collapsed={collapsedSections.has("sources")}
                             rows={sourceRows}
@@ -594,10 +598,10 @@ export function PostgresProjectHomeGraphView({
                               clearSection("sources");
                               setSourceKinds(new Set(["__none"]));
                             }}
-                            emptyText="No sources yet."
+                            emptyText={t("projectCore.graph.noSources")}
                           />
                           <ProjectHomeCanvasSelectorCard
-                            title="Objects"
+                            title={t("projectCore.entities.objects")}
                             count={objectCount}
                             collapsed={collapsedSections.has("objects")}
                             rows={objectRows}
@@ -610,10 +614,10 @@ export function PostgresProjectHomeGraphView({
                               clearSection("objects");
                               setObjectTypeIds(new Set(["__none"]));
                             }}
-                            emptyText="No objects yet."
+                            emptyText={t("projectCore.graph.noObjects")}
                           />
                           <ProjectHomeCanvasSelectorCard
-                            title="Relationships"
+                            title={t("projectCore.entities.relationships")}
                             count={relationshipCount}
                             collapsed={collapsedSections.has("relationships")}
                             rows={relationshipRows}
@@ -626,10 +630,10 @@ export function PostgresProjectHomeGraphView({
                               clearSection("relationships");
                               setRelationshipTypeIds(new Set(["__none"]));
                             }}
-                            emptyText="No relationships yet."
+                            emptyText={t("projectCore.graph.noRelationships")}
                           />
                           <ProjectHomeCanvasSelectorCard
-                            title="Codes"
+                            title={t("projectCore.entities.codes")}
                             count={codeCount}
                             collapsed={collapsedSections.has("codes")}
                             rows={codeRows}
@@ -642,7 +646,7 @@ export function PostgresProjectHomeGraphView({
                               clearSection("codes");
                               setCodeIds(new Set(["__none"]));
                             }}
-                            emptyText="No codes yet."
+                            emptyText={t("projectCore.graph.noCodes")}
                           />
                         </div>
                       </div>
@@ -654,54 +658,54 @@ export function PostgresProjectHomeGraphView({
                       className={`btn ${customSizesActive ? "btn--primary" : "btn--ghost"}`}
                       onClick={() => setSizeMenuOpen((current) => !current)}
                       aria-expanded={sizeMenuOpen}
-                      aria-label={sizeMenuOpen ? "Hide size controls" : "Show size controls"}
-                      title="Canvas item sizes"
+                      aria-label={sizeMenuOpen ? t("projectCore.graph.hideSizeControls") : t("projectCore.graph.showSizeControls")}
+                      title={t("projectCore.graph.canvasItemSizes")}
                     >
                       <FitCornersIcon className="postgres-explore-canvas-control-icon" />
                     </button>
                     {sizeMenuOpen ? (
                       <div className="project-home-size-menu">
                         <div className="project-home-size-menu-header">
-                          <div className="project-home-size-menu-title">Item Sizes</div>
+                          <div className="project-home-size-menu-title">{t("projectCore.graph.itemSizes")}</div>
                           <button
                             type="button"
                             className="btn btn--ghost project-home-size-reset-btn"
                             onClick={resetAllNodeSizes}
                             disabled={!customSizesActive}
                           >
-                            Reset all
+                            {t("projectCore.graph.resetAll")}
                           </button>
                         </div>
                         {sizeGroupCount === 0 ? (
-                          <div className="project-home-size-menu-empty">No visible items.</div>
+                          <div className="project-home-size-menu-empty">{t("projectCore.graph.noVisibleItems")}</div>
                         ) : (
                           <div className="home-primary-column postgres-experiment-home-primary-column project-home-selector-column project-home-selector-column--drawer project-home-size-section-column">
                             <ProjectHomeCanvasSizeSection
-                              title="Sources"
+                              title={t("projectCore.entities.sources")}
                               count={sourceSizeRows.reduce((total, row) => total + row.count, 0)}
                               collapsed={sizeCollapsedSections.has("sources")}
                               rows={sourceSizeRows}
                               onToggleCollapsed={() => onToggleSizeSectionCollapsed("sources")}
                               onResize={onResizeNodeGroup}
-                              emptyText="No visible sources."
+                              emptyText={t("projectCore.graph.noVisibleSources")}
                             />
                             <ProjectHomeCanvasSizeSection
-                              title="Objects"
+                              title={t("projectCore.entities.objects")}
                               count={objectSizeRows.reduce((total, row) => total + row.count, 0)}
                               collapsed={sizeCollapsedSections.has("objects")}
                               rows={objectSizeRows}
                               onToggleCollapsed={() => onToggleSizeSectionCollapsed("objects")}
                               onResize={onResizeNodeGroup}
-                              emptyText="No visible objects."
+                              emptyText={t("projectCore.graph.noVisibleObjects")}
                             />
                             <ProjectHomeCanvasSizeSection
-                              title="Codes"
+                              title={t("projectCore.entities.codes")}
                               count={codeSizeRows.reduce((total, row) => total + row.count, 0)}
                               collapsed={sizeCollapsedSections.has("codes")}
                               rows={codeSizeRows}
                               onToggleCollapsed={() => onToggleSizeSectionCollapsed("codes")}
                               onResize={onResizeNodeGroup}
-                              emptyText="No visible codes."
+                              emptyText={t("projectCore.graph.noVisibleCodes")}
                             />
                           </div>
                         )}
