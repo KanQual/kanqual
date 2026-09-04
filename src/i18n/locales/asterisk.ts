@@ -25,9 +25,9 @@ export const asterisk = {
     "showPassword": "*****",
     "hidePassword": "*****",
     "never": "*****",
-    "noDescription": "*****",
     "yes": "*****",
     "no": "*****",
+    "noDescription": "*****",
     "reset": "*****",
     "remove": "*****",
     "edit": "*****",
@@ -668,6 +668,7 @@ export const asterisk = {
       "cannotManageSources": "*****",
       "noMatchingSources": "*****",
       "sourceTypes": "*****",
+      "codeSources": "*****",
       "noSourceTypes": "*****",
       "textAndTranscriptsOnly": "*****",
       "allSources": "*****",
@@ -1825,6 +1826,9 @@ export const asterisk = {
       "columnEditor": "*****",
       "columnCoder": "*****",
       "columnViewer": "*****",
+      "userRoles": "*****",
+      "area": "*****",
+      "action": "*****",
       "yes": "*****",
       "no": "*****",
       "matrix": {
@@ -2236,6 +2240,10 @@ export const asterisk = {
       }
     },
     "overviewSections": {
+      "account": "*****",
+      "project": "*****",
+      "preferences": "*****",
+      "system": "*****",
       "everyday": {
         "eyebrow": "*****",
         "description": "*****"
@@ -2263,6 +2271,23 @@ export const asterisk = {
       "close": "*****",
       "done": "*****"
     },
+    "settingsTitle": "*****",
+    "openHelp": "*****",
+    "helpTitle": "*****",
+    "helpLine1": "*****",
+    "helpLine2": "*****",
+    "appearance": {
+      "title": "*****",
+      "interface": "*****",
+      "interfaceDensity": "*****",
+      "comfortable": "*****",
+      "compact": "*****",
+      "textSize": "*****",
+      "small": "*****",
+      "normal": "*****",
+      "large": "*****",
+      "updated": "*****"
+    },
     "startup": {
       "title": "*****",
       "emptyState": "*****",
@@ -2276,7 +2301,8 @@ export const asterisk = {
       "title": "*****",
       "label": "*****",
       "description": "*****",
-      "saved": "*****"
+      "saved": "*****",
+      "updated": "*****"
     },
     "documentImport": {
       "title": "*****",
@@ -2551,6 +2577,7 @@ export const asterisk = {
         "confirmProjectName": "*****"
       },
       "notices": {
+        "updatedProject": "*****",
         "exportedProjectData": "*****",
         "exportedEncryptedBackup": "*****",
         "exportedProjectLog": "*****",
@@ -2987,6 +3014,7 @@ export const asterisk = {
       "id": "*****",
       "annotatedText": "*****",
       "document": "*****",
+      "type": "*****",
       "sourceId": "*****",
       "sourceType": "*****",
       "code": "*****",
@@ -3068,7 +3096,8 @@ export const asterisk = {
       "createdBy": "*****",
       "created": "*****",
       "cases": "*****",
-      "documents": "*****"
+      "documents": "*****",
+      "sources": "*****"
     },
     "detail": {
       "code": "*****",
@@ -3192,6 +3221,7 @@ export const asterisk = {
       "noLinkedSources": "*****",
       "noLinkedAnnotations": "*****",
       "memoText": "*****",
+      "id": "*****",
       "sourceTitle": "*****",
       "type": "*****",
       "sourceFallback": "*****",
@@ -6151,16 +6181,23 @@ export const asterisk = {
       "users": "*****",
       "cases": "*****",
       "sources": "*****",
+      "objects": "*****",
+      "relationships": "*****",
       "documents": "*****",
       "codebook": "*****",
       "annotations": "*****",
       "codeText": "*****",
+      "codeSources": "*****",
       "memos": "*****",
+      "reports": "*****",
       "process": "*****",
       "chat": "*****",
       "code": "*****",
+      "assistedCoding": "*****",
       "attributes": "*****",
       "analyze": "*****",
+      "analyzeCodes": "*****",
+      "transcripts": "*****",
       "appSettings": "*****",
       "projectSettings": "*****",
       "userSettings": "*****"
@@ -6181,16 +6218,33 @@ export const asterisk = {
     },
     "projectBadge": {
       "label": "*****",
+      "activeLabel": "*****",
       "closeProject": "*****",
       "openProject": "*****"
     },
     "nav": {
       "openProjectFirst": "*****",
+      "openPostgresProjectFirst": "*****",
       "aiPermissionDenied": "*****",
       "enableAi": "*****"
     },
     "user": {
+      "administrator": "*****",
       "signOutTitle": "*****"
+    },
+    "status": {
+      "internetMode": "*****",
+      "lanMode": "*****",
+      "deviceMode": "*****",
+      "lanUnavailable": "*****",
+      "collaborationShared": "*****",
+      "collaborationSolo": "*****",
+      "collaborationIdle": "*****",
+      "collaborationUnavailable": "*****",
+      "aiRunning": "*****",
+      "aiReady": "*****",
+      "aiDisabled": "*****",
+      "aiUnavailable": "*****"
     },
     "roles": {
       "owner": "*****",

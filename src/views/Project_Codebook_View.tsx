@@ -410,7 +410,7 @@ export function CodebookView({
     { ...COLS[0], label: t("projectCodebook.table.name") },
     { ...COLS[1], label: t("projectCodebook.table.createdBy") },
     { ...COLS[2], label: t("projectCodebook.table.created") },
-    { ...COLS[3], label: "Sources" },
+    { ...COLS[3], label: t("projectCodebook.table.sources") },
   ];
 
   // Load

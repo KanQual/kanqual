@@ -1,35 +1,54 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Archive,
   ArrowLeftToLine,
   ArrowLeftRight,
   Bot,
   Box,
   Camera,
+  CalendarPlus,
+  Calendars,
   Check,
   CircleQuestionMark,
   Clapperboard,
+  Database,
   Download,
   Eye,
   EyeOff,
   FileCog,
+  Files,
   Funnel,
+  FolderCog,
+  FolderPlus,
   Globe,
   GlobeOff,
+  HardDrive,
+  Info,
+  Languages,
+  Lightbulb,
   ListRestart,
   LogOut,
+  Logs,
   Minus,
   Plus,
   Play,
   Pause,
   RedoDot,
+  ReceiptText,
   Save,
   Scan,
   Search,
+  Share2,
+  ShieldEllipsis,
   SquareCode,
   SquarePen,
+  SwatchBook,
   Tag,
   Trash,
   UndoDot,
+  UserRoundCog,
+  UserRoundKey,
+  UserRoundPlus,
   Users,
   Volume1,
   VolumeX,
@@ -75,6 +94,82 @@ export function NetworkIcon({ className }: IconProps) {
 
 export function CollaborationIcon({ className }: IconProps) {
   return <LucideAppIcon Icon={Users} className={className} />;
+}
+
+export function TimelineGroupIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Calendars} className={className} />;
+}
+
+export function TimelineAddItemIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={CalendarPlus} className={className} />;
+}
+
+export function SettingsAddUserIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={UserRoundPlus} className={className} />;
+}
+
+export function SettingsManageUsersIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={UserRoundCog} className={className} />;
+}
+
+export function SettingsPermissionsIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={UserRoundKey} className={className} />;
+}
+
+export function SettingsAddProjectIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={FolderPlus} className={className} />;
+}
+
+export function SettingsManageProjectsIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={FolderCog} className={className} />;
+}
+
+export function SettingsAdministratorLogIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={ShieldEllipsis} className={className} />;
+}
+
+export function SettingsDatabaseIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Database} className={className} />;
+}
+
+export function SettingsStorageIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={HardDrive} className={className} />;
+}
+
+export function SettingsUpdatesIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Archive} className={className} />;
+}
+
+export function SettingsAppearanceIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={SwatchBook} className={className} />;
+}
+
+export function SettingsLanguageIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Languages} className={className} />;
+}
+
+export function SettingsGettingStartedIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Lightbulb} className={className} />;
+}
+
+export function SettingsAboutIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Info} className={className} />;
+}
+
+export function SettingsProjectDetailsIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={ReceiptText} className={className} />;
+}
+
+export function SettingsUploadedFilesIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Files} className={className} />;
+}
+
+export function SettingsProjectLogIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Logs} className={className} />;
+}
+
+export function SettingsCodebookIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Share2} className={className} />;
 }
 
 export function AiAssistIcon({ className }: IconProps) {

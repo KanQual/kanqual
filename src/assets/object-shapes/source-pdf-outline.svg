@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Outline PDF source">
-  <path d="M12 8 H64 L88 32 V88 H12 Z" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" />
-  <path d="M64 8 V32 H88" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" />
-  <path d="M24 44 H76 V70 H24 Z" fill="#111111" />
-  <text x="50" y="63" text-anchor="middle" font-size="17" font-weight="900" font-family="Arial, sans-serif" letter-spacing="1" fill="#ffffff">PDF</text>
-  <path d="M30 80 H70" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="PDF source">
+  <g fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 22h4a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v6" />
+    <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+    <path d="M5 14a1 1 0 0 0-1 1v2a1 1 0 0 1-1 1 1 1 0 0 1 1 1v2a1 1 0 0 0 1 1" />
+    <path d="M9 22a1 1 0 0 0 1-1v-2a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-2a1 1 0 0 0-1-1" />
+  </g>
 </svg>

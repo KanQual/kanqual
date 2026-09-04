@@ -783,7 +783,7 @@ export function PostgresMemosView({
                     <>
                       <div className="postgres-memo-annotation-table-header">
                         <span />
-                        <span>ID</span>
+                        <span>{t("analysisMemos.editor.id")}</span>
                         <span>{t("analysisMemos.editor.sourceFallback")}</span>
                         <span>{t("analysisMemos.editor.type")}</span>
                       </div>

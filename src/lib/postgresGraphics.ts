@@ -726,53 +726,68 @@ export function renderSvgObjectShape(
 ): string {
   const strokeWidth = Math.max(1, Math.min(10, outlineWidth));
   if (sourceVisualKey) {
-    const strokeColor = outlineColor;
     const iconColor = color;
-    const insetX = width * 0.12;
-    const insetY = height * 0.08;
-    const foldStartX = width * 0.64;
-    const foldTipX = width * 0.88;
-    const foldTipY = height * 0.32;
-    const basePath = `M${insetX} ${insetY} H${foldStartX} L${foldTipX} ${foldTipY} V${height * 0.88} H${insetX} Z`;
-    const foldLine = `<path d="M${foldStartX} ${insetY} V${foldTipY} H${foldTipX}" fill="none" stroke="${strokeColor}" stroke-width="${Math.max(2.5, width * 0.018)}" stroke-linejoin="round" stroke-linecap="round" />`;
-    let iconMarkup = "";
+    let iconMarkup: string;
     switch (sourceVisualKey) {
       case "source_text":
-        iconMarkup = `<text x="${width / 2}" y="${height * 0.63}" text-anchor="middle" font-size="${Math.max(20, width * 0.2)}" font-weight="800" font-family="Arial, sans-serif" letter-spacing="1" fill="${iconColor}">TXT</text>`;
+        iconMarkup = [
+          `<path d="M12 22h6a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v6" />`,
+          `<path d="M14 2v5a1 1 0 0 0 1 1h5" />`,
+          `<path d="M3 16v-1.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 .5.5V16" />`,
+          `<path d="M6 22h2" />`,
+          `<path d="M7 14v8" />`,
+        ].join("");
         break;
       case "source_processed_transcript":
         iconMarkup = [
-          `<path d="M${width * 0.28} ${height * 0.44} H${width * 0.72} M${width * 0.28} ${height * 0.54} H${width * 0.72} M${width * 0.28} ${height * 0.64} H${width * 0.56}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linecap="round" />`,
-          `<path d="M${width * 0.62} ${height * 0.66} L${width * 0.7} ${height * 0.74} L${width * 0.84} ${height * 0.58}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linecap="round" stroke-linejoin="round" />`,
+          `<path d="M15 8a1 1 0 0 1-1-1V2a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8z" />`,
+          `<path d="M20 8v12a2 2 0 0 1-2 2h-4.182" />`,
+          `<path d="m3.305 19.53.923-.382" />`,
+          `<path d="M4 10.592V4a2 2 0 0 1 2-2h8" />`,
+          `<path d="m4.228 16.852-.924-.383" />`,
+          `<path d="m5.852 15.228-.383-.923" />`,
+          `<path d="m5.852 20.772-.383.924" />`,
+          `<path d="m8.148 15.228.383-.923" />`,
+          `<path d="m8.53 21.696-.382-.924" />`,
+          `<path d="m9.773 16.852.922-.383" />`,
+          `<path d="m9.773 19.148.922.383" />`,
+          `<circle cx="7" cy="18" r="3" />`,
         ].join("");
         break;
-      case "source_pdf": {
-        const backInsetX = width * 0.18;
-        const backInsetY = height * 0.22;
-        const frontInsetX = width * 0.26;
-        const frontInsetY = height * 0.12;
-        const frontFoldX = width * 0.68;
-        const frontTipX = width * 0.84;
-        const frontTipY = height * 0.28;
+      case "source_pdf":
         iconMarkup = [
-          `<path d="M${backInsetX} ${backInsetY} H${width * 0.74} V${height * 0.76} H${backInsetX} Z" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linejoin="round" />`,
-          `<path d="M${frontInsetX} ${frontInsetY} H${frontFoldX} L${frontTipX} ${frontTipY} V${height * 0.68} H${frontInsetX} Z" fill="#ffffff" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linejoin="round" />`,
-          `<path d="M${frontFoldX} ${frontInsetY} V${frontTipY} H${frontTipX}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(3, width * 0.024)}" stroke-linejoin="round" stroke-linecap="round" />`,
-          `<path d="M${width * 0.38} ${height * 0.42} H${width * 0.66} M${width * 0.38} ${height * 0.52} H${width * 0.62}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(3, width * 0.024)}" stroke-linecap="round" />`,
+          `<path d="M14 22h4a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v6" />`,
+          `<path d="M14 2v5a1 1 0 0 0 1 1h5" />`,
+          `<path d="M5 14a1 1 0 0 0-1 1v2a1 1 0 0 1-1 1 1 1 0 0 1 1 1v2a1 1 0 0 0 1 1" />`,
+          `<path d="M9 22a1 1 0 0 0 1-1v-2a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-2a1 1 0 0 0-1-1" />`,
         ].join("");
         break;
-      }
       case "source_audio":
-        iconMarkup = `<path d="M${width * 0.24} ${height * 0.57} C${width * 0.29} ${height * 0.49}, ${width * 0.33} ${height * 0.49}, ${width * 0.38} ${height * 0.57} S${width * 0.47} ${height * 0.65}, ${width * 0.52} ${height * 0.57} S${width * 0.61} ${height * 0.49}, ${width * 0.66} ${height * 0.57} S${width * 0.75} ${height * 0.65}, ${width * 0.8} ${height * 0.57}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(5, width * 0.045)}" stroke-linecap="round" stroke-linejoin="round" />`;
+        iconMarkup = [
+          `<path d="M4 11.55V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-1.95" />`,
+          `<path d="M14 2v5a1 1 0 0 0 1 1h5" />`,
+          `<path d="M12 15a5 5 0 0 1 0 6" />`,
+          `<path d="M8 14.502a.5.5 0 0 0-.826-.381l-1.893 1.631a1 1 0 0 1-.651.243H3.5a.5.5 0 0 0-.5.501v3.006a.5.5 0 0 0 .5.501h1.129a1 1 0 0 1 .652.243l1.893 1.633a.5.5 0 0 0 .826-.38z" />`,
+        ].join("");
         break;
       case "source_video":
-        iconMarkup = `<path d="M${width * 0.42} ${height * 0.4} L${width * 0.42} ${height * 0.72} L${width * 0.69} ${height * 0.56} Z" fill="${iconColor}" />`;
+        iconMarkup = [
+          `<path d="M4 12V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2" />`,
+          `<path d="M14 2v5a1 1 0 0 0 1 1h5" />`,
+          `<path d="m10 17.843 3.033-1.755a.64.64 0 0 1 .967.56v4.704a.65.65 0 0 1-.967.56L10 20.157" />`,
+          `<rect width="7" height="6" x="3" y="16" rx="1" />`,
+        ].join("");
         break;
       case "source_image":
-        iconMarkup = `<rect x="${width * 0.28}" y="${height * 0.38}" width="${width * 0.44}" height="${height * 0.3}" rx="${Math.max(3, width * 0.02)}" ry="${Math.max(3, width * 0.02)}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" /><circle cx="${width * 0.39}" cy="${height * 0.46}" r="${Math.max(4, width * 0.03)}" fill="${iconColor}" /><path d="M${width * 0.32} ${height * 0.66} L${width * 0.46} ${height * 0.52} L${width * 0.55} ${height * 0.61} L${width * 0.63} ${height * 0.52} L${width * 0.72} ${height * 0.66}" fill="none" stroke="${iconColor}" stroke-width="${Math.max(4, width * 0.03)}" stroke-linecap="round" stroke-linejoin="round" />`;
+        iconMarkup = [
+          `<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />`,
+          `<path d="M14 2v5a1 1 0 0 0 1 1h5" />`,
+          `<circle cx="10" cy="12" r="2" />`,
+          `<path d="m20 17-1.296-1.296a2.41 2.41 0 0 0-3.408 0L9 22" />`,
+        ].join("");
         break;
     }
-    return `<path d="${basePath}" fill="#ffffff" stroke="${strokeColor}" stroke-width="${Math.max(strokeWidth, width * 0.02)}" stroke-linejoin="round" />${foldLine}${iconMarkup}`;
+    return `<g transform="scale(${width / 24} ${height / 24})" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconMarkup}</g>`;
   }
   const fillColor = fill === "filled" ? hexToRgba(color, 1 - (Math.max(0, Math.min(100, fillTransparency)) / 100)) : "transparent";
   const points = getSvgShapePoints(shape, width, height);

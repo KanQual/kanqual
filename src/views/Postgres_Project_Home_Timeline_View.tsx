@@ -9,7 +9,7 @@ import sourcePdfOutlineShapeSvg from "../assets/object-shapes/source-pdf-outline
 import sourceImageOutlineShapeSvg from "../assets/object-shapes/source-image-outline.svg?raw";
 import sourceAudioOutlineShapeSvg from "../assets/object-shapes/source-audio-outline.svg?raw";
 import sourceVideoOutlineShapeSvg from "../assets/object-shapes/source-video-outline.svg?raw";
-import { CollaborationIcon, DownloadIcon, FitCornersIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon, ZoomIcon } from "../components/AppIcons";
+import { DownloadIcon, FitCornersIcon, ObjectIcon, PlusIcon, RelationshipIcon, SourceIcon, TimelineAddItemIcon, TimelineGroupIcon, ZoomIcon } from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SettingsModal } from "../components/SettingsModal";
 import { useI18n } from "../i18n/provider";
@@ -2128,7 +2128,7 @@ export function PostgresProjectHomeTimelineView({
             aria-label={t("projectCore.timeline.addGroup")}
             title={t("projectCore.timeline.group")}
           >
-            <CollaborationIcon className="project-home-canvas-create-action-icon" />
+            <TimelineGroupIcon className="project-home-canvas-create-action-icon" />
           </button>
           <div className="project-home-timeline-create-item-wrap">
             <button
@@ -2144,7 +2144,7 @@ export function PostgresProjectHomeTimelineView({
               aria-label={createItemMenuOpen ? t("projectCore.timeline.closeNewItemMenu") : t("projectCore.timeline.addItem")}
               title={t("projectCore.timeline.addItem")}
             >
-              <PlusIcon className="project-home-canvas-create-action-icon" />
+              <TimelineAddItemIcon className="project-home-canvas-create-action-icon" />
             </button>
             {createItemMenuOpen ? (
               <div className="project-home-canvas-create-menu project-home-timeline-create-submenu" role="menu">
@@ -2576,7 +2576,7 @@ export function PostgresProjectHomeTimelineView({
                               className={groupModalItemFill === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                               onClick={() => setGroupModalItemFill(option.value)}
                             >
-                              {option.label}
+                              {option.value === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
                             </button>
                           ))}
                         </div>

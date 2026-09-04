@@ -1603,11 +1603,32 @@ function valueKey(sourceId: string, attributeDefinitionId: string): string {
   return `${sourceId}:${attributeDefinitionId}`;
 }
 
-function sourceTypeRowLabel(label: string): string {
+function sourceKindLabel(kind: string, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (normalizeSourceKindFilterValue(kind)) {
+    case "text":
+      return t("projectCore.sources.sourceKinds.text");
+    case "transcript":
+      return t("projectCore.sourceKinds.transcript");
+    case "pdf":
+      return t("projectCore.sources.sourceKinds.pdf");
+    case "image":
+      return t("projectCore.sources.sourceKinds.image");
+    case "audio":
+      return t("projectCore.sources.sourceKinds.audio");
+    case "video":
+      return t("projectCore.sources.sourceKinds.video");
+    default:
+      return "";
+  }
+}
+
+function sourceTypeRowLabel(label: string, t: ReturnType<typeof useI18n>["t"]): string {
   const cleaned = label
     .replace(/\bsources?\b/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+  const localized = sourceKindLabel(cleaned || label, t);
+  if (localized) return localized;
   return cleaned || label;
 }
 
@@ -1620,17 +1641,18 @@ function sourceKindFromFilterValue(value: string): string | null {
   return option?.label ?? null;
 }
 
-function sourceTypeOptionLabel(kind: string, fallbackLabel?: string): string {
+function sourceTypeOptionLabel(kind: string, fallbackLabel: string | undefined, t: ReturnType<typeof useI18n>["t"]): string {
   return sourceTypeRowLabel(
     fallbackLabel
       || POSTGRES_SOURCE_KIND_VISUALS[kind.toLowerCase()]?.label
       || POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.value === kind || option.label === kind)?.label
       || kind,
+    t,
   );
 }
 
-function sourceKindDisplayLabel(kind: string, fallbackLabel?: string): string {
-  return fallbackLabel || kind || "Source";
+function sourceKindDisplayLabel(kind: string, fallbackLabel: string | undefined, t: ReturnType<typeof useI18n>["t"]): string {
+  return sourceTypeRowLabel(fallbackLabel || kind || t("projectCore.entities.source"), t);
 }
 
 function sourceObjectTypeSystemKeyFromKind(value: string | null | undefined): SourceObjectVisualKey | null {
@@ -4073,7 +4095,7 @@ function PostgresSourceDetail({
           </div>
 
           <dl className="user-detail-meta case-detail-meta">
-            <dt>{t("projectDocuments.columns.type")}</dt> <dd>{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType)}</dd>
+            <dt>{t("projectDocuments.columns.type")}</dt> <dd>{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType, t)}</dd>
             <dt>{t("projectDocuments.columns.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
             <dt>{t("projectCore.sources.detail.fileName")}</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
             <dt>{t("projectCore.sources.detail.extension")}</dt> <dd>{fileExt ? `.${fileExt}` : "\u2014"}</dd>
@@ -4977,13 +4999,13 @@ export function PostgresSourcesView({
         return kind
           ? {
               kind,
-              label: sourceTypeOptionLabel(kind, summary.label),
+              label: sourceTypeOptionLabel(kind, summary.label, t),
               count: summary.count,
             }
           : null;
       })
       .filter((option): option is { kind: string; label: string; count: number } => option !== null),
-    [sourceKindSummaries],
+    [sourceKindSummaries, t],
   );
 
   useEffect(() => {
@@ -6031,7 +6053,7 @@ export function PostgresSourcesView({
     : null;
   const pageTitle = showAttributesTable
     ? t("projectCore.sources.sourceAttributes")
-    : pageTitleOverride ?? (codingEnabled ? "Code Sources" : "Sources");
+    : pageTitleOverride ?? (codingEnabled ? t("projectCore.sources.codeSources") : t("projectCore.entities.sources"));
   const gettingStartedGuideActive =
     !!gettingStartedState
     && !gettingStartedState.dismissed
@@ -6548,7 +6570,7 @@ export function PostgresSourcesView({
                           </div>
                           <div className="project-type-list-copy">
                             <span className="project-type-list-title">
-                              {sourceTypeRowLabel(summary.label)}
+                              {sourceTypeRowLabel(summary.label, t)}
                             </span>
                             <span className="postgres-users-meta project-type-list-meta">
                               {t("projectCore.sources.attributesCount", { count: summary.attributeDefinitionCount })}
@@ -6910,7 +6932,7 @@ export function PostgresSourcesView({
                         title={lockStatus.title}
                       >
                         <td className="users-td users-td--name">{row.name}</td>
-                        <td className="users-td users-td--muted">{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType)}</td>
+                        <td className="users-td users-td--muted">{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType, t)}</td>
                         <td className="users-td users-td--muted">{lockStatus.label}</td>
                         <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
                       </tr>

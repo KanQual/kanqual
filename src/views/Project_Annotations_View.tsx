@@ -621,11 +621,15 @@ function formatAnnotationDisplayId(value: number | null): string {
   return value == null ? "-" : `A${value}`;
 }
 
-function formatSourceType(value: string | undefined): string {
+function formatSourceType(value: string | undefined, t: ReturnType<typeof useI18n>["t"]): string {
   const normalized = (value ?? "").trim().toLowerCase().replace(/_/g, " ");
   if (!normalized) return "-";
-  if (normalized === "pdf") return "PDF";
-  if (normalized === "processed transcript") return "Transcript";
+  if (normalized === "text") return t("projectCore.sourceKinds.text");
+  if (normalized === "pdf") return t("projectCore.sourceKinds.pdf");
+  if (normalized === "image") return t("projectCore.sourceKinds.image");
+  if (normalized === "audio") return t("projectCore.sourceKinds.audio");
+  if (normalized === "video") return t("projectCore.sourceKinds.video");
+  if (normalized === "transcript" || normalized === "processed transcript") return t("projectCore.sourceKinds.transcript");
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
@@ -641,7 +645,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   const { t } = useI18n();
   const localizedCols = [
     { ...COLS[0], label: t("projectAnnotations.table.document") },
-    COLS[1],
+    { ...COLS[1], label: t("projectAnnotations.table.type") },
     { ...COLS[2], label: t("projectAnnotations.table.code") },
     { ...COLS[3], label: t("projectAnnotations.table.lock") },
     { ...COLS[4], label: t("projectAnnotations.table.created") },
@@ -712,7 +716,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
           quote: annotation.quote ?? "",
           note: annotation.note ?? "",
           sourceKind,
-          sourceObjectType: sourceObjectType?.name ?? sourceVisual?.label ?? formatSourceType(sourceKind || "source"),
+          sourceObjectType: sourceObjectType?.name ?? sourceVisual?.label ?? formatSourceType(sourceKind || "source", t),
           sourceObjectTypeSystemKey: sourceObjectType?.systemKey ?? sourceVisual?.systemKey ?? null,
           sourceObjectTypeShape: sourceObjectType ? normalizeSourceObjectTypeShape(sourceObjectType.shape) : "rounded",
           sourceObjectTypeColor: sourceObjectType
@@ -839,7 +843,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   const sorted = [...filteredRows].sort((a, b) => {
     let cmp = 0;
     if (sortCol === "documentName") cmp = a.documentName.localeCompare(b.documentName);
-    else if (sortCol === "sourceKind") cmp = formatSourceType(a.sourceKind).localeCompare(formatSourceType(b.sourceKind));
+    else if (sortCol === "sourceKind") cmp = formatSourceType(a.sourceKind, t).localeCompare(formatSourceType(b.sourceKind, t));
     else if (sortCol === "codeLabel") cmp = a.codeLabel.localeCompare(b.codeLabel);
     else if (sortCol === "lockLabel") cmp = (a.lockLabel ?? "").localeCompare(b.lockLabel ?? "");
     else if (sortCol === "createdAt") cmp = (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
@@ -881,7 +885,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               <dt>{t("projectAnnotations.table.id")}</dt> <dd>{formatAnnotationDisplayId(selectedRow.displayId)}</dd>
               <dt>{t("projectAnnotations.table.sourceId")}</dt> <dd>{selectedRow.documentId}</dd>
               <dt>{t("projectAnnotations.table.document")}</dt> <dd>{selectedRow.documentName}</dd>
-              <dt>{t("projectAnnotations.table.sourceType")}</dt> <dd>{formatSourceType(selectedRow.sourceKind)}</dd>
+              <dt>{t("projectAnnotations.table.sourceType")}</dt> <dd>{formatSourceType(selectedRow.sourceKind, t)}</dd>
               <dt>{t("projectAnnotations.table.code")}</dt>
               <dd style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span className="code-swatch" style={{ background: selectedRow.codeColor }} />
@@ -1192,7 +1196,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                       {formatAnnotationDisplayId(row.displayId)}
                     </td>
                     <td className="users-td users-td--name">{row.documentName}</td>
-                    <td className="users-td users-td--muted">{formatSourceType(row.sourceKind)}</td>
+                    <td className="users-td users-td--muted">{formatSourceType(row.sourceKind, t)}</td>
                     <td className="users-td">
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span className="code-swatch" style={{ background: row.codeColor }} />

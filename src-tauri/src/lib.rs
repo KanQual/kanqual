@@ -1174,6 +1174,12 @@ mod postgres_auth_regression_tests {
     }
 
     #[test]
+    fn login_failure_classifier_does_not_treat_wrapped_bad_password_as_unavailable() {
+        let wrapped_bad_password = "Could not connect to PostgreSQL runtime: password authentication failed for user \"testuser\"";
+        assert!(!postgres_login_failure_is_runtime_unavailable(wrapped_bad_password));
+    }
+
+    #[test]
     fn login_failure_classifier_treats_refused_connection_as_unavailable() {
         let refused = "psql: error: connection to server at \"127.0.0.1\", port 5432 failed: Connection refused";
         assert!(postgres_login_failure_is_runtime_unavailable(refused));
@@ -1653,7 +1659,7 @@ async fn open_fresh_postgres_client(
     let (client, connection) = pg_config
         .connect(NoTls)
         .await
-        .map_err(|e| format!("Could not connect to PostgreSQL runtime: {e}"))?;
+        .map_err(|e| format!("Could not connect to PostgreSQL runtime: {}", describe_postgres_error(&e)))?;
     let task = tokio::spawn(async move {
         if let Err(error) = connection.await {
             if !POSTGRES_RUNTIME_RESTART_IN_PROGRESS.load(Ordering::SeqCst) {
@@ -1678,7 +1684,7 @@ async fn verify_postgres_database_login(
     client
         .query_one("SELECT current_user;", &[])
         .await
-        .map_err(|e| format!("PostgreSQL login check failed: {e}"))?;
+        .map_err(|e| format!("PostgreSQL login check failed: {}", describe_postgres_error(&e)))?;
     connection_task.abort();
     Ok(())
 }

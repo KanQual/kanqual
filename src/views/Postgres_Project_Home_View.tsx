@@ -755,6 +755,15 @@ function getPostgresSourceKindOption(kind: string | null | undefined) {
   return POSTGRES_SOURCE_KIND_OPTIONS.find((option) => normalizePostgresSourceKind(option.id) === normalized) ?? null;
 }
 
+function formatPostgresSourceVisualKeyLabel(
+  sourceVisualKey: string | null | undefined,
+  fallbackKind: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  const option = POSTGRES_SOURCE_KIND_OPTIONS.find((entry) => entry.sourceVisualKey === sourceVisualKey);
+  return formatPostgresSourceKindLabel(option?.id ?? fallbackKind, t);
+}
+
 function getHomeCanvasSourceObjectTypeId(kind: string | null | undefined): string {
   const option = getPostgresSourceKindOption(kind);
   return option ? `__home_canvas_source:${option.sourceVisualKey}` : "__home_canvas_source";
@@ -4043,7 +4052,18 @@ export function PostgresProjectHomeView({
   }, [project.id]);
 
   function projectRoleLabel(role: string) {
-    return role.slice(0, 1).toUpperCase() + role.slice(1);
+    switch (role) {
+      case "owner":
+        return t("projectUsers.roles.owner");
+      case "editor":
+        return t("projectUsers.roles.editor");
+      case "coder":
+        return t("projectUsers.roles.coder");
+      case "viewer":
+        return t("projectUsers.roles.viewer");
+      default:
+        return role.slice(0, 1).toUpperCase() + role.slice(1);
+    }
   }
 
   const userRoleSummaries = useMemo(
@@ -4066,7 +4086,7 @@ export function PostgresProjectHomeView({
         }
         return userRoleSortDir === "asc" ? comparison : -comparison;
       }),
-    [userRoleSortCol, userRoleSortDir, users],
+    [t, userRoleSortCol, userRoleSortDir, users],
   );
 
   const filteredProjectUsers = useMemo(
@@ -6385,10 +6405,15 @@ export function PostgresProjectHomeView({
               const systemKey = selection.object.objectTypeSystemKey ?? selection.objectTypeRecord?.systemKey ?? "";
               const sourceVisualKey = getPostgresSourceObjectVisualKey(systemKey);
               if (sourceVisualKey || systemKey === "home_canvas_source") {
+                const source = sources.find((entry) => entry.id === selection.object.id);
                 return {
                   title: selection.object.title.trim() || t("projectCore.graph.untitledSource"),
                   itemType: t("projectCore.entities.source"),
-                  typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
+                  typeDetail: formatPostgresSourceVisualKeyLabel(
+                    sourceVisualKey,
+                    source?.sourceKind || selection.object.objectType || selection.objectTypeRecord?.name || "",
+                    t,
+                  ),
                   attributes: sourceAttributeValues
                     .filter((value) => value.sourceId === selection.object.id && value.value.trim())
                     .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
@@ -6838,10 +6863,15 @@ export function PostgresProjectHomeView({
                     const systemKey = selection.object.objectTypeSystemKey ?? selection.objectTypeRecord?.systemKey ?? "";
                     const sourceVisualKey = getPostgresSourceObjectVisualKey(systemKey);
                     if (sourceVisualKey || systemKey === "home_canvas_source") {
+                      const source = sources.find((entry) => entry.id === selection.object.id);
                       return {
                         title: selection.object.title.trim() || t("projectCore.graph.untitledSource"),
                         itemType: t("projectCore.entities.source"),
-                        typeDetail: selection.object.objectType.trim() || selection.objectTypeRecord?.name || "",
+                        typeDetail: formatPostgresSourceVisualKeyLabel(
+                          sourceVisualKey,
+                          source?.sourceKind || selection.object.objectType || selection.objectTypeRecord?.name || "",
+                          t,
+                        ),
                         attributes: sourceAttributeValues
                           .filter((value) => value.sourceId === selection.object.id && value.value.trim())
                           .sort((left, right) => left.sortOrder - right.sortOrder || left.attributeName.localeCompare(right.attributeName, undefined, { sensitivity: "base" }))
@@ -7118,7 +7148,7 @@ export function PostgresProjectHomeView({
                                   </td>
                                   <td className="users-td users-td--muted">{formatCurrentDateTime(user.createdAt)}</td>
                                   <td className="users-td users-td--muted">
-                                    {user.lastActiveAt ? formatCurrentDateTime(user.lastActiveAt) : "Never"}
+                                    {user.lastActiveAt ? formatCurrentDateTime(user.lastActiveAt) : t("common.never")}
                                   </td>
                                 </tr>
                               ))}

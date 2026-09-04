@@ -1,7 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Outline processed transcript source">
-  <path d="M12 8 H64 L88 32 V88 H12 Z" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" />
-  <path d="M64 8 V32 H88" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" />
-  <path d="M50 39 V31 M50 69 V61 M61 50 H69 M31 50 H39 M58 42 L64 36 M36 64 L42 58 M58 58 L64 64 M36 36 L42 42" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" />
-  <circle cx="50" cy="50" r="12" fill="none" stroke="#111111" stroke-width="7" />
-  <circle cx="50" cy="50" r="3.5" fill="#111111" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Transcript source">
+  <g fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 8a1 1 0 0 1-1-1V2a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8z" />
+    <path d="M20 8v12a2 2 0 0 1-2 2h-4.182" />
+    <path d="m3.305 19.53.923-.382" />
+    <path d="M4 10.592V4a2 2 0 0 1 2-2h8" />
+    <path d="m4.228 16.852-.924-.383" />
+    <path d="m5.852 15.228-.383-.923" />
+    <path d="m5.852 20.772-.383.924" />
+    <path d="m8.148 15.228.383-.923" />
+    <path d="m8.53 21.696-.382-.924" />
+    <path d="m9.773 16.852.922-.383" />
+    <path d="m9.773 19.148.922.383" />
+    <circle cx="7" cy="18" r="3" />
+  </g>
 </svg>

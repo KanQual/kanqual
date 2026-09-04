@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AiAssistIcon, CloseIcon, CollaborationIcon, LogoutIcon, NetworkIcon } from "../components/AppIcons";
+import { useI18n } from "../i18n/provider";
 import sidebarMarkLogo from "../assets/logo-mark-no-background.png";
 import sidebarLogo from "../assets/logo-no-background.png";
 import type { PostgresAuthSession, PostgresProject } from "../lib/postgres";
@@ -74,6 +75,7 @@ export function PostgresSidebar({
   onShowAppSettings,
   onSignOut,
 }: PostgresSidebarProps) {
+  const { t } = useI18n();
   const [collapsedSidebarSections, setCollapsedSidebarSections] = useState<Set<string>>(() => new Set());
   const isSidebarSectionCollapsed = (sectionId: string) => (
     forceExpanded && lockExpandedNavigation ? false : collapsedSidebarSections.has(sectionId)
@@ -91,27 +93,27 @@ export function PostgresSidebar({
     });
   };
   const projectItems = [
-    { id: "home", label: "Home", disabled: !activeProject, onClick: onShowProjectHome },
-    { id: "users", label: "Users", disabled: !activeProject, onClick: onShowProjectUsers },
-    { id: "sources", label: "Sources", disabled: !activeProject, onClick: onShowProjectSources },
-    { id: "objects", label: "Objects", disabled: !activeProject, onClick: onShowProjectObjects },
-    { id: "relationships", label: "Relationships", disabled: !activeProject, onClick: onShowProjectRelationships },
-    { id: "codebook", label: "Codebook", disabled: !activeProject, onClick: onShowProjectCodebook },
-    { id: "annotations", label: "Annotations", disabled: !activeProject, onClick: onShowProjectAnnotations },
+    { id: "home", label: t("sidebar.items.home"), disabled: !activeProject, onClick: onShowProjectHome },
+    { id: "users", label: t("sidebar.items.users"), disabled: !activeProject, onClick: onShowProjectUsers },
+    { id: "sources", label: t("sidebar.items.sources"), disabled: !activeProject, onClick: onShowProjectSources },
+    { id: "objects", label: t("sidebar.items.objects"), disabled: !activeProject, onClick: onShowProjectObjects },
+    { id: "relationships", label: t("sidebar.items.relationships"), disabled: !activeProject, onClick: onShowProjectRelationships },
+    { id: "codebook", label: t("sidebar.items.codebook"), disabled: !activeProject, onClick: onShowProjectCodebook },
+    { id: "annotations", label: t("sidebar.items.annotations"), disabled: !activeProject, onClick: onShowProjectAnnotations },
   ];
   const analysisItems = [
-    { id: "code-text", label: "Code Sources", disabled: !activeProject, onClick: onShowProjectCodeText },
-    { id: "memos", label: "Memos", disabled: !activeProject, onClick: onShowProjectMemos },
-    { id: "reports", label: "Reports", disabled: !activeProject, onClick: onShowProjectReports },
+    { id: "code-text", label: t("sidebar.items.codeSources"), disabled: !activeProject, onClick: onShowProjectCodeText },
+    { id: "memos", label: t("sidebar.items.memos"), disabled: !activeProject, onClick: onShowProjectMemos },
+    { id: "reports", label: t("sidebar.items.reports"), disabled: !activeProject, onClick: onShowProjectReports },
   ];
   const aiAssistItems = [
-    { id: "ai-assist", label: "Home", disabled: !activeProject, onClick: onShowAiAssistHome },
+    { id: "ai-assist", label: t("sidebar.items.home"), disabled: !activeProject, onClick: onShowAiAssistHome },
     ...(aiAssistAllowed ? [
-      { id: "ai-assist-chat", label: "Chat", disabled: !activeProject, onClick: onShowAiAssistChat },
-      { id: "ai-assisted-coding", label: "Assisted Coding", disabled: !activeProject, onClick: onShowAiAssistedCoding },
-      { id: "ai-analyze", label: "Analyze Codes", disabled: !activeProject, onClick: onShowAiAnalyze },
-      { id: "ai-assist-source-attributes", label: "Attributes", disabled: !activeProject, onClick: onShowAiAssistSourceAttributes },
-      { id: "ai-assist-process-documents", label: "Transcripts", disabled: !activeProject, onClick: onShowAiAssistProcessDocuments },
+      { id: "ai-assist-chat", label: t("sidebar.items.chat"), disabled: !activeProject, onClick: onShowAiAssistChat },
+      { id: "ai-assisted-coding", label: t("sidebar.items.assistedCoding"), disabled: !activeProject, onClick: onShowAiAssistedCoding },
+      { id: "ai-analyze", label: t("sidebar.items.analyzeCodes"), disabled: !activeProject, onClick: onShowAiAnalyze },
+      { id: "ai-assist-source-attributes", label: t("sidebar.items.attributes"), disabled: !activeProject, onClick: onShowAiAssistSourceAttributes },
+      { id: "ai-assist-process-documents", label: t("sidebar.items.transcripts"), disabled: !activeProject, onClick: onShowAiAssistProcessDocuments },
     ] : []),
   ];
   const networkBadgeClass =
@@ -122,28 +124,28 @@ export function PostgresSidebar({
         : "brand-network-badge--local";
   const networkTitle =
     networkMode === "internet"
-      ? "Internet mode: remote users can connect through the configured address."
+      ? t("sidebar.status.internetMode")
       : networkMode === "network"
-        ? "LAN mode: local network users can connect."
+        ? t("sidebar.status.lanMode")
         : networkMode === "device"
-          ? "Device mode: only this machine can connect."
-          : "LAN mode is unavailable.";
+          ? t("sidebar.status.deviceMode")
+          : t("sidebar.status.lanUnavailable");
   const collaborationTitle =
     collaborationStatus === "active-shared"
-      ? "Collaboration is active. Other users are also connected."
+      ? t("sidebar.status.collaborationShared")
       : collaborationStatus === "active-solo"
-        ? "Collaboration is active. You are the only connected user."
+        ? t("sidebar.status.collaborationSolo")
       : collaborationStatus === "idle"
-        ? "Collaboration is limited to this device."
-        : "Open a project to use collaboration.";
+        ? t("sidebar.status.collaborationIdle")
+        : t("sidebar.status.collaborationUnavailable");
   const aiTitle =
     aiStatus === "running"
-      ? "AI Assist is preparing project embeddings."
+      ? t("sidebar.status.aiRunning")
       : aiStatus === "ready"
-        ? "AI Assist is ready for this project."
+        ? t("sidebar.status.aiReady")
         : aiStatus === "disabled"
-          ? "AI Assist is disabled for this project."
-          : "AI Assist is not ready for this project.";
+          ? t("sidebar.status.aiDisabled")
+          : t("sidebar.status.aiUnavailable");
 
   return (
     <aside className={`sidebar${forceExpanded ? " sidebar--expanded" : ""}${guideSpotlightSidebar ? " getting-started-spotlight-target sidebar--getting-started" : ""}`}>
@@ -172,7 +174,7 @@ export function PostgresSidebar({
 
       {activeProject ? (
         <div className="sidebar-project-badge">
-          <span className="project-badge-label project-badge-label--active">Active Project</span>
+          <span className="project-badge-label project-badge-label--active">{t("sidebar.projectBadge.activeLabel")}</span>
           <span className="project-badge-collapsed-name" aria-hidden="true">
             {activeProject.name}
           </span>
@@ -182,8 +184,8 @@ export function PostgresSidebar({
               type="button"
               className="project-badge-close"
               onClick={onShowProjects}
-              aria-label="Close project"
-              title="Close project"
+              aria-label={t("sidebar.projectBadge.closeProject")}
+              title={t("sidebar.projectBadge.closeProject")}
             >
               <CloseIcon className="project-badge-close-icon" />
             </button>
@@ -191,7 +193,7 @@ export function PostgresSidebar({
         </div>
       ) : (
         <button type="button" className="sidebar-project-badge sidebar-project-badge--empty" onClick={onShowProjects}>
-          <span className="project-badge-empty-text">Open Project</span>
+          <span className="project-badge-empty-text">{t("sidebar.projectBadge.openProject")}</span>
         </button>
       )}
 
@@ -203,7 +205,7 @@ export function PostgresSidebar({
             aria-expanded={!isSidebarSectionCollapsed("project")}
             onClick={() => toggleSidebarSection("project")}
           >
-            <span>Project</span>
+            <span>{t("sidebar.sections.project")}</span>
             <span className="sidebar-section-chevron">
               {isSidebarSectionCollapsed("project") ? "\u25b8" : "\u25be"}
             </span>
@@ -231,7 +233,7 @@ export function PostgresSidebar({
             aria-expanded={!isSidebarSectionCollapsed("analysis")}
             onClick={() => toggleSidebarSection("analysis")}
           >
-            <span>Analysis</span>
+            <span>{t("sidebar.sections.analysis")}</span>
             <span className="sidebar-section-chevron">
               {isSidebarSectionCollapsed("analysis") ? "\u25b8" : "\u25be"}
             </span>
@@ -259,7 +261,7 @@ export function PostgresSidebar({
             aria-expanded={!isSidebarSectionCollapsed("ai-assist")}
             onClick={() => toggleSidebarSection("ai-assist")}
           >
-            <span>AI Assist</span>
+            <span>{t("sidebar.sections.aiAssist")}</span>
             <span className="sidebar-section-chevron">
               {isSidebarSectionCollapsed("ai-assist") ? "\u25b8" : "\u25be"}
             </span>
@@ -272,7 +274,7 @@ export function PostgresSidebar({
                 className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}${guideSpotlightItemId === item.id ? " getting-started-spotlight-target" : ""}`}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
-                title={item.disabled ? "Open a PostgreSQL project first." : undefined}
+                title={item.disabled ? t("sidebar.nav.openPostgresProjectFirst") : undefined}
               >
                 {item.label}
               </button>
@@ -286,7 +288,7 @@ export function PostgresSidebar({
             className={`sidebar-section-header sidebar-section-header--link ${activeScreen === "app-settings" ? "sidebar-section-header--active" : ""}`}
             onClick={() => onShowAppSettings?.()}
           >
-            <span>Settings</span>
+            <span>{t("sidebar.sections.settings")}</span>
           </button>
         </div>
       </nav>
@@ -295,15 +297,15 @@ export function PostgresSidebar({
         <div className="sidebar-user-info">
           <div className="sidebar-user-name-row">
             <div className="sidebar-user-name">
-              {authSession.authKind === "postgres_admin" ? "Administrator" : authSession.user.name}
+              {authSession.authKind === "postgres_admin" ? t("sidebar.user.administrator") : authSession.user.name}
             </div>
             {authSession.authKind !== "postgres_admin" ? (
               <button
                 type="button"
                 className="sidebar-logout sidebar-logout--inline"
                 onClick={() => void onSignOut()}
-                aria-label="Log out"
-                title="Log out"
+                aria-label={t("sidebar.user.signOutTitle")}
+                title={t("sidebar.user.signOutTitle")}
               >
                 <LogoutIcon className="sidebar-logout-icon" />
               </button>

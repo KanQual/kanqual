@@ -8,7 +8,30 @@ import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCal
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
-import { CheckIcon, CloseIcon, DownloadIcon, EyeIcon, EyeOffIcon, HelpIcon, LogoutIcon, PlusIcon } from "../components/AppIcons";
+import {
+  AiAssistIcon,
+  CheckIcon,
+  CloseIcon,
+  DownloadIcon,
+  EyeIcon,
+  EyeOffIcon,
+  HelpIcon,
+  LogoutIcon,
+  NetworkIcon,
+  PlusIcon,
+  SettingsAddProjectIcon,
+  SettingsAddUserIcon,
+  SettingsAdministratorLogIcon,
+  SettingsAppearanceIcon,
+  SettingsDatabaseIcon,
+  SettingsGettingStartedIcon,
+  SettingsLanguageIcon,
+  SettingsManageProjectsIcon,
+  SettingsManageUsersIcon,
+  SettingsPermissionsIcon,
+  SettingsStorageIcon,
+  SettingsUpdatesIcon,
+} from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { LoadingCard } from "../components/LoadingCard";
 import { useI18n } from "../i18n/provider";
@@ -740,105 +763,105 @@ export function PostgresAdminSettingsView({
     id: AppSettingsModalId;
     title: string;
     description: string;
-    icon: string;
+    icon: ReactNode;
     tone: "default" | "network" | "admin";
   }> = [
     {
       id: "language",
       title: t("appSettings.sectionTitles.language"),
       description: t("appSettings.overview.language"),
-      icon: "L",
+      icon: <SettingsLanguageIcon />,
       tone: "default" as const,
     },
     {
       id: "appearance",
       title: t("adminSettings.system.appearance.title"),
       description: t("adminSettings.cards.appearance.description"),
-      icon: "A",
+      icon: <SettingsAppearanceIcon />,
       tone: "default" as const,
     },
     {
       id: "storage",
       title: t("appSettings.storage.localStorageTitle"),
       description: t("appSettings.overview.storage"),
-      icon: "S",
+      icon: <SettingsStorageIcon />,
       tone: "default" as const,
     },
     {
       id: "updates",
       title: t("adminSettings.cards.backupUpdates.title"),
       description: t("adminSettings.cards.backupUpdates.description"),
-      icon: "U",
+      icon: <SettingsUpdatesIcon />,
       tone: "admin" as const,
     },
     {
       id: "diagnostics",
       title: t("adminSettings.cards.database.title"),
       description: t("adminSettings.cards.database.description"),
-      icon: "D",
+      icon: <SettingsDatabaseIcon />,
       tone: "default" as const,
     },
     {
       id: "administratorLog",
       title: t("adminSettings.cards.administratorLog.title"),
       description: t("adminSettings.cards.administratorLog.description"),
-      icon: "Log",
+      icon: <SettingsAdministratorLogIcon />,
       tone: "admin" as const,
     },
     {
       id: "network",
       title: t("appSettings.sectionTitles.network"),
       description: t("appSettings.overview.network"),
-      icon: "N",
+      icon: <NetworkIcon />,
       tone: "admin" as const,
     },
     {
       id: "aiAssist",
       title: t("adminSettings.cards.aiAssist.title"),
       description: t("adminSettings.cards.aiAssist.description"),
-      icon: "AI",
+      icon: <AiAssistIcon />,
       tone: "admin" as const,
     },
     {
       id: "permissions",
       title: t("appSettings.permissions.title"),
       description: t("appSettings.permissions.description"),
-      icon: "R",
+      icon: <SettingsPermissionsIcon />,
       tone: "default" as const,
     },
     {
       id: "gettingStarted",
       title: t("adminSettings.cards.gettingStarted.title"),
       description: t("adminSettings.cards.gettingStarted.description"),
-      icon: "?",
+      icon: <SettingsGettingStartedIcon />,
       tone: "default" as const,
     },
     {
       id: "addProject",
       title: t("adminSettings.cards.addProject.title"),
       description: t("adminSettings.cards.addProject.description"),
-      icon: "+P",
+      icon: <SettingsAddProjectIcon />,
       tone: "admin" as const,
     },
     {
       id: "manageProjects",
       title: t("adminSettings.cards.manageProjects.title"),
       description: t("adminSettings.cards.manageProjects.description"),
-      icon: "P",
+      icon: <SettingsManageProjectsIcon />,
       tone: "admin" as const,
     },
     {
       id: "addUser",
       title: t("adminSettings.cards.addUser.title"),
       description: t("adminSettings.cards.addUser.description"),
-      icon: "+U",
+      icon: <SettingsAddUserIcon />,
       tone: "admin" as const,
     },
     {
       id: "manageUsers",
       title: t("adminSettings.cards.manageUsers.title"),
       description: t("adminSettings.cards.manageUsers.description"),
-      icon: "U",
+      icon: <SettingsManageUsersIcon />,
       tone: "admin" as const,
     },
   ];

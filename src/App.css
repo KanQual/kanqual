@@ -9741,6 +9741,12 @@ input[type="password"].form-input::-ms-clear {
   line-height: 1;
 }
 
+.app-settings-overview-card-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+
 .app-settings-modal-loading {
   display: grid;
   place-items: center;

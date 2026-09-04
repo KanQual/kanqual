@@ -1024,7 +1024,7 @@ export function UsersView() {
     return () => {
       cancelled = true;
     };
-  }, [activeProject, pb]);
+  }, [activeProject, pb, t]);
 
   useEffect(() => {
     if (selectedImportedUser && availableUsers.length === 0 && !availableUsersLoading) {

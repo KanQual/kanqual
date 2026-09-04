@@ -6,7 +6,23 @@ import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
-import { DownloadIcon, EyeIcon, EyeOffIcon, HelpIcon } from "../components/AppIcons";
+import {
+  DeleteIcon,
+  DownloadIcon,
+  EyeIcon,
+  EyeOffIcon,
+  HelpIcon,
+  SettingsAboutIcon,
+  SettingsAppearanceIcon,
+  SettingsCodebookIcon,
+  SettingsLanguageIcon,
+  SettingsPermissionsIcon,
+  SettingsProjectDetailsIcon,
+  SettingsProjectLogIcon,
+  SettingsStorageIcon,
+  SettingsUpdatesIcon,
+  SettingsUploadedFilesIcon,
+} from "../components/AppIcons";
 import { FilterIcon } from "../components/FilterIcon";
 import { SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
@@ -660,7 +676,7 @@ function EmbeddedPostgresProjectSettings({
       });
       onProjectUpdated(updated);
       setActiveModal(null);
-      setNotice(`Updated PostgreSQL project "${updated.name}".`);
+      setNotice(t("appSettings.project.notices.updatedProject", { name: updated.name }));
     } catch (updateError) {
       setError(describeUnknownError(updateError));
     } finally {
@@ -720,7 +736,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "details",
           title: t("appSettings.project.cards.detailsShortTitle"),
-          icon: "DE",
+          icon: <SettingsProjectDetailsIcon />,
           description: t("appSettings.project.cards.detailsShortDescription"),
           onOpen: () => {
             setError("");
@@ -732,7 +748,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "storage",
           title: t("appSettings.project.cards.storageTitle"),
-          icon: "HD",
+          icon: <SettingsStorageIcon />,
           description: t("appSettings.project.cards.storageDescription"),
           onOpen: () => {
             setError("");
@@ -747,7 +763,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "uploaded-files",
           title: t("appSettings.project.cards.uploadedFilesTitle"),
-          icon: "UP",
+          icon: <SettingsUploadedFilesIcon />,
           description: t("appSettings.project.cards.uploadedFilesDescription"),
           onOpen: () => {
             setError("");
@@ -758,7 +774,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "backups",
           title: t("appSettings.project.cards.snapshotsTitle"),
-          icon: "SN",
+          icon: <SettingsUpdatesIcon />,
           description: t("appSettings.project.cards.snapshotsDescription"),
           onOpen: () => {
             setBackupError("");
@@ -770,7 +786,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "log",
           title: t("appSettings.project.cards.logTitle"),
-          icon: "LG",
+          icon: <SettingsProjectLogIcon />,
           description: t("appSettings.project.cards.logDescription"),
           onOpen: () => {
             setError("");
@@ -786,7 +802,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "export",
           title: t("appSettings.project.cards.exportTitle"),
-          icon: "EX",
+          icon: <DownloadIcon />,
           description: t("appSettings.project.cards.exportDescription"),
           onOpen: () => {
             setExportError("");
@@ -796,7 +812,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "codebook",
           title: t("appSettings.project.cards.codebookTitle"),
-          icon: "CB",
+          icon: <SettingsCodebookIcon />,
           description: t("appSettings.project.cards.codebookDescription"),
           onOpen: () => {
             setCodebookError("");
@@ -806,7 +822,7 @@ function EmbeddedPostgresProjectSettings({
         {
           id: "danger",
           title: t("appSettings.project.cards.deleteProjectTitle"),
-          icon: "DL",
+          icon: <DeleteIcon />,
           description: t("appSettings.project.cards.deleteProjectDescription"),
           requiresProjectManagement: true,
           onOpen: () => {
@@ -1729,7 +1745,7 @@ export function PostgresAppSettingsView({
       recentProjectLimit,
       gettingStartedState,
       themeState: getStoredThemeState(),
-    }, "Language updated.");
+    }, t("appSettings.language.updated"));
   }
 
   async function handleThemeManagerApplied() {
@@ -1744,25 +1760,25 @@ export function PostgresAppSettingsView({
       recentProjectLimit,
       gettingStartedState,
       themeState: getStoredThemeState(),
-    }, "Theme updated.");
+    }, t("appSettings.appearance.updated"));
   }
 
   const groupedCards = [
     {
       id: "preferences",
-      title: "Preferences",
+      title: t("appSettings.overviewSections.preferences"),
       cards: [
-        { id: "appearance", title: "Appearance", icon: "Aa" },
-        { id: "language", title: t("appSettings.sectionTitles.language"), icon: "LA" },
-      ] as Array<{ id: AppSettingsModalId; title: string; icon: string }>,
+        { id: "appearance", title: t("appSettings.appearance.title"), icon: <SettingsAppearanceIcon /> },
+        { id: "language", title: t("appSettings.sectionTitles.language"), icon: <SettingsLanguageIcon /> },
+      ] as Array<{ id: AppSettingsModalId; title: string; icon: ReactNode }>,
     },
     {
       id: "system",
-      title: "System",
+      title: t("appSettings.overviewSections.system"),
       cards: [
-        { id: "about", title: t("appSettings.about.title"), icon: "KQ" },
-        { id: "permissions", title: t("appSettings.permissions.title"), icon: "RO" },
-      ] as Array<{ id: AppSettingsModalId; title: string; icon: string }>,
+        { id: "about", title: t("appSettings.about.title"), icon: <SettingsAboutIcon /> },
+        { id: "permissions", title: t("appSettings.permissions.title"), icon: <SettingsPermissionsIcon /> },
+      ] as Array<{ id: AppSettingsModalId; title: string; icon: ReactNode }>,
     },
   ];
 
@@ -1770,13 +1786,13 @@ export function PostgresAppSettingsView({
     <div className="view app-settings-view app-settings-view--compact">
       <header className="view-header">
         <div className="view-title-with-help">
-          <h1>Settings</h1>
+          <h1>{t("appSettings.settingsTitle")}</h1>
           <button
             type="button"
             className="users-help-icon-btn"
             onClick={() => setHelpOpen(true)}
-            title="Open settings help"
-            aria-label="Open settings help"
+            title={t("appSettings.openHelp")}
+            aria-label={t("appSettings.openHelp")}
           >
             <HelpIcon className="users-help-icon" />
           </button>
@@ -1784,18 +1800,18 @@ export function PostgresAppSettingsView({
       </header>
 
       {helpOpen ? (
-        <SettingsModal title="Settings Help" onClose={() => setHelpOpen(false)} modalClassName="modal--help">
+        <SettingsModal title={t("appSettings.helpTitle")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
           <div className="app-settings-modal-body">
             <p className="users-guide-copy">
-              Manage project details, storage, snapshots, imports and exports, codebook transfer, permissions, and personal display preferences from this settings hub.
+              {t("appSettings.helpLine1")}
             </p>
             <p className="users-guide-copy">
-              Some settings affect only your signed-in user, while project administration actions depend on your project role.
+              {t("appSettings.helpLine2")}
             </p>
           </div>
           <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
             <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              Close
+              {t("common.close")}
             </button>
           </div>
         </SettingsModal>
@@ -1809,7 +1825,7 @@ export function PostgresAppSettingsView({
           {onAuthSessionUpdated && onAuthSessionInvalidated ? (
             <section className="app-settings-overview-section app-settings-overview-section--compact">
               <div className="app-settings-overview-section-header">
-                <p className="app-settings-overview-section-heading">Account</p>
+                <p className="app-settings-overview-section-heading">{t("appSettings.overviewSections.account")}</p>
               </div>
               <PostgresUserSettingsView
                 authSession={authSession}
@@ -1824,7 +1840,7 @@ export function PostgresAppSettingsView({
           {project && onProjectUpdated && onProjectDeleted ? (
             <section className="app-settings-overview-section app-settings-overview-section--compact">
               <div className="app-settings-overview-section-header">
-                <p className="app-settings-overview-section-heading">Project</p>
+                <p className="app-settings-overview-section-heading">{t("appSettings.overviewSections.project")}</p>
               </div>
               <EmbeddedPostgresProjectSettings
                 project={project}
@@ -1967,18 +1983,18 @@ export function PostgresAppSettingsView({
                 </section>
               </div>
             </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button></div>
         </SettingsModal>
       ) : null}
 
       {activeModal === "appearance" ? (
-        <SettingsModal title="Appearance" onClose={() => setActiveModal(null)}>
+        <SettingsModal title={t("appSettings.appearance.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
-                <SettingsModalSection title="Interface">
+                <SettingsModalSection title={t("appSettings.appearance.interface")}>
                   <ActiveThemePreviewRow theme={theme} onEdit={() => setShowThemeManager(true)} />
                   <div className="settings-row">
-                    <div className="settings-row-info"><div className="settings-row-label">Interface density</div></div>
+                    <div className="settings-row-info"><div className="settings-row-label">{t("appSettings.appearance.interfaceDensity")}</div></div>
                     <div className="segmented-control">
                       {(["comfortable", "compact"] as Density[]).map((option) => (
                         <button
@@ -1991,13 +2007,13 @@ export function PostgresAppSettingsView({
                             persistThemePatch({ density: option });
                           }}
                         >
-                          {option === "comfortable" ? "Comfortable" : "Compact"}
+                          {option === "comfortable" ? t("appSettings.appearance.comfortable") : t("appSettings.appearance.compact")}
                         </button>
                       ))}
                     </div>
                   </div>
                   <div className="settings-row">
-                    <div className="settings-row-info"><div className="settings-row-label">Text size</div></div>
+                    <div className="settings-row-info"><div className="settings-row-label">{t("appSettings.appearance.textSize")}</div></div>
                     <div className="segmented-control">
                       {(["small", "normal", "large"] as FontSize[]).map((option) => (
                         <button
@@ -2010,7 +2026,7 @@ export function PostgresAppSettingsView({
                             persistThemePatch({ fontSize: option });
                           }}
                         >
-                          {option === "small" ? "Small" : option === "normal" ? "Normal" : "Large"}
+                          {option === "small" ? t("appSettings.appearance.small") : option === "normal" ? t("appSettings.appearance.normal") : t("appSettings.appearance.large")}
                         </button>
                       ))}
                     </div>
@@ -2018,7 +2034,7 @@ export function PostgresAppSettingsView({
                 </SettingsModalSection>
               </div>
             </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button></div>
         </SettingsModal>
       ) : null}
 
@@ -2035,16 +2051,16 @@ export function PostgresAppSettingsView({
       {activeModal === "permissions" ? (
         <SettingsModal title={t("appSettings.permissions.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
-              <SettingsModalSection title="User Roles">
+              <SettingsModalSection title={t("appSettings.permissions.userRoles")}>
                 <div className="users-table-wrap postgres-users-table-wrap" style={{ maxHeight: 420 }}>
                   <table className="users-table">
                     <thead>
                       <tr>
-                        <th className="users-th">Area</th>
-                        <th className="users-th">Action</th>
-                        <th className="users-th">Owner</th>
-                        <th className="users-th">Editor</th>
-                        <th className="users-th">Viewer</th>
+                        <th className="users-th">{t("appSettings.permissions.area")}</th>
+                        <th className="users-th">{t("appSettings.permissions.action")}</th>
+                        <th className="users-th">{t("appSettings.permissions.columnOwner")}</th>
+                        <th className="users-th">{t("appSettings.permissions.columnEditor")}</th>
+                        <th className="users-th">{t("appSettings.permissions.columnViewer")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2052,9 +2068,9 @@ export function PostgresAppSettingsView({
                         <tr className="users-row" key={`${row.category}-${row.permission}`}>
                           <td className="users-td users-td--muted">{row.category}</td>
                           <td className="users-td users-td--name">{row.permission}</td>
-                          <td className="users-td">{row.owner ? "Yes" : "No"}</td>
-                          <td className="users-td">{row.editor ? "Yes" : "No"}</td>
-                          <td className="users-td">{row.viewer ? "Yes" : "No"}</td>
+                          <td className="users-td">{row.owner ? t("common.yes") : t("common.no")}</td>
+                          <td className="users-td">{row.editor ? t("common.yes") : t("common.no")}</td>
+                          <td className="users-td">{row.viewer ? t("common.yes") : t("common.no")}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2062,7 +2078,7 @@ export function PostgresAppSettingsView({
                 </div>
               </SettingsModalSection>
             </div>
-            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>Done</button></div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button></div>
         </SettingsModal>
       ) : null}
 
