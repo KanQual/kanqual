@@ -164,7 +164,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `pako` | `2.1.0` | `(MIT AND Zlib)` |
 | `pdfjs-dist` | `6.3.289` | `Apache-2.0` |
 | `performance-now` | `2.1.0` | `MIT` |
-| `pocketbase` | `0.26.8` | `MIT` |
 | `process` | `0.11.10` | `MIT` |
 | `process-nextick-args` | `2.0.1` | `MIT` |
 | `prosemirror-changeset` | `2.4.1` | `MIT` |
@@ -682,7 +681,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `tauri-plugin-dialog` | `2.7.0` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-fs` | `2.5.0` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-opener` | `2.5.3` | `Apache-2.0 OR MIT` | `` |
-| `tauri-plugin-shell` | `2.3.5` | `Apache-2.0 OR MIT` | `` |
 | `tauri-runtime` | `2.10.1` | `Apache-2.0 OR MIT` | `` |
 | `tauri-runtime-wry` | `2.10.1` | `Apache-2.0 OR MIT` | `` |
 | `tauri-utils` | `2.8.3` | `Apache-2.0 OR MIT` | `` |

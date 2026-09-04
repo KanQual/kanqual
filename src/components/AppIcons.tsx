@@ -46,6 +46,7 @@ import {
   Tag,
   Trash,
   UndoDot,
+  UserRound,
   UserRoundCog,
   UserRoundKey,
   UserRoundPlus,
@@ -146,6 +147,10 @@ export function SettingsAppearanceIcon({ className }: IconProps) {
 
 export function SettingsLanguageIcon({ className }: IconProps) {
   return <LucideAppIcon Icon={Languages} className={className} />;
+}
+
+export function SettingsProfileIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={UserRound} className={className} />;
 }
 
 export function SettingsGettingStartedIcon({ className }: IconProps) {

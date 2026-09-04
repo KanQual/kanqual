@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -8,10 +8,25 @@ const rootDir = process.cwd();
 const localesDir = path.join(rootDir, "src", "i18n", "locales");
 const tempDir = path.join(rootDir, ".tmp", "i18n-check");
 
-const localeFiles = [
-  { code: "en", file: path.join(localesDir, "en.ts"), exportName: "en" },
-  { code: "asterisk", formatterLocale: "en", file: path.join(localesDir, "asterisk.ts"), exportName: "asterisk" },
-];
+async function getLocaleFiles() {
+  const entries = await readdir(localesDir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+    .map((entry) => {
+      const code = entry.name.replace(/\.ts$/, "");
+      return {
+        code,
+        formatterLocale: code === "asterisk" ? "en" : code,
+        file: path.join(localesDir, entry.name),
+        exportName: code,
+      };
+    })
+    .sort((a, b) => {
+      if (a.code === "en") return -1;
+      if (b.code === "en") return 1;
+      return a.code.localeCompare(b.code);
+    });
+}
 
 async function loadTsModule(filePath) {
   const source = await readFile(filePath, "utf8");
@@ -86,6 +101,7 @@ function describeType(value) {
 }
 
 async function main() {
+  const localeFiles = await getLocaleFiles();
   const loaded = await Promise.all(localeFiles.map(async (entry) => {
     const mod = await loadTsModule(entry.file);
     return {

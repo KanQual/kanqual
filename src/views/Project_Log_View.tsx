@@ -1,5 +1,3 @@
-import { Fragment, useMemo, useState } from "react";
-import { useStore } from "../context/StoreContext";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import type { ProjectLogEntry } from "../types";
@@ -851,101 +849,6 @@ export function ProjectLogDetailsPanel({ details }: { details: ProjectLogDetails
           );
         })}
       </div>
-    </div>
-  );
-}
-
-export function ProjectLogTable() {
-  const { t } = useI18n();
-  const { logEntries } = useStore();
-  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
-
-  const sorted = useMemo(
-    () => [...logEntries].sort(
-      (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
-    ),
-    [logEntries],
-  );
-
-  if (sorted.length === 0) {
-    return (
-      <div className="empty-state">
-        <p>{t("projectLog.empty.noActivity")}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="project-log-table-wrap">
-      <table className="project-log-table">
-        <thead>
-          <tr>
-            <th>{t("projectLog.columns.time")}</th>
-            <th>{t("projectLog.columns.user")}</th>
-            <th>{t("projectLog.columns.access")}</th>
-            <th>{t("projectLog.columns.category")}</th>
-            <th>{t("projectLog.columns.description")}</th>
-            <th>{t("projectLog.columns.details")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((entry: ProjectLogEntry) => {
-            const details = parseProjectLogDetails(entry.detailsJson);
-            const isExpanded = Boolean(expandedIds[entry.id]);
-            const summary = details ? summarizeProjectLogDetails(entry.action, details, t) : "";
-            return (
-              <Fragment key={entry.id}>
-                <tr className={`log-row log-row--${projectLogActionCategory(entry.action)}`}>
-                  <td className="log-cell log-cell--time">{formatProjectLogDateTime(entry.occurredAt)}</td>
-                  <td className="log-cell log-cell--user">{entry.userName || "-"}</td>
-                  <td className="log-cell log-cell--user">
-                    {entry.accessMode === "local"
-                      ? t("projectLog.access.local")
-                      : entry.accessMode === "remote"
-                        ? t("projectLog.access.remote")
-                        : "-"}
-                  </td>
-                  <td className="log-cell log-cell--action">
-                    <span className={`log-badge log-badge--${projectLogActionCategory(entry.action)}`}>
-                      {projectLogActionLabel(entry.action, t)}
-                    </span>
-                  </td>
-                  <td className="log-cell log-cell--label">
-                    <div>{projectLogDescriptionLabel(entry, details, t)}</div>
-                    {summary && <div className="log-inline-summary">{summary}</div>}
-                  </td>
-                  <td className="log-cell log-cell--details-toggle">
-                    {details ? (
-                      <button
-                        type="button"
-                        className="btn btn--xs log-details-toggle"
-                        onClick={() =>
-                          setExpandedIds((prev) => ({
-                            ...prev,
-                            [entry.id]: !prev[entry.id],
-                          }))
-                        }
-                        aria-expanded={isExpanded}
-                      >
-                        {isExpanded ? t("projectLog.actions.hideDetails") : t("projectLog.actions.viewDetails")}
-                      </button>
-                    ) : (
-                      <span className="log-details-none">-</span>
-                    )}
-                  </td>
-                </tr>
-                {details && isExpanded && (
-                  <tr className="log-details-row">
-                    <td className="log-cell log-cell--details" colSpan={6}>
-                      <ProjectLogDetailsPanel details={details} />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }

@@ -1537,7 +1537,7 @@ export function PostgresProjectHomeTimelineView({
 
   useEffect(() => {
     const container = timelineContainerRef.current;
-    if (!container || visibleTimelineEntries.length === 0) return;
+    if (!container) return;
     let cancelled = false;
     let timeline: TimelineController | null = null;
     void Promise.all([
@@ -2313,9 +2313,6 @@ export function PostgresProjectHomeTimelineView({
     </div>
   );
 
-  const mappedDefinitionsCount = sourceAttributeDefinitions.filter((definition) => definition.timelineRole).length
-    + objectAttributeDefinitions.filter((definition) => definition.timelineRole).length
-    + relationshipAttributeDefinitions.filter((definition) => definition.timelineRole).length;
   const timelineRenderedGroupCount = Math.max(1, currentTimelineGroupOrderKeys.length);
   const timelineCardStyle = {
     "--project-home-timeline-target-height": `${72 + ((timelineRenderedGroupCount + 1) * timelineAppearance.rowHeight)}px`,
@@ -2325,24 +2322,7 @@ export function PostgresProjectHomeTimelineView({
 
   return (
     <section className={`project-home-timeline-card project-home-timeline-card--font-${timelineAppearance.fontSize}`} style={timelineCardStyle}>
-      {timelineEntries.length === 0 ? (
-        <div className="project-home-timeline-empty">
-          {renderTimelineCreateControl(true)}
-          <div className="project-home-timeline-empty-graphic" aria-hidden="true">
-            <div className="project-home-timeline-empty-axis" />
-            <div className="project-home-timeline-empty-item project-home-timeline-empty-item--source" />
-            <div className="project-home-timeline-empty-item project-home-timeline-empty-item--object" />
-            <div className="project-home-timeline-empty-item project-home-timeline-empty-item--relationship" />
-          </div>
-          <p className="project-home-timeline-empty-text">
-            {mappedDefinitionsCount === 0
-              ? t("projectCore.timeline.emptyUnmapped")
-              : t("projectCore.timeline.emptyMapped")}
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="project-home-timeline-canvas-wrap">
+      <div className="project-home-timeline-canvas-wrap">
             <div ref={timelineContainerRef} className="project-home-timeline-canvas" />
             {selectedTimelineEntry ? (
               <div className="postgres-explore-inspector-overlay project-home-timeline-inspector-overlay">
@@ -2374,15 +2354,13 @@ export function PostgresProjectHomeTimelineView({
               </div>
             ) : null}
             {!canManageSources ? renderTimelineControlCluster() : null}
-            {visibleTimelineEntries.length === 0 ? (
+            {visibleTimelineEntries.length === 0 && timelineEntries.length > 0 ? (
               <p className="project-home-timeline-filter-empty">{t("projectCore.timeline.noItemsMatch")}</p>
             ) : null}
             {timelineExportError ? (
               <p className="project-home-timeline-export-error">{timelineExportError}</p>
             ) : null}
           </div>
-        </>
-      )}
       {groupModalDraft ? (
         <SettingsModal
           title={groupModalDraft === "new" ? t("projectCore.timeline.newGroupTitle") : t("projectCore.timeline.editGroupTitle")}

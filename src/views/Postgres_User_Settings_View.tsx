@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
-import { EyeIcon, EyeOffIcon, HelpIcon } from "../components/AppIcons";
+import { EyeIcon, EyeOffIcon, HelpIcon, SettingsProfileIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from "../i18n";
@@ -331,7 +331,7 @@ export function PostgresUserSettingsView({
                   className={embedded ? "app-settings-overview-card app-settings-overview-card--compact app-settings-overview-card--default" : "app-settings-overview-card app-settings-overview-card--default"}
                   onClick={() => setActiveModal("profile")}
                 >
-                  {embedded ? <span className="app-settings-overview-card-icon" aria-hidden="true">ID</span> : null}
+                  {embedded ? <span className="app-settings-overview-card-icon" aria-hidden="true"><SettingsProfileIcon /></span> : null}
                   <h3>Profile</h3>
                   {!embedded ? <p>View your KanQual account.</p> : null}
                 </button>

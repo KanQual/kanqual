@@ -1,5 +1,5 @@
-import type { Project } from "../types";
-import { loadProjectBackupManifest } from "./projectBackups";
+import type { PostgresProject } from "./postgres";
+import { loadPostgresProjectBackupManifest } from "./postgresProjectBackups";
 
 export type ProjectBackupIssueKind = "missing" | "failed" | "interrupted";
 
@@ -143,8 +143,8 @@ export function notifyProjectBackupsChanged(projectId: string): void {
   );
 }
 
-export async function loadProjectBackupBannerIssue(project: Project): Promise<ProjectBackupBannerIssue | null> {
-  const manifest = await loadProjectBackupManifest(project);
+export async function loadProjectBackupBannerIssue(project: PostgresProject): Promise<ProjectBackupBannerIssue | null> {
+  const manifest = await loadPostgresProjectBackupManifest(project);
   const storedIssue = readProjectBackupBannerIssue(project.id);
   const pendingAttempt = readPendingProjectBackupAttempt(project.id);
   if (storedIssue && (storedIssue.kind === "failed" || storedIssue.kind === "interrupted")) {

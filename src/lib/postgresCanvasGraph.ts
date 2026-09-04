@@ -343,7 +343,7 @@ export const POSTGRES_CYTOSCAPE_STYLESHEET = [
       "background-clip": "none",
       "background-image-opacity": 1,
       "background-opacity": 0,
-      "border-width": (element: { data: (key: string) => string | number }) => Math.max(2, Number(element.data("borderWidth"))),
+      "border-width": 0,
       "text-valign": "bottom",
       "text-margin-y": 10,
     },
@@ -351,9 +351,7 @@ export const POSTGRES_CYTOSCAPE_STYLESHEET = [
   {
     selector: "node.canvas-object--source-image:selected",
     style: {
-      "outline-opacity": 0,
-      "border-width": 4,
-      "border-color": "#3b82f6",
+      "border-width": 0,
       "shadow-opacity": 0.24,
     },
   },

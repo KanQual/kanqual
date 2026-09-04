@@ -1,13 +1,11 @@
 import {
   Component,
   type ErrorInfo,
-  type FormEvent,
   type ReactNode,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/provider";
 import { APP_SETTINGS_KEY } from "../lib/appSettings";
 import {
@@ -352,79 +350,6 @@ export function UpdateAvailableBanner({
         <a className="btn btn--primary" href={releaseUrl} target="_blank" rel="noreferrer">
           {t("app.updateBanner.viewRelease")}
         </a>
-      </div>
-    </div>
-  );
-}
-
-export function ForcePasswordChangeView() {
-  const { t } = useI18n();
-  const { user, changePassword, logout } = useAuth();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setError("");
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      setError(t("app.forcePassword.enterTemporary"));
-      return;
-    }
-    if (newPassword.length < 8) {
-      setError(t("app.forcePassword.passwordTooShort"));
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError(t("app.forcePassword.passwordsDoNotMatch"));
-      return;
-    }
-    setSaving(true);
-    try {
-      await changePassword({ currentPassword, newPassword });
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (changeError) {
-      setError(changeError instanceof Error ? changeError.message : t("app.forcePassword.passwordChangeFailed"));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="auth-screen">
-      <div className="auth-card">
-        <div className="auth-brand">{t("app.loadingCard.productNameSentenceCase")}</div>
-        <p className="auth-tagline">{t("app.forcePassword.tagline")}</p>
-        <form onSubmit={handleSubmit} className="form">
-          <h2 className="auth-panel-title">{t("app.forcePassword.title")}</h2>
-          <p className="auth-hint">{t("app.forcePassword.temporaryNotice")}</p>
-          <p className="auth-hint">{t("app.forcePassword.signedInAs", { email: user?.email ?? "" })}</p>
-          <label className="form-label">
-            {t("app.forcePassword.temporaryPassword")}
-            <input className="form-input" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoFocus autoComplete="current-password" />
-          </label>
-          <label className="form-label">
-            {t("app.forcePassword.newPassword")}
-            <input className="form-input" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label className="form-label">
-            {t("app.forcePassword.confirmPassword")}
-            <input className="form-input" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
-          </label>
-          {error && <p className="auth-error">{error}</p>}
-          <div className="form-actions">
-            <button type="button" className="btn" onClick={logout} disabled={saving}>
-              {t("common.signOut")}
-            </button>
-            <button type="submit" className="btn btn--primary" disabled={saving}>
-              {saving ? t("app.forcePassword.updating") : t("app.forcePassword.setPassword")}
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   );

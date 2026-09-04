@@ -1,5 +1,3 @@
-import type { RecordModel } from "pocketbase";
-
 export const PROJECT_UPLOADED_FILES_COLLECTION = "project_uploaded_files";
 
 export type ProjectUploadedFileStatus = "active" | "processed" | "orphaned" | "deleted";
@@ -35,6 +33,12 @@ export type ProjectUploadedFile = {
   createdAt: string;
   updatedAt: string;
   deletedAt: string;
+};
+
+type ProjectUploadedFileRecord = Record<string, unknown> & {
+  id: string;
+  created?: string;
+  updated?: string;
 };
 
 function normalizeStatus(value: unknown): ProjectUploadedFileStatus {
@@ -78,7 +82,7 @@ export function buildUploadedFileStatusEvent(input: {
   };
 }
 
-export function toProjectUploadedFile(record: RecordModel): ProjectUploadedFile {
+export function toProjectUploadedFile(record: ProjectUploadedFileRecord): ProjectUploadedFile {
   const uploadedFile =
     Array.isArray(record.uploaded_file)
       ? String(record.uploaded_file[0] ?? "")

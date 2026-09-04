@@ -52,10 +52,6 @@ export default defineConfig({
             return "react-vendor";
           }
 
-          if (id.includes("/pocketbase/")) {
-            return "pocketbase";
-          }
-
           if (id.includes("/@tauri-apps/")) {
             return "tauri";
           }

@@ -14,7 +14,6 @@ export interface RemoteSession {
 export const LOCAL_ACCOUNTS_KEY = "mc_local_accounts";
 export const REMOTE_SESSIONS_KEY = "mc_remote_sessions";
 export const POSTGRES_ACCOUNTS_KEY = "kq_postgres_experiment_accounts";
-export const LOCAL_PB_URL = "http://127.0.0.1:8090";
 
 export function getLocalAccounts(): AccountHistory[] {
   try {

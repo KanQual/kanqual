@@ -287,7 +287,7 @@ function formatDateInputValue(timestamp: number | null): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function getPocketBaseErrorMessage(error: unknown): string {
+function getReportSaveErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
     return error instanceof Error ? error.message : "Failed to save report.";
   }
@@ -1851,7 +1851,7 @@ function ReportPage({
       onSaved(record.id);
     } catch (e) {
       console.error(e);
-      setError(getPocketBaseErrorMessage(e));
+      setError(getReportSaveErrorMessage(e));
       setSaving(false);
     }
   }

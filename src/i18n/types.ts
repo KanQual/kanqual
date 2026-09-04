@@ -1,10 +1,9 @@
 import { en } from "./locales/en";
 
-export const SUPPORTED_LOCALES = ["en", "asterisk"] as const;
+export const SUPPORTED_LOCALES = ["en"] as const;
 
 export const LOCALE_LABELS: Record<LocaleCode, string> = {
   en: "English",
-  asterisk: "*****",
 };
 
 export type LocaleCode = (typeof SUPPORTED_LOCALES)[number];

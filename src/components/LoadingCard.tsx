@@ -1,4 +1,5 @@
-import startupLogo from "../assets/logo-outline.png";
+import startupLogo from "../assets/logo-mark-no-background.png";
+import loadingLogo from "../assets/logo-outline.png";
 import { useI18n } from "../i18n/provider";
 
 type LoadingCardProps = {
@@ -11,7 +12,7 @@ export function LoadingCard({ startupIntro = false, version }: LoadingCardProps)
 
   return (
     <div className={`auth-card loading-card${startupIntro ? " loading-card--startup-intro" : ""}`} role="status" aria-live="polite">
-      {!startupIntro ? <img src={startupLogo} alt="" className="loading-card-bg-logo" aria-hidden="true" /> : null}
+      {!startupIntro ? <img src={loadingLogo} alt="" className="loading-card-bg-logo" aria-hidden="true" /> : null}
       {startupIntro ? <img src={startupLogo} alt="" className="loading-card-intro-logo" aria-hidden="true" /> : null}
       <div className={`loading-card-content${startupIntro ? " loading-card-content--startup-intro" : ""}`}>
         {startupIntro ? (

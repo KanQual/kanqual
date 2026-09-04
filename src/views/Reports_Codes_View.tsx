@@ -302,7 +302,7 @@ function buildDefaultAttributeFilter(
   };
 }
 
-function getPocketBaseErrorMessage(error: unknown): string {
+function getReportSaveErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
     return error instanceof Error ? error.message : "Failed to save report.";
   }
@@ -2971,7 +2971,7 @@ function CodeReportCreationPage({
       onSaved?.(savedRow);
     } catch (e) {
       console.error(e);
-      setError(getPocketBaseErrorMessage(e));
+      setError(getReportSaveErrorMessage(e));
       setSaving(false);
     }
   }

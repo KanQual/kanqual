@@ -5,7 +5,7 @@
 
 Kanqual is a free, open-source, local-first qualitative research application for coding, memoing, reporting, and AI-assisted analysis by Mehmet Cansoy, Associate Professor of Sociology at Fairfield University.
 
-It is built as a desktop app with Tauri, React, TypeScript, Rust, and an embedded PocketBase backend. It is built on Windows 11, but also confirmed to work on Windows 10, MacOS 26.5, and Ubuntu 26.04. 
+It is built as a desktop app with Tauri, React, TypeScript, Rust, and an embedded PostgreSQL backend. It is built on Windows 11, but also confirmed to work on Windows 10, MacOS 26.5, and Ubuntu 26.04. 
 
 ## What Kanqual Does
 
@@ -64,7 +64,7 @@ AI Assist depends on local model/runtime setup in App Settings. In networked col
 - Frontend: React 19, TypeScript, Vite
 - Desktop shell: Tauri v2
 - Native layer: Rust
-- Local backend/database: PocketBase
+- Local backend/database: PostgreSQL
 - Optional AI runtime: Ollama
 - Local embeddings: Candle + multilingual-e5 workflow
 

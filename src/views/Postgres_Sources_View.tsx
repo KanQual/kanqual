@@ -2727,7 +2727,7 @@ export function SourceImportModal({
                   });
                 }}
               >
-                {saving ? t("projectSettings.modal.creating") : t("projectCore.sources.approveAndCreate")}
+                {saving ? t("common.creating") : t("projectCore.sources.approveAndCreate")}
               </button>
           </div>
         </SettingsModal>

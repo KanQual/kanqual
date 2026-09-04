@@ -498,13 +498,15 @@ export function PostgresExploreCanvasView({
       return;
     }
     const box = node.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
-    const padding = 8;
+    const horizontalPadding = 8;
+    const topPadding = 14;
+    const bottomPadding = 24;
     const nextHandle = {
       id: selectedNodeId,
-      x1: box.x1 - padding,
-      y1: box.y1 - padding,
-      x2: box.x2 + padding,
-      y2: box.y2 + padding,
+      x1: box.x1 - horizontalPadding,
+      y1: box.y1 - topPadding,
+      x2: box.x2 + horizontalPadding,
+      y2: box.y2 + bottomPadding,
       lockAspectRatio: true,
     };
     setResizeHandle((current) => {

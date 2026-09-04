@@ -8,7 +8,6 @@ import {
 import { LoadingCard } from "./components/LoadingCard";
 import { EyeIcon, EyeOffIcon } from "./components/AppIcons";
 import { GettingStartedGuideCallout } from "./components/GettingStartedGuideCallout";
-import { AuthProvider } from "./context/AuthContext";
 import { useI18n } from "./i18n/provider";
 import { I18nProvider } from "./i18n";
 import { readAppSettings, saveAppSettings } from "./lib/appSettings";
@@ -937,13 +936,11 @@ export default function App() {
   useDisableNativeContextMenu();
 
   return (
-    <AuthProvider>
-      <I18nProvider>
-        <AppErrorBoundaryWithI18n>
-          <AuthGate />
-        </AppErrorBoundaryWithI18n>
-      </I18nProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AppErrorBoundaryWithI18n>
+        <AuthGate />
+      </AppErrorBoundaryWithI18n>
+    </I18nProvider>
   );
 }
 
