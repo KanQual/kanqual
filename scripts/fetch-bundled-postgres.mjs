@@ -14,6 +14,7 @@ const runtimeRoot = path.join(repoRoot, "src-tauri", "postgres-runtimes");
 const requiredExecutables = ["postgres", "initdb", "pg_ctl", "psql", "pg_dump"];
 const unwantedDirectoryNames = new Set(["doc", "docs", "include", "pgxs", "pkgconfig"]);
 const unwantedFileExtensions = new Set([".a", ".la", ".lib", ".pdb"]);
+const unwantedFileNameFragments = ["pgadmin", "stackbuilder", "plpython"];
 
 function parseArgs(argv) {
   const args = {
@@ -161,8 +162,7 @@ async function trimRuntime(destination) {
     }
     if (
       unwantedFileExtensions.has(path.extname(lowerName))
-      || lowerName.includes("pgadmin")
-      || lowerName.includes("stackbuilder")
+      || unwantedFileNameFragments.some((fragment) => lowerName.includes(fragment))
     ) {
       await rm(fullPath, { force: true });
     }
@@ -191,8 +191,7 @@ async function validateRuntime(destination, target) {
   const unwanted = (await walk(destination)).filter(({ fullPath, child }) => {
     const lowerName = child.name.toLowerCase();
     return (
-      lowerName.includes("pgadmin")
-      || lowerName.includes("stackbuilder")
+      unwantedFileNameFragments.some((fragment) => lowerName.includes(fragment))
       || unwantedDirectoryNames.has(lowerName)
       || unwantedFileExtensions.has(path.extname(lowerName))
       || fullPath.toLowerCase().includes(`${path.sep}share${path.sep}doc${path.sep}`)

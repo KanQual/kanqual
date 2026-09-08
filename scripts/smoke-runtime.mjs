@@ -311,9 +311,6 @@ async function main() {
 
   if (args.platform === "linux") {
     env.APPIMAGE_EXTRACT_AND_RUN = "1";
-  } else if (args.platform === "windows") {
-    // Headless CI tokens cannot always create PostgreSQL's secondary restricted token.
-    env.PG_RESTRICT_EXEC = "1";
   }
 
   await fs.writeFile(smoke.statePath, JSON.stringify({

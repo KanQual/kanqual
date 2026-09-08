@@ -57,7 +57,6 @@ jobs:
       CI: true
       KANQUAL_POSTGRES_RUNTIME_TARGET: ${{ matrix.postgres_runtime_target }}
       RUST_BACKTRACE: full
-      RUST_LOG: tauri_cli=debug,tauri_bundler=trace
       APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.appimage_extract_and_run }}
 
     steps:
@@ -127,7 +126,12 @@ jobs:
           df -h
           pkg-config --modversion gtk+-3.0
           pkg-config --modversion webkit2gtk-4.1
-          find src-tauri/resources/runtime/postgresql-17 -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
+          du -sh src-tauri/resources/runtime/postgresql-17
+          find src-tauri/resources/runtime/postgresql-17 -type f | wc -l
+          file \
+            src-tauri/resources/runtime/postgresql-17/bin/postgres \
+            src-tauri/resources/runtime/postgresql-17/bin/initdb \
+            src-tauri/resources/runtime/postgresql-17/bin/pg_ctl
 
       - name: Build cross-platform release bundles
         uses: tauri-apps/tauri-action@v0
@@ -141,7 +145,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
-          args: -vv --bundles ${{ matrix.bundle_targets }}
+          args: --bundles ${{ matrix.bundle_targets }}
 
       - name: Create Windows portable bundle
         if: runner.os == 'Windows'
