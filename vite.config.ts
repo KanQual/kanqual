@@ -37,7 +37,7 @@ export default defineConfig({
             return "export-docx";
           }
 
-          if (id.includes("/write-excel-file/") || id.includes("/read-excel-file/")) {
+          if (id.includes("/write-excel-file/")) {
             return "export-excel";
           }
 

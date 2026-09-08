@@ -31,7 +31,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 candle-core = "0.10.2"
 candle-nn = "0.10.2"
 candle-transformers = "0.10.2"
-tokenizers = "0.21"
+tokenizers = "0.22"
 aes-gcm = "0.10"
 argon2 = "0.5"
 base64 = "0.22"

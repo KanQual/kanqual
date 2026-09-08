@@ -6103,33 +6103,6 @@ struct AppInfo {
     portable_mode: bool,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SmokeTestConfig {
-    enabled: bool,
-    run_id: Option<String>,
-    state_path: Option<String>,
-    user_name: Option<String>,
-    user_email: Option<String>,
-    user_password: Option<String>,
-    project_name: Option<String>,
-    app_data_dir: String,
-    portable_mode: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SmokeTestStateUpdateRequest {
-    phase: String,
-    message: Option<String>,
-    success: Option<bool>,
-    failure: Option<String>,
-    project_id: Option<String>,
-    user_email: Option<String>,
-    app_data_dir: Option<String>,
-    portable_mode: Option<bool>,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct PostgresBootstrapIdentity {
@@ -25920,41 +25893,254 @@ async fn delete_postgres_experiment_relationship_command(
     })
 }
 
-#[tauri::command]
-fn get_smoke_test_config_command(app: tauri::AppHandle) -> Result<SmokeTestConfig, String> {
-    let app_data_dir = kanqual_data_dir(&app)?;
-    Ok(SmokeTestConfig {
-        enabled: smoke_test_enabled(),
-        run_id: smoke_test_env_var("KANQUAL_SMOKE_RUN_ID"),
-        state_path: smoke_test_state_path().map(|path| path.to_string_lossy().to_string()),
-        user_name: smoke_test_env_var("KANQUAL_SMOKE_USER_NAME"),
-        user_email: smoke_test_env_var("KANQUAL_SMOKE_USER_EMAIL"),
-        user_password: smoke_test_env_var("KANQUAL_SMOKE_USER_PASSWORD"),
-        project_name: smoke_test_env_var("KANQUAL_SMOKE_PROJECT_NAME"),
-        app_data_dir: app_data_dir.to_string_lossy().to_string(),
-        portable_mode: is_portable_mode()?,
-    })
-}
-
-#[tauri::command]
-fn update_smoke_test_state_command(
-    app: tauri::AppHandle,
-    request: SmokeTestStateUpdateRequest,
+fn update_packaged_smoke_test_state(
+    app: &tauri::AppHandle,
+    phase: &str,
+    message: &str,
+    success: bool,
+    failure: Option<&str>,
+    project_id: Option<&str>,
+    user_email: Option<&str>,
 ) -> Result<(), String> {
     let payload = serde_json::json!({
-        "phase": request.phase,
-        "message": request.message,
-        "success": request.success,
-        "failure": request.failure,
-        "projectId": request.project_id,
-        "userEmail": request.user_email,
-        "appDataDir": request
-            .app_data_dir
-            .unwrap_or_else(|| kanqual_data_dir(&app).map(|path| path.to_string_lossy().to_string()).unwrap_or_default()),
-        "portableMode": request.portable_mode.unwrap_or_else(|| is_portable_mode().unwrap_or(false)),
+        "phase": phase,
+        "message": message,
+        "success": success,
+        "failure": failure,
+        "projectId": project_id,
+        "userEmail": user_email,
+        "appDataDir": kanqual_data_dir(app)
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        "portableMode": is_portable_mode().unwrap_or(false),
         "updatedAtMs": current_time_ms(),
     });
-    write_smoke_test_state(&app, payload)
+    write_smoke_test_state(app, payload)
+}
+
+type PackagedSmokeTestFailure = (String, String);
+
+fn packaged_smoke_failure(phase: &str, error: String) -> PackagedSmokeTestFailure {
+    (phase.to_string(), error)
+}
+
+async fn run_packaged_postgres_smoke_test(
+    app: tauri::AppHandle,
+) -> Result<(), PackagedSmokeTestFailure> {
+    let user_name = smoke_test_env_var("KANQUAL_SMOKE_USER_NAME")
+        .ok_or_else(|| packaged_smoke_failure("validating-configuration", "Smoke test is missing the temporary account name.".to_string()))?;
+    let user_email = smoke_test_env_var("KANQUAL_SMOKE_USER_EMAIL")
+        .map(|value| value.to_lowercase())
+        .ok_or_else(|| packaged_smoke_failure("validating-configuration", "Smoke test is missing the temporary account username.".to_string()))?;
+    let user_password = smoke_test_env_var("KANQUAL_SMOKE_USER_PASSWORD")
+        .ok_or_else(|| packaged_smoke_failure("validating-configuration", "Smoke test is missing the temporary account password.".to_string()))?;
+    let project_name = smoke_test_env_var("KANQUAL_SMOKE_PROJECT_NAME")
+        .ok_or_else(|| packaged_smoke_failure("validating-configuration", "Smoke test is missing the test project name.".to_string()))?;
+
+    let phase = "initializing-postgresql";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        "Initializing the bundled PostgreSQL cluster and control database.",
+        false,
+        None,
+        None,
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    initialize_bundled_postgres_cluster_command(
+        app.clone(),
+        app.state::<BundledPostgresProcess>(),
+        app.state::<PostgresExperimentAuthState>(),
+        InitializeBundledPostgresRequest {
+            superuser_password: user_password.clone(),
+        },
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+
+    let phase = "verifying-postgresql";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        "Verifying the bundled PostgreSQL runtime and administrator session.",
+        false,
+        None,
+        None,
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    let status = get_postgres_experiment_status_command(app.clone())
+        .await
+        .map_err(|error| packaged_smoke_failure(phase, error))?;
+    if !status.service_reachable || !status.bootstrap_applied {
+        return Err(packaged_smoke_failure(
+            phase,
+            "Bundled PostgreSQL did not become reachable and fully initialized.".to_string(),
+        ));
+    }
+    let auth_status = get_postgres_experiment_auth_status_command(
+        app.clone(),
+        app.state::<PostgresExperimentAuthState>(),
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    if auth_status
+        .current_session
+        .as_ref()
+        .map(|session| session.auth_kind.as_str())
+        != Some("postgres_admin")
+    {
+        return Err(packaged_smoke_failure(
+            phase,
+            "PostgreSQL initialization did not establish an administrator session.".to_string(),
+        ));
+    }
+
+    let phase = "creating-user";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        &format!("Creating the packaged smoke-test user {user_email}."),
+        false,
+        None,
+        None,
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    let user = create_postgres_experiment_app_user_command(
+        app.clone(),
+        app.state::<PostgresExperimentAuthState>(),
+        CreatePostgresExperimentAppUserRequest {
+            name: user_name,
+            username: user_email.clone(),
+            password: user_password.clone(),
+            must_change_password: false,
+        },
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+
+    let phase = "creating-project";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        &format!("Creating smoke-test project \"{project_name}\" and its databases."),
+        false,
+        None,
+        None,
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    let project = create_postgres_experiment_project_command(
+        app.clone(),
+        app.state::<PostgresExperimentAuthState>(),
+        CreatePostgresExperimentProjectRequest {
+            name: project_name,
+            description: "Packaged runtime smoke test project.".to_string(),
+        },
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+
+    let phase = "assigning-project-owner";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        &format!("Assigning {user_email} as a project owner."),
+        false,
+        None,
+        Some(&project.id),
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    create_postgres_experiment_project_user_command(
+        app.clone(),
+        app.state::<PostgresExperimentAuthState>(),
+        CreatePostgresExperimentProjectUserRequest {
+            project_id: project.id.clone(),
+            app_user_id: user.id.clone(),
+            role: "owner".to_string(),
+        },
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+
+    let phase = "authenticating-project-user";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        &format!("Signing in as {user_email}."),
+        false,
+        None,
+        Some(&project.id),
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    login_postgres_experiment_app_user_command(
+        app.clone(),
+        app.state::<PostgresExperimentAuthState>(),
+        app.state::<PostgresExperimentAuthThrottleState>(),
+        LoginPostgresExperimentAppUserRequest {
+            username: user_email.clone(),
+            password: user_password,
+            remember_session: false,
+        },
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+
+    let phase = "verifying-project-access";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        "Verifying project visibility, schema access, and ownership.",
+        false,
+        None,
+        Some(&project.id),
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    let projects = list_postgres_experiment_projects_command(
+        app.clone(),
+        app.state::<PostgresExperimentAuthState>(),
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    if !projects.iter().any(|candidate| candidate.id == project.id) {
+        return Err(packaged_smoke_failure(
+            phase,
+            "The smoke-test project is not visible to its assigned user.".to_string(),
+        ));
+    }
+    let project_users = list_postgres_experiment_project_users_command(
+        app.clone(),
+        app.state::<PostgresExperimentAuthState>(),
+        project.id.clone(),
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    if !project_users
+        .iter()
+        .any(|candidate| candidate.app_user_id == user.id && candidate.role == "owner")
+    {
+        return Err(packaged_smoke_failure(
+            phase,
+            "The smoke-test user does not have the expected project owner role.".to_string(),
+        ));
+    }
+
+    update_packaged_smoke_test_state(
+        &app,
+        "completed",
+        &format!("Created smoke-test project \"{}\" as {user_email}.", project.name),
+        true,
+        None,
+        Some(&project.id),
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure("completed", error))?;
+    Ok(())
 }
 
 fn project_role_allows_embedding_build(role: Option<&str>) -> bool {
@@ -32302,29 +32488,64 @@ pub fn run() {
             HashMap::new(),
         ))))
         .setup(|app| {
-            create_configured_window(app, "main").expect("could not create main window");
+            let packaged_smoke_test = smoke_test_enabled();
+            if packaged_smoke_test {
+                update_packaged_smoke_test_state(
+                    &app.app_handle(),
+                    "native-startup",
+                    "Started the native packaged smoke-test runner.",
+                    false,
+                    None,
+                    None,
+                    smoke_test_env_var("KANQUAL_SMOKE_USER_EMAIL").as_deref(),
+                )
+                .expect("could not initialize packaged smoke-test state");
+            } else {
+                create_configured_window(app, "main").expect("could not create main window");
+            }
 
             let app_data_dir =
                 kanqual_data_dir(&app.app_handle()).expect("could not resolve app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
             let postgres_handle = app.app_handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let postgres_process = postgres_handle.state::<BundledPostgresProcess>();
-                if let Err(error) =
-                    bundled_postgres::start_runtime(postgres_handle.clone(), &postgres_process.0)
-                        .await
-                {
-                    eprintln!("[kanqual] Could not start bundled PostgreSQL runtime: {error}");
-                }
-            });
-            let handle = app.app_handle().clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(250)).await;
+            if packaged_smoke_test {
+                tauri::async_runtime::spawn(async move {
+                    if let Err((phase, failure)) =
+                        run_packaged_postgres_smoke_test(postgres_handle.clone()).await
+                    {
+                        let _ = update_packaged_smoke_test_state(
+                            &postgres_handle,
+                            &phase,
+                            &format!("The packaged smoke flow failed during {phase}."),
+                            false,
+                            Some(&failure),
+                            None,
+                            smoke_test_env_var("KANQUAL_SMOKE_USER_EMAIL").as_deref(),
+                        );
+                        eprintln!("[kanqual] Packaged smoke test failed during {phase}: {failure}");
+                    }
+                });
+            } else {
+                tauri::async_runtime::spawn(async move {
+                    let postgres_process = postgres_handle.state::<BundledPostgresProcess>();
+                    if let Err(error) =
+                        bundled_postgres::start_runtime(postgres_handle.clone(), &postgres_process.0)
+                            .await
+                    {
+                        eprintln!("[kanqual] Could not start bundled PostgreSQL runtime: {error}");
+                    }
+                });
+            }
+            if !packaged_smoke_test {
+                let handle = app.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
 
-                if let Some(main_window) = handle.get_webview_window("main") {
-                    main_window.show().ok();
-                }
-            });
+                    if let Some(main_window) = handle.get_webview_window("main") {
+                        main_window.show().ok();
+                    }
+                });
+            }
 
             Ok(())
         })
@@ -32496,8 +32717,6 @@ pub fn run() {
             update_postgres_experiment_relationship_command,
             save_postgres_experiment_relationship_command,
             delete_postgres_experiment_relationship_command,
-            get_smoke_test_config_command,
-            update_smoke_test_state_command,
             encrypt_project_backup,
             decrypt_project_backup_payload,
             decrypt_project_backup_preview,

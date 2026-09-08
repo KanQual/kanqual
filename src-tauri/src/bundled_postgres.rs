@@ -872,6 +872,12 @@ pub async fn initialize_cluster(
     }
 
     let paths = prepare_runtime_dirs(&app)?;
+    fs::create_dir_all(&paths.data_dir).map_err(|e| {
+        format!(
+            "Could not create bundled PostgreSQL data directory {}: {e}",
+            paths.data_dir
+        )
+    })?;
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

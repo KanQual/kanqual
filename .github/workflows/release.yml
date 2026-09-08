@@ -19,6 +19,7 @@ jobs:
             platform_label: windows
             smoke_platform: windows
             smoke_packaged_args: ""
+            appimage_extract_and_run: ""
             postgres_runtime_target: "windows-x86_64"
             bundle_targets: "nsis"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
@@ -27,6 +28,7 @@ jobs:
             platform_label: macos
             smoke_platform: macos
             smoke_packaged_args: ""
+            appimage_extract_and_run: ""
             postgres_runtime_target: "macos-aarch64"
             bundle_targets: "app,dmg"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
@@ -35,6 +37,7 @@ jobs:
             platform_label: macos-intel
             smoke_platform: macos
             smoke_packaged_args: ""
+            appimage_extract_and_run: ""
             postgres_runtime_target: "macos-x86_64"
             bundle_targets: "app,dmg"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
@@ -43,6 +46,7 @@ jobs:
             platform_label: linux
             smoke_platform: linux
             smoke_packaged_args: ""
+            appimage_extract_and_run: "1"
             postgres_runtime_target: "linux-x86_64"
             bundle_targets: "appimage,deb"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
@@ -52,6 +56,9 @@ jobs:
     env:
       CI: true
       KANQUAL_POSTGRES_RUNTIME_TARGET: ${{ matrix.postgres_runtime_target }}
+      RUST_BACKTRACE: full
+      RUST_LOG: tauri_cli=debug,tauri_bundler=trace
+      APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.appimage_extract_and_run }}
 
     steps:
       - name: Check out repository
@@ -106,6 +113,21 @@ jobs:
           npm run build
           cargo test --manifest-path src-tauri/Cargo.toml
 
+      - name: Report Linux packaging environment
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          uname -a
+          rustc --version --verbose
+          cargo --version --verbose
+          node --version
+          npm --version
+          df -h
+          pkg-config --modversion gtk+-3.0
+          pkg-config --modversion webkit2gtk-4.1
+          find src-tauri/resources/runtime/postgresql-17 -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
+
       - name: Build cross-platform release bundles
         uses: tauri-apps/tauri-action@v0
         env:
@@ -118,7 +140,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
-          args: --bundles ${{ matrix.bundle_targets }}
+          args: -vv --bundles ${{ matrix.bundle_targets }}
 
       - name: Create Windows portable bundle
         if: runner.os == 'Windows'

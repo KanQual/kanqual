@@ -92,6 +92,18 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function appendBoundedOutput(current, chunk, maxLength = 64 * 1024) {
+  const combined = current + String(chunk);
+  return combined.length > maxLength ? combined.slice(-maxLength) : combined;
+}
+
+function formatOutputTail(label, output) {
+  const trimmed = output.trim();
+  if (!trimmed) return `- ${label}: (no output)`;
+  const tail = trimmed.length > 4000 ? trimmed.slice(-4000) : trimmed;
+  return `- ${label}:\n${tail}`;
+}
+
 function matchesExtension(filePath, extension) {
   return filePath.toLowerCase().endsWith(extension.toLowerCase());
 }
@@ -183,8 +195,17 @@ async function terminateChild(child, platform) {
 async function launchAndVerify({ command, args, env, holdMs }) {
   const child = spawn(command, args, {
     env: { ...process.env, ...env },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+  });
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout?.on("data", (chunk) => {
+    stdout = appendBoundedOutput(stdout, chunk);
+  });
+  child.stderr?.on("data", (chunk) => {
+    stderr = appendBoundedOutput(stderr, chunk);
   });
 
   let spawnError = null;
@@ -202,7 +223,10 @@ async function launchAndVerify({ command, args, env, holdMs }) {
     throw new Error(`Application exited too early with code ${child.exitCode}.`);
   }
 
-  return child;
+  return {
+    child,
+    getOutput: () => ({ stdout, stderr }),
+  };
 }
 
 async function waitForSmokeCompletion({ child, statePath, timeoutMs }) {
@@ -272,6 +296,8 @@ async function main() {
   }
 
   const smoke = await prepareSmokeWorkspace(args.platform);
+  const stdoutPath = path.join(smoke.rootDir, "app-stdout.log");
+  const stderrPath = path.join(smoke.rootDir, "app-stderr.log");
   const env = {
     KANQUAL_SMOKE_TEST: "1",
     KANQUAL_SMOKE_RUN_ID: smoke.runId,
@@ -285,9 +311,20 @@ async function main() {
 
   if (args.platform === "linux") {
     env.APPIMAGE_EXTRACT_AND_RUN = "1";
+  } else if (args.platform === "windows") {
+    // Headless CI tokens cannot always create PostgreSQL's secondary restricted token.
+    env.PG_RESTRICT_EXEC = "1";
   }
 
-  const child = await launchAndVerify({
+  await fs.writeFile(smoke.statePath, JSON.stringify({
+    phase: "launching",
+    message: `Launching ${target.launchPath} in ${target.mode} mode.`,
+    success: false,
+    failure: null,
+    updatedAtMs: Date.now(),
+  }, null, 2));
+
+  const launched = await launchAndVerify({
     command: target.launchPath,
     args: [],
     env,
@@ -295,15 +332,40 @@ async function main() {
   });
 
   let smokeState;
+  let smokeError = null;
   try {
     smokeState = await waitForSmokeCompletion({
-      child,
+      child: launched.child,
       statePath: smoke.statePath,
       timeoutMs: args.timeoutMs,
     });
+  } catch (error) {
+    smokeError = error;
   } finally {
-    await terminateChild(child, args.platform);
+    await terminateChild(launched.child, args.platform);
     await delay(1500);
+    const output = launched.getOutput();
+    await Promise.all([
+      fs.writeFile(stdoutPath, output.stdout),
+      fs.writeFile(stderrPath, output.stderr),
+    ]);
+  }
+
+  if (smokeError) {
+    const latestState = await readJsonIfExists(smoke.statePath);
+    const output = launched.getOutput();
+    const details = [
+      smokeError instanceof Error ? smokeError.message : String(smokeError),
+      `- Mode: ${target.mode}`,
+      `- Launch target: ${target.launchPath}`,
+      `- State file: ${smoke.statePath}`,
+      `- Last state: ${latestState ? JSON.stringify(latestState) : "(missing)"}`,
+      `- Full stdout log: ${stdoutPath}`,
+      `- Full stderr log: ${stderrPath}`,
+      formatOutputTail("Recent stdout", output.stdout),
+      formatOutputTail("Recent stderr", output.stderr),
+    ];
+    throw new Error(details.join("\n"));
   }
 
   assert(await pathExists(path.join(smoke.dataDir, "postgres", "data", "PG_VERSION")), `Smoke runtime test failed: expected bundled PostgreSQL data directory in ${smoke.dataDir}.`);
