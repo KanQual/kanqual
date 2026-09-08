@@ -4081,12 +4081,17 @@ export function ProjectHomeView({
     }
   }
 
+  const visibleProjectUsers = useMemo(
+    () => users.filter((user) => !user.appUserId.startsWith("postgres-admin:")),
+    [users],
+  );
+
   const userRoleSummaries = useMemo(
     () => PROJECT_ROLE_OPTIONS
       .map((role) => ({
         role,
         label: projectRoleLabel(role),
-        count: users.filter((user) => user.role === role).length,
+        count: visibleProjectUsers.filter((user) => user.role === role).length,
       }))
       .filter((summary) => summary.count > 0)
       .sort((left, right) => {
@@ -4101,14 +4106,14 @@ export function ProjectHomeView({
         }
         return userRoleSortDir === "asc" ? comparison : -comparison;
       }),
-    [t, userRoleSortCol, userRoleSortDir, users],
+    [t, userRoleSortCol, userRoleSortDir, visibleProjectUsers],
   );
 
   const filteredProjectUsers = useMemo(
     () => selectedUserRoleFilter === "all"
-      ? users
-      : users.filter((user) => user.role === selectedUserRoleFilter),
-    [selectedUserRoleFilter, users],
+      ? visibleProjectUsers
+      : visibleProjectUsers.filter((user) => user.role === selectedUserRoleFilter),
+    [selectedUserRoleFilter, visibleProjectUsers],
   );
 
   useEffect(() => {
@@ -6711,7 +6716,7 @@ export function ProjectHomeView({
                   <Suspense fallback={<ViewLoadingFallback />}>
                     <ProjectHomeDetailsViewLazy
                       project={project}
-                      users={users}
+                      users={visibleProjectUsers}
                       currentProjectUser={currentProjectUser}
                       isProjectAdmin={isProjectAdmin}
                       lastProjectActivityAt={lastProjectActivityAt}
@@ -7044,7 +7049,7 @@ export function ProjectHomeView({
                                 >
                                   {t("projectCore.homeShell.allUsers")}
                                 </td>
-                                <td className="data-table-cell data-table-cell--muted">{users.length}</td>
+                                <td className="data-table-cell data-table-cell--muted">{visibleProjectUsers.length}</td>
                               </tr>
                               {userRoleSummaries.map((summary) => (
                                 <tr
@@ -7096,7 +7101,7 @@ export function ProjectHomeView({
                         <div className="empty-state empty-state--full-width">
                           <p>{t("projectCore.homeShell.loadingUsers")}</p>
                         </div>
-                      ) : users.length === 0 ? (
+                      ) : visibleProjectUsers.length === 0 ? (
                         <div className="empty-state empty-state--full-width">
                           <p>{t("projectCore.homeShell.noUsers")}</p>
                         </div>
