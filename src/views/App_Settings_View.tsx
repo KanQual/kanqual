@@ -29,6 +29,7 @@ import {
 import { FilterIcon } from "../components/FilterIcon";
 import { SUPPORTED_LOCALES } from "../i18n";
 import { useI18n } from "../i18n/provider";
+import packageJson from "../../package.json";
 import { getAppRuntimeInfo, type AppRuntimeInfo } from "../lib/dataRoot";
 import { DEFAULT_GETTING_STARTED_STATE, normalizeGettingStartedState, type GettingStartedState } from "../lib/gettingStartedGuide";
 import { buildPermissionMatrixRows } from "../lib/permissionMatrix";
@@ -1867,7 +1868,7 @@ export function AppSettingsView({
                   <div className="about-kanqual-meta-grid">
                     <div className="about-kanqual-meta-card">
                       <span className="about-kanqual-meta-label">{t("appSettings.about.version")}</span>
-                      <strong>{appInfo?.appVersion ?? "0.9.1"}</strong>
+                      <strong>{appInfo?.appVersion ?? packageJson.version}</strong>
                     </div>
                     <div className="about-kanqual-meta-card">
                       <span className="about-kanqual-meta-label">{t("appSettings.about.releaseDate")}</span>
@@ -1890,7 +1891,7 @@ export function AppSettingsView({
                   <p>{t("appSettings.about.citationNote")}</p>
                   <div className="about-kanqual-citation">
                     {t("appSettings.about.citationExample", {
-                      version: appInfo?.appVersion ?? "0.9.1",
+                      version: appInfo?.appVersion ?? packageJson.version,
                     })}
                   </div>
                 </section>
