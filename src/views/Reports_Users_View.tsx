@@ -4,8 +4,12 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
 import type { EChartsCoreOption } from "echarts/core";
-import { DownloadIcon, HelpIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
+import { DownloadIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpModal } from "../components/HelpModal";
+import { TableMessageRow, TableShell } from "../components/TableShell";
+import { ViewHeader } from "../components/ViewHeader";
 import { formatCurrentDate, formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import {
@@ -431,14 +435,14 @@ function SelectionPanel({
 }) {
   const { t } = useI18n();
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
       <button
-        className="annotate-card-header"
+        className="workspace-panel-header"
         style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }}
         onClick={onToggleCollapsed}
       >
         <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-          <span className="annotate-card-title">{title}{count > 0 ? ` (${count})` : ""}</span>
+          <span className="workspace-panel-title">{title}{count > 0 ? ` (${count})` : ""}</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {headerExtra}
@@ -469,9 +473,9 @@ function CoderSelectionPanel({
 }) {
   const { t } = useI18n();
   return (
-    <div className="annotate-card annotate-card--featured" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{t("reportsUsers.panels.users")}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
+    <div className="workspace-panel workspace-panel--featured" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{t("reportsUsers.panels.users")}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
       </div>
       {!disabled && coders.length > 0 && (
         <div style={{ padding: "2px 14px 4px", display: "flex", gap: 8 }}>
@@ -607,9 +611,9 @@ function ActivityCategoryFilterCard({
   const availableTabs = useMemo(() => getAvailableLogCategories(categoryCounts), [categoryCounts]);
 
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{t("reportsUsers.activity.categoryFilters")}</span>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{t("reportsUsers.activity.categoryFilters")}</span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: 14 }}>
         {availableTabs.map((tab) => {
@@ -755,10 +759,10 @@ function CoderActivityOverTimeCard({
   }), [coderColumns, maxCount, periodRows]);
 
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{t("reportsUsers.activity.overTime")}</span>
-        <span className="users-filter-count">{visibleRows.length}</span>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{t("reportsUsers.activity.overTime")}</span>
+        <span className="filter-option-count">{visibleRows.length}</span>
       </div>
       <div style={{ display: "flex", justifyContent: "center", padding: "0 14px 10px" }}>
         <div className="segmented-control" role="tablist" aria-label={t("reportsUsers.activity.overTime")} style={{ width: "fit-content" }}>
@@ -779,11 +783,11 @@ function CoderActivityOverTimeCard({
       </div>
       <div style={{ padding: "0 14px 14px" }}>
         {periodRows.length === 0 || coderColumns.length === 0 ? (
-          <div className="users-td-msg" style={{ padding: "24px 12px" }}>{t("reportsUsers.empty.noLogActivity")}</div>
+          <div className="data-table-message" style={{ padding: "24px 12px" }}>{t("reportsUsers.empty.noLogActivity")}</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 18, alignItems: "center" }}>
             <div style={{ minWidth: 0, overflowX: "auto", paddingBottom: 4 }}>
-              <Suspense fallback={<div className="users-td-msg" style={{ padding: "24px 12px" }}>{t("reportsUsers.empty.loadingChart")}</div>}>
+              <Suspense fallback={<div className="data-table-message" style={{ padding: "24px 12px" }}>{t("reportsUsers.empty.loadingChart")}</div>}>
                 <EChart
                   option={activityChartOption}
                   style={{
@@ -832,32 +836,32 @@ function CoderProjectLogCard({
   }
 
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{t("projectLog.title")}</span>
-        <span className="users-filter-count">{sorted.length}</span>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{t("projectLog.title")}</span>
+        <span className="filter-option-count">{sorted.length}</span>
       </div>
-      <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 320 }}>
-        <table className="users-table">
+      <div className="data-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 320 }}>
+        <table className="data-table">
           <thead>
             <tr>
-              <th className="users-th" style={{ minWidth: 140 }}>{t("projectLog.columns.time")}</th>
-              <th className="users-th" style={{ minWidth: 130 }}>{t("reportsUsers.activity.coder")}</th>
-              <th className="users-th" style={{ minWidth: 90 }}>{t("projectLog.columns.access")}</th>
-              <th className="users-th" style={{ minWidth: 140 }}>{t("reportsUsers.activity.action")}</th>
-              <th className="users-th" style={{ minWidth: 220 }}>{t("reportsUsers.activity.description")}</th>
+              <th className="data-table-header" style={{ minWidth: 140 }}>{t("projectLog.columns.time")}</th>
+              <th className="data-table-header" style={{ minWidth: 130 }}>{t("reportsUsers.activity.coder")}</th>
+              <th className="data-table-header" style={{ minWidth: 90 }}>{t("projectLog.columns.access")}</th>
+              <th className="data-table-header" style={{ minWidth: 140 }}>{t("reportsUsers.activity.action")}</th>
+              <th className="data-table-header" style={{ minWidth: 220 }}>{t("reportsUsers.activity.description")}</th>
             </tr>
           </thead>
           <tbody>
           {visibleRows.length === 0 ? (
-            <tr><td colSpan={5} className="users-td-msg">{t("reportsUsers.empty.noProjectLogEntries")}</td></tr>
+            <tr><td colSpan={5} className="data-table-message">{t("reportsUsers.empty.noProjectLogEntries")}</td></tr>
           ) : visibleRows.map((entry) => (
-            <tr key={entry.id} className={`users-row log-row--${getLogCategory(entry.action)}`}>
-              <td className="users-td users-td--muted">{fmtDate(entry.occurredAt)}</td>
-              <td className="users-td users-td--name">{entry.userName || "-"}</td>
-              <td className="users-td users-td--muted">{accessModeLabel(entry.accessMode)}</td>
-              <td className="users-td users-td--muted">{projectLogActionLabel(entry.action, t)}</td>
-              <td className="users-td">{projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t)}</td>
+            <tr key={entry.id} className={`data-table-row log-row--${getLogCategory(entry.action)}`}>
+              <td className="data-table-cell data-table-cell--muted">{fmtDate(entry.occurredAt)}</td>
+              <td className="data-table-cell data-table-cell--name">{entry.userName || "-"}</td>
+              <td className="data-table-cell data-table-cell--muted">{accessModeLabel(entry.accessMode)}</td>
+              <td className="data-table-cell data-table-cell--muted">{projectLogActionLabel(entry.action, t)}</td>
+              <td className="data-table-cell">{projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t)}</td>
             </tr>
           ))}
           </tbody>
@@ -885,9 +889,9 @@ function ComparisonSummaryCard({ stats }: { stats: ComparisonSummaryStats }) {
   ];
 
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{t("reportsUsers.summary.comparisonSummary")}</span>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{t("reportsUsers.summary.comparisonSummary")}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, padding: 14 }}>
         {items.map((item) => (
@@ -914,30 +918,30 @@ function ComparisonMatrixCard({
   const maxValue = Math.max(0, ...rows.flatMap((row) => row.values));
 
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{title}</span>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{title}</span>
       </div>
-      <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 340 }}>
-        <table className="users-table">
+      <div className="data-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 340 }}>
+        <table className="data-table">
           <thead>
             <tr>
-              <th className="users-th" style={{ minWidth: 170 }}>{title}</th>
+              <th className="data-table-header" style={{ minWidth: 170 }}>{title}</th>
               {columns.map((column) => (
-                <th key={column.id} className="users-th" style={{ minWidth: 110 }}>{column.label}</th>
+                <th key={column.id} className="data-table-header" style={{ minWidth: 110 }}>{column.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 || columns.length === 0 ? (
-              <tr><td colSpan={columns.length + 1} className="users-td-msg">{t("reportsUsers.empty.selectCodersForComparison")}</td></tr>
+              <tr><td colSpan={columns.length + 1} className="data-table-message">{t("reportsUsers.empty.selectCodersForComparison")}</td></tr>
             ) : rows.map((row) => (
-              <tr key={row.id} className="users-row">
-                <td className="users-td users-td--name">{row.label}</td>
+              <tr key={row.id} className="data-table-row">
+                <td className="data-table-cell data-table-cell--name">{row.label}</td>
                 {row.values.map((value, index) => (
                   <td
                     key={`${row.id}-${columns[index]?.id ?? index}`}
-                    className="users-td"
+                    className="data-table-cell"
                     style={{
                       background: heatmapColor(value, maxValue),
                       color: value > 0 ? "var(--color-text)" : "var(--color-text-muted)",
@@ -1638,7 +1642,7 @@ function CoderReportCreationPage({
   }
 
   return (
-    <div className="annotate-view">
+    <div className="workbench-view">
       <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsUsers.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
@@ -1646,9 +1650,9 @@ function CoderReportCreationPage({
         </div>
       </div>
 
-      <div className={`annotate-layout${reportKind === "activity" ? " ann-report-annotate-layout" : ""}`}>
+      <div className={`workbench-layout${reportKind === "activity" ? " report-builder-layout" : ""}`}>
         <div
-          className="annotate-left"
+          className="workbench-sidebar"
           style={reportKind === "activity" ? { display: "flex", flexDirection: "column", justifyContent: "center" } : undefined}
         >
           <CoderSelectionPanel
@@ -1665,51 +1669,51 @@ function CoderReportCreationPage({
             />
           )}
           {loadingFilters && (
-            <div className="annotate-card" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel" style={{ flexShrink: 0 }}>
               <div style={{ padding: 14, fontSize: 13, color: "var(--color-text-muted)" }}>{t("reportsUsers.empty.loading")}</div>
             </div>
           )}
         </div>
 
         <div
-          className={reportKind === "activity" ? "annotate-main" : "annotate-center"}
+          className={reportKind === "activity" ? "workbench-main" : "workbench-center"}
           style={reportKind === "activity" ? { gap: 10, paddingTop: 2, paddingBottom: 2, overflowY: "auto" } : undefined}
         >
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header" style={{ gap: 10 }}>
-              <span className="annotate-card-title">{t("reportsUsers.reportTitle")}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header" style={{ gap: 10 }}>
+              <span className="workspace-panel-title">{t("reportsUsers.reportTitle")}</span>
               <div className="report-action-group" style={{ gap: 8, marginLeft: "auto" }}>
                 <button
                   type="button"
-                  className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                  className="btn btn--secondary card-header-icon-button report-title-action-button"
                   onClick={() => setShowExportModal(true)}
                   disabled={!isFrozen || !canExportReports}
                   title={!isFrozen ? t("reportsUsers.exportSavedOnly") : t("reportsUsers.exportTitle")}
                   aria-label={t("reportsUsers.exportTitle")}
                 >
-                  <DownloadIcon className="project-table-header-icon" />
+                  <DownloadIcon className="card-header-icon" />
                 </button>
                 {isFrozen && onUseSettings && canStartReports ? (
                   <button
                     type="button"
-                    className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                    className="btn btn--secondary card-header-icon-button report-title-action-button"
                     onClick={() => onUseSettings(frozenSnapshot!.settings)}
                     title={t("reportsUsers.newFromSettings")}
                     aria-label={t("reportsUsers.newFromSettings")}
                   >
-                    <RestartListIcon className="project-table-header-icon" />
+                    <RestartListIcon className="card-header-icon" />
                   </button>
                 ) : null}
                 {!isFrozen ? (
                   <button
                     type="button"
-                    className="btn btn--primary project-table-header-icon-button report-title-action-button"
+                    className="btn btn--primary card-header-icon-button report-title-action-button"
                     onClick={handleSave}
                     disabled={saving || !canStartReports}
                     title={saving ? t("reportsUsers.actions.saving") : t("reportsUsers.actions.save")}
                     aria-label={saving ? t("reportsUsers.actions.saving") : t("reportsUsers.actions.save")}
                   >
-                    <SaveIcon className="project-table-header-icon" />
+                    <SaveIcon className="card-header-icon" />
                   </button>
                 ) : null}
               </div>
@@ -1725,9 +1729,9 @@ function CoderReportCreationPage({
             </div>
           </div>
 
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header">
-              <span className="annotate-card-title">{t("reportsUsers.reportDetails")}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header">
+              <span className="workspace-panel-title">{t("reportsUsers.reportDetails")}</span>
             </div>
             <div style={{ padding: 14, display: "grid", gap: 8, fontSize: 13 }}>
               <div><strong>{t("reportsUsers.typeLabel")}:</strong> {reportLabelText}</div>
@@ -1739,49 +1743,49 @@ function CoderReportCreationPage({
           </div>
 
           {(reportKind === "activity" || reportKind === "comparison") && (
-            <div className="annotate-card" style={{ flexShrink: 0 }}>
-              <div className="annotate-card-header">
-                <span className="annotate-card-title">{reportKind === "comparison" ? t("reportsUsers.coderMetrics") : reportLabelText}</span>
+            <div className="workspace-panel" style={{ flexShrink: 0 }}>
+              <div className="workspace-panel-header">
+                <span className="workspace-panel-title">{reportKind === "comparison" ? t("reportsUsers.coderMetrics") : reportLabelText}</span>
               </div>
-              <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 320 }}>
-                <table className="users-table">
+              <div className="data-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 0, maxHeight: 320 }}>
+                <table className="data-table">
                   {reportKind === "activity" ? (
                     <>
                       <thead>
                         <tr>
-                          <th className="users-th">{t("reportsUsers.metrics.metric")}</th>
+                          <th className="data-table-header">{t("reportsUsers.metrics.metric")}</th>
                           {summaryRows.map((summary) => (
-                            <th key={summary.coderId} className="users-th">{summary.coderName}</th>
+                            <th key={summary.coderId} className="data-table-header">{summary.coderName}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {summaryRows.length === 0 ? (
-                          <tr><td colSpan={2} className="users-td-msg">{t("reportsUsers.empty.selectCodersForReport")}</td></tr>
+                          <tr><td colSpan={2} className="data-table-message">{t("reportsUsers.empty.selectCodersForReport")}</td></tr>
                         ) : (
                           <>
-                            <tr className="users-row">
-                              <td className="users-td users-td--name">{t("reportsUsers.metrics.annotations")}</td>
+                            <tr className="data-table-row">
+                              <td className="data-table-cell data-table-cell--name">{t("reportsUsers.metrics.annotations")}</td>
                               {summaryRows.map((summary) => (
-                                <td key={`${summary.coderId}-annotations`} className="users-td">{summary.annotations}</td>
+                                <td key={`${summary.coderId}-annotations`} className="data-table-cell">{summary.annotations}</td>
                               ))}
                             </tr>
-                            <tr className="users-row">
-                              <td className="users-td users-td--name">{t("reportsUsers.metrics.documents")}</td>
+                            <tr className="data-table-row">
+                              <td className="data-table-cell data-table-cell--name">{t("reportsUsers.metrics.documents")}</td>
                               {summaryRows.map((summary) => (
-                                <td key={`${summary.coderId}-documents`} className="users-td">{summary.documents}</td>
+                                <td key={`${summary.coderId}-documents`} className="data-table-cell">{summary.documents}</td>
                               ))}
                             </tr>
-                            <tr className="users-row">
-                              <td className="users-td users-td--name">{t("reportsUsers.metrics.codes")}</td>
+                            <tr className="data-table-row">
+                              <td className="data-table-cell data-table-cell--name">{t("reportsUsers.metrics.codes")}</td>
                               {summaryRows.map((summary) => (
-                                <td key={`${summary.coderId}-codes`} className="users-td">{summary.codes}</td>
+                                <td key={`${summary.coderId}-codes`} className="data-table-cell">{summary.codes}</td>
                               ))}
                             </tr>
-                            <tr className="users-row">
-                              <td className="users-td users-td--name">{t("reportsUsers.metrics.lastCoded")}</td>
+                            <tr className="data-table-row">
+                              <td className="data-table-cell data-table-cell--name">{t("reportsUsers.metrics.lastCoded")}</td>
                               {summaryRows.map((summary) => (
-                                <td key={`${summary.coderId}-last-coded`} className="users-td users-td--muted">{fmtDate(summary.lastCodedAt)}</td>
+                                <td key={`${summary.coderId}-last-coded`} className="data-table-cell data-table-cell--muted">{fmtDate(summary.lastCodedAt)}</td>
                               ))}
                             </tr>
                           </>
@@ -1792,23 +1796,23 @@ function CoderReportCreationPage({
                     <>
                       <thead>
                         <tr>
-                          <th className="users-th">{t("reportsUsers.activity.coder")}</th>
-                          <th className="users-th">{t("reportsUsers.metrics.annotations")}</th>
-                          <th className="users-th">{t("reportsUsers.metrics.documents")}</th>
-                          <th className="users-th">{t("reportsUsers.metrics.codes")}</th>
-                          <th className="users-th">{t("reportsUsers.metrics.lastCoded")}</th>
+                          <th className="data-table-header">{t("reportsUsers.activity.coder")}</th>
+                          <th className="data-table-header">{t("reportsUsers.metrics.annotations")}</th>
+                          <th className="data-table-header">{t("reportsUsers.metrics.documents")}</th>
+                          <th className="data-table-header">{t("reportsUsers.metrics.codes")}</th>
+                          <th className="data-table-header">{t("reportsUsers.metrics.lastCoded")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {summaryRows.length === 0 ? (
-                          <tr><td colSpan={5} className="users-td-msg">{t("reportsUsers.empty.selectCodersForReport")}</td></tr>
+                          <tr><td colSpan={5} className="data-table-message">{t("reportsUsers.empty.selectCodersForReport")}</td></tr>
                         ) : summaryRows.map((summary) => (
-                          <tr key={summary.coderId} className="users-row">
-                            <td className="users-td users-td--name">{summary.coderName}</td>
-                            <td className="users-td">{summary.annotations}</td>
-                            <td className="users-td">{summary.documents}</td>
-                            <td className="users-td">{summary.codes}</td>
-                            <td className="users-td users-td--muted">{fmtDate(summary.lastCodedAt)}</td>
+                          <tr key={summary.coderId} className="data-table-row">
+                            <td className="data-table-cell data-table-cell--name">{summary.coderName}</td>
+                            <td className="data-table-cell">{summary.annotations}</td>
+                            <td className="data-table-cell">{summary.documents}</td>
+                            <td className="data-table-cell">{summary.codes}</td>
+                            <td className="data-table-cell data-table-cell--muted">{fmtDate(summary.lastCodedAt)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1844,7 +1848,7 @@ function CoderReportCreationPage({
         </div>
 
         {reportKind !== "activity" && (
-        <div className="annotate-right">
+        <div className="workbench-inspector">
           <SelectionPanel
             title={t("reportsUsers.panels.documents")}
             count={selDocIds.size}
@@ -1956,7 +1960,7 @@ function CoderReportCreationPage({
                     onClick={(e) => e.stopPropagation()}
                   />
                   <span className="code-label">{item.name}</span>
-                  <span className="users-filter-count">{formatAttributeTypeLabel(item.dataType, t)}</span>
+                  <span className="filter-option-count">{formatAttributeTypeLabel(item.dataType, t)}</span>
                 </li>
               ))}
             </ul>
@@ -2139,95 +2143,75 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
   }
 
   return (
-    <div className="view users-view">
-      <header className="view-header">
-        <div className="users-title-wrap">
-          <h1>{t("reportsUsers.title")}</h1>
+    <div className="view view-shell">
+      <ViewHeader
+        title={t("reportsUsers.title")}
+        help={{ label: t("reportsUsers.openHelp"), onClick: () => setHelpOpen(true) }}
+        actions={(
           <button
-            type="button"
-            className="users-help-icon-btn"
-            aria-label={t("reportsUsers.openHelp")}
-            title={t("reportsUsers.openHelp")}
-            onClick={() => setHelpOpen(true)}
+            className="btn btn--primary"
+            onClick={() => setShowNewModal(true)}
+            disabled={!canCreateReports}
+            title={!canCreateReports ? t("reportsUsers.newReportDenied") : undefined}
           >
-            <HelpIcon className="users-help-icon" />
+            {t("reportsUsers.newReport")}
           </button>
-        </div>
-        <button
-          className="btn btn--primary"
-          onClick={() => setShowNewModal(true)}
-          disabled={!canCreateReports}
-          title={!canCreateReports ? t("reportsUsers.newReportDenied") : undefined}
-        >
-          {t("reportsUsers.newReport")}
-        </button>
-      </header>
+        )}
+      />
 
       {error && <div className="settings-error">{error}</div>}
 
-      <div className="users-content">
-        <section className="users-layout-main">
-          <div className="users-table-wrap">
-            <table className="users-table">
+      <div className="view-content">
+        <section className="report-layout-main">
+          <TableShell>
+            <table className="data-table">
               <thead>
                 <tr>
                   {reportColumns.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
-                      className="users-th users-th--sortable"
+                      className="data-table-header data-table-header--sortable"
                       onClick={() => handleSort(col.key)}
                     >
                       {col.label}
-                      <span className="users-sort-icon">{sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
+                      <span className="data-table-sort-icon">{sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={4} className="users-td-msg">{t("reportsUsers.loading")}</td></tr>}
-                {!loading && sorted.length === 0 && <tr><td colSpan={4} className="users-td-msg">{t("reportsUsers.noReports")}</td></tr>}
+                {loading && <TableMessageRow colSpan={4}>{t("reportsUsers.loading")}</TableMessageRow>}
+                {!loading && sorted.length === 0 && <TableMessageRow colSpan={4}>{t("reportsUsers.noReports")}</TableMessageRow>}
                 {!loading && sorted.map((row) => (
                   <tr
                     key={row.id}
-                    className="users-row"
+                    className="data-table-row"
                     onClick={() => setOpenSavedRow(row)}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setContextMenu({ x: e.clientX, y: e.clientY, row });
                     }}
                   >
-                    <td className="users-td users-td--name">{row.name}</td>
-                    <td className="users-td users-td--muted">{reportLabel(t, row.snapshot.kind)}</td>
-                    <td className="users-td users-td--muted">{row.createdByName}</td>
-                    <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
+                    <td className="data-table-cell data-table-cell--name">{row.name}</td>
+                    <td className="data-table-cell data-table-cell--muted">{reportLabel(t, row.snapshot.kind)}</td>
+                    <td className="data-table-cell data-table-cell--muted">{row.createdByName}</td>
+                    <td className="data-table-cell data-table-cell--muted">{fmtDate(row.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableShell>
         </section>
       </div>
 
       {helpOpen && (
-        <SettingsModal title={t("reportsUsers.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
-          <div className="app-settings-modal-body">
-            <p className="users-guide-copy">
-              {t("reportsUsers.help.line1")}
-            </p>
-            <p className="users-guide-copy">
-              {t("reportsUsers.help.line2")}
-            </p>
-            <p className="users-guide-copy">
-              {t("reportsUsers.help.line3")}
-            </p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              {t("reportsUsers.close")}
-            </button>
-          </div>
-        </SettingsModal>
+        <HelpModal
+          title={t("reportsUsers.help.title")}
+          onClose={() => setHelpOpen(false)}
+          closeLabel={t("reportsUsers.close")}
+          lines={[t("reportsUsers.help.line1"), t("reportsUsers.help.line2"), t("reportsUsers.help.line3")]}
+        />
       )}
 
       {contextMenu && (
@@ -2242,17 +2226,18 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
       )}
 
       {confirmDelete && (
-        <SettingsModal title={t("reportsUsers.deleteTitle")} onClose={() => setConfirmDelete(null)} closeDisabled={deleteLoading}>
-          <div className="app-settings-modal-body">
-            <p>{t("reportsUsers.deleteBody", { name: confirmDelete.name })}</p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsUsers.cancel")}</button>
-            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-              {deleteLoading ? t("reportsUsers.deleting") : t("reportsUsers.deleteReport")}
-            </button>
-          </div>
-        </SettingsModal>
+        <ConfirmDialog
+          title={t("reportsUsers.deleteTitle")}
+          busy={deleteLoading}
+          confirmLabel={t("reportsUsers.deleteReport")}
+          busyLabel={t("reportsUsers.deleting")}
+          cancelLabel={t("reportsUsers.cancel")}
+          tone="danger"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={handleDelete}
+        >
+          <p>{t("reportsUsers.deleteBody", { name: confirmDelete.name })}</p>
+        </ConfirmDialog>
       )}
 
       {showNewModal && (

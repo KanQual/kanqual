@@ -113,7 +113,7 @@ function useDisableNativeContextMenu(): void {
   }, []);
 }
 
-function PostgresForcePasswordChangeView({
+function ForcePasswordChangeView({
   session,
   currentPassword,
   onPasswordChanged,
@@ -277,23 +277,23 @@ async function ensureBundledPostgresRuntimeStarted(): Promise<void> {
   }
 }
 
-const PostgresProjectsViewLazy = lazy(
-  () => import("./views/Postgres_Projects_View").then((m) => ({ default: m.PostgresProjectsView })),
+const ProjectsViewLazy = lazy(
+  () => import("./views/Projects_View").then((m) => ({ default: m.ProjectsView })),
 );
-const PostgresLaunchViewLazy = lazy(
-  () => import("./views/Postgres_Auth_Flow_Views").then((m) => ({ default: m.PostgresLaunchView })),
+const LaunchViewLazy = lazy(
+  () => import("./views/Auth_Flow_Views").then((m) => ({ default: m.LaunchView })),
 );
-const PostgresAuthViewLazy = lazy(
-  () => import("./views/Postgres_Auth_Flow_Views").then((m) => ({ default: m.PostgresAuthView })),
+const AuthViewLazy = lazy(
+  () => import("./views/Auth_Flow_Views").then((m) => ({ default: m.AuthView })),
 );
-const PostgresWorkspaceModeChoiceViewLazy = lazy(
-  () => import("./views/Postgres_Auth_Flow_Views").then((m) => ({ default: m.PostgresWorkspaceModeChoiceView })),
+const WorkspaceModeChoiceViewLazy = lazy(
+  () => import("./views/Auth_Flow_Views").then((m) => ({ default: m.WorkspaceModeChoiceView })),
 );
-const PostgresProjectHomeViewLazy = lazy(
-  () => import("./views/Postgres_Project_Home_View").then((m) => ({ default: m.PostgresProjectHomeView })),
+const ProjectHomeViewLazy = lazy(
+  () => import("./views/Project_Home_View").then((m) => ({ default: m.ProjectHomeView })),
 );
-const PostgresAdminSettingsViewLazy = lazy(
-  () => import("./views/Postgres_Admin_Settings_View").then((m) => ({ default: m.PostgresAdminSettingsView })),
+const AdminSettingsViewLazy = lazy(
+  () => import("./views/Admin_Settings_View").then((m) => ({ default: m.AdminSettingsView })),
 );
 
 function ViewLoadingFallback() {
@@ -320,7 +320,7 @@ function StartupIntroFallback() {
   );
 }
 
-function PostgresStartupErrorCard({
+function StartupErrorCard({
   error,
   retrying,
   onRetry,
@@ -594,7 +594,7 @@ function AuthGate() {
 
   if (postgresStartupError && !postgresStatus) {
     return (
-      <PostgresStartupErrorCard
+      <StartupErrorCard
         error={postgresStartupError}
         retrying={!postgresStatusLoaded}
         onRetry={() => {
@@ -651,7 +651,7 @@ function AuthGate() {
   if (pendingFirstRunSession) {
     return (
       <Suspense fallback={<AuthLoadingFallback />}>
-        <PostgresWorkspaceModeChoiceViewLazy
+        <WorkspaceModeChoiceViewLazy
           onUseLocal={() => {
             const session = pendingFirstRunSession;
             setPendingFirstRunSession(null);
@@ -674,7 +674,7 @@ function AuthGate() {
           <PostgresProjectEmbeddingBuildBanner activeProject={adminOpenedProject} />
           <PostgresDocumentProcessingBanner />
           <PostgresProjectSnapshotWarningBanner activeProject={adminOpenedProject} />
-          <PostgresProjectHomeViewLazy
+          <ProjectHomeViewLazy
             project={adminOpenedProject}
             authSession={postgresAuthStatus.currentSession}
             onAuthSessionUpdated={(session) => {
@@ -741,7 +741,7 @@ function AuthGate() {
     return (
       <Suspense fallback={<AuthLoadingFallback />}>
         <PostgresEmbeddingModelDownloadBanner />
-        <PostgresAdminSettingsViewLazy
+        <AdminSettingsViewLazy
           authSession={postgresAuthStatus.currentSession}
           onOpenProject={async (project) => {
             await rememberPostgresProjectOpened({
@@ -767,7 +767,7 @@ function AuthGate() {
     && postgresAuthStatus.currentSession.user.mustChangePassword
   ) {
     return (
-      <PostgresForcePasswordChangeView
+      <ForcePasswordChangeView
         session={postgresAuthStatus.currentSession}
         currentPassword={pendingPasswordResetCurrentPassword}
         onPasswordChanged={(nextStatus) => {
@@ -783,7 +783,7 @@ function AuthGate() {
     return (
       <Suspense fallback={<ViewLoadingFallback />}>
         {renderUpdateAvailableBanner()}
-        <PostgresProjectsViewLazy
+        <ProjectsViewLazy
           onSignOut={signOutPostgresSession}
           renderProjectHome={(openedProject, helpers) => (
             <Suspense
@@ -794,7 +794,7 @@ function AuthGate() {
                 <PostgresProjectEmbeddingBuildBanner activeProject={openedProject} />
                 <PostgresDocumentProcessingBanner />
                 <PostgresProjectSnapshotWarningBanner activeProject={openedProject} />
-                <PostgresProjectHomeViewLazy
+                <ProjectHomeViewLazy
                   project={openedProject}
                   authSession={postgresAuthStatus.currentSession!}
                   onAuthSessionUpdated={(session) => {
@@ -837,7 +837,7 @@ function AuthGate() {
   if (postgresAuthReady && !workspaceModeSelected) {
     return (
       <Suspense fallback={<AuthLoadingFallback />}>
-        <PostgresWorkspaceModeChoiceViewLazy
+        <WorkspaceModeChoiceViewLazy
           onUseLocal={() => setWorkspaceModeSelected(true)}
         />
       </Suspense>
@@ -847,7 +847,7 @@ function AuthGate() {
   if (postgresAuthReady) {
     return (
       <Suspense fallback={<AuthLoadingFallback />}>
-        <PostgresAuthViewLazy
+        <AuthViewLazy
           authStatus={postgresAuthStatus}
           onRefresh={refreshPostgresStatus}
           onAuthenticated={async (session, currentPassword) => {
@@ -882,7 +882,7 @@ function AuthGate() {
 
   return (
     <Suspense fallback={<AuthLoadingFallback />}>
-      <PostgresLaunchViewLazy
+      <LaunchViewLazy
         status={postgresStatus}
         loading={!postgresStatusLoaded}
         onBootstrap={handleBootstrapPostgres}

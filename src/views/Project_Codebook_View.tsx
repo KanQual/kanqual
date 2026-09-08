@@ -2,9 +2,13 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import { HelpIcon, PlusIcon } from "../components/AppIcons";
+import { DeleteIcon, EditIcon, PlusIcon } from "../components/AppIcons";
+import { CardHeader } from "../components/CardHeader";
 import { DEFAULT_CODE_COLOR, NewCodeModal, type CodeRow } from "../components/NewCodeModal";
-import { SettingsModal } from "../components/SettingsModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpModal } from "../components/HelpModal";
+import { TableMessageRow, TableShell } from "../components/TableShell";
+import { ViewHeader } from "../components/ViewHeader";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
@@ -619,28 +623,20 @@ export function CodebookView({
           onSave={handlePostgresCodeSave}
         />
         {confirmDelete && (
-          <SettingsModal
+          <ConfirmDialog
             title={t("projectCodebook.deleteModal.title")}
             onClose={() => setConfirmDelete(null)}
-            closeDisabled={deleteLoading}
+            onConfirm={() => void handleDelete()}
+            busy={deleteLoading}
+            confirmLabel={t("projectCodebook.actions.deleteCode")}
+            busyLabel={t("projectCodebook.statuses.deleting")}
+            tone="danger"
+            warning={t("projectCodebook.deleteModal.warning")}
           >
-            <div className="app-settings-modal-body">
-              <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-                {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
-              </p>
-              <p className="modal-warning-text">
-                {t("projectCodebook.deleteModal.warning")}
-              </p>
-            </div>
-            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-                {t("common.cancel")}
-              </button>
-              <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-                {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
-              </button>
-            </div>
-          </SettingsModal>
+            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+              {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
+            </p>
+          </ConfirmDialog>
         )}
       </>
     );
@@ -648,29 +644,19 @@ export function CodebookView({
   // Render
 
   return (
-    <div className="view users-view">
-      <header className="view-header">
-        <div className="users-title-wrap">
-          <h1>{t("projectCodebook.pageTitle")}</h1>
-          <button
-            type="button"
-            className="users-help-icon-btn"
-            onClick={() => setHelpOpen(true)}
-            title={t("projectCodebook.showHelp")}
-            aria-label={t("projectCodebook.showHelp")}
-          >
-            <HelpIcon className="users-help-icon" />
-          </button>
-        </div>
-      </header>
+    <div className="view view-shell">
+      <ViewHeader
+        title={t("projectCodebook.pageTitle")}
+        help={{ label: t("projectCodebook.showHelp"), onClick: () => setHelpOpen(true) }}
+      />
 
-      {error && <p className="users-error">{error}</p>}
-      <div className="users-content codebook-table-shell">
-      <div className="home-project-card project-table-card codebook-table-card">
-        <div className="project-table-card-header">
-          <h2>{t("projectCodebook.pageTitle")}</h2>
-          <button
-            className="btn btn--primary project-table-header-icon-button"
+      {error && <p className="alert-error">{error}</p>}
+      <div className="view-content codebook-table-shell">
+      <div className="content-card table-card codebook-table-card">
+        <CardHeader
+          title={t("projectCodebook.pageTitle")}
+          actions={<button
+            className="btn btn--primary card-header-icon-button"
             onClick={() => {
               setNewCodeParentId("");
               setSubmitError(null);
@@ -684,27 +670,27 @@ export function CodebookView({
             }
             aria-label={t("projectCodebook.actions.newCode")}
           >
-            <PlusIcon className="project-table-header-icon" />
-          </button>
-        </div>
-      <div
-        className="users-table-wrap codebook-table-wrap"
+            <PlusIcon className="card-header-icon" />
+          </button>}
+        />
+      <TableShell
+        className="codebook-table-wrap"
         style={{
           maxHeight: 34 + (Math.max(loading || visible.length === 0 ? 1 : visible.length, 1) + 2) * 36,
         }}
       >
-        <table className="users-table">
+        <table className="data-table">
           <thead>
             <tr>
               {localizedCols.map((col) => (
                 <th
                   key={col.key}
                   style={{ width: col.width }}
-                  className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
+                  className={`data-table-header${sortCol === col.key ? " data-table-header--sorted" : ""}`}
                   onClick={() => handleSort(col.key)}
                 >
                   {col.label}
-                  <span className="users-sort-icon">
+                  <span className="data-table-sort-icon">
                     {" "}
                     {sortCol === col.key ? (sortDir === "asc" ? "\u2191" : "\u2193") : "\u2195"}
                   </span>
@@ -714,15 +700,15 @@ export function CodebookView({
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={5} className="users-td-msg">{t("projectCodebook.statuses.loading")}</td></tr>
+              <TableMessageRow colSpan={5}>{t("projectCodebook.statuses.loading")}</TableMessageRow>
             )}
             {!loading && visible.length === 0 && (
-              <tr><td colSpan={5} className="users-td-msg">{t("projectCodebook.empty.noCodes")}</td></tr>
+              <TableMessageRow colSpan={5}>{t("projectCodebook.empty.noCodes")}</TableMessageRow>
             )}
             {!loading && visible.map((node) => (
               <tr
                 key={node.id}
-                className="users-row codebook-list-row"
+                className="data-table-row codebook-list-row"
                 onClick={() => {
                   setSelectedRow(node);
                 }}
@@ -732,7 +718,7 @@ export function CodebookView({
                 }}
               >
                 {/* Name cell with indentation + collapse toggle */}
-                <td className="users-td users-td--name">
+                <td className="data-table-cell data-table-cell--name">
                   <span
                     className="code-tree-cell"
                     style={{ paddingLeft: node.depth * 20 }}
@@ -753,40 +739,27 @@ export function CodebookView({
                     <span>{node.label}</span>
                   </span>
                 </td>
-                <td className="users-td users-td--muted">{node.createdByName}</td>
-                <td className="users-td users-td--muted">{fmtDate(node.createdAt)}</td>
-                <td className="users-td users-td--muted">{node.sourcesCount}</td>
+                <td className="data-table-cell data-table-cell--muted">{node.createdByName}</td>
+                <td className="data-table-cell data-table-cell--muted">{fmtDate(node.createdAt)}</td>
+                <td className="data-table-cell data-table-cell--muted">{node.sourcesCount}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </TableShell>
       </div>
       </div>
 
       {helpOpen && (
-        <SettingsModal
+        <HelpModal
           title={t("projectCodebook.help.title")}
           onClose={() => setHelpOpen(false)}
-          modalClassName="modal--help"
-        >
-          <div className="app-settings-modal-body">
-            <p className="users-guide-copy">
-              {t("projectCodebook.help.line1")}
-            </p>
-            <p className="users-guide-copy">
-              {t("projectCodebook.help.line2")}
-            </p>
-            <p className="users-guide-copy">
-              {t("projectCodebook.help.line3")}
-            </p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              {t("common.close")}
-            </button>
-          </div>
-        </SettingsModal>
+          lines={[
+            t("projectCodebook.help.line1"),
+            t("projectCodebook.help.line2"),
+            t("projectCodebook.help.line3"),
+          ]}
+        />
       )}
 
       {/* Context menu */}
@@ -862,28 +835,20 @@ export function CodebookView({
 
       {/* Delete confirmation */}
       {confirmDelete && (
-        <SettingsModal
+        <ConfirmDialog
           title={t("projectCodebook.deleteModal.title")}
           onClose={() => setConfirmDelete(null)}
-          closeDisabled={deleteLoading}
+          onConfirm={() => void handleDelete()}
+          busy={deleteLoading}
+          confirmLabel={t("projectCodebook.actions.deleteCode")}
+          busyLabel={t("projectCodebook.statuses.deleting")}
+          tone="danger"
+          warning={t("projectCodebook.deleteModal.warning")}
         >
-          <div className="app-settings-modal-body">
-            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
-            </p>
-            <p className="modal-warning-text">
-              {t("projectCodebook.deleteModal.warning")}
-            </p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>
-              {t("common.cancel")}
-            </button>
-            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-              {deleteLoading ? t("projectCodebook.statuses.deleting") : t("projectCodebook.actions.deleteCode")}
-            </button>
-          </div>
-        </SettingsModal>
+          <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+            {t("projectCodebook.deleteModal.body", { label: confirmDelete.label })}
+          </p>
+        </ConfirmDialog>
       )}
 
       {/* New Code modal */}
@@ -926,7 +891,7 @@ export function CodebookView({
         />
       )}
       {submitError && !editingRow && !newCodeOpen && (
-        <p className="users-error" style={{ marginTop: 12 }}>{submitError}</p>
+        <p className="alert-error" style={{ marginTop: 12 }}>{submitError}</p>
       )}
     </div>
   );
@@ -966,33 +931,9 @@ function PostgresCodeDetail({
   const [row, setRow] = useState(initialRow);
   const [showEditModal, setShowEditModal] = useState(startEditing);
   const [saving, setSaving] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     setRow(initialRow);
   }, [initialRow]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setMenuOpen(false);
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [menuOpen]);
 
   async function handleSaveFromModal(payload: {
     label: string;
@@ -1021,55 +962,35 @@ function PostgresCodeDetail({
 
   return (
     <div className="view doc-detail-view">
-      <div className="workspace-back-row workspace-back-row--split">
-        <button className="btn" onClick={onBack}>{t("projectCodebook.actions.backToCodebook")}</button>
-        {(canEditCode || canDeleteCode) && (
+      <ViewHeader
+        title={t("projectCodebook.detail.pageTitle")}
+        back={{ label: t("projectCodebook.actions.backToCodebook"), onClick: onBack }}
+        titleClassName="view-title-row view-title-row--back-outside"
+        actions={(canEditCode || canDeleteCode) ? (
           <div className="workspace-back-actions">
             <button
               type="button"
-              className="btn btn--primary"
+              className="btn btn--primary card-header-icon-button"
               onClick={() => setShowEditModal(true)}
               disabled={!canEditCode}
-              title={!canEditCode ? t("projectCodebook.permissions.cannotEditCodes") : undefined}
+              title={!canEditCode ? t("projectCodebook.permissions.cannotEditCodes") : t("projectCodebook.actions.editCode")}
+              aria-label={t("projectCodebook.actions.editCode")}
             >
-              {t("projectCodebook.actions.editCode")}
+              <EditIcon className="card-header-icon" />
             </button>
-            <div className="user-detail-menu-wrap" ref={menuRef}>
-              <button
-                type="button"
-                className="btn"
-                aria-label={t("projectCodebook.actions.codeActions")}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((open) => !open)}
-              >
-                {t("projectCodebook.actions.actions")}
-              </button>
-              {menuOpen && (
-                <div className="context-menu user-detail-menu" role="menu">
-                  {canDeleteCode ? (
-                    <button
-                      type="button"
-                      className="context-menu-item context-menu-item--danger"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onRequestDelete(row);
-                      }}
-                    >
-                      {t("projectCodebook.actions.deleteCode")}
-                    </button>
-                  ) : (
-                    <div className="context-menu-item context-menu-item--disabled" title={t("projectCodebook.permissions.cannotDeleteCodes")}>
-                      {t("projectCodebook.actions.deleteCode")}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              className="btn btn--danger card-header-icon-button"
+              onClick={() => onRequestDelete(row)}
+              disabled={!canDeleteCode}
+              title={!canDeleteCode ? t("projectCodebook.permissions.cannotDeleteCodes") : t("projectCodebook.actions.deleteCode")}
+              aria-label={t("projectCodebook.actions.deleteCode")}
+            >
+              <DeleteIcon className="card-header-icon" />
+            </button>
           </div>
-        )}
-      </div>
+        ) : null}
+      />
 
       <div className="doc-detail-layout">
         <div className="doc-detail-left">

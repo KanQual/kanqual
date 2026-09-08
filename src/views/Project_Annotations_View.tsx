@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { HelpIcon, PauseIcon as ClipPauseIcon, PlayIcon as ClipPlayIcon } from "../components/AppIcons";
-import { SettingsModal } from "../components/SettingsModal";
+import { HighlighterIcon, PauseIcon as ClipPauseIcon, PlayIcon as ClipPlayIcon } from "../components/AppIcons";
+import { CardHeader } from "../components/CardHeader";
+import { HelpModal } from "../components/HelpModal";
+import { MasterDetailLayout } from "../components/MasterDetailLayout";
+import { TableMessageRow, TableShell } from "../components/TableShell";
+import { ViewHeader } from "../components/ViewHeader";
 import { useI18n } from "../i18n/provider";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import type { PostgresCode } from "../lib/postgres";
-import { visibleCodeNodes, type CodeTreeNode } from "./Postgres_Source_Coding_Shared";
+import { visibleCodeNodes, type CodeTreeNode } from "./Source_Coding_Shared";
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
@@ -356,7 +360,7 @@ function AudioAnnotationClip({
             </div>
           </div>
         ) : (
-          <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingAudioClip")}</p>
+          <p className="supporting-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingAudioClip")}</p>
         )}
       </div>
     </div>
@@ -451,7 +455,7 @@ function VideoAnnotationClip({
             </video>
           </div>
         ) : (
-          <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingVideoClip")}</p>
+          <p className="supporting-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingVideoClip")}</p>
         )}
       </div>
     </div>
@@ -577,7 +581,7 @@ function ImageAnnotationCrop({
             />
           </div>
         ) : (
-          <p className="users-guide-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingImageRegion")}</p>
+          <p className="supporting-copy" style={{ margin: 0 }}>{t("projectAnnotations.media.loadingImageRegion")}</p>
         )}
       </div>
     </div>
@@ -856,27 +860,31 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   if (selectedRow) {
     return (
       <div className="view doc-detail-view">
-        <div className="workspace-back-row workspace-back-row--split">
-          <button className="btn" onClick={() => setSelectedRow(null)}>
-            {t("projectAnnotations.actions.backToAnnotations")}
-          </button>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <ViewHeader
+          title={t("projectAnnotations.detail.pageTitle")}
+          back={{ label: t("projectAnnotations.actions.backToAnnotations"), onClick: () => setSelectedRow(null) }}
+          titleClassName="view-title-row view-title-row--back-outside"
+          actions={(
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
-              className="btn"
+              className="btn card-header-icon-button"
               onClick={() => jumpToSourceAnnotation(selectedRow)}
+              title={t("projectAnnotations.actions.openInCoding")}
+              aria-label={t("projectAnnotations.actions.openInCoding")}
             >
-              {t("projectAnnotations.actions.openInCoding")}
+              <HighlighterIcon className="card-header-icon" />
             </button>
-          </div>
-        </div>
+            </div>
+          )}
+        />
 
         <div className="doc-detail-layout">
           <div className="doc-detail-left">
             <div className="case-card">
               <h3 className="case-card-title">{t("projectAnnotations.detail.annotation")}</h3>
               <p className="case-card-value">{formatAnnotationDisplayId(selectedRow.displayId)}</p>
-              <p className="users-guide-copy" style={{ marginTop: 8, marginBottom: 0 }} title={selectedRow.lockTitle}>
+              <p className="supporting-copy" style={{ marginTop: 8, marginBottom: 0 }} title={selectedRow.lockTitle}>
                 {t("projectAnnotations.detail.lockValue", { value: selectedRow.lockLabel ?? "-" })}
               </p>
             </div>
@@ -906,7 +914,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
             {selectedRow.note ? (
               <div className="case-card">
                 <h3 className="case-card-title">{t("projectAnnotations.detail.note")}</h3>
-                <p className="users-guide-copy" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                <p className="supporting-copy" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
                   {selectedRow.note}
                 </p>
               </div>
@@ -959,34 +967,14 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   }
 
   return (
-    <div className="view users-view">
-      <header className="view-header">
-        <div className="users-title-wrap">
-          <h1>{t("projectAnnotations.pageTitle")}</h1>
-          <button
-            type="button"
-            className="users-help-icon-btn"
-            onClick={() => setHelpOpen(true)}
-            title={t("projectAnnotations.showHelp")}
-            aria-label={t("projectAnnotations.showHelp")}
-          >
-            <HelpIcon className="users-help-icon" />
-          </button>
-        </div>
-      </header>
+    <div className="view view-shell">
+      <ViewHeader
+        title={t("projectAnnotations.pageTitle")}
+        help={{ label: t("projectAnnotations.showHelp"), onClick: () => setHelpOpen(true) }}
+      />
 
-      {error && <p className="users-error">{error}</p>}
-      <div
-        className="postgres-sources-grid"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(280px, 340px) auto minmax(0, 1fr)",
-          gap: 0,
-          alignItems: "stretch",
-          flex: "0 0 auto",
-          minHeight: 0,
-        }}
-      >
+      {error && <p className="alert-error">{error}</p>}
+      <MasterDetailLayout>
         <div
           className="home-primary-column"
           style={{
@@ -1010,7 +998,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               </button>
             </div>
           </div>
-          <section className="home-project-card" style={{ padding: 0, overflow: "hidden" }}>
+          <section className="content-card" style={{ padding: 0, overflow: "hidden" }}>
             <div
               style={{
                 display: "flex",
@@ -1025,26 +1013,26 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               </div>
             </div>
             <div>
-              <table className="users-table" style={{ tableLayout: "fixed" }}>
+              <table className="data-table" style={{ tableLayout: "fixed" }}>
                 <thead>
                   <tr>
                     <th
-                      className={`users-th${codeFilterSortCol === "code" ? " users-th--sorted" : ""}`}
+                      className={`data-table-header${codeFilterSortCol === "code" ? " data-table-header--sorted" : ""}`}
                       style={{ width: "76%" }}
                       onClick={() => handleCodeFilterSort("code")}
                     >
                       {t("projectAnnotations.table.code")}
-                      <span className="users-sort-icon">
+                      <span className="data-table-sort-icon">
                         {codeFilterSortCol === "code" ? (codeFilterSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
                     </th>
                     <th
-                      className={`users-th${codeFilterSortCol === "count" ? " users-th--sorted" : ""}`}
+                      className={`data-table-header${codeFilterSortCol === "count" ? " data-table-header--sorted" : ""}`}
                       style={{ width: "24%" }}
                       onClick={() => handleCodeFilterSort("count")}
                     >
                       {t("projectAnnotations.table.count")}
-                      <span className="users-sort-icon">
+                      <span className="data-table-sort-icon">
                         {codeFilterSortCol === "count" ? (codeFilterSortDir === "asc" ? " ↑" : " ↓") : " ↕"}
                       </span>
                     </th>
@@ -1052,13 +1040,13 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                 </thead>
                 <tbody>
                   <tr
-                    className="users-row"
+                    className="data-table-row"
                     style={{
                       background: selectedCodeFilter === "all" ? "rgba(53, 80, 112, 0.10)" : undefined,
                     }}
                   >
                     <td
-                      className="users-td users-td--name"
+                      className="data-table-cell data-table-cell--name"
                       role="button"
                       tabIndex={0}
                       onClick={() => setSelectedCodeFilter("all")}
@@ -1071,18 +1059,18 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                     >
                       <span>{t("projectAnnotations.detail.allAnnotations")}</span>
                     </td>
-                    <td className="users-td users-td--muted">{rows.length}</td>
+                    <td className="data-table-cell data-table-cell--muted">{rows.length}</td>
                   </tr>
                   {visibleCodes.map(({ code, depth, hasChildren }) => (
                     <tr
                       key={code.id}
-                      className="users-row"
+                      className="data-table-row"
                       style={{
                         background: selectedCodeFilter === code.id ? "rgba(53, 80, 112, 0.10)" : undefined,
                       }}
                     >
                       <td
-                        className="users-td users-td--name"
+                        className="data-table-cell data-table-cell--name"
                         role="button"
                         tabIndex={0}
                         onClick={() => setSelectedCodeFilter(code.id)}
@@ -1116,7 +1104,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                           </span>
                         </div>
                       </td>
-                      <td className="users-td users-td--muted">{annotationCountByCodeId.get(code.id) ?? 0}</td>
+                      <td className="data-table-cell data-table-cell--muted">{annotationCountByCodeId.get(code.id) ?? 0}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1133,7 +1121,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
         <div className="project-workspace-col-divider" aria-hidden="true" />
 
         <section
-          className="users-content"
+          className="view-content"
           style={{
             alignItems: "stretch",
             justifyContent: "center",
@@ -1145,29 +1133,26 @@ export function AnnotationsView(props: AnnotationsViewProps) {
             paddingRight: 4,
           }}
         >
-          <div className="home-project-card project-table-card">
-            <div className="project-table-card-header">
-              <h2>{t("projectAnnotations.pageTitle")}</h2>
-            </div>
-          <div
-            className="users-table-wrap"
+          <div className="content-card table-card">
+            <CardHeader title={t("projectAnnotations.pageTitle")} />
+          <TableShell
             style={{ maxHeight: 34 + (Math.max(rowCount, 1) + 2) * 36 }}
           >
-            <table className="users-table">
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ width: ANNOTATION_ID_WIDTH }} className="users-th">
+                  <th style={{ width: ANNOTATION_ID_WIDTH }} className="data-table-header">
                     {t("projectAnnotations.table.id")}
                   </th>
                   {localizedCols.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
-                      className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
+                      className={`data-table-header${sortCol === col.key ? " data-table-header--sorted" : ""}`}
                       onClick={() => handleSort(col.key)}
                     >
                       {col.label}
-                      <span className="users-sort-icon">
+                      <span className="data-table-sort-icon">
                         {sortCol === col.key
                           ? sortDir === "asc"
                             ? " ↑"
@@ -1180,73 +1165,58 @@ export function AnnotationsView(props: AnnotationsViewProps) {
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={7} className="users-td-msg">{t("projectAnnotations.loading")}</td></tr>
+                  <TableMessageRow colSpan={7}>{t("projectAnnotations.loading")}</TableMessageRow>
                 )}
                 {!loading && sorted.length === 0 && (
-                  <tr><td colSpan={7} className="users-td-msg">{t("projectAnnotations.empty")}</td></tr>
+                  <TableMessageRow colSpan={7}>{t("projectAnnotations.empty")}</TableMessageRow>
                 )}
                 {!loading && sorted.map((row) => (
                   <tr
                     key={row.id}
-                    className="users-row annotations-list-row"
+                    className="data-table-row annotations-list-row"
                     onClick={() => openAnnotation(row)}
                     title={row.lockTitle}
                   >
-                    <td className="users-td users-td--muted">
+                    <td className="data-table-cell data-table-cell--muted">
                       {formatAnnotationDisplayId(row.displayId)}
                     </td>
-                    <td className="users-td users-td--name">{row.documentName}</td>
-                    <td className="users-td users-td--muted">{formatSourceType(row.sourceKind, t)}</td>
-                    <td className="users-td">
+                    <td className="data-table-cell data-table-cell--name">{row.documentName}</td>
+                    <td className="data-table-cell data-table-cell--muted">{formatSourceType(row.sourceKind, t)}</td>
+                    <td className="data-table-cell">
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span className="code-swatch" style={{ background: row.codeColor }} />
                         {row.codeLabel}
                       </span>
                     </td>
-                    <td className="users-td users-td--muted">
+                    <td className="data-table-cell data-table-cell--muted">
                       {row.lockLabel ?? "-"}
                     </td>
-                    <td className="users-td users-td--muted">
+                    <td className="data-table-cell data-table-cell--muted">
                       {fmtDate(row.createdAt)}
                     </td>
-                    <td className="users-td users-td--muted">
+                    <td className="data-table-cell data-table-cell--muted">
                       {row.createdByName}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableShell>
           </div>
         </section>
-      </div>
+      </MasterDetailLayout>
 
       {helpOpen && (
-        <SettingsModal
+        <HelpModal
           title={t("projectAnnotations.help.title")}
           onClose={() => setHelpOpen(false)}
-          modalClassName="modal--help"
-        >
-          <div className="app-settings-modal-body">
-            <p className="users-guide-copy">
-              {t("projectAnnotations.help.line1")}
-            </p>
-            <p className="users-guide-copy">
-              {t("projectAnnotations.help.line2")}
-            </p>
-            <p className="users-guide-copy">
-              {t("projectAnnotations.help.line3")}
-            </p>
-            <p className="users-guide-copy">
-              {t("projectAnnotations.help.line4")}
-            </p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              {t("common.close")}
-            </button>
-          </div>
-        </SettingsModal>
+          lines={[
+            t("projectAnnotations.help.line1"),
+            t("projectAnnotations.help.line2"),
+            t("projectAnnotations.help.line3"),
+            t("projectAnnotations.help.line4"),
+          ]}
+        />
       )}
     </div>
   );

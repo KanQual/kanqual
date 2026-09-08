@@ -6,6 +6,7 @@ const root = process.cwd();
 const summaryOnly = process.argv.includes("--summary");
 const includeRoots = ["src/App.tsx", "src/components", "src/views"];
 const exclude = new Set([path.normalize("src/i18n/locales/en.ts")]);
+const userFacingJsxAttributes = new Set(["aria-label", "title", "description", "heading", "placeholder", "alt", "label"]);
 
 function walk(entry, files = []) {
   const full = path.join(root, entry);
@@ -25,6 +26,31 @@ function hasLetters(text) {
 
 function clean(text) {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function findEnclosingJsxAttribute(node) {
+  let current = node.parent;
+  while (current && !ts.isSourceFile(current)) {
+    if (ts.isJsxAttribute(current)) return current;
+    if (ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current)) return null;
+    current = current.parent;
+  }
+  return null;
+}
+
+function isInsideTranslationCall(node, boundary) {
+  let current = node.parent;
+  while (current && current !== boundary) {
+    if (
+      ts.isCallExpression(current)
+      && ts.isIdentifier(current.expression)
+      && current.expression.text === "t"
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 function shouldIgnoreString(text) {
@@ -62,13 +88,15 @@ for (const relative of files) {
     } else if (ts.isJsxAttribute(node) && node.initializer && ts.isStringLiteral(node.initializer)) {
       const attr = node.name.getText(sf);
       const value = clean(node.initializer.text);
-      if (["aria-label", "title", "placeholder", "alt", "label"].includes(attr) && !shouldIgnoreString(value)) {
+      if (userFacingJsxAttributes.has(attr) && !shouldIgnoreString(value)) {
         findings.push({ file: relative, line: lineOf(node), kind: `attr:${attr}`, value });
       }
     } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       const parent = node.parent;
       const value = clean(node.text);
       const inJsxAttr = ts.isJsxAttribute(parent);
+      const enclosingJsxAttribute = inJsxAttr ? null : findEnclosingJsxAttribute(node);
+      const enclosingJsxAttributeName = enclosingJsxAttribute?.name.getText(sf);
       const likelyMessage =
         ts.isCallExpression(parent) &&
         ts.isIdentifier(parent.expression) &&
@@ -80,7 +108,14 @@ for (const relative of files) {
       const thrown =
         ts.isNewExpression(parent) &&
         parent.expression.getText(sf) === "Error";
-      if (!inJsxAttr && (likelyMessage || errorSetter || thrown) && !shouldIgnoreString(value)) {
+      if (
+        enclosingJsxAttributeName
+        && userFacingJsxAttributes.has(enclosingJsxAttributeName)
+        && !isInsideTranslationCall(node, enclosingJsxAttribute)
+        && !shouldIgnoreString(value)
+      ) {
+        findings.push({ file: relative, line: lineOf(node), kind: `attr:${enclosingJsxAttributeName}`, value });
+      } else if (!inJsxAttr && (likelyMessage || errorSetter || thrown) && !shouldIgnoreString(value)) {
         findings.push({ file: relative, line: lineOf(node), kind: likelyMessage ? "dialog" : errorSetter ? "error-state" : "throw", value });
       }
     }

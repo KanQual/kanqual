@@ -1,0 +1,2069 @@
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { ActiveThemePreviewRow } from "../components/ActiveThemePreviewRow";
+import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
+import { ThemeManagerModal } from "../components/ThemeManagerModal";
+import { SettingsModal } from "../components/SettingsModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpModal } from "../components/HelpModal";
+import { SettingsOverviewCard, SettingsOverviewSection } from "../components/SettingsOverviewCard";
+import { ViewHeader } from "../components/ViewHeader";
+import {
+  DeleteIcon,
+  DownloadIcon,
+  EyeIcon,
+  EyeOffIcon,
+  SettingsAboutIcon,
+  SettingsAppearanceIcon,
+  SettingsCodebookIcon,
+  SettingsLanguageIcon,
+  SettingsPermissionsIcon,
+  SettingsProjectDetailsIcon,
+  SettingsProjectLogIcon,
+  SettingsStorageIcon,
+  SettingsUpdatesIcon,
+  SettingsUploadedFilesIcon,
+} from "../components/AppIcons";
+import { FilterIcon } from "../components/FilterIcon";
+import { SUPPORTED_LOCALES } from "../i18n";
+import { useI18n } from "../i18n/provider";
+import { getAppRuntimeInfo, type AppRuntimeInfo } from "../lib/dataRoot";
+import { DEFAULT_GETTING_STARTED_STATE, normalizeGettingStartedState, type GettingStartedState } from "../lib/gettingStartedGuide";
+import { buildPermissionMatrixRows } from "../lib/permissionMatrix";
+import {
+  deletePostgresProject,
+  getPostgresUserPreferences,
+  listPostgresProjectLog,
+  listPostgresSources,
+  savePostgresUserPreferences,
+  updatePostgresProject,
+  type PostgresAuthSession,
+  type PostgresProject,
+  type PostgresProjectLogEntry,
+  type PostgresSource,
+  type PostgresUserPreferences,
+} from "../lib/postgres";
+import {
+  applyDensity,
+  applyFontSize,
+  getStoredTheme,
+  getStoredThemeState,
+  initTheme,
+  setActivePresetId,
+  setRuntimeThemePreferences,
+  type Density,
+  type FontSize,
+  type Theme,
+} from "../theme";
+import { UserSettingsView } from "./User_Settings_View";
+import thirdPartyNoticesRaw from "../../THIRD_PARTY_NOTICES.md?raw";
+import {
+  deletePostgresProjectBackup,
+  createPostgresProjectBackup,
+  formatPostgresBackupSize,
+  importPostgresProjectBackupAsProject,
+  loadPostgresProjectBackupManifest,
+  postgresBackupRetentionStatus,
+  type BackupRetentionStatus,
+  type PostgresProjectBackupEntry,
+  type PostgresProjectBackupManifest,
+} from "../lib/postgresProjectBackups";
+import { fetchPostgresProjectExportData, importPostgresRefiQdaCodebook } from "../lib/postgresProjectExport";
+import {
+  makeProjectBackupJson,
+  makeProjectBackupXlsx,
+  makeRefiQdaCodebook,
+  makeRefiQdaProject,
+  parseRefiQdaCodebook,
+} from "../lib/projectExport";
+import {
+  formatProjectLogDateTime,
+  parseProjectLogDetails,
+  projectLogAccessModeLabel,
+  projectLogActionCategory,
+  projectLogActionLabel,
+  projectLogDescriptionLabel,
+  ProjectLogDetailsPanel,
+  summarizeProjectLogDetails,
+} from "./Project_Log_View";
+import {
+  clearPendingProjectBackupAttempt,
+  clearProjectBackupBannerIssue,
+  notifyProjectBackupsChanged,
+  OPEN_PROJECT_SETTINGS_MODAL_EVENT,
+} from "../lib/projectBackupBanner";
+
+export type AppSettingsViewProps = {
+  authSession: PostgresAuthSession;
+  project?: PostgresProject;
+  canManageProject?: boolean;
+  canEditProjectMetadata?: boolean;
+  memberCount?: number;
+  ownerCount?: number;
+  objectCount?: number;
+  relationshipCount?: number;
+  onProjectUpdated?: (project: PostgresProject) => void;
+  onProjectDeleted?: (projectId: string) => void;
+  onProjectOpened?: (project: PostgresProject) => void | Promise<void>;
+  onAuthSessionUpdated?: (session: PostgresAuthSession) => void;
+  onAuthSessionInvalidated?: () => void;
+};
+
+type AppSettingsModalId =
+  | "about"
+  | "appearance"
+  | "language"
+  | "permissions";
+
+type LicenseRow = {
+  name: string;
+  version: string;
+  license: string;
+};
+
+function parseMarkdownLicenseTable(markdown: string, heading: string): LicenseRow[] {
+  const sectionPattern = new RegExp(`## ${heading}\\r?\\n([\\s\\S]*?)(\\r?\\n## |$)`);
+  const sectionMatch = markdown.match(sectionPattern);
+  if (!sectionMatch) return [];
+
+  const lines = sectionMatch[1]
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const tableLines = lines.filter((line) => line.startsWith("|"));
+  if (tableLines.length < 3) return [];
+
+  return tableLines.slice(2).map((line) => {
+    const cells = line
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim().replace(/^`|`$/g, ""));
+    return {
+      name: cells[0] ?? "",
+      version: cells[1] ?? "",
+      license: cells[2] ?? "",
+    };
+  });
+}
+
+const aboutJavascriptLicenses = parseMarkdownLicenseTable(
+  thirdPartyNoticesRaw,
+  "Resolved JavaScript / TypeScript Dependency Inventory",
+);
+
+const aboutRustLicenses = parseMarkdownLicenseTable(
+  thirdPartyNoticesRaw,
+  "Resolved Rust Crate Inventory",
+);
+
+const RELEASE_DATE = "June 12, 2026";
+
+function SettingsModalSection({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <section className="app-settings-modal-section">
+      <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+        <h3>{title}</h3>
+      </div>
+      {children ? <div className="app-settings-modal-section-body">{children}</div> : null}
+    </section>
+  );
+}
+
+function describeAppSettingsUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function applyPostgresRuntimeThemePreferences(preferences: PostgresUserPreferences): void {
+  setRuntimeThemePreferences({
+    theme: preferences.theme,
+    density: preferences.density,
+    fontSize: preferences.fontSize,
+    themeState: preferences.themeState,
+  });
+  initTheme();
+}
+
+type EmbeddedProjectSettingsProps = {
+  project: PostgresProject;
+  canManageProject: boolean;
+  canEditProjectMetadata?: boolean;
+  memberCount: number;
+  ownerCount: number;
+  objectCount: number;
+  relationshipCount: number;
+  onProjectUpdated: (project: PostgresProject) => void;
+  onProjectDeleted: (projectId: string) => void;
+  onProjectOpened?: (project: PostgresProject) => void | Promise<void>;
+  embedded?: boolean;
+};
+
+function describeUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function formatPostgresDateTime(iso: string): string {
+  if (!iso) return "-";
+  try {
+    return new Intl.DateTimeFormat([], {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return "-";
+  }
+}
+
+function formatSnapshotCreatedParts(iso: string): { date: string; time: string } {
+  if (!iso) return { date: "-", time: "" };
+  try {
+    const date = new Date(iso);
+    return {
+      date: new Intl.DateTimeFormat([], {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }).format(date),
+      time: new Intl.DateTimeFormat([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(date),
+    };
+  } catch {
+    return { date: "-", time: "" };
+  }
+}
+
+function safeExportName(name: string): string {
+  return name.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "kanqual_project";
+}
+
+function backupReasonLabel(entry: PostgresProjectBackupEntry, t: ReturnType<typeof useI18n>["t"]): string {
+  if (entry.reason === "manual") return t("appSettings.project.snapshots.manual");
+  return t("appSettings.project.snapshots.automatic");
+}
+
+function formatSnapshotHour(date: Date): string {
+  return new Intl.DateTimeFormat([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+  }).format(date);
+}
+
+function formatSnapshotDay(date: Date): string {
+  return new Intl.DateTimeFormat([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function snapshotRetentionUntilLabel(status: BackupRetentionStatus, t: ReturnType<typeof useI18n>["t"]): string {
+  if (status.category === "manual") {
+    return t("appSettings.project.snapshots.indefinite");
+  }
+  if (status.category === "latest") {
+    return t("appSettings.project.snapshots.untilSuperseded");
+  }
+  if (status.category === "pending-delete") {
+    return t("appSettings.project.snapshots.nextCleanup");
+  }
+  if (status.deletionDate) {
+    return formatSnapshotDay(status.deletionDate);
+  }
+  return "-";
+}
+
+type SnapshotRetentionBadgeKind = "manual" | "hourly" | "daily" | "weekly" | "promotion" | "empty";
+type ProjectLogFilterColumn = "time" | "user" | "access" | "category" | "description";
+
+function snapshotRetentionBucketLabels(status: BackupRetentionStatus, t: ReturnType<typeof useI18n>["t"]): Array<{ label: string; kind: SnapshotRetentionBadgeKind }> {
+  const labels: Array<{ label: string; kind: SnapshotRetentionBadgeKind }> = [];
+  if (status.category === "manual") {
+    labels.push({ label: t("appSettings.project.snapshots.manual"), kind: "manual" });
+  } else if (status.category === "hourly" && status.bucketStart) {
+    labels.push({ label: t("appSettings.project.snapshots.hourly", { value: formatSnapshotHour(status.bucketStart) }), kind: "hourly" });
+  } else if (status.category === "daily" && status.bucketStart) {
+    labels.push({ label: t("appSettings.project.snapshots.daily", { value: formatSnapshotDay(status.bucketStart) }), kind: "daily" });
+  } else if (status.category === "weekly" && status.bucketStart) {
+    labels.push({ label: t("appSettings.project.snapshots.weekly", { value: formatSnapshotDay(status.bucketStart) }), kind: "weekly" });
+  } else if (!status.promotion) {
+    labels.push({ label: "-", kind: "empty" });
+  }
+  if (status.promotion) {
+    labels.push({ label: t("appSettings.project.snapshots.willBecome", { value: status.promotion }), kind: "promotion" });
+  }
+  return labels;
+}
+
+function snapshotRetentionBadgeClass(kind: SnapshotRetentionBadgeKind): string {
+  return `backup-badge backup-badge--retention backup-badge--retention-${kind}`;
+}
+
+function projectCreationSourceLabel(source: string, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (source) {
+    case "snapshot": return t("appSettings.project.createdFrom.snapshot");
+    case "kanqual_export": return t("appSettings.project.createdFrom.kanqualExport");
+    case "refi_qda": return t("appSettings.project.createdFrom.refiQda");
+    case "manual": return t("appSettings.project.createdFrom.manual");
+    default: return source ? source.replace(/_/g, " ") : t("appSettings.project.createdFrom.manual");
+  }
+}
+
+function csvEscape(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function EmbeddedPostgresProjectSettings({
+  project,
+  canManageProject,
+  canEditProjectMetadata = canManageProject,
+  memberCount,
+  ownerCount,
+  onProjectUpdated,
+  onProjectDeleted,
+  onProjectOpened,
+  embedded = false,
+}: EmbeddedProjectSettingsProps) {
+  const { t } = useI18n();
+  const [activeModal, setActiveModal] = useState<"details" | "storage" | "uploaded-files" | "backups" | "log" | "export" | "codebook" | "danger" | null>(null);
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description);
+  const [deleteConfirmationName, setDeleteConfirmationName] = useState("");
+  const [submitting, setSubmitting] = useState<"details" | "delete" | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [projectLogEntries, setProjectLogEntries] = useState<PostgresProjectLogEntry[]>([]);
+  const [expandedLogIds, setExpandedLogIds] = useState<Record<string, boolean>>({});
+  const [projectLogFilterOpen, setProjectLogFilterOpen] = useState(false);
+  const [projectLogFilters, setProjectLogFilters] = useState<Record<ProjectLogFilterColumn, string>>({
+    time: "",
+    user: "",
+    access: "",
+    category: "",
+    description: "",
+  });
+  const [backupManifest, setBackupManifest] = useState<PostgresProjectBackupManifest | null>(null);
+  const [backupBusy, setBackupBusy] = useState<"manual" | "delete" | "import" | null>(null);
+  const [backupError, setBackupError] = useState("");
+  const [backupNotice, setBackupNotice] = useState("");
+  const [deleteBackup, setDeleteBackup] = useState<PostgresProjectBackupEntry | null>(null);
+  const [importBackup, setImportBackup] = useState<PostgresProjectBackupEntry | null>(null);
+  const [importBackupProjectName, setImportBackupProjectName] = useState("");
+  const [importedBackupProject, setImportedBackupProject] = useState<PostgresProject | null>(null);
+  const [openBackupActionsFile, setOpenBackupActionsFile] = useState<string | null>(null);
+  const backupActionsMenuRef = useRef<HTMLTableCellElement | null>(null);
+  const [exporting, setExporting] = useState<"json" | "xlsx" | "qdpx" | "encrypted" | null>(null);
+  const [exportError, setExportError] = useState("");
+  const [encryptedBackupPassword, setEncryptedBackupPassword] = useState("");
+  const [encryptedBackupPasswordConfirm, setEncryptedBackupPasswordConfirm] = useState("");
+  const [encryptedBackupPasswordVisible, setEncryptedBackupPasswordVisible] = useState(false);
+  const [encryptedBackupPasswordConfirmVisible, setEncryptedBackupPasswordConfirmVisible] = useState(false);
+  const [codebookBusy, setCodebookBusy] = useState<"export" | "import" | null>(null);
+  const [codebookError, setCodebookError] = useState("");
+  const [codebookImportResult, setCodebookImportResult] = useState<{ importedCount: number } | null>(null);
+  const [projectLogExporting, setProjectLogExporting] = useState(false);
+
+  useEffect(() => {
+    setName(project.name);
+    setDescription(project.description);
+  }, [project.description, project.name]);
+
+  useEffect(() => {
+    if (!openBackupActionsFile) return;
+    function onPointerDown(event: PointerEvent) {
+      if (backupActionsMenuRef.current?.contains(event.target as Node)) return;
+      setOpenBackupActionsFile(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [openBackupActionsFile]);
+
+  async function loadSources() {
+    try {
+      setSources(await listPostgresSources(project.id));
+    } catch (loadError) {
+      setError(describeUnknownError(loadError));
+    }
+  }
+
+  async function loadProjectLog() {
+    try {
+      setProjectLogEntries(await listPostgresProjectLog(project.id));
+    } catch (loadError) {
+      setError(describeUnknownError(loadError));
+    }
+  }
+
+  async function loadBackups() {
+    try {
+      setBackupManifest(await loadPostgresProjectBackupManifest(project));
+    } catch (loadError) {
+      setBackupError(describeUnknownError(loadError));
+    }
+  }
+
+  const retainedSources = useMemo(
+    () => sources.filter((source) => source.storagePath || source.originalFileName),
+    [sources],
+  );
+
+  const sortedProjectLogEntries = useMemo(() => {
+    const normalizedFilters = Object.fromEntries(
+      Object.entries(projectLogFilters).map(([key, value]) => [key, value.trim().toLowerCase()]),
+    ) as Record<ProjectLogFilterColumn, string>;
+    return [...projectLogEntries]
+      .filter((entry) => {
+        const values: Record<ProjectLogFilterColumn, string> = {
+          time: formatProjectLogDateTime(entry.occurredAt).toLowerCase(),
+          user: (entry.userName || "-").toLowerCase(),
+          access: projectLogAccessModeLabel(entry.accessMode, t).toLowerCase(),
+          category: projectLogActionLabel(entry.action, t).toLowerCase(),
+          description: projectLogDescriptionLabel(entry, parseProjectLogDetails(entry.detailsJson), t).toLowerCase(),
+        };
+        return (Object.keys(normalizedFilters) as ProjectLogFilterColumn[]).every((column) => {
+          const filter = normalizedFilters[column];
+          return !filter || values[column].includes(filter);
+        });
+      })
+      .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+  }, [projectLogEntries, projectLogFilters, t]);
+
+  async function handleExport(format: "json" | "xlsx" | "qdpx") {
+    setExportError("");
+    setExporting(format);
+    try {
+      const extension = format === "json" ? "json" : format === "xlsx" ? "xlsx" : "qdpx";
+      const path = await save({
+        defaultPath: `${safeExportName(project.name)}_export.${extension}`,
+        filters: [{ name: t("appSettings.project.export.fileDialog", { format: extension.toUpperCase() }), extensions: [extension] }],
+      });
+      if (!path) return;
+      const data = await fetchPostgresProjectExportData(project);
+      if (format === "json") {
+        await writeTextFile(path, makeProjectBackupJson(data));
+      } else if (format === "xlsx") {
+        await writeFile(path, makeProjectBackupXlsx(data));
+      } else {
+        await writeFile(path, makeRefiQdaProject(data));
+      }
+      setNotice(t("appSettings.project.notices.exportedProjectData", { format: format.toUpperCase() }));
+    } catch (exportFailure) {
+      setExportError(describeUnknownError(exportFailure));
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  async function handleEncryptedBackupExport() {
+    setExportError("");
+    if (!encryptedBackupPassword || encryptedBackupPassword !== encryptedBackupPasswordConfirm) {
+      setExportError(t("appSettings.project.errors.matchingBackupPasswords"));
+      return;
+    }
+    setExporting("encrypted");
+    try {
+      const path = await save({
+        defaultPath: `${safeExportName(project.name)}_encrypted_backup.kqbe`,
+        filters: [{ name: t("appSettings.project.export.kanqualEncryptedBackupDialog"), extensions: ["kqbe"] }],
+      });
+      if (!path) return;
+      const data = await fetchPostgresProjectExportData(project);
+      const encryptedBackup = await invoke<string>("encrypt_project_backup", {
+        request: {
+          backupJson: makeProjectBackupJson(data),
+          password: encryptedBackupPassword,
+        },
+      });
+      await writeTextFile(path, encryptedBackup);
+      setEncryptedBackupPassword("");
+      setEncryptedBackupPasswordConfirm("");
+      setNotice(t("appSettings.project.notices.exportedEncryptedBackup"));
+    } catch (exportFailure) {
+      setExportError(describeUnknownError(exportFailure));
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  async function handleProjectLogExport() {
+    setExportError("");
+    setProjectLogExporting(true);
+    try {
+      const path = await save({
+        defaultPath: `${safeExportName(project.name)}_project_log.csv`,
+        filters: [{ name: t("appSettings.project.export.csvFileDialog"), extensions: ["csv"] }],
+      });
+      if (!path) return;
+      const entries = projectLogEntries.length ? sortedProjectLogEntries : await listPostgresProjectLog(project.id);
+      const csv = [
+        [
+          t("appSettings.project.log.time"),
+          t("appSettings.project.log.user"),
+          t("appSettings.project.log.access"),
+          t("appSettings.project.log.category"),
+          t("appSettings.project.log.action"),
+          t("appSettings.project.log.description"),
+        ].map(csvEscape).join(","),
+        ...entries.map((entry) => [
+          csvEscape(formatProjectLogDateTime(entry.occurredAt)),
+          csvEscape(entry.userName || "-"),
+          csvEscape(projectLogAccessModeLabel(entry.accessMode, t)),
+          csvEscape(projectLogActionCategory(entry.action)),
+          csvEscape(projectLogActionLabel(entry.action, t)),
+          csvEscape(entry.label || ""),
+        ].join(",")),
+      ].join("\n");
+      await writeTextFile(path, csv);
+      setNotice(t("appSettings.project.notices.exportedProjectLog"));
+    } catch (exportFailure) {
+      setExportError(describeUnknownError(exportFailure));
+    } finally {
+      setProjectLogExporting(false);
+    }
+  }
+
+  async function handleManualBackup() {
+    setBackupError("");
+    setBackupNotice("");
+    if (!canManageProject) {
+      setBackupError(t("appSettings.project.errors.createSnapshotDenied"));
+      return;
+    }
+    setBackupBusy("manual");
+    try {
+      const { manifest } = await createPostgresProjectBackup(project, "manual");
+      setBackupManifest(manifest);
+      clearPendingProjectBackupAttempt(project.id);
+      clearProjectBackupBannerIssue(project.id);
+      notifyProjectBackupsChanged(project.id);
+      setBackupNotice(t("appSettings.project.notices.snapshotCreated"));
+    } catch (backupFailure) {
+      setBackupError(describeUnknownError(backupFailure));
+    } finally {
+      setBackupBusy(null);
+    }
+  }
+
+  async function handleDeleteBackup() {
+    if (!deleteBackup) return;
+    setBackupError("");
+    if (!canManageProject) {
+      setBackupError(t("appSettings.project.errors.deleteSnapshotDenied"));
+      setDeleteBackup(null);
+      return;
+    }
+    if (!deleteBackup.manual) {
+      setBackupError(t("appSettings.project.errors.automaticSnapshotsManaged"));
+      setDeleteBackup(null);
+      return;
+    }
+    setBackupBusy("delete");
+    try {
+      setBackupManifest(await deletePostgresProjectBackup(project, deleteBackup));
+      setDeleteBackup(null);
+      setBackupNotice(t("appSettings.project.notices.snapshotDeleted"));
+    } catch (deleteFailure) {
+      setBackupError(describeUnknownError(deleteFailure));
+    } finally {
+      setBackupBusy(null);
+    }
+  }
+
+  async function handleImportBackup() {
+    if (!importBackup) return;
+    setBackupError("");
+    setBackupNotice("");
+    if (!importBackupProjectName.trim()) {
+      setBackupError(t("appSettings.project.errors.enterNewProjectName"));
+      return;
+    }
+    if (!canManageProject) {
+      setBackupError(t("appSettings.project.errors.restoreSnapshotDenied"));
+      setImportBackup(null);
+      return;
+    }
+    setBackupBusy("import");
+    try {
+      const imported = await importPostgresProjectBackupAsProject(project, importBackup, {
+        name: importBackupProjectName.trim(),
+      });
+      setImportedBackupProject(imported);
+      setImportBackup(null);
+      setImportBackupProjectName("");
+      setBackupNotice(t("appSettings.project.notices.snapshotRestored", { name: imported.name }));
+    } catch (importFailure) {
+      setBackupError(describeUnknownError(importFailure));
+    } finally {
+      setBackupBusy(null);
+    }
+  }
+
+  async function handleCodebookExport() {
+    setCodebookError("");
+    setCodebookBusy("export");
+    try {
+      const path = await save({
+        defaultPath: `${safeExportName(project.name)}_codebook.qdc`,
+        filters: [{ name: t("appSettings.project.codebook.refiTitle"), extensions: ["qdc"] }],
+      });
+      if (!path) return;
+      const data = await fetchPostgresProjectExportData(project);
+      await writeTextFile(path, makeRefiQdaCodebook(data));
+      setNotice(t("appSettings.project.notices.exportedCodebook"));
+    } catch (exportFailure) {
+      setCodebookError(describeUnknownError(exportFailure));
+    } finally {
+      setCodebookBusy(null);
+    }
+  }
+
+  async function handleCodebookImport() {
+    setCodebookError("");
+    setCodebookBusy("import");
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [{ name: t("appSettings.project.codebook.refiTitle"), extensions: ["qdc", "xml"] }],
+      });
+      if (!path || Array.isArray(path)) return;
+      const codes = parseRefiQdaCodebook(await readTextFile(path));
+      const importedCount = await importPostgresRefiQdaCodebook(project.id, codes);
+      setCodebookImportResult({ importedCount });
+    } catch (importFailure) {
+      setCodebookError(describeUnknownError(importFailure));
+    } finally {
+      setCodebookBusy(null);
+    }
+  }
+
+  async function handleSaveDetails(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (!canEditProjectMetadata) {
+      setError(t("appSettings.project.errors.editDetailsDenied"));
+      return;
+    }
+    if (!name.trim()) {
+      setError(t("appSettings.project.errors.enterProjectName"));
+      return;
+    }
+
+    setSubmitting("details");
+    try {
+      const updated = await updatePostgresProject({
+        projectId: project.id,
+        name: name.trim(),
+        description: description.trim(),
+      });
+      onProjectUpdated(updated);
+      setActiveModal(null);
+      setNotice(t("appSettings.project.notices.updatedProject", { name: updated.name }));
+    } catch (updateError) {
+      setError(describeUnknownError(updateError));
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
+  async function handleDeleteProject() {
+    setError("");
+    setNotice("");
+    if (!canManageProject) {
+      setError(t("appSettings.project.errors.deleteProjectDenied"));
+      return;
+    }
+    if (deleteConfirmationName.trim() !== project.name.trim()) {
+      setError(t("appSettings.project.errors.confirmProjectName"));
+      return;
+    }
+
+    setSubmitting("delete");
+    try {
+      await deletePostgresProject(project.id);
+      onProjectDeleted(project.id);
+    } catch (deleteError) {
+      setError(describeUnknownError(deleteError));
+      setSubmitting(null);
+    }
+  }
+
+  function openRequestedProjectSettingsModal() {
+    const requestedModal = sessionStorage.getItem("kanqual:open-project-settings-modal");
+    if (requestedModal !== "backups") return;
+    sessionStorage.removeItem("kanqual:open-project-settings-modal");
+    setBackupError("");
+    setBackupNotice("");
+    setActiveModal("backups");
+    void loadBackups();
+  }
+
+  useEffect(() => {
+    openRequestedProjectSettingsModal();
+
+    function handleOpenProjectSettingsModal() {
+      openRequestedProjectSettingsModal();
+    }
+
+    window.addEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    return () => {
+      window.removeEventListener(OPEN_PROJECT_SETTINGS_MODAL_EVENT, handleOpenProjectSettingsModal);
+    };
+  }, [project.id]);
+
+  const projectSettingsSections = [
+    {
+      heading: t("appSettings.project.cards.projectHeading"),
+      cards: [
+        {
+          id: "details",
+          title: t("appSettings.project.cards.detailsShortTitle"),
+          icon: <SettingsProjectDetailsIcon />,
+          description: t("appSettings.project.cards.detailsShortDescription"),
+          onOpen: () => {
+            setError("");
+            setName(project.name);
+            setDescription(project.description);
+            setActiveModal("details");
+          },
+        },
+        {
+          id: "storage",
+          title: t("appSettings.project.cards.storageTitle"),
+          icon: <SettingsStorageIcon />,
+          description: t("appSettings.project.cards.storageDescription"),
+          onOpen: () => {
+            setError("");
+            setActiveModal("storage");
+          },
+        },
+      ],
+    },
+    {
+      heading: t("appSettings.project.cards.dataHeading"),
+      cards: [
+        {
+          id: "uploaded-files",
+          title: t("appSettings.project.cards.uploadedFilesTitle"),
+          icon: <SettingsUploadedFilesIcon />,
+          description: t("appSettings.project.cards.uploadedFilesDescription"),
+          onOpen: () => {
+            setError("");
+            setActiveModal("uploaded-files");
+            void loadSources();
+          },
+        },
+        {
+          id: "backups",
+          title: t("appSettings.project.cards.snapshotsTitle"),
+          icon: <SettingsUpdatesIcon />,
+          description: t("appSettings.project.cards.snapshotsDescription"),
+          onOpen: () => {
+            setBackupError("");
+            setBackupNotice("");
+            setActiveModal("backups");
+            void loadBackups();
+          },
+        },
+        {
+          id: "log",
+          title: t("appSettings.project.cards.logTitle"),
+          icon: <SettingsProjectLogIcon />,
+          description: t("appSettings.project.cards.logDescription"),
+          onOpen: () => {
+            setError("");
+            setActiveModal("log");
+            void loadProjectLog();
+          },
+        },
+      ],
+    },
+    {
+      heading: t("appSettings.project.cards.exchangeHeading"),
+      cards: [
+        {
+          id: "export",
+          title: t("appSettings.project.cards.exportTitle"),
+          icon: <DownloadIcon />,
+          description: t("appSettings.project.cards.exportDescription"),
+          onOpen: () => {
+            setExportError("");
+            setActiveModal("export");
+          },
+        },
+        {
+          id: "codebook",
+          title: t("appSettings.project.cards.codebookTitle"),
+          icon: <SettingsCodebookIcon />,
+          description: t("appSettings.project.cards.codebookDescription"),
+          onOpen: () => {
+            setCodebookError("");
+            setActiveModal("codebook");
+          },
+        },
+        {
+          id: "danger",
+          title: t("appSettings.project.cards.deleteProjectTitle"),
+          icon: <DeleteIcon />,
+          description: t("appSettings.project.cards.deleteProjectDescription"),
+          requiresProjectManagement: true,
+          onOpen: () => {
+            setError("");
+            setDeleteConfirmationName("");
+            setActiveModal("danger");
+          },
+        },
+      ],
+    },
+  ];
+  const visibleProjectSettingsSections = projectSettingsSections
+    .map((section) => ({
+      ...section,
+      cards: section.cards.filter((card) => !card.requiresProjectManagement || canManageProject),
+    }))
+    .filter((section) => section.cards.length > 0);
+  const projectSettingsCards = visibleProjectSettingsSections.flatMap((section) => section.cards);
+
+  return (
+    <div className={embedded ? "project-settings-view project-settings-view--embedded" : "view project-settings-view"}>
+      {!embedded ? (
+        <ViewHeader
+          title={t("appSettings.project.pageTitle")}
+          titleClassName="view-title-with-help"
+        />
+      ) : null}
+
+      {notice ? <p className="settings-success">{notice}</p> : null}
+      {error ? <p className="auth-error">{error}</p> : null}
+
+      <div className="app-settings-overview-shell project-settings-overview-shell">
+        <div className={embedded ? "app-settings-overview-stack app-settings-overview-stack--compact" : "app-settings-overview-stack"}>
+          {embedded ? (
+            <div className="app-settings-overview-grid app-settings-overview-grid--compact">
+              {projectSettingsCards.map((card) => (
+                <SettingsOverviewCard
+                  key={card.id}
+                  compact
+                  icon={card.icon}
+                  title={card.title}
+                  description={card.description}
+                  onActivate={card.onOpen}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="app-settings-overview-sections">
+              {visibleProjectSettingsSections.map((section) => (
+                <SettingsOverviewSection key={section.heading} heading={section.heading}>
+                  {section.cards.map((card) => (
+                    <SettingsOverviewCard
+                      key={card.id}
+                      icon={card.icon}
+                      title={card.title}
+                      description={card.description}
+                      onActivate={card.onOpen}
+                    />
+                  ))}
+                </SettingsOverviewSection>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {activeModal === "details" ? (
+        <SettingsModal title={t("appSettings.project.details.title")} onClose={() => setActiveModal(null)} closeDisabled={submitting === "details"}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+                    <h3>{t("appSettings.project.details.metadata")}</h3>
+                  </div>
+                  <div className="app-settings-modal-section-body">
+                    <div className="home-restricted-list" style={{ marginBottom: 16 }}>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">{t("appSettings.project.details.createdFrom")}</span>
+                        <span className="home-restricted-value">{projectCreationSourceLabel(project.creationSource, t)}</span>
+                      </div>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">{t("appSettings.project.details.createdAt")}</span>
+                        <span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span>
+                      </div>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">{t("appSettings.project.details.createdBy")}</span>
+                        <span className="home-restricted-value">{project.createdByUsername || t("appSettings.project.createdFrom.unknown")}</span>
+                      </div>
+                    </div>
+                    <form className="form" onSubmit={handleSaveDetails}>
+                      <label className="form-label">
+                        {t("appSettings.project.details.projectName")}
+                        <input
+                          className="form-input"
+                          value={name}
+                          onChange={(event) => setName(event.target.value)}
+                          disabled={submitting === "details" || !canEditProjectMetadata}
+                          autoFocus
+                        />
+                      </label>
+                      <label className="form-label">
+                        {t("appSettings.project.details.description")}
+                        <textarea
+                          className="form-input form-textarea"
+                          rows={5}
+                          value={description}
+                          onChange={(event) => setDescription(event.target.value)}
+                          disabled={submitting === "details" || !canEditProjectMetadata}
+                        />
+                      </label>
+                      {!canEditProjectMetadata ? (
+                        <p className="auth-hint" style={{ marginTop: 0 }}>
+                          {t("appSettings.project.errors.editDetailsDenied")}
+                        </p>
+                      ) : null}
+                      <div className="form-actions">
+                        <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "details"}>
+                          {t("common.cancel")}
+                        </button>
+                        <button
+                          type="submit"
+                          className="btn btn--primary"
+                          disabled={submitting === "details" || !canEditProjectMetadata || !name.trim()}
+                        >
+                          {submitting === "details" ? t("common.saving") : t("appSettings.project.details.saveChanges")}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </section>
+              </div>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "storage" ? (
+        <SettingsModal title={t("appSettings.project.storage.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+                    <h3>{t("appSettings.project.storage.dedicatedDatabase")}</h3>
+                  </div>
+                  <div className="app-settings-modal-section-body">
+                    <div className="home-restricted-list">
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.databaseName")}</span><span className="home-restricted-value">{project.databaseName || "-"}</span></div>
+                      <div className="home-restricted-item">
+                        <span className="home-restricted-label">{t("appSettings.project.storage.storagePath")}</span>
+                        <span className="home-restricted-value" style={{ textAlign: "right", overflowWrap: "anywhere" }}>
+                          {project.storagePath || "-"}
+                        </span>
+                      </div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.created")}</span><span className="home-restricted-value">{formatPostgresDateTime(project.createdAt)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.lastUpdated")}</span><span className="home-restricted-value">{formatPostgresDateTime(project.updatedAt)}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.owners")}</span><span className="home-restricted-value">{ownerCount}</span></div>
+                      <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.storage.members")}</span><span className="home-restricted-value">{memberCount}</span></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "uploaded-files" ? (
+        <SettingsModal title={t("appSettings.project.uploadedFiles.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+                    <h3>{t("appSettings.project.uploadedFiles.retainedSourceFiles")}</h3>
+                  </div>
+                  <div className="app-settings-modal-section-body">
+                    <div className="backup-list">
+                      {retainedSources.length > 0 ? retainedSources.map((source) => (
+                        <div key={source.id} className="backup-list-item">
+                          <div>
+                            <div className="backup-list-title">
+                              {source.originalFileName || source.title || t("appSettings.project.uploadedFiles.untitledSource")}
+                              <span className="backup-badge backup-badge--scheduled">{source.sourceKind}</span>
+                            </div>
+                            <div className="backup-list-meta">
+                              {source.title}
+                              {source.storagePath ? ` | ${source.storagePath}` : ""}
+                            </div>
+                            <div className="backup-list-meta">
+                              {t("appSettings.project.uploadedFiles.imported", { date: formatPostgresDateTime(source.createdAt) })}
+                            </div>
+                          </div>
+                        </div>
+                      )) : (
+                        <div className="empty-state backup-empty-state">
+                          <p>{t("appSettings.project.uploadedFiles.noneFound")}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "backups" ? (
+        <SettingsModal title={t("appSettings.project.snapshots.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                {backupError ? <div className="form-error project-settings-error">{backupError}</div> : null}
+                {backupNotice ? <div className="settings-success project-settings-success">{backupNotice}</div> : null}
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-body">
+                    <div className="backup-create-actions">
+                      <button
+                        className="btn"
+                        onClick={() => void handleManualBackup()}
+                        disabled={backupBusy === "manual" || !canManageProject}
+                        title={!canManageProject ? t("appSettings.project.errors.createSnapshotDenied") : undefined}
+                      >
+                        {backupBusy === "manual" ? t("appSettings.project.snapshots.creating") : t("appSettings.project.snapshots.createNow")}
+                      </button>
+                    </div>
+                    {!canManageProject ? (
+                      <p className="auth-hint" style={{ marginBottom: 0 }}>
+                        {t("appSettings.project.errors.manageSnapshotsDenied")}
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
+                    <h3>{t("appSettings.project.snapshots.available")}</h3>
+                  </div>
+                  <div className="app-settings-modal-section-body">
+                    <div className="backup-list">
+                      {backupManifest?.backups.length ? (
+                        <div className="project-log-table-wrap snapshot-table-wrap">
+                          <table className="project-log-table snapshot-table">
+                            <thead>
+                              <tr>
+                                <th>{t("appSettings.project.snapshots.created")}</th>
+                                <th>{t("appSettings.project.snapshots.retainedUntil")}</th>
+                                <th>{t("appSettings.project.snapshots.retention")}</th>
+                                <th>{t("appSettings.project.snapshots.reason")}</th>
+                                <th>{t("appSettings.project.snapshots.total")}</th>
+                                <th>{t("appSettings.project.snapshots.trigger")}</th>
+                                <th>{t("appSettings.project.snapshots.actions")}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {backupManifest.backups.map((backup) => {
+                                const retentionStatus = postgresBackupRetentionStatus(
+                                  backup,
+                                  backupManifest.backups,
+                                  backupManifest.retention,
+                                );
+                                const retentionLabels = snapshotRetentionBucketLabels(retentionStatus, t);
+                                const createdParts = formatSnapshotCreatedParts(backup.createdAt);
+                                return (
+                                  <tr key={backup.file}>
+                                    <td className="log-cell log-cell--time snapshot-created-cell">
+                                      <span>{createdParts.date}</span>
+                                      {createdParts.time ? <span>{createdParts.time}</span> : null}
+                                    </td>
+                                    <td className="log-cell log-cell--time">{snapshotRetentionUntilLabel(retentionStatus, t)}</td>
+                                    <td className="log-cell snapshot-retention-cell">
+                                      {retentionLabels.map((item) => (
+                                        <span
+                                          key={item.label}
+                                          className={snapshotRetentionBadgeClass(item.kind)}
+                                        >
+                                          {item.label}
+                                        </span>
+                                      ))}
+                                    </td>
+                                    <td className="log-cell log-cell--label">{backupReasonLabel(backup, t)}</td>
+                                    <td className="log-cell log-cell--time">{formatPostgresBackupSize(backup.sizeBytes) || "0 B"}</td>
+                                    <td className="log-cell log-cell--label">{backup.sourceLogLabel ? t("appSettings.project.snapshots.triggeredBy", { label: backup.sourceLogLabel }) : "-"}</td>
+                                    <td
+                                      className="log-cell snapshot-table-actions"
+                                      ref={openBackupActionsFile === backup.file ? backupActionsMenuRef : undefined}
+                                    >
+                                      <button
+                                        type="button"
+                                        className="snapshot-actions-trigger"
+                                        onClick={() => {
+                                          setOpenBackupActionsFile((current) => current === backup.file ? null : backup.file);
+                                        }}
+                                        aria-label={t("appSettings.project.snapshots.actionMenu")}
+                                        aria-expanded={openBackupActionsFile === backup.file}
+                                        title={t("appSettings.project.snapshots.actionMenu")}
+                                      >
+                                        ...
+                                      </button>
+                                      {openBackupActionsFile === backup.file ? (
+                                        <div className="snapshot-actions-menu" role="menu">
+                                          <button
+                                            type="button"
+                                            className="snapshot-actions-menu-item"
+                                            onClick={() => {
+                                              setOpenBackupActionsFile(null);
+                                              setBackupError("");
+                                              setBackupNotice("");
+                                              setImportBackup(backup);
+                                              setImportBackupProjectName(t("appSettings.project.snapshots.snapshotCopyName", { projectName: project.name }));
+                                            }}
+                                            disabled={!!backupBusy || !canManageProject}
+                                            title={!canManageProject ? t("appSettings.project.errors.restoreSnapshotDenied") : undefined}
+                                            role="menuitem"
+                                          >
+                                            {t("common.restore")}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="snapshot-actions-menu-item snapshot-actions-menu-item--danger"
+                                            onClick={() => {
+                                              setOpenBackupActionsFile(null);
+                                              setDeleteBackup(backup);
+                                            }}
+                                            disabled={!!backupBusy || !canManageProject || !backup.manual}
+                                            title={
+                                              !canManageProject
+                                                ? t("appSettings.project.errors.deleteSnapshotDenied")
+                                                : !backup.manual
+                                                  ? t("appSettings.project.errors.automaticSnapshotsManagedShort")
+                                                  : undefined
+                                            }
+                                            role="menuitem"
+                                          >
+                                            {t("common.delete")}
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="empty-state backup-empty-state">
+                          <p>{t("appSettings.project.snapshots.noSnapshots")}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "log" ? (
+        <SettingsModal title={t("appSettings.project.log.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              {exportError ? <p className="auth-error">{exportError}</p> : null}
+              <div className="app-settings-modal-sections">
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-body">
+                    <div className="settings-inline-actions" style={{ justifyContent: "flex-end", marginBottom: 10 }}>
+                      <button
+                        type="button"
+                        className="codebook-icon-action"
+                        onClick={() => void handleProjectLogExport()}
+                        disabled={projectLogExporting}
+                        aria-label={t("appSettings.project.log.exportCsvLabel")}
+                        title={projectLogExporting ? t("appSettings.project.export.exporting") : t("appSettings.project.log.exportCsvTitle")}
+                      >
+                        <DownloadIcon className="filter-icon-svg" />
+                      </button>
+                      <button
+                        type="button"
+                        className="codebook-icon-action"
+                        onClick={() => setProjectLogFilterOpen(true)}
+                        aria-label={t("appSettings.project.log.filterLogLabel")}
+                        title={t("appSettings.project.log.filter")}
+                      >
+                        <FilterIcon className="filter-icon-svg" />
+                      </button>
+                    </div>
+                    {sortedProjectLogEntries.length === 0 ? (
+                      <div className="empty-state backup-empty-state">
+                        <p>{t("appSettings.project.log.noActivity")}</p>
+                      </div>
+                    ) : (
+                      <div className="project-log-table-wrap">
+                        <table className="project-log-table">
+                          <thead>
+                            <tr>
+                              <th>{t("appSettings.project.log.time")}</th>
+                              <th>{t("appSettings.project.log.user")}</th>
+                              <th>{t("appSettings.project.log.access")}</th>
+                              <th>{t("appSettings.project.log.category")}</th>
+                              <th>{t("appSettings.project.log.description")}</th>
+                              <th>{t("appSettings.project.log.details")}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortedProjectLogEntries.map((entry) => {
+                              const details = parseProjectLogDetails(entry.detailsJson);
+                              const isExpanded = Boolean(expandedLogIds[entry.id]);
+                              const summary = details ? summarizeProjectLogDetails(entry.action, details, t) : "";
+                              return (
+                                <Fragment key={entry.id}>
+                                  <tr className={`log-row log-row--${projectLogActionCategory(entry.action)}`}>
+                                    <td className="log-cell log-cell--time">{formatProjectLogDateTime(entry.occurredAt)}</td>
+                                    <td className="log-cell log-cell--user">{entry.userName || "-"}</td>
+                                    <td className="log-cell log-cell--user">{projectLogAccessModeLabel(entry.accessMode, t)}</td>
+                                    <td className="log-cell log-cell--action">
+                                      <span className={`log-badge log-badge--${projectLogActionCategory(entry.action)}`}>
+                                        {projectLogActionLabel(entry.action, t)}
+                                      </span>
+                                    </td>
+                                    <td className="log-cell log-cell--label">
+                                      <div>{projectLogDescriptionLabel(entry, details, t)}</div>
+                                      {summary ? <div className="log-inline-summary">{summary}</div> : null}
+                                    </td>
+                                    <td className="log-cell log-cell--details-toggle">
+                                      {details ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn--xs log-details-toggle"
+                                          onClick={() => setExpandedLogIds((current) => ({ ...current, [entry.id]: !current[entry.id] }))}
+                                          aria-expanded={isExpanded}
+                                        >
+                                          {isExpanded ? t("appSettings.project.log.hide") : t("appSettings.project.log.view")}
+                                        </button>
+                                      ) : (
+                                        <span className="log-details-none">-</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                  {details && isExpanded ? (
+                                    <tr className="log-details-row">
+                                      <td className="log-cell log-cell--details" colSpan={6}>
+                                        <ProjectLogDetailsPanel details={details} />
+                                      </td>
+                                    </tr>
+                                  ) : null}
+                                </Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "log" && projectLogFilterOpen ? (
+        <SettingsModal title={t("appSettings.project.log.filterTitle")} onClose={() => setProjectLogFilterOpen(false)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-body">
+                    <div className="settings-form-grid">
+                      {([
+                        ["time", t("appSettings.project.log.time")],
+                        ["user", t("appSettings.project.log.user")],
+                        ["access", t("appSettings.project.log.access")],
+                        ["category", t("appSettings.project.log.category")],
+                        ["description", t("appSettings.project.log.description")],
+                      ] as Array<[ProjectLogFilterColumn, string]>).map(([column, label]) => (
+                        <label className="form-field" key={column}>
+                          <span>{label}</span>
+                          <input
+                            className="form-input"
+                            value={projectLogFilters[column]}
+                            onChange={(event) => setProjectLogFilters((current) => ({ ...current, [column]: event.target.value }))}
+                            placeholder={t("appSettings.project.log.filterPlaceholder", { label: label.toLowerCase() })}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setProjectLogFilters({
+                  time: "",
+                  user: "",
+                  access: "",
+                  category: "",
+                  description: "",
+                })}
+              >
+                {t("common.clear")}
+              </button>
+              <button type="button" className="btn btn--primary" onClick={() => setProjectLogFilterOpen(false)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "export" ? (
+        <SettingsModal title={t("appSettings.project.export.title")} onClose={() => setActiveModal(null)} closeDisabled={!!exporting}>
+            <div className="app-settings-modal-body">
+              {exportError ? <p className="auth-error">{exportError}</p> : null}
+              <div className="app-settings-modal-sections">
+                <section className="project-backup-primary-panel">
+                  <div className="project-backup-primary-header">
+                    <div>
+                      <h3>{t("appSettings.project.export.encryptedTitle")}</h3>
+                      <p>{t("appSettings.project.export.encryptedDescription")}</p>
+                    </div>
+                  </div>
+                  <div className="project-backup-password-grid">
+                    <label className="form-label">
+                      {t("appSettings.project.export.backupPassword")}
+                      <div className="password-input-wrap">
+                        <input
+                          className="form-input password-input-field"
+                          type={encryptedBackupPasswordVisible ? "text" : "password"}
+                          value={encryptedBackupPassword}
+                          onChange={(event) => setEncryptedBackupPassword(event.target.value)}
+                          autoComplete="new-password"
+                          disabled={!!exporting}
+                        />
+                        <button
+                          type="button"
+                          className="password-visibility-btn"
+                          aria-label={encryptedBackupPasswordVisible ? t("common.hidePassword") : t("common.showPassword")}
+                          aria-pressed={encryptedBackupPasswordVisible}
+                          onClick={() => setEncryptedBackupPasswordVisible((current) => !current)}
+                          disabled={!!exporting}
+                        >
+                          {encryptedBackupPasswordVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
+                        </button>
+                      </div>
+                    </label>
+                    <label className="form-label">
+                      {t("appSettings.project.export.confirmPassword")}
+                      <div className="password-input-wrap">
+                        <input
+                          className="form-input password-input-field"
+                          type={encryptedBackupPasswordConfirmVisible ? "text" : "password"}
+                          value={encryptedBackupPasswordConfirm}
+                          onChange={(event) => setEncryptedBackupPasswordConfirm(event.target.value)}
+                          autoComplete="new-password"
+                          disabled={!!exporting}
+                        />
+                        <button
+                          type="button"
+                          className="password-visibility-btn"
+                          aria-label={encryptedBackupPasswordConfirmVisible ? t("common.hidePassword") : t("common.showPassword")}
+                          aria-pressed={encryptedBackupPasswordConfirmVisible}
+                          onClick={() => setEncryptedBackupPasswordConfirmVisible((current) => !current)}
+                          disabled={!!exporting}
+                        >
+                          {encryptedBackupPasswordConfirmVisible ? <EyeOffIcon className="password-visibility-icon" /> : <EyeIcon className="password-visibility-icon" />}
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+                  {encryptedBackupPasswordConfirm && encryptedBackupPassword !== encryptedBackupPasswordConfirm ? (
+                    <p className="settings-warning settings-warning--danger" style={{ margin: 0 }}>
+                      {t("appSettings.project.export.passwordMismatch")}
+                    </p>
+                  ) : null}
+                  <div className="project-backup-primary-actions">
+                    <button className="btn btn--primary" onClick={() => void handleEncryptedBackupExport()} disabled={!!exporting || !encryptedBackupPassword || !encryptedBackupPasswordConfirm || encryptedBackupPassword !== encryptedBackupPasswordConfirm}>
+                      {exporting === "encrypted" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportBackup")}
+                    </button>
+                  </div>
+                </section>
+
+                <section className="project-export-secondary-section">
+                  <h3>{t("appSettings.project.export.otherFormats")}</h3>
+                  <p className="project-export-secondary-note">
+                    {t("appSettings.project.export.otherFormatsNote")}
+                  </p>
+                  <div className="project-export-format-list">
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">{t("appSettings.project.export.jsonFormat")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.export.jsonDescription")}</div>
+                      </div>
+                      <button className="btn" onClick={() => void handleExport("json")} disabled={!!exporting}>
+                        {exporting === "json" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportAction")}
+                      </button>
+                    </div>
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">{t("appSettings.project.export.refiQdaFormat")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.export.refiDescription")}</div>
+                      </div>
+                      <button className="btn" onClick={() => void handleExport("qdpx")} disabled={!!exporting}>
+                        {exporting === "qdpx" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportAction")}
+                      </button>
+                    </div>
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">{t("appSettings.project.export.excelFormat")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.export.excelDescription")}</div>
+                      </div>
+                      <button className="btn" onClick={() => void handleExport("xlsx")} disabled={!!exporting}>
+                        {exporting === "xlsx" ? t("appSettings.project.export.exporting") : t("appSettings.project.export.exportAction")}
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)} disabled={!!exporting}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "codebook" ? (
+        <SettingsModal title={t("appSettings.project.codebook.title")} onClose={() => setActiveModal(null)} closeDisabled={!!codebookBusy}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                {codebookError ? <p className="auth-error">{codebookError}</p> : null}
+                <section className="project-backup-primary-panel">
+                  <div className="project-backup-primary-header">
+                    <div>
+                      <h3>{t("appSettings.project.codebook.refiTitle")}</h3>
+                      <p>{t("appSettings.project.codebook.description")}</p>
+                    </div>
+                  </div>
+                  <div className="project-export-format-list">
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">{t("appSettings.project.codebook.importTitle")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.codebook.importDescription")}</div>
+                      </div>
+                      <button className="btn" onClick={() => void handleCodebookImport()} disabled={!!codebookBusy}>
+                        {codebookBusy === "import" ? t("appSettings.project.codebook.importing") : t("appSettings.project.codebook.importTitle")}
+                      </button>
+                    </div>
+                    <div className="project-export-format-row">
+                      <div>
+                        <div className="project-export-format-title">{t("appSettings.project.codebook.exportTitle")}</div>
+                        <div className="project-export-format-copy">{t("appSettings.project.codebook.exportDescription")}</div>
+                      </div>
+                      <button className="btn btn--primary" onClick={() => void handleCodebookExport()} disabled={!!codebookBusy}>
+                        {codebookBusy === "export" ? t("appSettings.project.export.exporting") : t("appSettings.project.codebook.exportTitle")}
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <span />
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)} disabled={!!codebookBusy}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "danger" ? (
+        <SettingsModal title={t("appSettings.project.deleteProject.title")} onClose={() => setActiveModal(null)} closeDisabled={submitting === "delete"}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                <section className="app-settings-modal-section">
+                  <div className="app-settings-modal-section-header app-settings-modal-section-header--danger">
+                    <h3>{t("appSettings.project.deleteProject.dangerZone")}</h3>
+                  </div>
+                  <div className="app-settings-modal-section-body">
+                    <p className="settings-warning settings-warning--danger">
+                      {t("appSettings.project.deleteProject.warningPrefix")} <strong>{project.name}</strong>, {t("appSettings.project.deleteProject.warningSuffix")}
+                    </p>
+                    <label className="form-label">
+                      {t("appSettings.project.deleteProject.confirmLabel")}
+                      <input
+                        className="form-input"
+                        value={deleteConfirmationName}
+                        onChange={(event) => setDeleteConfirmationName(event.target.value)}
+                        disabled={submitting === "delete" || !canManageProject}
+                        autoFocus
+                      />
+                    </label>
+                    {!canManageProject ? (
+                      <p className="auth-hint" style={{ marginTop: 0 }}>
+                        {t("appSettings.project.errors.deleteProjectDenied")}
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <button type="button" className="btn" onClick={() => setActiveModal(null)} disabled={submitting === "delete"}>{t("common.cancel")}</button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                onClick={() => void handleDeleteProject()}
+                disabled={submitting === "delete" || !canManageProject || deleteConfirmationName.trim() !== project.name.trim()}
+              >
+                {submitting === "delete" ? t("appSettings.project.deleteProject.deleting") : t("appSettings.project.deleteProject.deleteAction")}
+              </button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {deleteBackup ? (
+        <ConfirmDialog
+          title={t("appSettings.project.snapshots.deleteTitle")}
+          onClose={() => setDeleteBackup(null)}
+          onConfirm={() => void handleDeleteBackup()}
+          busy={backupBusy === "delete"}
+          confirmDisabled={!canManageProject}
+          confirmLabel={t("appSettings.project.snapshots.deleteAction")}
+          busyLabel={t("appSettings.project.snapshots.deleting")}
+          tone="danger"
+          footerClassName="app-settings-modal-footer"
+        >
+          <p className="import-project-copy">
+            {t("appSettings.project.snapshots.deleteBody", { date: formatPostgresDateTime(deleteBackup.createdAt) })}
+          </p>
+        </ConfirmDialog>
+      ) : null}
+
+      {importBackup ? (
+        <SettingsModal
+          title={t("appSettings.project.snapshots.restoreTitle")}
+          onClose={() => {
+            setImportBackup(null);
+            setImportBackupProjectName("");
+          }}
+          closeDisabled={backupBusy === "import"}
+        >
+            <div className="app-settings-modal-body">
+              <p className="import-project-copy">
+                {t("appSettings.project.snapshots.restoreBody", { date: formatPostgresDateTime(importBackup.createdAt) })}
+              </p>
+              <label className="form-field">
+                <span>{t("appSettings.project.snapshots.newProjectName")}</span>
+                <input
+                  className="form-input"
+                  value={importBackupProjectName}
+                  onChange={(event) => setImportBackupProjectName(event.target.value)}
+                  disabled={backupBusy === "import"}
+                  autoFocus
+                />
+              </label>
+              <div className="home-restricted-list">
+                <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.snapshots.database")}</span><span className="home-restricted-value">{formatPostgresBackupSize(importBackup.databaseBytes) || "0 B"}</span></div>
+                <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.snapshots.files")}</span><span className="home-restricted-value">{formatPostgresBackupSize(importBackup.storageBytes) || "0 B"}</span></div>
+                <div className="home-restricted-item"><span className="home-restricted-label">{t("appSettings.project.snapshots.storedFiles")}</span><span className="home-restricted-value">{importBackup.storageFileCount}</span></div>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer">
+              <button type="button" className="btn" onClick={() => {
+                setImportBackup(null);
+                setImportBackupProjectName("");
+              }} disabled={backupBusy === "import"}>{t("common.cancel")}</button>
+              <button type="button" className="btn btn--primary" onClick={() => void handleImportBackup()} disabled={backupBusy === "import" || !canManageProject || !importBackupProjectName.trim()}>
+                {backupBusy === "import" ? t("common.restoring") : t("common.restore")}
+              </button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {importedBackupProject ? (
+        <SettingsModal title={t("appSettings.project.snapshots.restoredTitle")} onClose={() => setImportedBackupProject(null)}>
+            <div className="app-settings-modal-body">
+              <p className="import-project-copy">
+                {t("appSettings.project.snapshots.restoredBody", { name: importedBackupProject.name })}
+              </p>
+            </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              {onProjectOpened ? (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    const projectToOpen = importedBackupProject;
+                    setImportedBackupProject(null);
+                    void onProjectOpened(projectToOpen);
+                  }}
+                >
+                  {t("appSettings.project.snapshots.openProject")}
+                </button>
+              ) : null}
+              <button type="button" className="btn btn--primary" onClick={() => setImportedBackupProject(null)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {codebookImportResult ? (
+        <SettingsModal title={t("appSettings.project.codebook.importedTitle")} onClose={() => setCodebookImportResult(null)}>
+            <div className="app-settings-modal-body">
+              <p className="import-project-copy">
+                {t("appSettings.project.codebook.importedBody", { count: codebookImportResult.importedCount })}
+              </p>
+            </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              <button type="button" className="btn btn--primary" onClick={() => setCodebookImportResult(null)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+    </div>
+  );
+}
+
+
+export function AppSettingsView({
+  authSession,
+  project,
+  canManageProject = false,
+  canEditProjectMetadata = canManageProject,
+  memberCount = 0,
+  ownerCount = 0,
+  objectCount = 0,
+  relationshipCount = 0,
+  onProjectUpdated,
+  onProjectDeleted,
+  onProjectOpened,
+  onAuthSessionUpdated,
+  onAuthSessionInvalidated,
+}: AppSettingsViewProps) {
+  const { locale, setLocale, t } = useI18n();
+  const [activeModal, setActiveModal] = useState<AppSettingsModalId | null>(null);
+  const [showThemeManager, setShowThemeManager] = useState(false);
+  const [appInfo, setAppInfo] = useState<AppRuntimeInfo | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [theme, setTheme] = useState<Theme>("light");
+  const [density, setDensity] = useState<Density>("comfortable");
+  const [fontSize, setFontSize] = useState<FontSize>("normal");
+  const [sourceTextSizePx, setSourceTextSizePx] = useState(15);
+  const [recentProjectLimit, setRecentProjectLimit] = useState(10);
+  const [gettingStartedState, setGettingStartedState] = useState<GettingStartedState>(DEFAULT_GETTING_STARTED_STATE);
+  const permissionMatrixRows = useMemo(() => buildPermissionMatrixRows(t), [t]);
+
+  const refreshDetails = useCallback(async () => {
+    setError("");
+    try {
+      const [nextUserPreferences, nextAppInfo] = await Promise.all([
+        getPostgresUserPreferences(),
+        getAppRuntimeInfo(),
+      ]);
+      setAppInfo(nextAppInfo);
+      setTheme(nextUserPreferences.theme);
+      setDensity(nextUserPreferences.density);
+      setFontSize(nextUserPreferences.fontSize);
+      setSourceTextSizePx(nextUserPreferences.sourceTextSizePx);
+      setRecentProjectLimit(nextUserPreferences.recentProjectLimit);
+      setGettingStartedState(normalizeGettingStartedState(nextUserPreferences.gettingStartedState));
+      if (nextUserPreferences.locale !== locale) setLocale(nextUserPreferences.locale);
+      applyPostgresRuntimeThemePreferences(nextUserPreferences);
+      setActivePresetId(null);
+    } catch (loadError) {
+      setError(describeAppSettingsUnknownError(loadError));
+    }
+  }, [locale, setLocale]);
+
+  useEffect(() => {
+    void refreshDetails();
+  }, [refreshDetails]);
+
+  const persistUserPreferences = useCallback(async (next: PostgresUserPreferences, successMessage?: string) => {
+    try {
+      const saved = await savePostgresUserPreferences(next);
+      setTheme(saved.theme);
+      setDensity(saved.density);
+      setFontSize(saved.fontSize);
+      setSourceTextSizePx(saved.sourceTextSizePx);
+      setRecentProjectLimit(saved.recentProjectLimit);
+      setGettingStartedState(normalizeGettingStartedState(saved.gettingStartedState));
+      applyPostgresRuntimeThemePreferences(saved);
+      if (successMessage) setNotice(successMessage);
+      setError("");
+    } catch (saveError) {
+      setError(describeAppSettingsUnknownError(saveError));
+    }
+  }, []);
+
+  function persistThemePatch(next: Partial<Pick<PostgresUserPreferences, "theme" | "density" | "fontSize" | "locale">>) {
+    void persistUserPreferences({
+      theme,
+      density,
+      fontSize,
+      sourceTextSizePx,
+      locale,
+      recentProjectLimit,
+      gettingStartedState,
+      themeState: getStoredThemeState(),
+      ...next,
+    });
+  }
+
+  async function handleLocaleChange(nextLocale: (typeof SUPPORTED_LOCALES)[number]) {
+    setLocale(nextLocale);
+    await persistUserPreferences({
+      theme,
+        density,
+        fontSize,
+      sourceTextSizePx,
+      locale: nextLocale,
+      recentProjectLimit,
+      gettingStartedState,
+      themeState: getStoredThemeState(),
+    }, t("appSettings.language.updated"));
+  }
+
+  async function handleThemeManagerApplied() {
+    const nextTheme = getStoredTheme();
+    setTheme(nextTheme);
+    await persistUserPreferences({
+      theme: nextTheme,
+      density,
+      fontSize,
+      sourceTextSizePx,
+      locale,
+      recentProjectLimit,
+      gettingStartedState,
+      themeState: getStoredThemeState(),
+    }, t("appSettings.appearance.updated"));
+  }
+
+  const groupedCards = [
+    {
+      id: "preferences",
+      title: t("appSettings.overviewSections.preferences"),
+      cards: [
+        { id: "appearance", title: t("appSettings.appearance.title"), icon: <SettingsAppearanceIcon /> },
+        { id: "language", title: t("appSettings.sectionTitles.language"), icon: <SettingsLanguageIcon /> },
+      ] as Array<{ id: AppSettingsModalId; title: string; icon: ReactNode }>,
+    },
+    {
+      id: "system",
+      title: t("appSettings.overviewSections.system"),
+      cards: [
+        { id: "about", title: t("appSettings.about.title"), icon: <SettingsAboutIcon /> },
+        { id: "permissions", title: t("appSettings.permissions.title"), icon: <SettingsPermissionsIcon /> },
+      ] as Array<{ id: AppSettingsModalId; title: string; icon: ReactNode }>,
+    },
+  ];
+
+  return (
+    <div className="view app-settings-view app-settings-view--compact">
+      <ViewHeader
+        title={t("appSettings.settingsTitle")}
+        titleClassName="view-title-with-help"
+        help={{ label: t("appSettings.openHelp"), onClick: () => setHelpOpen(true) }}
+      />
+
+      {helpOpen ? (
+        <HelpModal
+          title={t("appSettings.helpTitle")}
+          onClose={() => setHelpOpen(false)}
+          lines={[t("appSettings.helpLine1"), t("appSettings.helpLine2")]}
+        />
+      ) : null}
+
+      {notice ? <p className="settings-success">{notice}</p> : null}
+      {error ? <p className="auth-error">{error}</p> : null}
+
+      <div className="app-settings-overview-shell">
+        <div className="app-settings-overview-stack app-settings-overview-stack--compact">
+          {onAuthSessionUpdated && onAuthSessionInvalidated ? (
+            <section className="app-settings-overview-section app-settings-overview-section--compact">
+              <div className="app-settings-overview-section-header">
+                <p className="app-settings-overview-section-heading">{t("appSettings.overviewSections.account")}</p>
+              </div>
+              <UserSettingsView
+                authSession={authSession}
+                onAuthSessionUpdated={onAuthSessionUpdated}
+                onAuthSessionInvalidated={onAuthSessionInvalidated}
+                embedded
+                includeAppearance={false}
+              />
+            </section>
+          ) : null}
+
+          {project && onProjectUpdated && onProjectDeleted ? (
+            <section className="app-settings-overview-section app-settings-overview-section--compact">
+              <div className="app-settings-overview-section-header">
+                <p className="app-settings-overview-section-heading">{t("appSettings.overviewSections.project")}</p>
+              </div>
+              <EmbeddedPostgresProjectSettings
+                project={project}
+                canManageProject={canManageProject}
+                canEditProjectMetadata={canEditProjectMetadata}
+                memberCount={memberCount}
+                ownerCount={ownerCount}
+                objectCount={objectCount}
+                relationshipCount={relationshipCount}
+                onProjectUpdated={onProjectUpdated}
+                onProjectDeleted={onProjectDeleted}
+                onProjectOpened={onProjectOpened}
+                embedded
+              />
+            </section>
+          ) : null}
+
+          <div className="app-settings-overview-sections">
+            {groupedCards.map((section) => (
+              <SettingsOverviewSection key={section.id} heading={section.title} compact>
+                  {section.cards.map((card) => (
+                    <SettingsOverviewCard
+                      key={card.id}
+                      compact
+                      icon={card.icon}
+                      title={card.title}
+                      onActivate={() => setActiveModal(card.id)}
+                    />
+                  ))}
+              </SettingsOverviewSection>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {activeModal === "about" ? (
+        <SettingsModal title={t("appSettings.about.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-about-body">
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.release")}</h4>
+                  <div className="about-kanqual-meta-grid">
+                    <div className="about-kanqual-meta-card">
+                      <span className="about-kanqual-meta-label">{t("appSettings.about.version")}</span>
+                      <strong>{appInfo?.appVersion ?? "0.9.1"}</strong>
+                    </div>
+                    <div className="about-kanqual-meta-card">
+                      <span className="about-kanqual-meta-label">{t("appSettings.about.releaseDate")}</span>
+                      <strong>{RELEASE_DATE}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.createdBy")}</h4>
+                  <p>{t("appSettings.about.createdByBody")}</p>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.citation")}</h4>
+                  <p>{t("appSettings.about.citationNote")}</p>
+                  <div className="about-kanqual-citation">
+                    {t("appSettings.about.citationExample", {
+                      version: appInfo?.appVersion ?? "0.9.1",
+                    })}
+                  </div>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.license")}</h4>
+                  <p>{t("appSettings.about.licenseBody")} {t("appSettings.about.licenseNote")}</p>
+                </section>
+
+                <hr className="about-kanqual-separator" />
+
+                <section className="about-kanqual-section">
+                  <h4>{t("appSettings.about.dependencyLicenses")}</h4>
+                  <p className="about-kanqual-license-note">{t("appSettings.about.dependencyLicensesNote")}</p>
+
+                  <div className="about-kanqual-license-block">
+                    <h5>{t("appSettings.about.javascriptTypescript")}</h5>
+                    <div className="about-kanqual-license-table-wrap">
+                      <table className="about-kanqual-license-table">
+                        <thead>
+                          <tr>
+                            <th>{t("appSettings.about.package")}</th>
+                            <th>{t("appSettings.about.version")}</th>
+                            <th>{t("appSettings.about.license")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {aboutJavascriptLicenses.map((row) => (
+                            <tr key={`js-${row.name}-${row.version}`}>
+                              <td>{row.name}</td>
+                              <td>{row.version}</td>
+                              <td>{row.license}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="about-kanqual-license-block">
+                    <h5>{t("appSettings.about.rust")}</h5>
+                    <div className="about-kanqual-license-table-wrap">
+                      <table className="about-kanqual-license-table">
+                        <thead>
+                          <tr>
+                            <th>{t("appSettings.about.crate")}</th>
+                            <th>{t("appSettings.about.version")}</th>
+                            <th>{t("appSettings.about.license")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {aboutRustLicenses.map((row) => (
+                            <tr key={`rust-${row.name}-${row.version}`}>
+                              <td>{row.name}</td>
+                              <td>{row.version}</td>
+                              <td>{row.license}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button></div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "appearance" ? (
+        <SettingsModal title={t("appSettings.appearance.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
+                <SettingsModalSection title={t("appSettings.appearance.interface")}>
+                  <ActiveThemePreviewRow theme={theme} onEdit={() => setShowThemeManager(true)} />
+                  <div className="settings-row">
+                    <div className="settings-row-info"><div className="settings-row-label">{t("appSettings.appearance.interfaceDensity")}</div></div>
+                    <div className="segmented-control">
+                      {(["comfortable", "compact"] as Density[]).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={density === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                          onClick={() => {
+                            setDensity(option);
+                            applyDensity(option);
+                            persistThemePatch({ density: option });
+                          }}
+                        >
+                          {option === "comfortable" ? t("appSettings.appearance.comfortable") : t("appSettings.appearance.compact")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-info"><div className="settings-row-label">{t("appSettings.appearance.textSize")}</div></div>
+                    <div className="segmented-control">
+                      {(["small", "normal", "large"] as FontSize[]).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={fontSize === option ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                          onClick={() => {
+                            setFontSize(option);
+                            applyFontSize(option);
+                            persistThemePatch({ fontSize: option });
+                          }}
+                        >
+                          {option === "small" ? t("appSettings.appearance.small") : option === "normal" ? t("appSettings.appearance.normal") : t("appSettings.appearance.large")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </SettingsModalSection>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button></div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "language" ? (
+        <LanguageSettingsModal
+          title={t("appSettings.sectionTitles.language")}
+          label={t("appSettings.language.label")}
+          locale={locale}
+          onChange={(nextLocale) => void handleLocaleChange(nextLocale)}
+          onClose={() => setActiveModal(null)}
+        />
+      ) : null}
+
+      {activeModal === "permissions" ? (
+        <SettingsModal title={t("appSettings.permissions.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <SettingsModalSection title={t("appSettings.permissions.userRoles")}>
+                <div className="data-table-wrap data-table-wrap--elevated" style={{ maxHeight: 420 }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th className="data-table-header">{t("appSettings.permissions.area")}</th>
+                        <th className="data-table-header">{t("appSettings.permissions.action")}</th>
+                        <th className="data-table-header">{t("appSettings.permissions.columnOwner")}</th>
+                        <th className="data-table-header">{t("appSettings.permissions.columnEditor")}</th>
+                        <th className="data-table-header">{t("appSettings.permissions.columnViewer")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {permissionMatrixRows.map((row) => (
+                        <tr className="data-table-row" key={`${row.category}-${row.permission}`}>
+                          <td className="data-table-cell data-table-cell--muted">{row.category}</td>
+                          <td className="data-table-cell data-table-cell--name">{row.permission}</td>
+                          <td className="data-table-cell">{row.owner ? t("common.yes") : t("common.no")}</td>
+                          <td className="data-table-cell">{row.editor ? t("common.yes") : t("common.no")}</td>
+                          <td className="data-table-cell">{row.viewer ? t("common.yes") : t("common.no")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SettingsModalSection>
+            </div>
+            <div className="app-settings-modal-footer"><span /><button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button></div>
+        </SettingsModal>
+      ) : null}
+
+      {showThemeManager ? (
+        <ThemeManagerModal
+          onClose={() => setShowThemeManager(false)}
+          onApplied={() => void handleThemeManagerApplied()}
+          onCanceled={() => setTheme(getStoredTheme())}
+        />
+      ) : null}
+    </div>
+  );
+}

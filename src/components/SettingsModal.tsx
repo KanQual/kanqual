@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
 import { useI18n } from "../i18n/provider";
 
 type SettingsModalProps = {
@@ -44,17 +44,56 @@ export function SettingsModal({
   overlayClassName = "",
   overlayStyle,
 }: SettingsModalProps) {
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+  const subtitleId = useId();
   const modalClasses = `modal app-settings-modal${modalClassName ? ` ${modalClassName}` : ""}`;
   const overlayClasses = `modal-overlay${overlayClassName ? ` ${overlayClassName}` : ""}`;
 
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => {
+      if (!modalRef.current?.contains(document.activeElement)) {
+        modalRef.current?.querySelector<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")?.focus();
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || closeDisabled) return;
+      const overlays = document.querySelectorAll(".modal-overlay");
+      if (overlays[overlays.length - 1] !== overlayRef.current) return;
+      event.preventDefault();
+      onClose();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [closeDisabled, onClose]);
+
   return (
-    <div className={overlayClasses} style={overlayStyle} onClick={() => !closeDisabled && onClose()}>
-      <div className={modalClasses} onClick={(event) => event.stopPropagation()}>
+    <div ref={overlayRef} className={overlayClasses} style={overlayStyle} onClick={() => !closeDisabled && onClose()}>
+      <div
+        ref={modalRef}
+        className={modalClasses}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={subtitle ? subtitleId : undefined}
+        onClick={(event) => event.stopPropagation()}
+      >
         <SettingsModalCloseButton onClick={onClose} disabled={closeDisabled} />
         <div className="settings-section-header">
           <div>
-            <h2 className="settings-section-title">{title}</h2>
-            {subtitle ? <div className="settings-section-desc">{subtitle}</div> : null}
+            <h2 id={titleId} className="settings-section-title">{title}</h2>
+            {subtitle ? <div id={subtitleId} className="settings-section-desc">{subtitle}</div> : null}
           </div>
         </div>
         {children}

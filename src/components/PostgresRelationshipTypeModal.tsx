@@ -3,7 +3,10 @@ import {
   EditableAttributesMatrix,
   type EditableAttributeMatrixValues,
 } from "./EditableAttributesMatrix";
+import { ModalTabSelector } from "./ModalTabSelector";
 import {
+  PostgresColorControl,
+  PostgresRangeControl,
   PostgresRelationshipArrowheadPicker,
   PostgresRelationshipEndpointRestrictionColumn,
   PostgresRelationshipGraphicPreviewCard,
@@ -14,7 +17,7 @@ import {
   TIMELINE_FIELD_OPTIONS,
   type TimelineFieldRole,
   type TypeAttributeDraft,
-} from "../views/Postgres_Project_Home_Timeline_Fields";
+} from "../views/Project_Home_Timeline_Fields";
 import {
   POSTGRES_RELATIONSHIP_LINE_WEIGHT_MAX,
   POSTGRES_RELATIONSHIP_LINE_WEIGHT_MIN,
@@ -61,8 +64,8 @@ function PostgresRelationshipTypeTimelineFields(props: {
 }) {
   const { t } = useI18n();
   return (
-    <div className="postgres-attribute-modal-section">
-      <div className="postgres-attribute-modal-title">{t("sharedModals.tabs.timelineFields")}</div>
+    <div className="attribute-editor-section">
+      <div className="attribute-editor-title">{t("sharedModals.tabs.timelineFields")}</div>
       <div className="case-detail-attributes-table-wrap">
         <table className="case-detail-attributes-table">
           <tbody>
@@ -187,19 +190,16 @@ export function PostgresRelationshipTypeModal(props: {
       modalClassName="modal--wide"
       overlayStyle={{ zIndex: 120 }}
     >
-      <form onSubmit={props.onSubmit} className={`form app-settings-modal-body ${props.tab === "graphics" ? "source-editor-modal-body--graphics source-editor-form--graphics" : ""}`}>
-        <div className="segmented-control modal-segmented-control" role="tablist" aria-label={props.ariaLabel}>
-          {(["details", "graphics", "object1", "object2", "attributes", "timeline"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={`segmented-control-option ${props.tab === tab ? "segmented-control-option--active" : ""}`}
-              onClick={() => props.setTab(tab)}
-            >
-              {formatRelationshipTypeModalTab(tab, t)}
-            </button>
-          ))}
-        </div>
+      <form onSubmit={props.onSubmit} className={`form app-settings-modal-body ${props.tab === "graphics" ? "modal-body--graphics modal-form--graphics" : ""}`}>
+        <ModalTabSelector
+          value={props.tab}
+          options={(["details", "graphics", "object1", "object2", "attributes", "timeline"] as const).map((tab) => ({
+            value: tab,
+            label: formatRelationshipTypeModalTab(tab, t),
+          }))}
+          ariaLabel={props.ariaLabel}
+          onChange={props.setTab}
+        />
         {props.tab === "details" ? (
           <label className="form-label">
             {t("sharedModals.relationshipModal.relationshipTypeName")}
@@ -211,24 +211,16 @@ export function PostgresRelationshipTypeModal(props: {
             />
           </label>
         ) : props.tab === "graphics" ? (
-          <div className="source-graphics-layout">
-            <div className="source-graphics-controls">
-              <label className="form-label">
-                {t("common.color")}
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <input
-                    className="form-input form-input--color"
-                    type="color"
-                    value={props.color}
-                    onChange={(event) => props.setColor(event.target.value)}
-                  />
-                  <input
-                    className="form-input"
-                    value={props.color}
-                    onChange={(event) => props.setColor(event.target.value)}
-                  />
-                </div>
-              </label>
+          <div className="graphics-editor-layout">
+            <div className="graphics-editor-controls">
+              <PostgresColorControl
+                label={t("common.color")}
+                swatchValue={props.color}
+                textValue={props.color}
+                onChange={props.setColor}
+                textWidth="fluid"
+                alignItems="center"
+              />
               <label className="form-label">
                 {t("sharedModals.graphics.lineShape")}
                 <PostgresRelationshipLineShapePicker
@@ -245,21 +237,14 @@ export function PostgresRelationshipTypeModal(props: {
                   previewColor={props.color}
                 />
               </label>
-              <label className="form-label timeline-group-opacity-control">
-                {t("sharedModals.graphics.lineWeight")}
-                <div className="timeline-group-slider-row">
-                  <input
-                    className="form-range"
-                    type="range"
-                    min={POSTGRES_RELATIONSHIP_LINE_WEIGHT_MIN}
-                    max={POSTGRES_RELATIONSHIP_LINE_WEIGHT_MAX}
-                    step="1"
-                    value={lineWeight}
-                    onChange={(event) => props.setLineWeight(Number(event.target.value))}
-                  />
-                  <span className="timeline-group-slider-value">{lineWeight}px</span>
-                </div>
-              </label>
+              <PostgresRangeControl
+                label={t("sharedModals.graphics.lineWeight")}
+                value={lineWeight}
+                min={POSTGRES_RELATIONSHIP_LINE_WEIGHT_MIN}
+                max={POSTGRES_RELATIONSHIP_LINE_WEIGHT_MAX}
+                suffix="px"
+                onChange={props.setLineWeight}
+              />
             </div>
             <PostgresRelationshipGraphicPreviewCard
               label={t("sharedModals.graphics.relationshipTypePreview")}

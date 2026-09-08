@@ -7,13 +7,17 @@ import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import type { Annotation, Code, Document as ProjectDocument } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
-import { DownloadIcon, HelpIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
+import { DownloadIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpModal } from "../components/HelpModal";
+import { TableMessageRow, TableShell } from "../components/TableShell";
+import { ViewHeader } from "../components/ViewHeader";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
 import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
-import { getFloatingTooltipStyle } from "./Postgres_Source_Coding_Shared";
+import { getFloatingTooltipStyle } from "./Source_Coding_Shared";
 
 const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
 
@@ -373,7 +377,7 @@ function buildCodeTree(codes: Code[]): CodeTreeNode[] {
 
 // ─── PDF export helpers ───────────────────────────────────────────────────────
 
-function svgToPngDataUrl(svgString: string): Promise<string> {
+function svgToPngDataUrl(svgString: string, noCanvasContextError: string, svgRenderError: string): Promise<string> {
   const wMatch = svgString.match(/width="(\d+)"/);
   const hMatch = svgString.match(/height="(\d+)"/);
   const w = wMatch ? parseInt(wMatch[1], 10) : 700;
@@ -383,7 +387,7 @@ function svgToPngDataUrl(svgString: string): Promise<string> {
     canvas.width = w * 2;
     canvas.height = h * 2;
     const ctx = canvas.getContext("2d");
-    if (!ctx) { reject(new Error("no canvas context")); return; }
+    if (!ctx) { reject(new Error(noCanvasContextError)); return; }
     ctx.scale(2, 2);
     const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -395,7 +399,7 @@ function svgToPngDataUrl(svgString: string): Promise<string> {
       URL.revokeObjectURL(url);
       resolve(canvas.toDataURL("image/png"));
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("SVG render failed")); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(svgRenderError)); };
     img.src = url;
   });
 }
@@ -891,9 +895,9 @@ function FrequencyReportCard({
   }, [displayBuckets, tableRows]);
 
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{section.title}</span>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{section.title}</span>
         {canCollapseChildCodes && (
           <label
             style={{
@@ -932,24 +936,24 @@ function FrequencyReportCard({
           ))}
         </div>
         {viewMode === "table" && (
-          <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 230 }}>
-            <table className="users-table">
+          <div className="data-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 230 }}>
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th className="users-th" style={{ minWidth: 150 }}>{section.title}</th>
+                  <th className="data-table-header" style={{ minWidth: 150 }}>{section.title}</th>
                   {displayBuckets.map((bucket) => (
-                    <th key={bucket.id} className="users-th" style={{ minWidth: 110 }}>{bucket.label}</th>
+                    <th key={bucket.id} className="data-table-header" style={{ minWidth: 110 }}>{bucket.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {tableRows.length === 0 || displayBuckets.length === 0 ? (
-                  <tr><td colSpan={displayBuckets.length + 1} className="users-td-msg">{t("reportsCodes.noSelectedItems")}</td></tr>
+                  <tr><td colSpan={displayBuckets.length + 1} className="data-table-message">{t("reportsCodes.noSelectedItems")}</td></tr>
                 ) : tableRows.map((row) => (
-                  <tr key={row.id} className="users-row">
-                    <td className="users-td users-td--name">{row.label}</td>
+                  <tr key={row.id} className="data-table-row">
+                    <td className="data-table-cell data-table-cell--name">{row.label}</td>
                     {row.values.map((value, index) => (
-                      <td key={`${row.id}-${displayBuckets[index].id}`} className="users-td">{value}</td>
+                      <td key={`${row.id}-${displayBuckets[index].id}`} className="data-table-cell">{value}</td>
                     ))}
                   </tr>
                 ))}
@@ -960,9 +964,9 @@ function FrequencyReportCard({
 
         {viewMode === "chart" && (
           tableRows.length === 0 || displayBuckets.length === 0 ? (
-            <div className="users-td-msg">{t("reportsCodes.noSelectedItems")}</div>
+            <div className="data-table-message">{t("reportsCodes.noSelectedItems")}</div>
           ) : (
-            <Suspense fallback={<div className="users-td-msg">{t("reportsCodes.loadingChart")}</div>}>
+            <Suspense fallback={<div className="data-table-message">{t("reportsCodes.loadingChart")}</div>}>
               {isFacetedFrequencyCard ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   {facetChartOptions.map((facet) => (
@@ -1014,15 +1018,15 @@ function FrequencyReportCard({
         )}
 
         {viewMode === "matrix" && (
-          <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 280 }}>
-            <table className="users-table">
+          <div className="data-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 280 }}>
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th className="users-th" style={{ minWidth: 160 }}>{t("reportsCodes.singleEntity.code")}</th>
+                  <th className="data-table-header" style={{ minWidth: 160 }}>{t("reportsCodes.singleEntity.code")}</th>
                   {tableRows.map((row) => (
                     <th
                       key={row.id}
-                      className="users-th"
+                      className="data-table-header"
                       style={{
                         minWidth: isSourcesFrequencyCard ? 88 : 110,
                         maxWidth: isSourcesFrequencyCard ? 88 : undefined,
@@ -1039,17 +1043,17 @@ function FrequencyReportCard({
               </thead>
               <tbody>
                 {matrix.length === 0 ? (
-                  <tr><td colSpan={tableRows.length + 1} className="users-td-msg">{t("reportsCodes.selectCodesToBuildMatrix")}</td></tr>
+                  <tr><td colSpan={tableRows.length + 1} className="data-table-message">{t("reportsCodes.selectCodesToBuildMatrix")}</td></tr>
                 ) : matrix.map((row) => (
-                  <tr key={row.bucket.id} className="users-row">
-                    <td className="users-td users-td--name">
+                  <tr key={row.bucket.id} className="data-table-row">
+                    <td className="data-table-cell data-table-cell--name">
                       <span className="code-swatch" style={{ background: row.bucket.color, marginRight: 8 }} />
                       {row.bucket.label}
                     </td>
                     {row.cells.map((value, index) => (
                       <td
                         key={`${row.bucket.id}-${tableRows[index].id}`}
-                        className="users-td"
+                        className="data-table-cell"
                         style={{
                           background: heatmapColor(value, maxCell),
                           color: value > 0 ? "var(--color-text)" : "var(--color-text-muted)",
@@ -1096,9 +1100,9 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
       ? aggregateCoOccurrenceCodeCounts(codeCounts, codes, collapseChildCodes)
       : codeCounts;
     return (
-      <div className="annotate-card" style={{ flexShrink: 0 }}>
-        <div className="annotate-card-header">
-          <span className="annotate-card-title">{sectionTitle}</span>
+      <div className="workspace-panel" style={{ flexShrink: 0 }}>
+        <div className="workspace-panel-header">
+          <span className="workspace-panel-title">{sectionTitle}</span>
           {canCollapseChildCodes && (
             <label
               style={{
@@ -1125,24 +1129,24 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
             {t("reportsCodes.singleEntity.oneItemSelected", { name: entityLabel })}
           </div>
-          <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 300 }}>
-            <table className="users-table">
+          <div className="data-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 300 }}>
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th className="users-th" style={{ minWidth: 160 }}>{t("reportsCodes.singleEntity.code")}</th>
-                  <th className="users-th" style={{ minWidth: 100 }}>{t("reportsCodes.singleEntity.annotations")}</th>
+                  <th className="data-table-header" style={{ minWidth: 160 }}>{t("reportsCodes.singleEntity.code")}</th>
+                  <th className="data-table-header" style={{ minWidth: 100 }}>{t("reportsCodes.singleEntity.annotations")}</th>
                 </tr>
               </thead>
               <tbody>
                 {displayCodeCounts.length === 0 ? (
-                  <tr><td colSpan={2} className="users-td-msg">{t("reportsCodes.singleEntity.selectCodes")}</td></tr>
+                  <tr><td colSpan={2} className="data-table-message">{t("reportsCodes.singleEntity.selectCodes")}</td></tr>
                 ) : displayCodeCounts.map(({ code, count }) => (
-                  <tr key={code.id} className="users-row">
-                    <td className="users-td users-td--name">
+                  <tr key={code.id} className="data-table-row">
+                    <td className="data-table-cell data-table-cell--name">
                       <span className="code-swatch" style={{ background: code.color, marginRight: 8 }} />
                       {code.label}
                     </td>
-                    <td className="users-td">{count}</td>
+                    <td className="data-table-cell">{count}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1154,9 +1158,9 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
   }
 
   return (
-    <div className="annotate-card" style={{ flexShrink: 0 }}>
-      <div className="annotate-card-header">
-        <span className="annotate-card-title">{sectionTitle}</span>
+    <div className="workspace-panel" style={{ flexShrink: 0 }}>
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-title">{sectionTitle}</span>
         {canCollapseChildCodes && (
           <label
             style={{
@@ -1184,7 +1188,7 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
       </div>
       <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 16 }}>
         {section.matrices.length === 0 ? (
-          <div className="users-td-msg">{t("reportsCodes.selectCodesToBuildMatrix")}</div>
+          <div className="data-table-message">{t("reportsCodes.selectCodesToBuildMatrix")}</div>
         ) : section.matrices.map((sourceMatrix) => {
           const matrix = canCollapseChildCodes
             ? aggregateCoOccurrenceMatrix(sourceMatrix, codes, collapseChildCodes)
@@ -1200,22 +1204,22 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
                   {matrix.subtitle}
                 </div>
               )}
-              <div className="users-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 300 }}>
-                <table className="users-table">
+              <div className="data-table-wrap" style={{ margin: 0, maxWidth: "none", borderRadius: 6, maxHeight: 300 }}>
+                <table className="data-table">
                   <thead>
                     <tr>
-                      <th className="users-th" style={{ minWidth: 150 }}>{t("reportsCodes.singleEntity.code")}</th>
+                      <th className="data-table-header" style={{ minWidth: 150 }}>{t("reportsCodes.singleEntity.code")}</th>
                       {matrix.codes.map((code) => (
-                        <th key={code.id} className="users-th" style={{ minWidth: 110 }}>{code.label}</th>
+                        <th key={code.id} className="data-table-header" style={{ minWidth: 110 }}>{code.label}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {matrix.codes.length === 0 ? (
-                      <tr><td colSpan={matrix.codes.length + 1} className="users-td-msg">{t("reportsCodes.selectCodesToBuildMatrix")}</td></tr>
+                      <tr><td colSpan={matrix.codes.length + 1} className="data-table-message">{t("reportsCodes.selectCodesToBuildMatrix")}</td></tr>
                     ) : matrix.codes.map((rowCode, rowIndex) => (
-                      <tr key={rowCode.id} className="users-row">
-                        <td className="users-td users-td--name">
+                      <tr key={rowCode.id} className="data-table-row">
+                        <td className="data-table-cell data-table-cell--name">
                           <span className="code-swatch" style={{ background: rowCode.color, marginRight: 8 }} />
                           {rowCode.label}
                         </td>
@@ -1227,7 +1231,7 @@ function CoOccurrenceMatrixCard({ section, codes }: { section: CoOccurrenceSecti
                           return (
                             <td
                               key={`${rowCode.id}-${colCode.id}`}
-                              className="users-td"
+                              className="data-table-cell"
                               onMouseEnter={(event) => {
                                 if (emptyCell) return;
                                 setCellTooltip({
@@ -3367,7 +3371,11 @@ function CodeReportCreationPage({
             addText(t("reportsCodes.frequencyViews.chart"), 12, "bold", 6);
             try {
               const svg = buildFreqBarChartSvg(tableRows, displayBuckets, maxCell);
-              const png = await svgToPngDataUrl(svg);
+              const png = await svgToPngDataUrl(
+                svg,
+                t("reportsCommon.errors.noCanvasContext"),
+                t("reportsCommon.errors.svgRenderFailed"),
+              );
               const svgHMatch = svg.match(/height="(\d+)"/);
               const svgH = svgHMatch ? parseInt(svgHMatch[1], 10) : 400;
               const imgH = (svgH / 700) * contentWidth;
@@ -3382,7 +3390,11 @@ function CodeReportCreationPage({
             addText(t("reportsCodes.frequencyViews.heatmap"), 12, "bold", 6);
             try {
               const svg = buildFreqHeatmapSvg(matrix, tableRows, maxCell);
-              const png = await svgToPngDataUrl(svg);
+              const png = await svgToPngDataUrl(
+                svg,
+                t("reportsCommon.errors.noCanvasContext"),
+                t("reportsCommon.errors.svgRenderFailed"),
+              );
               const wMatch = svg.match(/width="(\d+)"/);
               const hMatch = svg.match(/height="(\d+)"/);
               const svgW = wMatch ? parseInt(wMatch[1], 10) : 700;
@@ -3719,7 +3731,11 @@ function CodeReportCreationPage({
             children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.frequencyViews.chart"), bold: true })] }));
             try {
               const svg = buildFreqBarChartSvg(tableRows, displayBuckets, maxCell);
-              const png = await svgToPngDataUrl(svg);
+              const png = await svgToPngDataUrl(
+                svg,
+                t("reportsCommon.errors.noCanvasContext"),
+                t("reportsCommon.errors.svgRenderFailed"),
+              );
               const svgHMatch = svg.match(/height="(\d+)"/);
               const nativeH = svgHMatch ? parseInt(svgHMatch[1], 10) : 400;
               const displayW = 480;
@@ -3736,7 +3752,11 @@ function CodeReportCreationPage({
             children.push(new Paragraph({ children: [new TextRun({ text: t("reportsCodes.frequencyViews.heatmap"), bold: true })] }));
             try {
               const svg = buildFreqHeatmapSvg(matrix, tableRows, maxCell);
-              const png = await svgToPngDataUrl(svg);
+              const png = await svgToPngDataUrl(
+                svg,
+                t("reportsCommon.errors.noCanvasContext"),
+                t("reportsCommon.errors.svgRenderFailed"),
+              );
               const wMatch = svg.match(/width="(\d+)"/);
               const hMatch = svg.match(/height="(\d+)"/);
               const nativeW = wMatch ? parseInt(wMatch[1], 10) : 700;
@@ -3803,7 +3823,7 @@ function CodeReportCreationPage({
   }
 
   return (
-    <div className="annotate-view">
+    <div className="workbench-view">
       <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsCodes.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
@@ -3811,16 +3831,16 @@ function CodeReportCreationPage({
         </div>
       </div>
 
-      <div className="annotate-layout ann-report-annotate-layout">
-        <div className="annotate-left">
-          <div className="annotate-left-title">{t("reportsCodes.panels.includeInReport")}</div>
+      <div className="workbench-layout report-builder-layout">
+        <div className="workbench-sidebar">
+          <div className="workbench-sidebar-title">{t("reportsCodes.panels.includeInReport")}</div>
 
           {/* Objects */}
-          <div className="annotate-card">
-            <div className="annotate-card-header" style={{ gap: 8 }}>
-              <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("cases")}>
+          <div className="workspace-panel">
+            <div className="workspace-panel-header" style={{ gap: 8 }}>
+              <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("cases")}>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="annotate-card-title">{t("reportsCodes.panels.cases")}{selCaseIds.size > 0 ? ` (${selCaseIds.size})` : ""}</span>
+                  <span className="workspace-panel-title">{t("reportsCodes.panels.cases")}{selCaseIds.size > 0 ? ` (${selCaseIds.size})` : ""}</span>
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
@@ -3894,11 +3914,11 @@ function CodeReportCreationPage({
           </div>
 
           {/* Sources */}
-          <div className="annotate-card">
-            <div className="annotate-card-header" style={{ gap: 8 }}>
-              <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("documents")}>
+          <div className="workspace-panel">
+            <div className="workspace-panel-header" style={{ gap: 8 }}>
+              <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("documents")}>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="annotate-card-title">{t("reportsCodes.panels.documents")}{selDocIds.size > 0 ? ` (${selDocIds.size})` : ""}</span>
+                  <span className="workspace-panel-title">{t("reportsCodes.panels.documents")}{selDocIds.size > 0 ? ` (${selDocIds.size})` : ""}</span>
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
@@ -3970,9 +3990,9 @@ function CodeReportCreationPage({
           </div>
 
           {/* Relationships */}
-          <div className="annotate-card">
-            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("relationships")}>
-              <span className="annotate-card-title">{t("reportsCodes.panels.relationships")}{selRelationshipIds.size > 0 ? ` (${selRelationshipIds.size})` : ""}</span>
+          <div className="workspace-panel">
+            <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("relationships")}>
+              <span className="workspace-panel-title">{t("reportsCodes.panels.relationships")}{selRelationshipIds.size > 0 ? ` (${selRelationshipIds.size})` : ""}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("relationships") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("relationships") && (
@@ -4066,9 +4086,9 @@ function CodeReportCreationPage({
           </div>
 
           {/* Codes */}
-          <div className="annotate-card annotate-card--featured report-codes-card">
-            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("codes")}>
-              <span className="annotate-card-title">{t("reportsCodes.panels.codes")}{selCodeIds.size > 0 ? ` (${selCodeIds.size})` : ""}</span>
+          <div className="workspace-panel workspace-panel--featured report-codes-card">
+            <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("codes")}>
+              <span className="workspace-panel-title">{t("reportsCodes.panels.codes")}{selCodeIds.size > 0 ? ` (${selCodeIds.size})` : ""}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("codes") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("codes") && (
@@ -4108,9 +4128,9 @@ function CodeReportCreationPage({
           </div>
 
           {/* Users */}
-          <div className="annotate-card">
-            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("users")}>
-              <span className="annotate-card-title">{t("reportsCodes.panels.users")}{selUserIds.size > 0 ? ` (${selUserIds.size})` : ""}</span>
+          <div className="workspace-panel">
+            <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("users")}>
+              <span className="workspace-panel-title">{t("reportsCodes.panels.users")}{selUserIds.size > 0 ? ` (${selUserIds.size})` : ""}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("users") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("users") && (
@@ -4152,16 +4172,16 @@ function CodeReportCreationPage({
         </div>
 
         <div
-          className="annotate-main"
+          className="workbench-main"
           style={{ overflowY: "auto", gap: 10, flexDirection: "column", display: "flex", paddingTop: 2, paddingBottom: 2 }}
         >
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header" style={{ gap: 10 }}>
-              <span className="annotate-card-title">{t("reportsCodes.reportTitle")}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header" style={{ gap: 10 }}>
+              <span className="workspace-panel-title">{t("reportsCodes.reportTitle")}</span>
               <div className="report-action-group" style={{ gap: 8, marginLeft: "auto" }}>
                 <button
                   type="button"
-                  className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                  className="btn btn--secondary card-header-icon-button report-title-action-button"
                   title={
                     !isFrozen
                       ? t("reportsCodes.exportSavedOnly")
@@ -4173,29 +4193,29 @@ function CodeReportCreationPage({
                   onClick={() => setShowExportModal(true)}
                   aria-label={t("reportsCodes.export")}
                 >
-                  <DownloadIcon className="project-table-header-icon" />
+                  <DownloadIcon className="card-header-icon" />
                 </button>
                 {isFrozen && onUseSettings && canStartReports ? (
                   <button
                     type="button"
-                    className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                    className="btn btn--secondary card-header-icon-button report-title-action-button"
                     onClick={() => onUseSettings(row!.snapshot.settings)}
                     title={t("reportsCodes.newFromSettings")}
                     aria-label={t("reportsCodes.newFromSettings")}
                   >
-                    <RestartListIcon className="project-table-header-icon" />
+                    <RestartListIcon className="card-header-icon" />
                   </button>
                 ) : null}
                 {!isFrozen ? (
                   <button
                     type="button"
-                    className="btn btn--primary project-table-header-icon-button report-title-action-button"
+                    className="btn btn--primary card-header-icon-button report-title-action-button"
                     onClick={handleSave}
                     disabled={saving || !canStartReports}
                     title={saving ? t("reportsCodes.actions.saving") : t("reportsCodes.actions.save")}
                     aria-label={saving ? t("reportsCodes.actions.saving") : t("reportsCodes.actions.save")}
                   >
-                    <SaveIcon className="project-table-header-icon" />
+                    <SaveIcon className="card-header-icon" />
                   </button>
                 ) : null}
               </div>
@@ -4205,8 +4225,8 @@ function CodeReportCreationPage({
             </div>
           </div>
 
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsCodes.reportDetails")}</span></div>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header"><span className="workspace-panel-title">{t("reportsCodes.reportDetails")}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", fontSize: 13 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
                 <span>
@@ -4229,9 +4249,9 @@ function CodeReportCreationPage({
             </div>
           </div>
 
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header">
-              <span className="annotate-card-title">{t("reportsCodes.reportDescription")}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header">
+              <span className="workspace-panel-title">{t("reportsCodes.reportDescription")}</span>
               <button
                 className="btn btn--small"
                 onClick={() => setShowDescription((prev) => !prev)}
@@ -4258,9 +4278,9 @@ function CodeReportCreationPage({
             )}
           </div>
 
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header">
-              <span className="annotate-card-title">{t("reportsCodes.filtersTitle")}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header">
+              <span className="workspace-panel-title">{t("reportsCodes.filtersTitle")}</span>
             </div>
             <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
               {!hasActiveFilters ? (
@@ -4296,7 +4316,7 @@ function CodeReportCreationPage({
             {selectedSummaryCards.map((item) => (
               <button
                 key={item.key}
-                className="annotate-card"
+                className="workspace-panel"
                 onClick={() => toggleSummaryCard(item.key)}
                 aria-expanded={expandedSummaryCards.has(item.key)}
                 style={{
@@ -4406,7 +4426,7 @@ function CodeReportCreationPage({
                         onClick={(e) => e.stopPropagation()}
                       />
                       <span className="code-label">{typeLabel}</span>
-                      <span className="users-filter-count">
+                      <span className="filter-option-count">
                         {caseItems.filter((item) => formatObjectType(item.objectType) === typeLabel).length}
                       </span>
                     </li>
@@ -4444,7 +4464,7 @@ function CodeReportCreationPage({
                     onClick={(e) => e.stopPropagation()}
                   />
                   <span className="code-label">{item.name}</span>
-                  <span className="users-filter-count">{getAttributeTypeLabel(t, item.dataType)}</span>
+                  <span className="filter-option-count">{getAttributeTypeLabel(t, item.dataType)}</span>
                 </li>
               ))}
             </ul>
@@ -4487,7 +4507,7 @@ function CodeReportCreationPage({
                         onClick={(e) => e.stopPropagation()}
                       />
                       <span className="code-label">{typeLabel}</span>
-                      <span className="users-filter-count">
+                      <span className="filter-option-count">
                         {documents.filter((doc) => formatSourceType(doc.type) === typeLabel).length}
                       </span>
                     </li>
@@ -4525,7 +4545,7 @@ function CodeReportCreationPage({
                     onClick={(e) => e.stopPropagation()}
                   />
                   <span className="code-label">{item.name}</span>
-                  <span className="users-filter-count">{getAttributeTypeLabel(t, item.dataType)}</span>
+                  <span className="filter-option-count">{getAttributeTypeLabel(t, item.dataType)}</span>
                 </li>
               ))}
             </ul>
@@ -4705,95 +4725,75 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
   }
 
   return (
-    <div className="view users-view">
-      <header className="view-header">
-        <div className="users-title-wrap">
-          <h1>{t("reportsCodes.title")}</h1>
+    <div className="view view-shell">
+      <ViewHeader
+        title={t("reportsCodes.title")}
+        help={{ label: t("reportsCodes.openHelp"), onClick: () => setHelpOpen(true) }}
+        actions={(
           <button
-            type="button"
-            className="users-help-icon-btn"
-            aria-label={t("reportsCodes.openHelp")}
-            title={t("reportsCodes.openHelp")}
-            onClick={() => setHelpOpen(true)}
+            className="btn btn--primary"
+            onClick={() => setShowNewModal(true)}
+            disabled={!canCreateReports}
+            title={!canCreateReports ? t("reportsCodes.newReportDenied") : undefined}
           >
-            <HelpIcon className="users-help-icon" />
+            {t("reportsCodes.newReport")}
           </button>
-        </div>
-        <button
-          className="btn btn--primary"
-          onClick={() => setShowNewModal(true)}
-          disabled={!canCreateReports}
-          title={!canCreateReports ? t("reportsCodes.newReportDenied") : undefined}
-        >
-          {t("reportsCodes.newReport")}
-        </button>
-      </header>
+        )}
+      />
 
-      {error && <p className="users-error">{error}</p>}
+      {error && <p className="alert-error">{error}</p>}
 
-      <div className="users-content">
-        <section className="users-layout-main">
-          <div className="users-table-wrap" style={{ maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36 }}>
-            <table className="users-table">
+      <div className="view-content">
+        <section className="report-layout-main">
+          <TableShell style={{ maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36 }}>
+            <table className="data-table">
               <thead>
                 <tr>
                   {codeReportColumns.map((col) => (
                     <th
                       key={col.key}
                       style={{ width: col.width }}
-                      className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
+                      className={`data-table-header${sortCol === col.key ? " data-table-header--sorted" : ""}`}
                       onClick={() => handleSort(col.key)}
                     >
                       {col.label}
-                      <span className="users-sort-icon">{sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
+                      <span className="data-table-sort-icon">{sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={4} className="users-td-msg">{t("reportsCodes.loading")}</td></tr>}
-                {!loading && sorted.length === 0 && <tr><td colSpan={4} className="users-td-msg">{t("reportsCodes.noReports")}</td></tr>}
+                {loading && <TableMessageRow colSpan={4}>{t("reportsCodes.loading")}</TableMessageRow>}
+                {!loading && sorted.length === 0 && <TableMessageRow colSpan={4}>{t("reportsCodes.noReports")}</TableMessageRow>}
                 {!loading && sorted.map((row) => (
                   <tr
                     key={row.id}
-                    className="users-row"
+                    className="data-table-row"
                     onClick={() => setOpenSavedRow(row)}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setContextMenu({ x: e.clientX, y: e.clientY, row });
                     }}
                   >
-                    <td className="users-td users-td--name">{row.name}</td>
-                    <td className="users-td users-td--muted">{getCodeReportLabel(t, row.snapshot.kind)}</td>
-                    <td className="users-td users-td--muted">{row.createdByName}</td>
-                    <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
+                    <td className="data-table-cell data-table-cell--name">{row.name}</td>
+                    <td className="data-table-cell data-table-cell--muted">{getCodeReportLabel(t, row.snapshot.kind)}</td>
+                    <td className="data-table-cell data-table-cell--muted">{row.createdByName}</td>
+                    <td className="data-table-cell data-table-cell--muted">{fmtDate(row.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableShell>
         </section>
       </div>
 
       {helpOpen && (
-        <SettingsModal title={t("reportsCodes.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
-          <div className="app-settings-modal-body">
-            <p className="users-guide-copy">
-              {t("reportsCodes.help.line1")}
-            </p>
-            <p className="users-guide-copy">
-              {t("reportsCodes.help.line2")}
-            </p>
-            <p className="users-guide-copy">
-              {t("reportsCodes.help.line3")}
-            </p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              {t("reportsCodes.close")}
-            </button>
-          </div>
-        </SettingsModal>
+        <HelpModal
+          title={t("reportsCodes.help.title")}
+          onClose={() => setHelpOpen(false)}
+          closeLabel={t("reportsCodes.close")}
+          lines={[t("reportsCodes.help.line1"), t("reportsCodes.help.line2"), t("reportsCodes.help.line3")]}
+        />
       )}
 
       {contextMenu && (
@@ -4808,20 +4808,21 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
       )}
 
       {confirmDelete && (
-        <SettingsModal title={t("reportsCodes.deleteTitle")} onClose={() => setConfirmDelete(null)} closeDisabled={deleteLoading}>
-          <div className="app-settings-modal-body">
-            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              {t("reportsCodes.deleteBody", { name: confirmDelete.name })}
-            </p>
-            <p className="modal-warning-text">{t("reportsCodes.deleteWarning")}</p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsCodes.cancel")}</button>
-            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-              {deleteLoading ? t("reportsCodes.deleting") : t("reportsCodes.deleteReport")}
-            </button>
-          </div>
-        </SettingsModal>
+        <ConfirmDialog
+          title={t("reportsCodes.deleteTitle")}
+          warning={t("reportsCodes.deleteWarning")}
+          busy={deleteLoading}
+          confirmLabel={t("reportsCodes.deleteReport")}
+          busyLabel={t("reportsCodes.deleting")}
+          cancelLabel={t("reportsCodes.cancel")}
+          tone="danger"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={handleDelete}
+        >
+          <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+            {t("reportsCodes.deleteBody", { name: confirmDelete.name })}
+          </p>
+        </ConfirmDialog>
       )}
 
       {showNewModal && (

@@ -23,6 +23,7 @@ import {
   Globe,
   GlobeOff,
   HardDrive,
+  Highlighter,
   Info,
   Languages,
   Lightbulb,
@@ -211,6 +212,10 @@ export function EditIcon({ className }: IconProps) {
 
 export function DeleteIcon({ className }: IconProps) {
   return <LucideAppIcon Icon={Trash} className={className} />;
+}
+
+export function HighlighterIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={Highlighter} className={className} />;
 }
 
 export function CheckIcon({ className }: IconProps) {

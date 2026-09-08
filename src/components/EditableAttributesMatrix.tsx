@@ -48,18 +48,18 @@ export function EditableAttributesMatrix({
 }) {
   const { t } = useI18n();
   return (
-    <div className="postgres-attribute-modal-section editable-attributes-matrix-section">
+    <div className="attribute-editor-section editable-attributes-matrix-section">
       <div className="editable-attributes-matrix-header">
-        <div className="postgres-attribute-modal-title">{t("sharedModals.attributes.title")}</div>
+        <div className="attribute-editor-title">{t("sharedModals.attributes.title")}</div>
         <button
           type="button"
-          className="btn btn--primary project-table-header-icon-button"
+          className="btn btn--primary card-header-icon-button"
           onClick={onAddAttribute}
           disabled={disabled}
           title={t("sharedModals.attributes.add")}
           aria-label={t("sharedModals.attributes.add")}
         >
-          <PlusIcon className="project-table-header-icon" />
+          <PlusIcon className="card-header-icon" />
         </button>
       </div>
       {definitions.length === 0 ? (
@@ -102,13 +102,13 @@ export function EditableAttributesMatrix({
           </div>
         </div>
       ) : (
-        <div className="users-table-wrap editable-attributes-matrix-wrap">
-          <table className="users-table editable-attributes-matrix-table">
+        <div className="data-table-wrap editable-attributes-matrix-wrap">
+          <table className="data-table editable-attributes-matrix-table">
             <thead>
               <tr>
-                <th className="users-th editable-attributes-matrix-name-col">{t("sharedModals.attributes.nameColumn")}</th>
+                <th className="data-table-header editable-attributes-matrix-name-col">{t("sharedModals.attributes.nameColumn")}</th>
                 {definitions.map((definition) => (
-                  <th key={definition.id} className="users-th editable-attributes-matrix-attribute-col">
+                  <th key={definition.id} className="data-table-header editable-attributes-matrix-attribute-col">
                     <div className="editable-attributes-matrix-column-header">
                       <span title={definition.name}>{definition.name}</span>
                       <span className="editable-attributes-matrix-column-actions">
@@ -140,12 +140,12 @@ export function EditableAttributesMatrix({
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id} className="users-row">
-                  <td className="users-td users-td--name editable-attributes-matrix-name-cell">{row.name}</td>
+                <tr key={row.id} className="data-table-row">
+                  <td className="data-table-cell data-table-cell--name editable-attributes-matrix-name-cell">{row.name}</td>
                   {definitions.map((definition) => {
                     const value = values[definition.id]?.[row.id] ?? "";
                     return (
-                      <td key={`${row.id}-${definition.id}`} className="users-td editable-attributes-matrix-cell">
+                      <td key={`${row.id}-${definition.id}`} className="data-table-cell editable-attributes-matrix-cell">
                         {definition.dataType === "categorical" ? (
                           <select
                             className="form-input editable-attributes-matrix-input"

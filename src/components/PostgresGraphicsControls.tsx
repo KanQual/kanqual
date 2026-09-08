@@ -1,5 +1,6 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useI18n } from "../i18n/provider";
+import { ModalTabSelector } from "./ModalTabSelector";
 import {
   POSTGRES_OBJECT_FILL_OPTIONS,
   POSTGRES_OBJECT_TYPE_DEFAULT_FILL_TRANSPARENCY,
@@ -24,6 +25,256 @@ import {
   type PostgresSourceObjectVisualKey,
 } from "../lib/postgresGraphics";
 import { usePostgresStoredImageUrl } from "../lib/postgresStoredImages";
+
+export type PostgresGraphicModeOption<T extends string> = {
+  value: T;
+  label: string;
+};
+
+export function PostgresGraphicModeTabs<T extends string>(props: {
+  value: T;
+  options: Array<PostgresGraphicModeOption<T>>;
+  ariaLabel: string;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  centered?: boolean;
+}) {
+  const tabs = (
+    <ModalTabSelector
+      value={props.value}
+      options={props.options}
+      ariaLabel={props.ariaLabel}
+      onChange={props.onChange}
+      disabled={props.disabled}
+      className={`segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--${props.options.length === 3 ? "three" : "two"}`}
+    />
+  );
+
+  return props.centered === false ? tabs : <div style={{ display: "flex", justifyContent: "center" }}>{tabs}</div>;
+}
+
+export function PostgresColorControl(props: {
+  label: ReactNode;
+  swatchValue: string;
+  textValue: string;
+  onChange: (value: string) => void;
+  textWidth?: number | "fluid";
+  alignItems?: "center" | "flex-end";
+}) {
+  const textStyle: CSSProperties = props.textWidth === "fluid"
+    ? { flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }
+    : { flex: `0 0 ${props.textWidth ?? 148}px`, fontFamily: "monospace" };
+  return (
+    <label className="form-label">
+      {props.label}
+      <div style={{ display: "flex", alignItems: props.alignItems ?? "flex-end", gap: 12 }}>
+        <input
+          className="form-input form-input--color"
+          type="color"
+          value={props.swatchValue}
+          onChange={(event) => props.onChange(event.target.value)}
+          style={{ width: 92, minWidth: 92, height: 56 }}
+        />
+        <input
+          className="form-input"
+          value={props.textValue}
+          onChange={(event) => props.onChange(event.target.value)}
+          style={textStyle}
+        />
+      </div>
+    </label>
+  );
+}
+
+export function PostgresRangeControl(props: {
+  label: ReactNode;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  step?: number;
+  suffix?: string;
+}) {
+  return (
+    <label className="form-label timeline-group-opacity-control">
+      {props.label}
+      <div className="timeline-group-slider-row">
+        <input
+          className="form-range"
+          type="range"
+          min={props.min}
+          max={props.max}
+          step={props.step ?? 1}
+          value={props.value}
+          onChange={(event) => props.onChange(Number(event.target.value))}
+        />
+        <span className="timeline-group-slider-value">{props.value}{props.suffix ?? ""}</span>
+      </div>
+    </label>
+  );
+}
+
+export function PostgresImageUploadActions(props: {
+  hasImage: boolean;
+  disabled?: boolean;
+  importDisabled?: boolean;
+  removeDisabled?: boolean;
+  onImport: () => void;
+  onRemove?: () => void;
+  importingLabel?: string;
+  uploadLabel?: string;
+  replaceLabel?: string;
+  removeLabel?: string;
+  importButtonClassName?: string;
+  removeButtonClassName?: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+      <button
+        type="button"
+        className={props.importButtonClassName ?? "btn btn--small"}
+        onClick={props.onImport}
+        disabled={props.disabled || props.importDisabled}
+      >
+        {props.importingLabel ?? (props.hasImage
+          ? props.replaceLabel ?? t("sharedModals.graphics.replaceImage")
+          : props.uploadLabel ?? t("sharedModals.graphics.uploadImage"))}
+      </button>
+      {props.hasImage && props.onRemove ? (
+        <button
+          type="button"
+          className={props.removeButtonClassName ?? "btn btn--ghost-danger btn--small"}
+          onClick={props.onRemove}
+          disabled={props.disabled || props.removeDisabled}
+        >
+          {props.removeLabel ?? t("common.remove")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function PostgresObjectUploadGraphicControls(props: {
+  outlineColor: string;
+  outlineColorText: string;
+  outlineWidth?: number;
+  onOutlineColorChange: (value: string) => void;
+  onOutlineWidthChange?: (value: number) => void;
+  textWidth?: number | "fluid";
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      <PostgresColorControl
+        label={t("sharedModals.graphics.outline")}
+        swatchValue={props.outlineColor}
+        textValue={props.outlineColorText}
+        onChange={props.onOutlineColorChange}
+        textWidth={props.textWidth ?? 132}
+      />
+      {props.outlineWidth !== undefined && props.onOutlineWidthChange ? (
+        <PostgresRangeControl
+          label={t("sharedModals.graphics.outlineWidth")}
+          value={normalizePostgresObjectOutlineWidth(props.outlineWidth)}
+          min={1}
+          max={10}
+          suffix="px"
+          onChange={props.onOutlineWidthChange}
+        />
+      ) : null}
+    </>
+  );
+}
+
+export function PostgresObjectSelectGraphicControls(props: {
+  shape: PostgresObjectTypeShape;
+  fill: PostgresObjectFill;
+  color: string;
+  colorText: string;
+  outlineColor: string;
+  outlineColorText: string;
+  fillTransparency: number;
+  outlineWidth: number;
+  fillStyleAriaLabel: string;
+  onShapeChange: (value: PostgresObjectTypeShape) => void;
+  onFillChange: (value: PostgresObjectFill) => void;
+  onColorChange: (value: string) => void;
+  onOutlineColorChange: (value: string) => void;
+  onFillTransparencyChange: (value: number) => void;
+  onOutlineWidthChange: (value: number) => void;
+}) {
+  const { t } = useI18n();
+  const fillTransparency = Math.max(0, Math.min(100, props.fillTransparency));
+  const outlineWidth = normalizePostgresObjectOutlineWidth(props.outlineWidth);
+  return (
+    <>
+      <label className="form-label">
+        {t("sharedModals.graphics.shape")}
+        <PostgresObjectShapePicker
+          value={props.shape}
+          onChange={(value) => props.onShapeChange((value || "rounded") as PostgresObjectTypeShape)}
+          previewColor={props.color}
+          previewOutlineColor={props.outlineColor}
+          previewFill={props.fill}
+          previewFillTransparency={fillTransparency}
+          previewOutlineWidth={outlineWidth}
+        />
+      </label>
+      <div className="graphics-editor-setting-row">
+        <span className="form-label">{t("sharedModals.graphics.fillStyle")}</span>
+        <div className="segmented-control graphics-editor-fill-control" role="tablist" aria-label={props.fillStyleAriaLabel}>
+          {(["outline", "filled"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={props.fill === option}
+              className={`segmented-control-option ${props.fill === option ? "segmented-control-option--active" : ""}`}
+              onClick={() => props.onFillChange(option)}
+            >
+              {option === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
+            </button>
+          ))}
+        </div>
+      </div>
+      {props.fill === "filled" ? (
+        <>
+          <PostgresColorControl
+            label={t("sharedModals.graphics.fill")}
+            swatchValue={props.color}
+            textValue={props.colorText}
+            onChange={props.onColorChange}
+            textWidth="fluid"
+          />
+          <PostgresRangeControl
+            label={t("sharedModals.graphics.fillTransparency")}
+            value={fillTransparency}
+            min={0}
+            max={100}
+            suffix="%"
+            onChange={props.onFillTransparencyChange}
+          />
+        </>
+      ) : null}
+      <PostgresColorControl
+        label={t("sharedModals.graphics.outline")}
+        swatchValue={props.outlineColor}
+        textValue={props.outlineColorText}
+        onChange={props.onOutlineColorChange}
+        textWidth="fluid"
+      />
+      <PostgresRangeControl
+        label={t("sharedModals.graphics.outlineWidth")}
+        value={outlineWidth}
+        min={1}
+        max={10}
+        suffix="px"
+        onChange={props.onOutlineWidthChange}
+      />
+    </>
+  );
+}
 
 function formatObjectShapeLabel(value: string, fallback: string, t: ReturnType<typeof useI18n>["t"]): string {
   const labels: Record<string, string> = {
@@ -575,14 +826,14 @@ export function PostgresObjectGraphicPreviewCard(props: {
   const imageUrl = usePostgresStoredImageUrl(projectStoragePath, imageStoragePath);
   const displayImageUrl = previewUrl || imageUrl;
   return (
-    <div className="source-graphics-preview-card" aria-label={label}>
+    <div className="graphics-editor-preview-card" aria-label={label}>
       <span className="form-label">{t("common.preview")}</span>
-      <div className="source-graphics-preview-stage">
+      <div className="graphics-editor-preview-stage">
         {empty ? null : displayImageUrl ? (
           <img
             src={displayImageUrl}
             alt=""
-            className="source-graphics-preview-image"
+            className="graphics-editor-preview-image"
             style={{
               borderColor: outlineColor,
               borderWidth: normalizePostgresObjectOutlineWidth(outlineWidth),
@@ -615,9 +866,9 @@ export function PostgresRelationshipGraphicPreviewCard(props: {
 }) {
   const { t } = useI18n();
   return (
-    <div className="source-graphics-preview-card" aria-label={props.label}>
+    <div className="graphics-editor-preview-card" aria-label={props.label}>
       <span className="form-label">{t("common.preview")}</span>
-      <div className="source-graphics-preview-stage">
+      <div className="graphics-editor-preview-stage">
         <div className="relationship-graphics-preview-line">
           <RelationshipTypeLinePreview
             lineShape={props.lineShape}

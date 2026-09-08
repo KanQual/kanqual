@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   build: {
+    chunkSizeWarningLimit: 2300,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -17,7 +18,7 @@ export default defineConfig({
             id.includes("cytoscape")
             || id.includes("elkjs")
             || id.includes("src/lib/postgresCanvasGraph.ts")
-            || id.includes("src/views/Postgres_Explore_Canvas_View.tsx")
+            || id.includes("src/views/Explore_Canvas_View.tsx")
           ) {
             return "canvas-graph";
           }

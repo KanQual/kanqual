@@ -98,27 +98,27 @@ export function PostgresAttributeValueHistoryModal({
         ) : entries.length === 0 ? (
           <p className="case-card-empty">{t("sharedModals.attributes.emptyHistory")}</p>
         ) : (
-          <div className="users-table-wrap attribute-history-table-wrap">
-            <table className="users-table attribute-history-table">
+          <div className="data-table-wrap attribute-history-table-wrap">
+            <table className="data-table attribute-history-table">
               <thead>
                 <tr>
-                  <th className="users-th attribute-history-col-date">{t("sharedModals.attributes.changed")}</th>
-                  <th className="users-th attribute-history-col-action">{t("sharedModals.attributes.action")}</th>
-                  <th className="users-th attribute-history-col-value">{t("sharedModals.attributes.previous")}</th>
-                  <th className="users-th attribute-history-col-value">{t("sharedModals.attributes.new")}</th>
-                  <th className="users-th attribute-history-col-ai">{t("sharedModals.attributes.ai")}</th>
-                  <th className="users-th attribute-history-col-user">{t("sharedModals.attributes.user")}</th>
+                  <th className="data-table-header attribute-history-col-date">{t("sharedModals.attributes.changed")}</th>
+                  <th className="data-table-header attribute-history-col-action">{t("sharedModals.attributes.action")}</th>
+                  <th className="data-table-header attribute-history-col-value">{t("sharedModals.attributes.previous")}</th>
+                  <th className="data-table-header attribute-history-col-value">{t("sharedModals.attributes.new")}</th>
+                  <th className="data-table-header attribute-history-col-ai">{t("sharedModals.attributes.ai")}</th>
+                  <th className="data-table-header attribute-history-col-user">{t("sharedModals.attributes.user")}</th>
                 </tr>
               </thead>
               <tbody>
                 {entries.map((entry) => (
-                  <tr key={entry.id} className="users-row">
-                    <td className="users-td users-td--muted">{formatChangedAt(entry.changedAt)}</td>
-                    <td className="users-td">{formatAction(entry.aiAssistAction || entry.changeAction, t)}</td>
-                    <td className="users-td">{formatValue(entry.previousValue)}</td>
-                    <td className="users-td">{formatValue(entry.newValue)}</td>
-                    <td className="users-td">{entry.aiAssistRelated ? t("common.yes") : t("common.no")}</td>
-                    <td className="users-td users-td--muted">{entry.changedByName || "-"}</td>
+                  <tr key={entry.id} className="data-table-row">
+                    <td className="data-table-cell data-table-cell--muted">{formatChangedAt(entry.changedAt)}</td>
+                    <td className="data-table-cell">{formatAction(entry.aiAssistAction || entry.changeAction, t)}</td>
+                    <td className="data-table-cell">{formatValue(entry.previousValue)}</td>
+                    <td className="data-table-cell">{formatValue(entry.newValue)}</td>
+                    <td className="data-table-cell">{entry.aiAssistRelated ? t("common.yes") : t("common.no")}</td>
+                    <td className="data-table-cell data-table-cell--muted">{entry.changedByName || "-"}</td>
                   </tr>
                 ))}
               </tbody>

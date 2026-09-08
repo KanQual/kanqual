@@ -1,0 +1,6416 @@
+﻿import { type FormEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
+import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { type SharedAttributeDataType, type SharedAttributeDraft } from "../components/AttributeValuesModal";
+import {
+  EditableAttributesMatrix,
+  type EditableAttributeMatrixValues,
+} from "../components/EditableAttributesMatrix";
+import {
+  PostgresAttributeValueHistoryModal,
+  type PostgresAttributeValueHistoryTarget,
+} from "../components/PostgresAttributeValueHistoryModal";
+import { CloseIcon, DeleteIcon, EditIcon, PlusIcon, ZoomIcon } from "../components/AppIcons";
+import { CardHeader } from "../components/CardHeader";
+import {
+  ObjectShapeSwatch,
+  PostgresGraphicModeTabs,
+  PostgresImageUploadActions,
+  PostgresObjectGraphicPreviewCard,
+  PostgresObjectSelectGraphicControls,
+  PostgresObjectUploadGraphicControls,
+} from "../components/PostgresGraphicsControls";
+import {
+  PostgresRelationshipModal,
+  type PostgresRelationshipEndpointOption as SharedPostgresRelationshipEndpointOption,
+} from "../components/PostgresRelationshipModal";
+import { SettingsModal } from "../components/SettingsModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpModal } from "../components/HelpModal";
+import { MasterDetailLayout } from "../components/MasterDetailLayout";
+import { ModalTabSelector } from "../components/ModalTabSelector";
+import { TableMessageRow, TableShell } from "../components/TableShell";
+import { ViewHeader } from "../components/ViewHeader";
+import { ProcessedTranscriptView, getProcessedTranscriptQuestionOutline, parseProcessedTranscriptSegments } from "../components/ProcessedTranscriptView";
+import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
+import { useI18n } from "../i18n/provider";
+import { readAppSettings } from "../lib/appSettings";
+import { useViewportContextMenuStyle } from "../lib/contextMenu";
+import { createMediaWaveformCache, serializeMediaWaveformCache } from "../lib/mediaWaveform";
+import { createMediaVideoFrameIndexCache, serializeMediaVideoFrameIndexCache } from "../lib/mediaVideoFrameIndex";
+import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
+import {
+  POSTGRES_OBJECT_TYPE_DEFAULT_FILL_TRANSPARENCY as SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY,
+  POSTGRES_OBJECT_TYPE_DEFAULT_OUTLINE_WIDTH as SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH,
+  getPostgresSourceObjectVisualKey as getSourceObjectVisualKey,
+  normalizeOptionalPostgresObjectTypeColor as normalizeOptionalSourceObjectColor,
+  normalizePostgresObjectFill as normalizeSourceObjectFill,
+  normalizePostgresObjectFillTransparency,
+  normalizePostgresObjectOutlineWidth,
+  normalizePostgresObjectTypeColor as normalizeSourceObjectColor,
+  normalizePostgresObjectTypeShape as normalizeSourceObjectTypeShape,
+  type PostgresObjectFill as SourceObjectFill,
+  type PostgresObjectTypeShape as SourceObjectTypeShape,
+  type PostgresSourceObjectVisualKey as SourceObjectVisualKey,
+} from "../lib/postgresGraphics";
+import {
+  isVisibleItemTimelineAttribute,
+  itemTimelineAttributeDefaultValue,
+  itemTimelineAttributeLabel,
+} from "../lib/timelineAttributeUi";
+import {
+  inferUploadMediaType,
+  sourceImportFileExtension,
+  uploadMediaTypeFromFileExtension,
+} from "../lib/sourceUploadMedia";
+import {
+  acquirePostgresSourceLock,
+  createPostgresAnnotation,
+  createPostgresCode,
+  deletePostgresAnnotation,
+  deletePostgresCode,
+  type PostgresCode,
+  type PostgresAnnotationSummary,
+  type PostgresObject,
+  type PostgresRelationship,
+  type PostgresRelationshipAttributeDefinition,
+  type PostgresRelationshipType,
+  type PostgresSource,
+  type PostgresSourceAttributeDefinition,
+  type PostgresSourceAttributeValue,
+  type PostgresSourceLock,
+  type PostgresSourceTypeSetting,
+  createPostgresSource,
+  deletePostgresSource,
+  deletePostgresSourceAttributeDefinition,
+  getPostgresProjectDocumentImportSettings,
+  importPostgresSourceFile,
+  importPostgresSourceImage,
+  importPostgresSourceTypeImage,
+  kickPostgresSourceLock,
+  listPostgresProjects,
+  releasePostgresSourceLock,
+  removePostgresSourceTypeImage,
+  removePostgresSourceImage,
+  savePostgresSourceAttribute,
+  savePostgresSourceTypeSetting,
+  savePostgresRelationship,
+  savePostgresRelationshipType,
+  updatePostgresAnnotation,
+  updatePostgresCode,
+  updatePostgresSource,
+} from "../lib/postgres";
+import { SourceAudioCodingView } from "./Source_Audio_Coding_View";
+import { SourceImageCodingView } from "./Source_Image_Coding_View";
+import {
+  AnnotationEditorModal,
+  TextSizeControls,
+  useSourceTextSizePreference,
+} from "./Source_Coding_Shared";
+import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCallout";
+import type { GettingStartedState } from "../lib/gettingStartedGuide";
+import { formatMediaTime } from "./Source_Media_Timeline";
+import { SourceAITextCodingView } from "./Source_AI_Text_Coding_View";
+import { SourceTextCodingView } from "./Source_Text_Coding_View";
+import { SourceVideoCodingView } from "./Source_Video_Coding_View";
+
+type SortCol = "name" | "objects" | "annotations" | "createdAt";
+type SortDir = "asc" | "desc";
+type SourceKindSortCol = "label" | "count";
+type AttributeSortCol = "name" | string;
+type AttributeSortDir = "asc" | "desc";
+type SourceUploadTab = "text" | "pdf" | "image" | "audio" | "video";
+type SourceGraphicMode = "inherit" | "select" | "upload";
+
+type SourceUploadDraft = {
+  id: string;
+  file: File;
+  reviewed: boolean;
+  title: string;
+  sourceKind: string;
+  notes: string;
+  extractedText: string;
+  fileTypeLabel: string;
+  characterCount: number | null;
+  shapeOverride: string;
+  colorOverride: string;
+  outlineColorOverride: string;
+  fillOverride: string;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
+  imageStoragePath: string;
+  pendingImageFile: File | null;
+  removeImage: boolean;
+  attributeValuesByDefinitionId: Record<string, string>;
+};
+
+export type SourceRow = {
+  id: string;
+  name: string;
+  type: string;
+  sourceObjectType: string;
+  sourceObjectTypeSystemKey: string | null;
+  notes: string;
+  content: string;
+  structuredContentJson: string;
+  waveformPeaksJson: string;
+  videoFrameIndexJson: string;
+  extractedFromVideoSourceId: string;
+  extractedFromVideoTimeMs: number | null;
+  filePath: string;
+  shapeOverride: string;
+  colorOverride: string;
+  outlineColorOverride: string;
+  fillOverride: string;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
+  imageStoragePath: string;
+  annotationCount: number;
+  objectCount: number;
+  createdAt: string;
+};
+
+export type SourceEditorPayload = {
+  sourceKind: string;
+  name: string;
+  notes: string;
+  content: string;
+  shapeOverride: string | null;
+  colorOverride: string | null;
+  outlineColorOverride: string | null;
+  fillOverride: string | null;
+  fillTransparencyOverride: number | null;
+  outlineWidthOverride: number | null;
+  imageStoragePath: string | null;
+  pendingImageFile: File | null;
+  removeImage: boolean;
+  attributeValuesByDefinitionId: Record<string, string>;
+};
+
+function normalizeSourceKindFilterValue(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/^source_/, "").replace(/_/g, " ");
+  return normalized === "processed transcript" ? "transcript" : normalized;
+}
+
+function sourceRowMatchesAllowedKinds(row: SourceRow, allowedKinds: Set<string> | null): boolean {
+  if (!allowedKinds) return true;
+  return [
+    row.type,
+    row.sourceObjectType,
+    row.sourceObjectTypeSystemKey ?? "",
+  ].some((value) => allowedKinds.has(normalizeSourceKindFilterValue(value)));
+}
+
+export type SourceAnnotationRow = {
+  id: string;
+  codeIds: string[];
+  codeLabels: string[];
+  codeColors: string[];
+  quote: string;
+  note: string;
+  anchorKind: string;
+  timeStartMs: number | null;
+  timeEndMs: number | null;
+  imageRegion: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    imageWidth: number;
+    imageHeight: number;
+    pageNumber?: number | null;
+  } | null;
+  startOffset: number | null;
+  endOffset: number | null;
+  createdByName: string;
+  createdAt: string;
+};
+
+export type PendingSelection = {
+  startOffset: number;
+  endOffset: number;
+  quote: string;
+  anchorKind?: string;
+  timeStartMs?: number | null;
+  timeEndMs?: number | null;
+  imageRegion?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    imageWidth: number;
+    imageHeight: number;
+    pageNumber?: number | null;
+  } | null;
+  displayLabel?: string;
+};
+
+export type CodeOption = {
+  id: string;
+  label: string;
+  color: string;
+};
+
+type SourceRelationshipRow = {
+  id: string;
+  relationshipType: string;
+  otherEndpointName: string;
+  otherEndpointType: string;
+  description: string;
+  relationship: PostgresRelationship;
+};
+
+type SourceAttributeDefinitionRow = {
+  id: string;
+  name: string;
+  dataType: SharedAttributeDataType;
+  description: string;
+  options: string[];
+  sourceKinds: string[];
+  timelineRole?: SharedAttributeDraft["timelineRole"];
+  sortOrder: number;
+};
+
+type SourceAttributeDraft = SharedAttributeDraft & {
+  sourceKinds: string[];
+};
+
+type SourceAttributeValueRow = {
+  id: string;
+  sourceId: string;
+  attributeDefinitionId: string;
+  value: string;
+};
+
+type BulkSourceAttributeTarget = {
+  attribute: SourceAttributeDefinitionRow;
+  rows: SourceRow[];
+};
+
+const SOURCE_LOCK_HEARTBEAT_MS = 15_000;
+const SOURCE_IMPORT_ACCEPTED_EXTS = new Set([
+  "txt",
+  "rtf",
+  "docx",
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "ogg",
+  "flac",
+  "mp4",
+  "mov",
+  "avi",
+  "mkv",
+  "webm",
+  "m4v",
+]);
+const SOURCE_IMPORT_TEXT_EXTS = new Set(["txt", "rtf", "docx"]);
+const SOURCE_IMPORT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+const SOURCE_IMPORT_AUDIO_EXTS = new Set(["mp3", "wav", "m4a", "aac", "ogg", "flac"]);
+const SOURCE_IMPORT_VIDEO_EXTS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
+const POSTGRES_SOURCE_KIND_OPTIONS = [
+  { value: "text", label: "Text" },
+  { value: "Transcript", label: "Transcript" },
+  { value: "pdf", label: "PDF" },
+  { value: "image", label: "Image" },
+  { value: "audio", label: "Audio" },
+  { value: "video", label: "Video" },
+] as const;
+const POSTGRES_SOURCE_KIND_VISUALS: Record<string, { label: string; color: string; systemKey: SourceObjectVisualKey }> = {
+  text: { label: "Text", color: "#355070", systemKey: "source_text" },
+  transcript: { label: "Transcript", color: "#2a9d8f", systemKey: "source_processed_transcript" },
+  pdf: { label: "PDF", color: "#7f5539", systemKey: "source_pdf" },
+  image: { label: "Image", color: "#6d597a", systemKey: "source_image" },
+  audio: { label: "Audio", color: "#b56576", systemKey: "source_audio" },
+  video: { label: "Video", color: "#457b9d", systemKey: "source_video" },
+};
+const SOURCE_OBJECT_TYPE_DEFAULT_COLOR = "#355070";
+
+function getSourceKindVisual(sourceKind: string | null | undefined): { label: string; color: string; systemKey: SourceObjectVisualKey } | null {
+  const normalized = normalizeSourceKindFilterValue(sourceKind ?? "");
+  return POSTGRES_SOURCE_KIND_VISUALS[normalized] ?? null;
+}
+
+type SourceTypeEditModalDraft = {
+  name: string;
+  description: string;
+  shape: SourceObjectTypeShape;
+  color: string;
+  outlineColor: string;
+  fill: SourceObjectFill;
+  fillTransparency: number;
+  outlineWidth: number;
+  imageStoragePath: string;
+  attributes: SourceTypeAttributeDraft[];
+  attributeValuesByDraftId: EditableAttributeMatrixValues;
+  removedAttributeIds: string[];
+};
+
+type SourceTypeAttributeDraft = SourceAttributeDraft & {
+  localId: string;
+  originalSourceKinds: string[];
+};
+
+function createSourceTypeAttributeDraft(sourceKind: string): SourceTypeAttributeDraft {
+  return {
+    localId: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    name: "",
+    dataType: "text",
+    description: "",
+    options: [],
+    timelineRole: "",
+    sourceKinds: [sourceKind],
+    originalSourceKinds: [],
+  };
+}
+
+function SourceTypeEditModal({
+  sourceType,
+  projectStoragePath,
+  attributeDefinitions,
+  sources,
+  attributeValues,
+  initialTab = "details",
+  saving,
+  uploading,
+  error,
+  onCancel,
+  onSave,
+  onUploadImage,
+  onRemoveImage,
+}: {
+  sourceType: PostgresSourceTypeSetting;
+  projectStoragePath: string;
+  attributeDefinitions: PostgresSourceAttributeDefinition[];
+  sources: SourceRow[];
+  attributeValues: PostgresSourceAttributeValue[];
+  initialTab?: "details" | "graphics" | "attributes" | "timeline";
+  saving: boolean;
+  uploading: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSave: (draft: SourceTypeEditModalDraft) => void;
+  onUploadImage: (sourceKind: string, file: File) => Promise<PostgresSourceTypeSetting>;
+  onRemoveImage: (sourceKind: string) => Promise<PostgresSourceTypeSetting>;
+}) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState<"details" | "graphics" | "attributes" | "timeline">(initialTab);
+  const defaultSourceVisualKey = sourceObjectTypeSystemKeyFromKind(sourceType.sourceKind);
+  const defaultSourceVisual = getSourceKindVisual(sourceType.sourceKind);
+  const [graphicMode, setGraphicMode] = useState<"default" | "select" | "upload">(
+    sourceType.imageStoragePath ? "upload" : defaultSourceVisualKey ? "default" : "select",
+  );
+  const [editingAttributeDraft, setEditingAttributeDraft] = useState<SourceTypeAttributeDraft | null>(null);
+  const [removedAttributeIds, setRemovedAttributeIds] = useState<string[]>([]);
+  const [name, setName] = useState(sourceType.name);
+  const [description, setDescription] = useState(sourceType.description);
+  const [shape, setShape] = useState<SourceObjectTypeShape>(normalizeSourceObjectTypeShape(sourceType.shape));
+  const [color, setColor] = useState(normalizeSourceObjectColor(sourceType.color));
+  const [outlineColor, setOutlineColor] = useState(
+    normalizeOptionalSourceObjectColor(sourceType.outlineColor) || normalizeSourceObjectColor(sourceType.color),
+  );
+  const [fill, setFill] = useState<SourceObjectFill>(normalizeSourceObjectFill(sourceType.fill));
+  const [fillTransparency, setFillTransparency] = useState(normalizePostgresObjectFillTransparency(sourceType.fillTransparency));
+  const [outlineWidth, setOutlineWidth] = useState(normalizePostgresObjectOutlineWidth(sourceType.outlineWidth));
+  const [imageStoragePath, setImageStoragePath] = useState(sourceType.imageStoragePath ?? "");
+  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const normalizedColor = normalizeSourceObjectColor(color);
+  const normalizedOutlineColor = normalizeOptionalSourceObjectColor(outlineColor) || normalizedColor;
+  const sourceTypeAttributeOptions = [{ kind: sourceType.sourceKind, label: sourceType.name, count: 0 }];
+  const [attributeDrafts, setAttributeDrafts] = useState<SourceTypeAttributeDraft[]>(() => {
+    const currentKind = normalizeSourceKindFilterValue(sourceType.sourceKind);
+    return attributeDefinitions
+      .filter((definition) => (definition.sourceKinds ?? []).some((kind) => normalizeSourceKindFilterValue(kind) === currentKind))
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+      .map((definition) => ({
+        localId: definition.id,
+        id: definition.id,
+        name: definition.name,
+        dataType: definition.dataType,
+        description: definition.description,
+        options: definition.options,
+        timelineRole: definition.timelineRole ?? "",
+        sourceKinds: [sourceType.sourceKind],
+        originalSourceKinds: definition.sourceKinds ?? [],
+      }));
+  });
+  const matrixRows = useMemo(
+    () => sources
+      .filter((source) => normalizeSourceKindFilterValue(source.type) === normalizeSourceKindFilterValue(sourceType.sourceKind))
+      .map((source) => ({ id: source.id, name: source.name }))
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [sourceType.sourceKind, sources],
+  );
+  const [attributeValuesByDraftId, setAttributeValuesByDraftId] = useState<EditableAttributeMatrixValues>(() => {
+    const sourceIds = new Set(
+      sources
+        .filter((source) => normalizeSourceKindFilterValue(source.type) === normalizeSourceKindFilterValue(sourceType.sourceKind))
+        .map((source) => source.id),
+    );
+    return Object.fromEntries(
+      attributeDefinitions
+        .filter((definition) => (definition.sourceKinds ?? []).some((kind) => normalizeSourceKindFilterValue(kind) === normalizeSourceKindFilterValue(sourceType.sourceKind)))
+        .map((definition) => [
+          definition.id,
+          Object.fromEntries(
+            attributeValues
+              .filter((value) => value.attributeDefinitionId === definition.id && sourceIds.has(value.sourceId))
+              .map((value) => [value.sourceId, value.value]),
+          ),
+        ]),
+    );
+  });
+
+  async function handleUploadFile(file: File | null | undefined) {
+    if (!file || saving || uploading) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const previewUrl = URL.createObjectURL(new Blob([bytes], { type: file.type || "image/*" }));
+    try {
+      const saved = await onUploadImage(sourceType.sourceKind, file);
+      setImageStoragePath(saved.imageStoragePath ?? "");
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return previewUrl;
+      });
+      setGraphicMode("upload");
+    } catch {
+      URL.revokeObjectURL(previewUrl);
+    } finally {
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleRemoveImage() {
+    if (saving || uploading || !imageStoragePath) return;
+    try {
+      const saved = await onRemoveImage(sourceType.sourceKind);
+      setImageStoragePath(saved.imageStoragePath ?? "");
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+    } catch {
+      // The parent owns the visible modal error text.
+    }
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    onSave({
+      name,
+      description,
+      shape,
+      color: normalizedColor,
+      outlineColor: normalizedOutlineColor,
+      fill,
+      fillTransparency: fill === "filled" ? normalizePostgresObjectFillTransparency(fillTransparency) : SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY,
+      outlineWidth: normalizePostgresObjectOutlineWidth(outlineWidth),
+      imageStoragePath,
+      attributes: attributeDrafts,
+      attributeValuesByDraftId,
+      removedAttributeIds,
+    });
+  }
+
+  function openNewAttributeDraft() {
+    setEditingAttributeDraft(createSourceTypeAttributeDraft(sourceType.sourceKind));
+  }
+
+  function openEditAttributeDraft(draft: SourceTypeAttributeDraft) {
+    setEditingAttributeDraft({ ...draft, options: [...draft.options], sourceKinds: [sourceType.sourceKind] });
+  }
+
+  function saveAttributeDraft(draft: SourceAttributeDraft) {
+    setAttributeDrafts((current) => {
+      const existing = current.find((entry) => entry.localId === editingAttributeDraft?.localId);
+      const nextDraft: SourceTypeAttributeDraft = {
+        ...(existing ?? createSourceTypeAttributeDraft(sourceType.sourceKind)),
+        ...draft,
+        sourceKinds: [sourceType.sourceKind],
+        originalSourceKinds: existing?.originalSourceKinds ?? editingAttributeDraft?.originalSourceKinds ?? [],
+      };
+      const found = current.some((entry) => entry.localId === nextDraft.localId);
+      setAttributeValuesByDraftId((values) => values[nextDraft.localId] ? values : { ...values, [nextDraft.localId]: {} });
+      return found
+        ? current.map((entry) => (entry.localId === nextDraft.localId ? nextDraft : entry))
+        : [...current, nextDraft];
+    });
+    setEditingAttributeDraft(null);
+  }
+
+  function deleteAttributeDraft(localId: string) {
+    setAttributeDrafts((current) => {
+      const draft = current.find((entry) => entry.localId === localId);
+      if (draft?.id) {
+        setRemovedAttributeIds((ids) => ids.includes(draft.id!) ? ids : [...ids, draft.id!]);
+      }
+      setAttributeValuesByDraftId((values) => {
+        const next = { ...values };
+        delete next[localId];
+        return next;
+      });
+      return current.filter((entry) => entry.localId !== localId);
+    });
+  }
+
+  function updateMatrixValue(attributeLocalId: string, sourceId: string, value: string) {
+    setAttributeValuesByDraftId((current) => ({
+      ...current,
+      [attributeLocalId]: {
+        ...(current[attributeLocalId] ?? {}),
+        [sourceId]: value,
+      },
+    }));
+  }
+
+  function updateTimelineField(role: TimelineFieldRole, value: string) {
+    if (value === "__create__") {
+      const option = TIMELINE_FIELD_OPTIONS.find((entry) => entry.role === role)!;
+      setEditingAttributeDraft({
+        ...createSourceTypeAttributeDraft(sourceType.sourceKind),
+        name: option.defaultName,
+        dataType: option.dataTypes[0],
+        options: defaultTimelineAttributeOptions(role),
+        timelineRole: role,
+      });
+      return;
+    }
+    setAttributeDrafts((current) => current.map((draft) => ({
+      ...draft,
+      timelineRole: draft.localId === value ? role : draft.timelineRole === role ? "" : draft.timelineRole,
+    })));
+  }
+
+  function renderTimelineFieldMappings() {
+    return (
+      <div className="attribute-editor-section">
+        <div className="attribute-editor-title">{t("sharedModals.tabs.timelineFields")}</div>
+        <div className="case-detail-attributes-table-wrap">
+          <table className="case-detail-attributes-table">
+            <tbody>
+              {TIMELINE_FIELD_OPTIONS.map((field) => {
+                const selectedDraft = attributeDrafts.find((draft) => draft.timelineRole === field.role);
+                const eligibleDrafts = attributeDrafts
+                  .filter((draft) => field.dataTypes.includes(draft.dataType))
+                  .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+                return (
+                  <tr key={field.role}>
+                    <th className="case-detail-attributes-label" scope="row">{field.label}</th>
+                    <td className="case-detail-attributes-value">
+                      <select
+                        className="form-input"
+                        value={selectedDraft?.localId ?? ""}
+                        onChange={(event) => updateTimelineField(field.role, event.target.value)}
+                      >
+                        <option value="">{t("sharedModals.attributes.none")}</option>
+                        {eligibleDrafts.map((draft) => (
+                          <option key={draft.localId} value={draft.localId}>{draft.name || t("sharedModals.attributes.untitledAttribute")}</option>
+                        ))}
+                        <option value="__create__">{t("sharedModals.attributes.createNewAttribute")}</option>
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SettingsModal
+      title={t("projectCore.sources.editSourceType")}
+      onClose={onCancel}
+      closeDisabled={saving || uploading}
+      modalClassName="modal--wide"
+    >
+      <form className={`form ${tab === "graphics" ? "modal-body--graphics modal-form--graphics" : ""}`} onSubmit={submit}>
+        <ModalTabSelector
+          value={tab}
+          options={(["details", "graphics", "attributes", "timeline"] as const).map((tabId) => ({
+            value: tabId,
+            label: tabId === "details"
+              ? t("sharedModals.tabs.details")
+              : tabId === "graphics"
+                ? t("sharedModals.tabs.graphics")
+                : tabId === "attributes"
+                  ? t("sharedModals.tabs.attributes")
+                  : t("sharedModals.tabs.timeline"),
+          }))}
+          ariaLabel={t("projectCore.sources.editSourceTypeTabs")}
+          onChange={setTab}
+        />
+
+        {tab === "details" ? (
+          <>
+            <label className="form-label">
+              {t("projectCore.sources.sourceTypeName")}
+              <input
+                className="form-input"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                autoFocus
+              />
+            </label>
+            <label className="form-label">
+              {t("common.description")}
+              <textarea
+                className="form-input form-textarea"
+                rows={4}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+          </>
+        ) : tab === "graphics" ? (
+          <>
+              <div className="graphics-editor-layout">
+                <div className="graphics-editor-controls">
+                  <PostgresGraphicModeTabs
+                    value={graphicMode}
+                    options={[
+                      ...(defaultSourceVisualKey ? [{ value: "default" as const, label: t("projectCore.sources.defaultTab") }] : []),
+                      { value: "select" as const, label: t("common.select") },
+                      { value: "upload" as const, label: t("common.upload") },
+                    ]}
+                    ariaLabel={t("projectCore.sources.sourceTypeGraphicsTabs")}
+                    onChange={setGraphicMode}
+                    disabled={saving || uploading}
+                  />
+
+                {graphicMode === "default" ? null : graphicMode === "select" ? (
+                  <PostgresObjectSelectGraphicControls
+                    shape={shape}
+                    fill={fill}
+                    color={normalizedColor}
+                    colorText={color}
+                    outlineColor={normalizedOutlineColor}
+                    outlineColorText={outlineColor}
+                    fillTransparency={fillTransparency}
+                    outlineWidth={outlineWidth}
+                    fillStyleAriaLabel={t("projectCore.sources.sourceTypeFillStyle")}
+                    onShapeChange={setShape}
+                    onFillChange={setFill}
+                    onColorChange={setColor}
+                    onOutlineColorChange={setOutlineColor}
+                    onFillTransparencyChange={setFillTransparency}
+                    onOutlineWidthChange={setOutlineWidth}
+                  />
+                ) : (
+                  <>
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                      style={{ display: "none" }}
+                      onChange={(event) => void handleUploadFile(event.currentTarget.files?.[0])}
+                    />
+                    <PostgresImageUploadActions
+                      hasImage={Boolean(imageStoragePath || imagePreviewUrl)}
+                      disabled={saving || uploading}
+                      onImport={() => uploadInputRef.current?.click()}
+                      onRemove={imageStoragePath ? () => void handleRemoveImage() : undefined}
+                      importingLabel={uploading ? t("projectCore.sources.uploading") : undefined}
+                      uploadLabel={t("projectCore.sources.uploadImage")}
+                      replaceLabel={t("projectCore.sources.replaceImage")}
+                      removeLabel={t("common.clear")}
+                      importButtonClassName="btn btn--secondary"
+                      removeButtonClassName="btn"
+                    />
+                    {imageStoragePath || imagePreviewUrl ? (
+                      <PostgresObjectUploadGraphicControls
+                        outlineColor={normalizedOutlineColor}
+                        outlineColorText={outlineColor}
+                        outlineWidth={outlineWidth}
+                        onOutlineColorChange={setOutlineColor}
+                        onOutlineWidthChange={setOutlineWidth}
+                        textWidth={148}
+                      />
+                    ) : null}
+                  </>
+                )}
+              </div>
+              <PostgresObjectGraphicPreviewCard
+                label={t("projectCore.sources.sourceTypePreview")}
+                projectStoragePath={projectStoragePath}
+                imageStoragePath={graphicMode === "upload" ? imageStoragePath : ""}
+                previewUrl={graphicMode === "upload" ? imagePreviewUrl : ""}
+                shape={graphicMode === "default" ? "rounded" : shape}
+                fill={graphicMode === "default" ? "outline" : fill}
+                color={graphicMode === "default" ? defaultSourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR : normalizedColor}
+                outlineColor={graphicMode === "default" ? defaultSourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR : normalizedOutlineColor}
+                fillTransparency={fillTransparency}
+                outlineWidth={outlineWidth}
+                sourceVisualKey={graphicMode === "default" ? defaultSourceVisualKey : null}
+                empty={graphicMode === "upload" && !imageStoragePath && !imagePreviewUrl}
+              />
+            </div>
+          </>
+        ) : tab === "timeline" ? (
+          renderTimelineFieldMappings()
+        ) : (
+          <EditableAttributesMatrix
+            definitions={attributeDrafts.map((draft) => ({
+              id: draft.localId,
+              name: draft.name || t("sharedModals.attributes.untitledAttribute"),
+              dataType: draft.dataType,
+              description: draft.description,
+              options: draft.options,
+            }))}
+            rows={matrixRows}
+            values={attributeValuesByDraftId}
+            disabled={saving || uploading}
+            emptyDefinitionsLabel={t("projectCore.sources.noTypeAttributes")}
+            emptyRowsLabel={t("projectCore.sources.noSourcesOfType")}
+            onAddAttribute={openNewAttributeDraft}
+            onEditAttribute={(localId) => {
+              const draft = attributeDrafts.find((entry) => entry.localId === localId);
+              if (draft) openEditAttributeDraft(draft);
+            }}
+            onDeleteAttribute={deleteAttributeDraft}
+            onChangeValue={updateMatrixValue}
+          />
+        )}
+
+        {error ? <p className="auth-error">{error}</p> : null}
+        <div className="app-settings-modal-footer">
+          <button type="button" className="btn" onClick={onCancel} disabled={saving || uploading}>{t("common.cancel")}</button>
+          <button type="submit" className="btn btn--primary" disabled={saving || uploading || !name.trim()}>
+            {saving ? t("common.saving") : t("common.save")}
+          </button>
+        </div>
+      </form>
+      {editingAttributeDraft ? (
+        <SourceAttributeTypesModal
+          draft={editingAttributeDraft}
+          sourceTypeOptions={sourceTypeAttributeOptions}
+          saving={saving}
+          onCancel={() => setEditingAttributeDraft(null)}
+          onSave={saveAttributeDraft}
+        />
+      ) : null}
+    </SettingsModal>
+  );
+}
+
+let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
+
+async function loadPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+      return module;
+    });
+  }
+  return pdfJsPromise;
+}
+
+function normalizeSourceKindSelection(value: string | null | undefined): string {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (POSTGRES_SOURCE_KIND_OPTIONS.some((option) => option.value === normalized)) {
+    return normalized;
+  }
+  return "text";
+}
+
+function fmtDate(iso: string): string {
+  if (!iso) return "\u2014";
+  try {
+    return formatCurrentDateTime(iso, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "\u2014";
+  }
+}
+
+function maskedFileLabel(filePath: string): string {
+  return filePath || "N/A";
+}
+
+function stripRtf(rtf: string): string {
+  return rtf
+    .replace(/\\par\b/gi, "\n")
+    .replace(/\\line\b/gi, "\n")
+    .replace(/\\tab\b/gi, "\t")
+    .replace(/\\'([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\[a-z]+\*?-?\d* ?/gi, "")
+    .replace(/[{}\\]/g, "")
+    .replace(/ {2,}/g, " ")
+    .trim();
+}
+
+async function findZipEntry(bytes: Uint8Array, target: string): Promise<string | null> {
+  const decoder = new TextDecoder();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocdSignature = 0x06054b50;
+  const centralDirectorySignature = 0x02014b50;
+  const localFileHeaderSignature = 0x04034b50;
+  const maxCommentLength = 0xffff;
+  const searchStart = Math.max(0, bytes.length - (22 + maxCommentLength));
+
+  async function inflateCompressedData(compressed: Uint8Array, method: number): Promise<string | null> {
+    if (method === 0) return decoder.decode(compressed);
+    if (method !== 8) return null;
+    const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    const out = await new Response(stream).arrayBuffer();
+    return decoder.decode(out);
+  }
+
+  for (let off = bytes.length - 22; off >= searchStart; off -= 1) {
+    if (view.getUint32(off, true) !== eocdSignature) continue;
+    const centralDirectorySize = view.getUint32(off + 12, true);
+    const centralDirectoryOffset = view.getUint32(off + 16, true);
+    const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
+    if (centralDirectoryEnd > bytes.length) break;
+
+    let cursor = centralDirectoryOffset;
+    while (cursor + 46 <= centralDirectoryEnd) {
+      if (view.getUint32(cursor, true) !== centralDirectorySignature) break;
+      const method = view.getUint16(cursor + 10, true);
+      const cSize = view.getUint32(cursor + 20, true);
+      const fnLen = view.getUint16(cursor + 28, true);
+      const extraLen = view.getUint16(cursor + 30, true);
+      const commentLen = view.getUint16(cursor + 32, true);
+      const localHeaderOffset = view.getUint32(cursor + 42, true);
+      const nameStart = cursor + 46;
+      const nameEnd = nameStart + fnLen;
+      const fname = decoder.decode(bytes.slice(nameStart, nameEnd));
+      if (fname === target) {
+        if (localHeaderOffset + 30 > bytes.length) return null;
+        if (view.getUint32(localHeaderOffset, true) !== localFileHeaderSignature) return null;
+        const localFnLen = view.getUint16(localHeaderOffset + 26, true);
+        const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+        const dataOff = localHeaderOffset + 30 + localFnLen + localExtraLen;
+        const compressed = bytes.slice(dataOff, dataOff + cSize);
+        return inflateCompressedData(compressed, method);
+      }
+      cursor = nameEnd + extraLen + commentLen;
+    }
+  }
+
+  return null;
+}
+
+function extractWordXmlText(xml: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length > 0) {
+    return xml
+      .replace(/<w:tab[^>]*\/>/g, "\t")
+      .replace(/<w:br[^>]*\/>/g, "\n")
+      .replace(/<w:cr[^>]*\/>/g, "\n")
+      .replace(/<\/w:p>/g, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/ {2,}/g, " ")
+      .trim();
+  }
+
+  const wordNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  const paragraphs = Array.from(doc.getElementsByTagNameNS(wordNs, "p"));
+  const lines = paragraphs.map((paragraph) => {
+    let text = "";
+    for (const node of Array.from(paragraph.getElementsByTagName("*"))) {
+      if (node.namespaceURI !== wordNs) continue;
+      if (node.localName === "t") text += node.textContent ?? "";
+      else if (node.localName === "tab") text += "\t";
+      else if (node.localName === "br" || node.localName === "cr") text += "\n";
+    }
+    return text.replace(/ {2,}/g, " ").trimEnd();
+  });
+  return lines.filter((line, index) => line || index < lines.length - 1).join("\n").trim();
+}
+
+async function extractDocxText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const xml = await findZipEntry(bytes, "word/document.xml");
+  if (!xml) return "";
+  return extractWordXmlText(xml);
+}
+
+async function extractPdfText(file: File): Promise<string> {
+  const data = await file.arrayBuffer();
+  const pdfjsLib = await loadPdfJs();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const parts: string[] = [];
+  for (let index = 1; index <= pdf.numPages; index += 1) {
+    const page = await pdf.getPage(index);
+    const content = await page.getTextContent();
+    parts.push(
+      content.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" "),
+    );
+  }
+  return parts.join("\n").replace(/ {2,}/g, " ").trim();
+}
+
+async function extractTextFromFile(file: File): Promise<string> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "txt") return file.text();
+  if (ext === "rtf") return stripRtf(await file.text());
+  if (ext === "docx") return extractDocxText(file);
+  if (ext === "pdf") return extractPdfText(file);
+  throw new Error(`File type ".${ext}" is not supported.`);
+}
+
+function shouldExtractTextFromUploadFile(file: File): boolean {
+  return SOURCE_IMPORT_TEXT_EXTS.has(sourceImportFileExtension(file));
+}
+
+function inferSourceKindFromUploadFile(file: File): string | null {
+  const ext = sourceImportFileExtension(file);
+  const mediaType = file.type.toLowerCase();
+  if (SOURCE_IMPORT_IMAGE_EXTS.has(ext) || mediaType.startsWith("image/")) return "image";
+  if (SOURCE_IMPORT_AUDIO_EXTS.has(ext) || mediaType.startsWith("audio/")) return "audio";
+  if (SOURCE_IMPORT_VIDEO_EXTS.has(ext) || mediaType.startsWith("video/")) return "video";
+  return null;
+}
+
+function describeUploadProcessing(file: File): string {
+  const ext = sourceImportFileExtension(file);
+  if (shouldExtractTextFromUploadFile(file)) return "Text will be extracted for coding.";
+  if (ext === "pdf") return "PDF will be stored as an original file without text extraction.";
+  if (inferSourceKindFromUploadFile(file) === "image") return "Image will be stored as original media without text extraction.";
+  if (inferSourceKindFromUploadFile(file) === "audio") return "Audio will be stored as original media without text extraction.";
+  if (inferSourceKindFromUploadFile(file) === "video") return "Video will be stored as original media without text extraction.";
+  return "Original file will be stored without text extraction.";
+}
+
+function uploadTabAcceptValue(tab: SourceUploadTab): string {
+  if (tab === "text") return ".txt,.rtf,.docx";
+  if (tab === "pdf") return ".pdf,application/pdf";
+  if (tab === "image") return "image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg";
+  if (tab === "audio") return "audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac";
+  return "video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v";
+}
+
+function uploadTabHint(tab: SourceUploadTab): string {
+  if (tab === "text") return "txt / rtf / docx";
+  if (tab === "pdf") return "pdf";
+  if (tab === "image") return "png / jpg / gif / webp / bmp / svg";
+  if (tab === "audio") return "mp3 / wav / m4a / aac / ogg / flac";
+  return "mp4 / mov / avi / mkv / webm / m4v";
+}
+
+function uploadTabForFile(file: File): SourceUploadTab | null {
+  const ext = sourceImportFileExtension(file);
+  const mediaType = file.type.toLowerCase();
+  if (SOURCE_IMPORT_TEXT_EXTS.has(ext)) return "text";
+  if (ext === "pdf" || mediaType === "application/pdf") return "pdf";
+  if (SOURCE_IMPORT_IMAGE_EXTS.has(ext) || mediaType.startsWith("image/")) return "image";
+  if (SOURCE_IMPORT_AUDIO_EXTS.has(ext) || mediaType.startsWith("audio/")) return "audio";
+  if (SOURCE_IMPORT_VIDEO_EXTS.has(ext) || mediaType.startsWith("video/")) return "video";
+  return null;
+}
+
+function fileMatchesUploadTab(file: File, tab: SourceUploadTab): boolean {
+  return uploadTabForFile(file) === tab;
+}
+
+function preliminarySourceTitleFromFileName(fileName: string): string {
+  return fileName.replace(/\.[^/.]+$/, "").trim();
+}
+
+function sourceUploadFileTypeLabel(file: File): string {
+  const ext = sourceImportFileExtension(file);
+  if (ext === "pdf") return "PDF";
+  if (SOURCE_IMPORT_IMAGE_EXTS.has(ext)) return "Image";
+  if (SOURCE_IMPORT_VIDEO_EXTS.has(ext)) return "Video";
+  if (SOURCE_IMPORT_TEXT_EXTS.has(ext)) return ext.toUpperCase();
+  if (file.type.startsWith("image/")) return "Image";
+  if (file.type.startsWith("video/")) return "Video";
+  return ext ? ext.toUpperCase() : "File";
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function fileNameFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const name = normalized.split("/").pop();
+  return name && name.trim() ? name : "Dropped file";
+}
+
+function fileExtensionFromPath(path: string): string {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function isAbsoluteStoragePath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("/");
+}
+
+function resolveProjectStoragePath(projectStoragePath: string, sourceStoragePath: string): string {
+  const trimmedSourcePath = sourceStoragePath.trim();
+  if (!trimmedSourcePath) return "";
+  if (isAbsoluteStoragePath(trimmedSourcePath)) return trimmedSourcePath;
+  const trimmedProjectPath = projectStoragePath.trim().replace(/[\\/]+$/, "");
+  if (!trimmedProjectPath) return trimmedSourcePath;
+  const normalizedSourcePath = trimmedSourcePath.replace(/^([\\/])+/, "");
+  return `${trimmedProjectPath}\\${normalizedSourcePath.replace(/\//g, "\\")}`;
+}
+
+async function readDroppedFile(path: string): Promise<File> {
+  const bytes = await readTauriFile(path);
+  return new File([bytes], fileNameFromPath(path));
+}
+
+function valueKey(sourceId: string, attributeDefinitionId: string): string {
+  return `${sourceId}:${attributeDefinitionId}`;
+}
+
+function sourceKindLabel(kind: string, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (normalizeSourceKindFilterValue(kind)) {
+    case "text":
+      return t("projectCore.sources.sourceKinds.text");
+    case "transcript":
+      return t("projectCore.sourceKinds.transcript");
+    case "pdf":
+      return t("projectCore.sources.sourceKinds.pdf");
+    case "image":
+      return t("projectCore.sources.sourceKinds.image");
+    case "audio":
+      return t("projectCore.sources.sourceKinds.audio");
+    case "video":
+      return t("projectCore.sources.sourceKinds.video");
+    default:
+      return "";
+  }
+}
+
+function sourceTypeRowLabel(label: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const cleaned = label
+    .replace(/\bsources?\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const localized = sourceKindLabel(cleaned || label, t);
+  if (localized) return localized;
+  return cleaned || label;
+}
+
+function sourceKindFromFilterValue(value: string): string | null {
+  const normalized = normalizeSourceKindFilterValue(value);
+  const visualEntry = Object.entries(POSTGRES_SOURCE_KIND_VISUALS)
+    .find(([, visual]) => visual.systemKey === normalized);
+  if (visualEntry) return visualEntry[1].label;
+  const option = POSTGRES_SOURCE_KIND_OPTIONS.find((entry) => entry.value === normalized || entry.label.toLowerCase() === normalized);
+  return option?.label ?? null;
+}
+
+function sourceTypeOptionLabel(kind: string, fallbackLabel: string | undefined, t: ReturnType<typeof useI18n>["t"]): string {
+  return sourceTypeRowLabel(
+    fallbackLabel
+      || POSTGRES_SOURCE_KIND_VISUALS[kind.toLowerCase()]?.label
+      || POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.value === kind || option.label === kind)?.label
+      || kind,
+    t,
+  );
+}
+
+function sourceKindDisplayLabel(kind: string, fallbackLabel: string | undefined, t: ReturnType<typeof useI18n>["t"]): string {
+  return sourceTypeRowLabel(fallbackLabel || kind || t("projectCore.entities.source"), t);
+}
+
+function sourceObjectTypeSystemKeyFromKind(value: string | null | undefined): SourceObjectVisualKey | null {
+  const normalized = normalizeSourceKindFilterValue(value ?? "");
+  const visualKey = getSourceObjectVisualKey(normalized);
+  if (visualKey) return visualKey;
+  const visual = POSTGRES_SOURCE_KIND_VISUALS[normalized];
+  if (visual) return visual.systemKey;
+  return null;
+}
+
+function normalizeAttributeOptions(options: string[]): string[] {
+  return options.map((option) => option.trim()).filter(Boolean);
+}
+
+type TimelineFieldRole = Exclude<NonNullable<SharedAttributeDraft["timelineRole"]>, "">;
+
+const TIMELINE_FIELD_OPTIONS: Array<{
+  role: TimelineFieldRole;
+  label: string;
+  dataTypes: SharedAttributeDataType[];
+  defaultName: string;
+}> = [
+  { role: "timeline_start", label: "Start", dataTypes: ["datetime"], defaultName: "Timeline start" },
+  { role: "timeline_end", label: "End", dataTypes: ["datetime"], defaultName: "Timeline end" },
+  { role: "timeline_label", label: "Label", dataTypes: ["text", "categorical"], defaultName: "Timeline label" },
+  { role: "timeline_item_type", label: "Item Type", dataTypes: ["categorical"], defaultName: "Timeline item type" },
+];
+
+function timelineRoleFitsDataType(role: SharedAttributeDraft["timelineRole"], dataType: SharedAttributeDataType): boolean {
+  if (!role) return true;
+  const option = TIMELINE_FIELD_OPTIONS.find((entry) => entry.role === role);
+  return option ? option.dataTypes.includes(dataType) : false;
+}
+
+function defaultTimelineAttributeOptions(role: TimelineFieldRole): string[] {
+  return role === "timeline_item_type" ? ["Point", "Range"] : [];
+}
+
+function normalizeSourceAttributeKinds(sourceKinds: string[]): string[] {
+  const normalized = new Set(sourceKinds);
+  if (normalized.has("Text") || normalized.has("text")) {
+    normalized.add("Transcript");
+  }
+  return Array.from(normalized);
+}
+
+function SourceAttributeTypesModal({
+  draft,
+  sourceTypeOptions,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  draft: SourceAttributeDraft;
+  sourceTypeOptions: Array<{ kind: string; label: string; count: number }>;
+  saving: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSave: (draft: SourceAttributeDraft) => void;
+}) {
+  const { t } = useI18n();
+  const [name, setName] = useState(draft.name);
+  const [dataType, setDataType] = useState<SharedAttributeDataType>(draft.dataType);
+  const [description, setDescription] = useState(draft.description);
+  const [options, setOptions] = useState<string[]>(draft.options.length > 0 ? draft.options : ["", ""]);
+  const [sourceKinds, setSourceKinds] = useState<string[]>(draft.sourceKinds);
+  const typeOptions: Array<{ value: SharedAttributeDataType; label: string }> = [
+    { value: "text", label: t("attributeModal.types.text") },
+    { value: "number", label: t("attributeModal.types.number") },
+    { value: "datetime", label: t("attributeModal.types.datetime") },
+    { value: "categorical", label: t("attributeModal.types.categorical") },
+  ];
+  const normalizedOptions = normalizeAttributeOptions(options);
+  const effectiveTimelineRole = timelineRoleFitsDataType(draft.timelineRole, dataType) ? draft.timelineRole ?? "" : "";
+
+  return (
+    <SettingsModal
+      title={draft.id ? t("attributeModal.editTitle") : t("attributeModal.createTitle")}
+      onClose={onCancel}
+      closeDisabled={saving}
+      modalClassName="modal--wide"
+    >
+      <div className="app-settings-modal-body">
+        <div className="attribute-values-details">
+          <label className="form-group">
+            <span className="form-label">{t("attributeModal.attributeName")}</span>
+            <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div className="form-group attribute-details-span">
+            <span className="form-label">{t("attributeModal.dataType")}</span>
+            <div className="attribute-type-picker">
+              {typeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`attribute-type-btn${dataType === option.value ? " attribute-type-btn--active" : ""}`}
+                  onClick={() => setDataType(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="form-group attribute-details-span">
+            <span className="form-label">{t("attributeModal.description")}</span>
+            <textarea
+              className="form-input attribute-description-input"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={4}
+            />
+          </label>
+          {dataType === "categorical" ? (
+            <div className="form-group attribute-details-span">
+              <span className="form-label">{t("attributeModal.categories")}</span>
+              <div className="attribute-category-list">
+                {options.map((option, index) => (
+                  <input
+                    key={index}
+                    className="form-input"
+                    value={option}
+                    onChange={(event) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)))}
+                    placeholder={t("attributeModal.categoryPlaceholder", { index: index + 1 })}
+                  />
+                ))}
+              </div>
+              <button type="button" className="btn btn--small" onClick={() => setOptions((current) => [...current, ""])}>
+                {t("attributeModal.addMore")}
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="attribute-values-list">
+          {sourceTypeOptions.length === 0 ? (
+            <p className="case-card-empty">{t("projectCore.sources.noSourceTypes")}</p>
+          ) : (
+            sourceTypeOptions.map((option) => (
+              <label key={option.kind} className="attribute-value-row">
+                <span>{option.label}</span>
+                <input
+                  type="checkbox"
+                  checked={sourceKinds.includes(option.kind)}
+                  onChange={(event) => {
+                    setSourceKinds((current) => event.target.checked
+                      ? [...current, option.kind]
+                      : current.filter((kind) => kind !== option.kind));
+                  }}
+                />
+              </label>
+            ))
+          )}
+        </div>
+        {error ? <div className="form-error" style={{ marginTop: 16 }}>{error}</div> : null}
+      </div>
+      <div className="app-settings-modal-footer">
+        <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
+        <button
+          className="btn btn--primary"
+          onClick={() => onSave({
+            ...draft,
+            name: name.trim(),
+            dataType,
+            description: description.trim(),
+            options: normalizedOptions,
+            timelineRole: effectiveTimelineRole,
+            sourceKinds,
+          })}
+          disabled={saving || !name.trim() || sourceKinds.length === 0 || (dataType === "categorical" && normalizedOptions.length < 2)}
+        >
+          {saving ? t("attributeModal.saving") : t("attributeModal.save")}
+        </button>
+      </div>
+    </SettingsModal>
+  );
+}
+
+function BulkSourceAttributeValuesModal({
+  target,
+  valuesBySource,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  target: BulkSourceAttributeTarget;
+  valuesBySource: Record<string, SourceAttributeValueRow>;
+  saving: boolean;
+  error?: string | null;
+  onCancel: () => void;
+  onSave: (valuesBySourceId: Record<string, string>) => void;
+}) {
+  const { t } = useI18n();
+  const [draftValues, setDraftValues] = useState<Record<string, string>>(() => (
+    Object.fromEntries(
+      target.rows.map((row) => [
+        row.id,
+        valuesBySource[valueKey(row.id, target.attribute.id)]?.value ?? "",
+      ]),
+    )
+  ));
+  const attribute = target.attribute;
+
+  function updateValue(sourceId: string, value: string) {
+    setDraftValues((current) => ({
+      ...current,
+      [sourceId]: value,
+    }));
+  }
+
+  function renderInput(row: SourceRow) {
+    const value = draftValues[row.id] ?? "";
+    if (attribute.dataType === "categorical") {
+      return (
+        <select
+          className="form-input"
+          value={value}
+          onChange={(event) => updateValue(row.id, event.target.value)}
+          disabled={saving}
+        >
+          <option value="">-</option>
+          {attribute.options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    if (attribute.dataType === "number") {
+      return (
+        <input
+          className="form-input"
+          type="number"
+          value={value}
+          onChange={(event) => updateValue(row.id, event.target.value)}
+          disabled={saving}
+        />
+      );
+    }
+    if (attribute.dataType === "datetime") {
+      return (
+        <input
+          className="form-input"
+          type="datetime-local"
+          value={value}
+          onChange={(event) => updateValue(row.id, event.target.value)}
+          disabled={saving}
+        />
+      );
+    }
+    return (
+      <input
+        className="form-input"
+        type="text"
+        value={value}
+        onChange={(event) => updateValue(row.id, event.target.value)}
+        disabled={saving}
+      />
+    );
+  }
+
+  return (
+    <SettingsModal
+      title={`Edit ${attribute.name}`}
+      onClose={onCancel}
+      closeDisabled={saving}
+      modalClassName="modal--wide"
+    >
+      <div className="bulk-attribute-values-modal">
+        {error ? <p className="auth-error">{error}</p> : null}
+        <div className="data-table-wrap bulk-attribute-values-table-wrap">
+          <table className="data-table bulk-attribute-values-table">
+            <thead>
+              <tr>
+                <th className="data-table-header" style={{ width: "42%" }}>{t("projectCore.sources.source")}</th>
+                <th className="data-table-header">{t("projectCore.sources.value")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {target.rows.length === 0 ? (
+                <tr><td className="data-table-message" colSpan={2}>{t("projectCore.sources.noSourcesOfType")}</td></tr>
+              ) : target.rows.map((row) => (
+                <tr key={row.id} className="data-table-row">
+                  <td className="data-table-cell data-table-cell--name">{row.name}</td>
+                  <td className="data-table-cell">{renderInput(row)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="app-settings-modal-footer">
+        <button type="button" className="btn" onClick={onCancel} disabled={saving}>{t("projectCore.sources.cancel")}</button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => onSave(draftValues)}
+          disabled={saving}
+        >
+          {saving ? t("projectCore.sources.saving") : t("projectCore.sources.save")}
+        </button>
+      </div>
+    </SettingsModal>
+  );
+}
+
+function describeSourceLock(
+  lock: PostgresSourceLock | null | undefined,
+  currentUserId: string,
+): { label: string; title: string } {
+  if (!lock) {
+    return {
+      label: "Available",
+      title: "This source is currently available for coding.",
+    };
+  }
+  if (lock.userId === currentUserId) {
+    return {
+      label: "You",
+      title: "You are currently holding this source lock.",
+    };
+  }
+  return {
+    label: "Locked",
+    title: `${lock.userName || "Another user"} is currently holding this source lock.`,
+  };
+}
+
+function formatAttributeDisplay(value: string, dataType: SharedAttributeDataType): string {
+  if (!value) return "";
+  if (dataType === "datetime") {
+    try {
+      return formatCurrentDateTime(value, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function sourceRowMatchesAttributeDefinition(row: SourceRow, definition: Pick<SourceAttributeDefinitionRow, "sourceKinds">): boolean {
+  const sourceKinds = definition.sourceKinds ?? [];
+  if (sourceKinds.length === 0) return true;
+  const rowKindKeys = new Set([
+    normalizeSourceKindFilterValue(row.type),
+    normalizeSourceKindFilterValue(row.sourceObjectType),
+    normalizeSourceKindFilterValue(row.sourceObjectTypeSystemKey ?? ""),
+    normalizeSourceKindFilterValue(sourceKindFromFilterValue(row.sourceObjectTypeSystemKey ?? row.type) ?? ""),
+  ].filter(Boolean));
+  return sourceKinds.some((kind) => rowKindKeys.has(normalizeSourceKindFilterValue(kind)));
+}
+
+function relationshipTypeAllowsSourceEndpoint(
+  relationshipType: PostgresRelationshipType,
+  endpoint: "from" | "to",
+  sourceKind: string,
+): boolean {
+  const objectTypeIds = endpoint === "from" ? relationshipType.fromObjectTypeIds : relationshipType.toObjectTypeIds;
+  const sourceKinds = endpoint === "from" ? relationshipType.fromSourceKinds : relationshipType.toSourceKinds;
+  const normalizedSourceKinds = new Set(sourceKinds.map(normalizeSourceKindFilterValue));
+  const normalizedSourceKind = normalizeSourceKindFilterValue(sourceKind);
+  if (normalizedSourceKinds.size > 0) return normalizedSourceKinds.has(normalizedSourceKind);
+  return objectTypeIds.length === 0;
+}
+
+function relationshipTypeAllowsObjectEndpoint(
+  relationshipType: PostgresRelationshipType,
+  endpoint: "from" | "to",
+  objectTypeId: string,
+): boolean {
+  const objectTypeIds = endpoint === "from" ? relationshipType.fromObjectTypeIds : relationshipType.toObjectTypeIds;
+  const sourceKinds = endpoint === "from" ? relationshipType.fromSourceKinds : relationshipType.toSourceKinds;
+  if (objectTypeIds.length > 0) return objectTypeIds.includes(objectTypeId);
+  return sourceKinds.length === 0;
+}
+
+function toRelationshipAttributePayload(
+  definitions: PostgresRelationshipAttributeDefinition[],
+  valuesByDefinitionId: Record<string, string>,
+) {
+  return definitions.map((definition) => ({
+    attributeDefinitionId: definition.id,
+    value: valuesByDefinitionId[definition.id] ?? "",
+  }));
+}
+
+function valuesForPostgresRelationship(relationship: PostgresRelationship): Record<string, string> {
+  return Object.fromEntries(
+    relationship.attributeValues.map((value) => [value.attributeDefinitionId, value.value]),
+  );
+}
+
+function buildCodeOptions(codes: PostgresCode[]): CodeOption[] {
+  const childrenOf = new Map<string, PostgresCode[]>();
+  const roots: PostgresCode[] = [];
+  for (const code of codes) {
+    if (code.parentCodeId) {
+      const group = childrenOf.get(code.parentCodeId) ?? [];
+      group.push(code);
+      childrenOf.set(code.parentCodeId, group);
+    } else {
+      roots.push(code);
+    }
+  }
+  const sortGroup = (group: PostgresCode[]) => {
+    group.sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+      return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+    });
+  };
+  sortGroup(roots);
+  for (const group of childrenOf.values()) sortGroup(group);
+
+  const result: CodeOption[] = [];
+  const visit = (group: PostgresCode[], depth: number) => {
+    for (const code of group) {
+      result.push({
+        id: code.id,
+        label: `${"  ".repeat(depth)}${code.label}`,
+        color: code.color,
+      });
+      visit(childrenOf.get(code.id) ?? [], depth + 1);
+    }
+  };
+  visit(roots, 0);
+  return result;
+}
+
+function RichTextEditor({
+  initialHtml,
+  editorRef,
+  onChange,
+  minRows,
+}: {
+  initialHtml: string;
+  editorRef: React.RefObject<HTMLDivElement | null>;
+  onChange?: () => void;
+  minRows?: number;
+}) {
+  useEffect(() => {
+    if (editorRef.current) editorRef.current.innerHTML = initialHtml;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const contentStyle = minRows
+    ? { height: `${minRows * 1.5}em`, overflowY: "auto" as const }
+    : undefined;
+
+  return (
+    <div className="rte">
+      <div
+        ref={editorRef}
+        className="rte-content"
+        contentEditable
+        suppressContentEditableWarning
+        onInput={onChange}
+        style={contentStyle}
+      />
+    </div>
+  );
+}
+
+export function SourceImportModal({
+  importSettings,
+  attributeDefinitions,
+  sourceTypeSettings = [],
+  saving,
+  error,
+  gettingStartedAddSourceActive = false,
+  onGettingStartedDismiss,
+  onCancel,
+  onSave,
+}: {
+  importSettings: {
+    defaultMode: "upload" | "paste";
+    autoNameFromFile: boolean;
+    trimImportedText: boolean;
+    warnBeforeEmptyImport: boolean;
+    storeOriginalFileName: boolean;
+  };
+  attributeDefinitions: PostgresSourceAttributeDefinition[];
+  sourceTypeSettings?: PostgresSourceTypeSetting[];
+  saving: boolean;
+  error: string | null;
+  gettingStartedAddSourceActive?: boolean;
+  onGettingStartedDismiss?: () => void;
+  onCancel: () => void;
+  onSave: (payload:
+    | {
+        mode: "paste";
+        title: string;
+        sourceKind: string;
+        notes: string;
+        content: string;
+      }
+    | {
+        mode: "upload";
+        items: Array<{
+          file: File;
+          title: string;
+          sourceKind: string;
+          notes: string;
+          extractedText: string;
+          shapeOverride: string;
+          colorOverride: string;
+          outlineColorOverride: string;
+          fillOverride: string;
+          fillTransparencyOverride: number | null;
+          outlineWidthOverride: number | null;
+          imageStoragePath: string;
+          pendingImageFile: File | null;
+          removeImage: boolean;
+          attributeValuesByDefinitionId: Record<string, string>;
+        }>;
+      }
+  ) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [mode, setMode] = useState<"upload" | "paste">(importSettings.defaultMode);
+  const [uploadTab, setUploadTab] = useState<SourceUploadTab>("text");
+  const [title, setTitle] = useState("");
+  const [sourceKind, setSourceKind] = useState("text");
+  const [notes, setNotes] = useState("");
+  const [uploadDrafts, setUploadDrafts] = useState<SourceUploadDraft[]>([]);
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractingDraftIds, setExtractingDraftIds] = useState<string[]>([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewDraftId, setReviewDraftId] = useState<string | null>(null);
+  const [pasteHasContent, setPasteHasContent] = useState(false);
+  const pastedRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  function resetUploadState() {
+    setUploadDrafts([]);
+    setExtractError(null);
+    setExtracting(false);
+    setExtractingDraftIds([]);
+    setReviewOpen(false);
+    setReviewDraftId(null);
+    dragDepthRef.current = 0;
+    setDragging(false);
+  }
+
+  function setModeAndReset(nextMode: "upload" | "paste") {
+    setMode(nextMode);
+    resetUploadState();
+  }
+
+  function setUploadTabAndReset(nextTab: SourceUploadTab) {
+    setUploadTab(nextTab);
+    resetUploadState();
+    if (nextTab === "image") setSourceKind("image");
+    else if (nextTab === "audio") setSourceKind("audio");
+    else if (nextTab === "video") setSourceKind("video");
+    else setSourceKind("text");
+  }
+
+  function setCreateMode(nextMode: "paste" | SourceUploadTab) {
+    if (nextMode === "paste") {
+      setModeAndReset("paste");
+      return;
+    }
+    setMode("upload");
+    setUploadTabAndReset(nextMode);
+  }
+
+  async function processFiles(nextFiles: File[]) {
+    const validFiles = nextFiles.filter((file) => {
+      const ext = sourceImportFileExtension(file);
+      return SOURCE_IMPORT_ACCEPTED_EXTS.has(ext);
+    });
+    const wrongTabFiles = validFiles.filter((file) => !fileMatchesUploadTab(file, uploadTab));
+    const matchedFiles = validFiles.filter((file) => fileMatchesUploadTab(file, uploadTab));
+    if (matchedFiles.length === 0) {
+      const ext = sourceImportFileExtension(nextFiles[0] ?? new File([], ""));
+      setExtractError(wrongTabFiles.length > 0
+        ? `These files do not match the ${uploadTab.toUpperCase()} tab.`
+        : `Unsupported file type ".${ext}".`);
+      return;
+    }
+
+    setExtracting(true);
+    setExtractError(null);
+    try {
+      const nextDrafts: SourceUploadDraft[] = [];
+      for (const file of matchedFiles) {
+        const inferredSourceKind = inferSourceKindFromUploadFile(file);
+        const draftSourceKind = inferredSourceKind ?? (uploadTab === "pdf" ? "pdf" : sourceKind);
+        const shouldExtractText = shouldExtractTextFromUploadFile(file);
+        const extractedText = shouldExtractText
+          ? (importSettings.trimImportedText ? (await extractTextFromFile(file)).trim() : await extractTextFromFile(file))
+          : "";
+        nextDrafts.push({
+          id: `${file.name}-${file.size}-${file.lastModified}`,
+          file,
+          reviewed: false,
+          title: preliminarySourceTitleFromFileName(file.name),
+          sourceKind: draftSourceKind,
+          notes: "",
+          extractedText,
+          fileTypeLabel: sourceUploadFileTypeLabel(file),
+          characterCount: shouldExtractText ? extractedText.length : null,
+          shapeOverride: "",
+          colorOverride: "",
+          outlineColorOverride: "",
+          fillOverride: "",
+          fillTransparencyOverride: null,
+          outlineWidthOverride: null,
+          imageStoragePath: "",
+          pendingImageFile: null,
+          removeImage: false,
+          attributeValuesByDefinitionId: {},
+        });
+      }
+      setUploadDrafts(nextDrafts);
+      if (wrongTabFiles.length > 0) {
+        setExtractError(`Some files were skipped because they do not match the ${uploadTab.toUpperCase()} tab.`);
+      }
+    } catch {
+      setExtractError(t("projectCore.sources.import.readFailed"));
+      setUploadDrafts([]);
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setDragging(true);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    setDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragging(false);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setDragging(false);
+    const dropped = Array.from(e.dataTransfer.files ?? []);
+    if (dropped.length > 0) void processFiles(dropped);
+  }
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    async function attachDragDropListener() {
+      try {
+        unlisten = await getCurrentWindow().onDragDropEvent(async (event) => {
+          if (disposed || mode !== "upload") return;
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setDragging(true);
+            return;
+          }
+          if (event.payload.type === "leave") {
+            dragDepthRef.current = 0;
+            setDragging(false);
+            return;
+          }
+          dragDepthRef.current = 0;
+          setDragging(false);
+          const paths = event.payload.paths;
+          if (paths.length === 0) return;
+          try {
+            const droppedFiles = await Promise.all(paths.map((path) => readDroppedFile(path)));
+            await processFiles(droppedFiles);
+          } catch (nextError) {
+            setExtractError(nextError instanceof Error ? nextError.message : "Could not read dropped file.");
+          }
+        });
+      } catch {
+        // Browser builds rely on the DOM drag/drop handlers.
+      }
+    }
+
+    void attachDragDropListener();
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, [mode, uploadTab, sourceKind, importSettings.trimImportedText]);
+
+  useEffect(() => {
+    if (mode !== "upload" || uploadTab !== "text") return;
+    setUploadDrafts((current) => current.map((draft) => ({ ...draft, sourceKind })));
+  }, [mode, sourceKind, uploadTab]);
+
+  const canSubmit = mode === "paste"
+    ? title.trim().length > 0 && pasteHasContent
+    : uploadDrafts.length > 0;
+
+  const reviewSourceTypeLabel = (kind: string) =>
+    kind === "pdf"
+      ? "PDF"
+      : POSTGRES_SOURCE_KIND_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
+
+  function removeUploadDraft(draftId: string) {
+    setUploadDrafts((current) => current.filter((draft) => draft.id !== draftId));
+    if (reviewDraftId === draftId) setReviewDraftId(null);
+  }
+
+  function sourceRowForUploadDraft(draft: SourceUploadDraft): SourceRow {
+    return {
+      id: draft.id,
+      name: draft.title,
+      type: draft.sourceKind,
+      sourceObjectType: reviewSourceTypeLabel(draft.sourceKind),
+      sourceObjectTypeSystemKey: null,
+      notes: draft.notes,
+      content: draft.sourceKind === "text" ? draft.extractedText : "",
+      structuredContentJson: "",
+      waveformPeaksJson: "",
+      videoFrameIndexJson: "",
+      extractedFromVideoSourceId: "",
+      extractedFromVideoTimeMs: null,
+      filePath: draft.file.name,
+      shapeOverride: draft.shapeOverride,
+      colorOverride: draft.colorOverride,
+      outlineColorOverride: draft.outlineColorOverride,
+      fillOverride: draft.fillOverride,
+      fillTransparencyOverride: draft.fillTransparencyOverride,
+      outlineWidthOverride: draft.outlineWidthOverride,
+      imageStoragePath: draft.imageStoragePath,
+      annotationCount: 0,
+      objectCount: 0,
+      createdAt: "",
+    };
+  }
+
+  function saveReviewedUploadDraft(draftId: string, payload: SourceEditorPayload) {
+    setUploadDrafts((current) => current.map((draft) => (
+      draft.id === draftId
+        ? {
+            ...draft,
+            title: payload.name,
+            sourceKind: payload.sourceKind,
+            notes: payload.notes,
+            extractedText: payload.sourceKind === "text" ? payload.content : draft.extractedText,
+            characterCount: payload.sourceKind === "text" ? payload.content.length : null,
+            shapeOverride: payload.shapeOverride ?? "",
+            colorOverride: payload.colorOverride ?? "",
+            outlineColorOverride: payload.outlineColorOverride ?? "",
+            fillOverride: payload.fillOverride ?? "",
+            fillTransparencyOverride: payload.fillTransparencyOverride,
+            outlineWidthOverride: payload.outlineWidthOverride,
+            imageStoragePath: payload.imageStoragePath ?? "",
+            pendingImageFile: payload.pendingImageFile,
+            removeImage: payload.removeImage,
+            attributeValuesByDefinitionId: payload.attributeValuesByDefinitionId,
+            reviewed: true,
+          }
+        : draft
+    )));
+    setReviewDraftId(null);
+  }
+
+  const gettingStartedReviewPending =
+    gettingStartedAddSourceActive
+    && reviewOpen
+    && !reviewDraftId
+    && uploadDrafts.some((draft) => !draft.reviewed);
+  const gettingStartedApprovalPending =
+    gettingStartedAddSourceActive
+    && reviewOpen
+    && !reviewDraftId
+    && uploadDrafts.length > 0
+    && uploadDrafts.every((draft) => draft.reviewed);
+  const gettingStartedReviewActive =
+    gettingStartedAddSourceActive
+    && !!reviewDraftId;
+  const gettingStartedUploadPending =
+    gettingStartedAddSourceActive
+    && !reviewOpen
+    && !reviewDraftId
+    && mode === "upload"
+    && uploadTab === "text"
+    && uploadDrafts.length === 0;
+  const gettingStartedCreateSourcePending =
+    gettingStartedAddSourceActive
+    && !reviewOpen
+    && !reviewDraftId
+    && mode === "upload"
+    && uploadTab === "text"
+    && uploadDrafts.length > 0;
+  const gettingStartedUploadModalSpotlightActive =
+    gettingStartedUploadPending || gettingStartedCreateSourcePending;
+
+  return (
+    <>
+      <SettingsModal
+        title={t("projectCore.sources.newSource")}
+        onClose={onCancel}
+        closeDisabled={saving}
+        modalClassName={`doc-upload-modal${mode === "paste" ? " doc-upload-modal--text-entry" : ""}`}
+        overlayClassName={gettingStartedUploadModalSpotlightActive ? "modal-overlay--getting-started-spotlight" : ""}
+      >
+        <div className="app-settings-modal-body">
+          <div className="doc-upload-modal-title-row">
+          <div className="segmented-control">
+            <button
+              type="button"
+              className={`segmented-control-option${mode === "upload" && uploadTab === "text" ? " segmented-control-option--active" : ""}`}
+              onClick={() => setCreateMode("text")}
+            >
+              {t("projectCore.sources.sourceKinds.text")}
+            </button>
+            <button
+              type="button"
+              className={`segmented-control-option${mode === "upload" && uploadTab === "pdf" ? " segmented-control-option--active" : ""}`}
+              onClick={() => setCreateMode("pdf")}
+            >
+              {t("projectCore.sources.sourceKinds.pdf")}
+            </button>
+            <button
+              type="button"
+              className={`segmented-control-option${mode === "upload" && uploadTab === "image" ? " segmented-control-option--active" : ""}`}
+              onClick={() => setCreateMode("image")}
+            >
+              {t("projectCore.sources.sourceKinds.image")}
+            </button>
+            <button
+              type="button"
+              className={`segmented-control-option${mode === "upload" && uploadTab === "audio" ? " segmented-control-option--active" : ""}`}
+              onClick={() => setCreateMode("audio")}
+            >
+              {t("projectCore.sources.sourceKinds.audio")}
+            </button>
+            <button
+              type="button"
+              className={`segmented-control-option${mode === "upload" && uploadTab === "video" ? " segmented-control-option--active" : ""}`}
+              onClick={() => setCreateMode("video")}
+            >
+              {t("projectCore.sources.sourceKinds.video")}
+            </button>
+            <button
+              type="button"
+              className={`segmented-control-option${mode === "paste" ? " segmented-control-option--active" : ""}`}
+              onClick={() => setCreateMode("paste")}
+            >
+              {t("projectCore.sources.sourceKinds.textEntry")}
+            </button>
+          </div>
+          </div>
+        <div className="form">
+          {mode === "upload" ? (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={uploadTabAcceptValue(uploadTab)}
+                multiple
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const nextFiles = Array.from(event.target.files ?? []);
+                  if (nextFiles.length > 0) void processFiles(nextFiles);
+                  event.target.value = "";
+                }}
+              />
+              <div
+                className={`doc-dropzone${dragging ? " doc-dropzone--drag" : ""}${uploadDrafts.length > 0 ? " doc-dropzone--filled" : ""}${gettingStartedAddSourceActive && mode === "upload" && uploadTab === "text" && uploadDrafts.length === 0 ? " getting-started-spotlight-target" : ""}`}
+                onClick={() => !uploadDrafts.length && fileInputRef.current?.click()}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={onDrop}
+              >
+                {extracting ? (
+                  <span className="doc-dropzone-primary">{t("projectCore.sources.import.readingFiles")}</span>
+                ) : uploadDrafts.length === 0 ? (
+                  <>
+                    <span className="doc-dropzone-icon">^</span>
+                    <span className="doc-dropzone-primary">{t("projectCore.sources.import.browseDrop")}</span>
+                    <span className="doc-dropzone-hint">{uploadTabHint(uploadTab)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="doc-dropzone-filename">{t("projectCore.sources.import.filesReady", { count: formatCurrentNumber(uploadDrafts.length) })}</span>
+                    {extractError
+                      ? <span className="doc-dropzone-warn">{extractError}</span>
+                      : <span className="doc-dropzone-hint">{uploadDrafts[0] ? describeUploadProcessing(uploadDrafts[0].file) : uploadTabHint(uploadTab)}</span>}
+                    <button
+                      type="button"
+                      className="doc-dropzone-change"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        resetUploadState();
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      {t("projectCore.sources.import.changeFiles")}
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="form-label">
+                {t("projectCore.sources.title")}
+                <input
+                  className="form-input"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  autoFocus
+                />
+              </label>
+              <label className="form-label">
+                {t("projectCore.sources.notes")}
+                <textarea className="form-input" rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} />
+              </label>
+              <RichTextEditor
+                initialHtml=""
+                editorRef={pastedRef}
+                minRows={14}
+                onChange={() => setPasteHasContent(!!(pastedRef.current?.textContent?.trim()))}
+              />
+            </>
+          )}
+
+          {(error || extractError) && <p className="auth-error">{error ?? extractError}</p>}
+        </div>
+        </div>
+        <div className="app-settings-modal-footer">
+          <button className="btn" onClick={onCancel} disabled={saving}>{t("projectCore.sources.cancel")}</button>
+          <button
+            className={`btn btn--primary${gettingStartedCreateSourcePending ? " getting-started-spotlight-target" : ""}`}
+            disabled={saving || !canSubmit}
+            onClick={() => {
+              if (mode === "paste") {
+                const rawContent = pastedRef.current?.innerHTML ?? "";
+                const content = importSettings.trimImportedText ? rawContent.trim() : rawContent;
+                void onSave({
+                  mode,
+                  title: title.trim(),
+                  sourceKind,
+                  notes,
+                  content,
+                });
+                return;
+              }
+              setReviewOpen(true);
+            }}
+          >
+            {saving ? t("projectCore.sources.saving") : t("projectCore.sources.createSource")}
+          </button>
+        </div>
+      </SettingsModal>
+      {gettingStartedUploadPending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title={t("app.gettingStarted.createSourceTitle")}
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>{t("app.gettingStarted.uploadSourceBody")}</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {gettingStartedCreateSourcePending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title={t("app.gettingStarted.createSourceTitle")}
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>{t("app.gettingStarted.createSourceButtonBody")}</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {reviewOpen ? (
+        <SettingsModal
+          title={t("projectCore.sources.approveSources")}
+          onClose={() => setReviewOpen(false)}
+          closeDisabled={saving}
+          modalClassName="modal--wide source-import-review-modal"
+          overlayClassName={gettingStartedReviewPending || gettingStartedApprovalPending ? "modal-overlay--getting-started-spotlight" : ""}
+        >
+          <div className="app-settings-modal-body">
+            <p className="supporting-copy" style={{ marginTop: 0, marginBottom: 16 }}>
+              {t("projectCore.sources.reviewFilesBeforeCreating")}
+            </p>
+            <div className="data-table-wrap source-import-review-table-wrap">
+              <table className="data-table">
+                <thead>
+                    <tr>
+                    <th className="data-table-header" style={{ width: "70%", cursor: "default" }}>{t("projectCore.sources.originalFilename")}</th>
+                    <th className="data-table-header" style={{ width: "30%", cursor: "default" }} aria-label={t("projectCore.sources.actions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {uploadDrafts.map((draft) => (
+                    <tr key={draft.id}>
+                      <td className="data-table-cell data-table-cell--name">{draft.file.name}</td>
+                      <td className="data-table-cell source-import-review-actions-cell">
+                        <button
+                          type="button"
+                          className={`btn btn--ghost source-import-review-btn${gettingStartedReviewPending && !draft.reviewed ? " getting-started-spotlight-target" : ""}`}
+                          onClick={() => setReviewDraftId(draft.id)}
+                          disabled={saving || extractingDraftIds.includes(draft.id)}
+                        >
+                          {t("projectCore.sources.review")}
+                        </button>
+                        {uploadTab === "pdf" && extractingDraftIds.includes(draft.id) ? (
+                          <div className="entity-list-meta" style={{ marginTop: 6 }}>{t("projectCore.sources.extractingText")}</div>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="source-import-review-remove-btn"
+                          onClick={() => removeUploadDraft(draft.id)}
+                          disabled={saving}
+                          aria-label={t("projectCore.sources.removeSourceName", { name: draft.file.name })}
+                          title={t("projectCore.sources.removeSource")}
+                        >
+                          <CloseIcon className="source-import-review-remove-icon" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {(error || extractError) && <p className="auth-error">{error ?? extractError}</p>}
+          </div>
+          <div className="app-settings-modal-footer">
+              <button className="btn" onClick={() => setReviewOpen(false)} disabled={saving}>{t("projectCore.sources.back")}</button>
+              <button
+                className={`btn btn--primary${gettingStartedApprovalPending ? " getting-started-spotlight-target" : ""}`}
+                disabled={saving || uploadDrafts.length === 0 || extractingDraftIds.length > 0}
+                onClick={() => {
+                  void onSave({
+                    mode: "upload",
+                    items: uploadDrafts.map((draft) => ({
+                      file: draft.file,
+                      title: draft.title,
+                      sourceKind: draft.sourceKind,
+                      notes: draft.notes,
+                      extractedText: draft.sourceKind === "text" ? draft.extractedText : "",
+                      shapeOverride: draft.shapeOverride,
+                      colorOverride: draft.colorOverride,
+                      outlineColorOverride: draft.outlineColorOverride,
+                      fillOverride: draft.fillOverride,
+                      fillTransparencyOverride: draft.fillTransparencyOverride,
+                      outlineWidthOverride: draft.outlineWidthOverride,
+                      imageStoragePath: draft.imageStoragePath,
+                      pendingImageFile: draft.pendingImageFile,
+                      removeImage: draft.removeImage,
+                      attributeValuesByDefinitionId: draft.attributeValuesByDefinitionId,
+                    })),
+                  });
+                }}
+              >
+                {saving ? t("common.creating") : t("projectCore.sources.approveAndCreate")}
+              </button>
+          </div>
+        </SettingsModal>
+      ) : null}
+      {gettingStartedReviewPending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title={t("app.gettingStarted.reviewSourceTitle")}
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>{t("app.gettingStarted.reviewSourceBody")}</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {gettingStartedApprovalPending ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title={t("app.gettingStarted.createSourceTitle")}
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>{t("app.gettingStarted.approveSourceBody")}</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {reviewDraftId ? (() => {
+        const reviewDraft = uploadDrafts.find((draft) => draft.id === reviewDraftId) ?? null;
+        if (!reviewDraft) return null;
+        return (
+          <SourceEditorModal
+            title={t("projectCore.sources.reviewSource")}
+            initialRow={sourceRowForUploadDraft(reviewDraft)}
+            projectStoragePath=""
+            sourceTypeSettings={sourceTypeSettings}
+            attributeDefinitions={attributeDefinitions}
+            attributeValuesByDefinitionId={reviewDraft.attributeValuesByDefinitionId}
+            saving={saving}
+            error={null}
+            gettingStartedReviewActive={gettingStartedReviewActive}
+            onCancel={() => setReviewDraftId(null)}
+            onSave={(payload) => saveReviewedUploadDraft(reviewDraft.id, payload)}
+          />
+        );
+      })() : null}
+      {gettingStartedReviewActive ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title={t("app.gettingStarted.confirmSourceTitle")}
+            onDismiss={onGettingStartedDismiss}
+          >
+            <p>{t("app.gettingStarted.confirmSourceBody")}</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+export function SourceEditorModal({
+  title,
+  initialRow,
+  projectStoragePath = "",
+  sourceTypeSettings = [],
+  attributeDefinitions,
+  attributeValuesByDefinitionId,
+  saving,
+  error,
+  gettingStartedReviewActive = false,
+  onCancel,
+  onSave,
+}: {
+  title: string;
+  initialRow?: SourceRow | null;
+  projectStoragePath?: string;
+  sourceTypeSettings?: PostgresSourceTypeSetting[];
+  attributeDefinitions: PostgresSourceAttributeDefinition[];
+  attributeValuesByDefinitionId: Record<string, string>;
+  saving: boolean;
+  error: string | null;
+  gettingStartedReviewActive?: boolean;
+  onCancel: () => void;
+  onSave: (payload: SourceEditorPayload) => void;
+}) {
+  const { t } = useI18n();
+  const [activeTab, setActiveTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
+  const [graphicMode, setGraphicMode] = useState<SourceGraphicMode>(() => {
+    if (initialRow?.imageStoragePath) return "upload";
+    if (initialRow?.shapeOverride || initialRow?.colorOverride || initialRow?.outlineColorOverride || initialRow?.fillOverride) return "select";
+    return "inherit";
+  });
+  const [sourceKind, setSourceKind] = useState(normalizeSourceKindSelection(initialRow?.type));
+  const [name, setName] = useState(initialRow?.name || "");
+  const [notes, setNotes] = useState(initialRow?.notes || "");
+  const [content, setContent] = useState(initialRow?.content || "");
+  const [shapeOverride, setShapeOverride] = useState(initialRow?.shapeOverride ?? "");
+  const [colorOverride, setColorOverride] = useState(initialRow?.colorOverride ?? "");
+  const [outlineColorOverride, setOutlineColorOverride] = useState(initialRow?.outlineColorOverride ?? "");
+  const [fillOverride, setFillOverride] = useState(initialRow?.fillOverride ?? "");
+  const [fillTransparencyOverride, setFillTransparencyOverride] = useState(initialRow?.fillTransparencyOverride ?? SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY);
+  const [outlineWidthOverride, setOutlineWidthOverride] = useState(initialRow?.outlineWidthOverride ?? SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH);
+  const [imageStoragePath, setImageStoragePath] = useState(initialRow?.imageStoragePath ?? "");
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const [removeImage, setRemoveImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const [attributeDraftValues, setAttributeDraftValues] = useState<Record<string, string>>(() => ({
+    ...attributeValuesByDefinitionId,
+  }));
+  const selectedSourceType = useMemo(() => (
+    sourceTypeSettings.find((setting) => normalizeSourceKindFilterValue(setting.sourceKind) === normalizeSourceKindFilterValue(sourceKind)) ?? null
+  ), [sourceKind, sourceTypeSettings]);
+  const sourceVisualKey = sourceObjectTypeSystemKeyFromKind(sourceKind);
+  const inheritedShape = normalizeSourceObjectTypeShape(selectedSourceType?.shape ?? "");
+  const inheritedColor = normalizeSourceObjectColor(selectedSourceType?.color ?? "");
+  const inheritedOutlineColor = normalizeOptionalSourceObjectColor(selectedSourceType?.outlineColor ?? "") || inheritedColor;
+  const effectiveShape = normalizeSourceObjectTypeShape(shapeOverride || selectedSourceType?.shape || "");
+  const effectiveColor = normalizeSourceObjectColor(colorOverride || selectedSourceType?.color || "");
+  const effectiveOutlineColor = normalizeOptionalSourceObjectColor(outlineColorOverride || selectedSourceType?.outlineColor || "") || effectiveColor;
+  const effectiveFill = graphicMode === "select" ? normalizeSourceObjectFill(fillOverride || "outline") : normalizeSourceObjectFill(fillOverride || selectedSourceType?.fill || "");
+  const effectiveFillTransparency = normalizePostgresObjectFillTransparency(fillTransparencyOverride);
+  const effectiveOutlineWidth = normalizePostgresObjectOutlineWidth(outlineWidthOverride);
+  const displayedAttributeDefinitions = useMemo(
+    () => attributeDefinitions.filter((definition) => {
+      const sourceKinds = definition.sourceKinds ?? [];
+      return sourceKinds.length === 0 || sourceKinds.includes(sourceKind);
+    }),
+    [attributeDefinitions, sourceKind],
+  );
+  const displayedTimelineDefinitions = useMemo(
+    () => displayedAttributeDefinitions.filter(isVisibleItemTimelineAttribute),
+    [displayedAttributeDefinitions],
+  );
+
+  useEffect(() => () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  }, [imagePreviewUrl]);
+
+  function updateAttributeValue(attributeDefinitionId: string, value: string) {
+    setAttributeDraftValues((current) => ({
+      ...current,
+      [attributeDefinitionId]: value,
+    }));
+  }
+
+  function setSourceGraphicMode(nextMode: SourceGraphicMode) {
+    setGraphicMode(nextMode);
+    if (nextMode === "inherit") {
+      setShapeOverride("");
+      setColorOverride("");
+      setOutlineColorOverride("");
+      setFillOverride("");
+      setFillTransparencyOverride(SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY);
+      setOutlineWidthOverride(SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH);
+      setImageStoragePath("");
+      setPendingImageFile(null);
+      setRemoveImage(Boolean(initialRow?.imageStoragePath));
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+    } else if (nextMode === "select") {
+      setFillOverride((current) => current || "outline");
+      setImageStoragePath("");
+      setPendingImageFile(null);
+      setRemoveImage(Boolean(initialRow?.imageStoragePath));
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+    } else {
+      setShapeOverride("");
+      setColorOverride("");
+      setFillOverride("");
+      setFillTransparencyOverride(SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY);
+      setOutlineWidthOverride(SOURCE_GRAPHIC_DEFAULT_OUTLINE_WIDTH);
+      setRemoveImage(false);
+    }
+  }
+
+  function selectSourceImage(file: File | null | undefined) {
+    if (!file) return;
+    const nextPreviewUrl = URL.createObjectURL(file);
+    setPendingImageFile(file);
+    setImagePreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return nextPreviewUrl;
+    });
+    setImageStoragePath("");
+    setRemoveImage(false);
+    setGraphicMode("upload");
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  }
+
+  function clearSourceImage() {
+    setPendingImageFile(null);
+    setImageStoragePath("");
+    setRemoveImage(Boolean(initialRow?.imageStoragePath));
+    setImagePreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+  }
+
+  return (
+    <SettingsModal
+      title={title}
+      onClose={onCancel}
+      closeDisabled={saving}
+      modalClassName="modal--wide assoc-doc-modal"
+      overlayClassName={gettingStartedReviewActive ? "modal-overlay--getting-started-spotlight" : ""}
+    >
+      <div className={`app-settings-modal-body ${activeTab === "graphics" ? "modal-body--graphics" : ""}`}>
+        <ModalTabSelector
+          value={activeTab}
+          options={[
+            { value: "details", label: t("sharedModals.tabs.details") },
+            { value: "graphics", label: t("sharedModals.tabs.graphics") },
+            { value: "attributes", label: t("sharedModals.tabs.attributes") },
+            { value: "timeline", label: t("sharedModals.tabs.timeline") },
+          ]}
+          ariaLabel={t("projectCore.sources.sourceEditorTabs")}
+          onChange={setActiveTab}
+        />
+        <div className={`form ${activeTab === "graphics" ? "modal-form--graphics" : ""}`}>
+          {activeTab === "details" ? (
+            <>
+              <label className="form-label">
+                {t("projectCore.sources.sourceType")}
+                <select className="form-input" value={sourceKind} onChange={(event) => setSourceKind(event.target.value)}>
+                  {POSTGRES_SOURCE_KIND_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-label">
+                {t("projectCore.sources.title")}
+                <input className="form-input" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+              </label>
+              <label className="form-label">
+                {t("projectCore.sources.notes")}
+                <textarea className="form-input" rows={5} value={notes} onChange={(event) => setNotes(event.target.value)} />
+              </label>
+              <label className="form-label">
+                {t("projectCore.sources.content")}
+                <textarea className="form-input" rows={14} value={content} onChange={(event) => setContent(event.target.value)} />
+              </label>
+            </>
+          ) : activeTab === "graphics" ? (
+            <>
+              <div className="graphics-editor-layout">
+                <div className="graphics-editor-controls">
+                  <PostgresGraphicModeTabs
+                    value={graphicMode}
+                    options={[
+                      { value: "inherit", label: t("common.inherit") },
+                      { value: "select", label: t("common.select") },
+                      { value: "upload", label: t("common.upload") },
+                    ]}
+                    ariaLabel={t("projectCore.sources.sourceGraphicSource")}
+                    onChange={setSourceGraphicMode}
+                    disabled={saving}
+                    centered={false}
+                  />
+                  {graphicMode === "inherit" ? (
+                    <p className="auth-hint graphics-editor-hint">
+                      {t("projectCore.sources.inheritHelp")}
+                    </p>
+                  ) : graphicMode === "upload" ? (
+                    <>
+                      <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                        style={{ display: "none" }}
+                        onChange={(event) => selectSourceImage(event.currentTarget.files?.[0])}
+                      />
+                      <PostgresImageUploadActions
+                        hasImage={Boolean(imageStoragePath || imagePreviewUrl)}
+                        disabled={saving}
+                        onImport={() => imageInputRef.current?.click()}
+                        onRemove={clearSourceImage}
+                        uploadLabel={t("projectCore.sources.uploadImage")}
+                        replaceLabel={t("projectCore.sources.replaceImage")}
+                        removeLabel={t("common.clear")}
+                        importButtonClassName="btn btn--secondary"
+                        removeButtonClassName="btn"
+                      />
+                      {imageStoragePath || imagePreviewUrl ? (
+                        <PostgresObjectUploadGraphicControls
+                          outlineColor={effectiveOutlineColor}
+                          outlineColorText={outlineColorOverride || inheritedOutlineColor}
+                          outlineWidth={effectiveOutlineWidth}
+                          onOutlineColorChange={setOutlineColorOverride}
+                          onOutlineWidthChange={setOutlineWidthOverride}
+                          textWidth={148}
+                        />
+                      ) : null}
+                    </>
+                  ) : (
+                    <PostgresObjectSelectGraphicControls
+                      shape={effectiveShape}
+                      fill={effectiveFill}
+                      color={effectiveColor}
+                      colorText={colorOverride || inheritedColor}
+                      outlineColor={effectiveOutlineColor}
+                      outlineColorText={outlineColorOverride || inheritedOutlineColor}
+                      fillTransparency={effectiveFillTransparency}
+                      outlineWidth={effectiveOutlineWidth}
+                      fillStyleAriaLabel={t("projectCore.sources.sourceFillStyle")}
+                      onShapeChange={(value) => setShapeOverride(value === inheritedShape ? "" : value)}
+                      onFillChange={setFillOverride}
+                      onColorChange={setColorOverride}
+                      onOutlineColorChange={setOutlineColorOverride}
+                      onFillTransparencyChange={setFillTransparencyOverride}
+                      onOutlineWidthChange={setOutlineWidthOverride}
+                    />
+                  )}
+                </div>
+                <PostgresObjectGraphicPreviewCard
+                  label={t("projectCore.sources.sourcePreview")}
+                  projectStoragePath={projectStoragePath}
+                  imageStoragePath={graphicMode === "upload" ? imageStoragePath : ""}
+                  previewUrl={graphicMode === "upload" ? imagePreviewUrl : ""}
+                  shape={effectiveShape}
+                  fill={effectiveFill}
+                  color={effectiveColor}
+                  outlineColor={effectiveOutlineColor}
+                  fillTransparency={effectiveFillTransparency}
+                  outlineWidth={effectiveOutlineWidth}
+                  sourceVisualKey={graphicMode === "select" ? null : sourceVisualKey}
+                  empty={graphicMode === "upload" && !imageStoragePath && !imagePreviewUrl}
+                />
+              </div>
+            </>
+          ) : activeTab === "timeline" ? (
+            displayedTimelineDefinitions.length === 0 ? (
+              <p className="case-card-empty">{t("projectCore.sources.noTimelineFields")}</p>
+            ) : (
+              <div className="case-detail-attributes-table-wrap">
+                <table className="case-detail-attributes-table">
+                  <tbody>
+                    {displayedTimelineDefinitions.map((definition) => {
+                      const defaultValue = itemTimelineAttributeDefaultValue(definition, name);
+                      return (
+                      <tr key={definition.id}>
+                        <th className="case-detail-attributes-label" scope="row">{itemTimelineAttributeLabel(definition)}</th>
+                        <td className="case-detail-attributes-value">
+                          {definition.dataType === "categorical" ? (
+                            <select
+                              className="form-input"
+                              value={attributeDraftValues[definition.id] ?? ""}
+                              onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                            >
+                              <option value="">{defaultValue || "-"}</option>
+                              {definition.options.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              className="form-input"
+                              type={definition.dataType === "number" ? "number" : definition.dataType === "datetime" ? "datetime-local" : "text"}
+                              step={definition.dataType === "number" ? "any" : undefined}
+                              placeholder={defaultValue}
+                              value={attributeDraftValues[definition.id] ?? ""}
+                              onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : displayedAttributeDefinitions.length === 0 ? (
+            <p className="case-card-empty">{t("projectCore.sources.noSourceAttributes")}</p>
+          ) : (
+            <div className="case-detail-attributes-table-wrap">
+              <table className="case-detail-attributes-table">
+                <tbody>
+                  {displayedAttributeDefinitions.map((definition) => (
+                    <tr key={definition.id}>
+                      <th className="case-detail-attributes-label" scope="row">{definition.name}</th>
+                      <td className="case-detail-attributes-value">
+                        {definition.dataType === "categorical" ? (
+                          <select
+                            className="form-input"
+                            value={attributeDraftValues[definition.id] ?? ""}
+                            onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                          >
+                            <option value="">-</option>
+                            {definition.options.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={definition.dataType === "number" ? "number" : definition.dataType === "datetime" ? "datetime-local" : "text"}
+                            step={definition.dataType === "number" ? "any" : undefined}
+                            value={attributeDraftValues[definition.id] ?? ""}
+                            onChange={(event) => updateAttributeValue(definition.id, event.target.value)}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        {error && <p className="auth-error">{error}</p>}
+      </div>
+      <div className="app-settings-modal-footer">
+        <button className="btn" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>
+        <button
+          className={`btn btn--primary${gettingStartedReviewActive ? " getting-started-spotlight-target" : ""}`}
+          onClick={() => onSave({
+            sourceKind,
+            name,
+            notes,
+            content,
+            shapeOverride: graphicMode === "select" ? effectiveShape : null,
+            colorOverride: graphicMode === "select" && effectiveFill === "filled" ? normalizeSourceObjectColor(colorOverride || inheritedColor) : null,
+            outlineColorOverride: graphicMode === "inherit" ? null : normalizeOptionalSourceObjectColor(outlineColorOverride) || null,
+            fillOverride: graphicMode === "select" ? effectiveFill : null,
+            fillTransparencyOverride: graphicMode === "select" && effectiveFill === "filled" ? effectiveFillTransparency : null,
+            outlineWidthOverride: graphicMode === "select" || graphicMode === "upload" ? effectiveOutlineWidth : null,
+            imageStoragePath: graphicMode === "upload" ? imageStoragePath.trim() || null : null,
+            pendingImageFile: graphicMode === "upload" ? pendingImageFile : null,
+            removeImage,
+            attributeValuesByDefinitionId: attributeDraftValues,
+          })}
+          disabled={saving || !name.trim()}
+        >
+          {saving ? t("projectCore.sources.saving") : t("projectCore.sources.save")}
+        </button>
+      </div>
+    </SettingsModal>
+  );
+}
+
+function CreateSourceRelationshipModal({
+  source,
+  relationship,
+  projectId,
+  sources,
+  objects,
+  relationshipTypes,
+  relationshipAttributeDefinitions,
+  saving,
+  error,
+  onCancel,
+  onRelationshipTypeCreated,
+  onSave,
+}: {
+  source: SourceRow;
+  relationship?: PostgresRelationship | null;
+  projectId: string;
+  sources: SourceRow[];
+  objects: PostgresObject[];
+  relationshipTypes: PostgresRelationshipType[];
+  relationshipAttributeDefinitions: PostgresRelationshipAttributeDefinition[];
+  saving: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onRelationshipTypeCreated: (
+    relationshipType: PostgresRelationshipType,
+    attributeDefinitions: PostgresRelationshipAttributeDefinition[],
+  ) => void;
+  onSave: (payload: {
+    relationshipId: string | null;
+    relationshipTypeId: string;
+    fromEntityType: "object" | "source";
+    fromEntityId: string;
+    toEntityType: "object" | "source";
+    toEntityId: string;
+    description: string;
+    lineShapeOverride?: string | null;
+    lineWeightOverride?: number | null;
+    arrowheadOverride?: string | null;
+    colorOverride?: string | null;
+    attributeValues: Array<{ attributeDefinitionId: string; value: string }>;
+  }) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const availableRelationshipTypes = useMemo(
+    () => [...relationshipTypes].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [relationshipTypes],
+  );
+  const [relationshipTypeId, setRelationshipTypeId] = useState(relationship?.relationshipTypeId ?? availableRelationshipTypes[0]?.id ?? "");
+  const selectedRelationshipType = relationshipTypes.find((relationshipType) => relationshipType.id === relationshipTypeId) ?? null;
+  const [fromEntityType, setFromEntityType] = useState<"object" | "source">(relationship?.fromEntityType ?? "source");
+  const [fromEntityId, setFromEntityId] = useState(relationship?.fromEntityId ?? source.id);
+  const [toEntityType, setToEntityType] = useState<"object" | "source">(relationship?.toEntityType ?? "object");
+  const [toEntityId, setToEntityId] = useState(relationship?.toEntityId ?? "");
+  const [modalTab, setModalTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
+  const [description, setDescription] = useState(relationship?.description ?? "");
+  const [lineShapeOverride, setLineShapeOverride] = useState(relationship?.lineShapeOverride ?? "");
+  const [lineWeightOverride, setLineWeightOverride] = useState<number | null>(relationship?.lineWeightOverride ?? null);
+  const [arrowheadOverride, setArrowheadOverride] = useState(relationship?.arrowheadOverride ?? "");
+  const [colorOverride, setColorOverride] = useState(relationship?.colorOverride ?? "");
+  const [attributeValues, setAttributeValues] = useState<Record<string, string>>(
+    relationship ? valuesForPostgresRelationship(relationship) : {},
+  );
+  const [newTypeOpen, setNewTypeOpen] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
+  const [newTypeError, setNewTypeError] = useState("");
+  const [newTypeSaving, setNewTypeSaving] = useState(false);
+
+  const fromEndpointOptions = useMemo<SharedPostgresRelationshipEndpointOption[]>(() => {
+    if (!selectedRelationshipType) return [];
+    return [
+      ...objects
+        .filter((object) => relationshipTypeAllowsObjectEndpoint(selectedRelationshipType, "from", object.objectTypeId))
+        .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }))
+        .map((object) => ({
+          key: `object:${object.id}`,
+          entityType: "object" as const,
+          entityId: object.id,
+          name: object.title,
+          type: object.objectType || "Object",
+        })),
+      ...sources
+        .filter((candidate) => relationshipTypeAllowsSourceEndpoint(selectedRelationshipType, "from", candidate.type))
+        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+        .map((candidate) => ({
+          key: `source:${candidate.id}`,
+          entityType: "source" as const,
+          entityId: candidate.id,
+          name: candidate.name,
+          type: candidate.sourceObjectType || candidate.type || "Source",
+        })),
+    ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  }, [objects, selectedRelationshipType, sources]);
+
+  const toEndpointOptions = useMemo<SharedPostgresRelationshipEndpointOption[]>(() => {
+    if (!selectedRelationshipType) return [];
+    const fromKey = `${fromEntityType}:${fromEntityId}`;
+    return [
+      ...objects
+        .filter((object) => relationshipTypeAllowsObjectEndpoint(selectedRelationshipType, "to", object.objectTypeId))
+        .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }))
+        .map((object) => ({
+          key: `object:${object.id}`,
+          entityType: "object" as const,
+          entityId: object.id,
+          name: object.title,
+          type: object.objectType || "Object",
+        })),
+      ...sources
+        .filter((candidate) => relationshipTypeAllowsSourceEndpoint(selectedRelationshipType, "to", candidate.type))
+        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+        .map((candidate) => ({
+          key: `source:${candidate.id}`,
+          entityType: "source" as const,
+          entityId: candidate.id,
+          name: candidate.name,
+          type: candidate.sourceObjectType || candidate.type || "Source",
+        })),
+    ].filter((option) => option.key !== fromKey)
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  }, [fromEntityId, fromEntityType, objects, selectedRelationshipType, sources]);
+
+  const attributeDefinitionsForType = useMemo(
+    () => relationshipAttributeDefinitions
+      .filter((definition) => definition.relationshipTypeId === relationshipTypeId)
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [relationshipAttributeDefinitions, relationshipTypeId],
+  );
+  useEffect(() => {
+    if (relationshipTypeId && availableRelationshipTypes.some((relationshipType) => relationshipType.id === relationshipTypeId)) return;
+    setRelationshipTypeId(availableRelationshipTypes[0]?.id ?? "");
+  }, [availableRelationshipTypes, relationshipTypeId]);
+
+  useEffect(() => {
+    if (fromEntityId && fromEndpointOptions.some((option) => option.entityType === fromEntityType && option.entityId === fromEntityId)) return;
+    const preferredSource = fromEndpointOptions.find((option) => option.entityType === "source" && option.entityId === source.id);
+    const nextOption = preferredSource ?? fromEndpointOptions[0] ?? null;
+    setFromEntityType(nextOption?.entityType ?? "source");
+    setFromEntityId(nextOption?.entityId ?? "");
+  }, [fromEndpointOptions, fromEntityId, fromEntityType, source.id]);
+
+  useEffect(() => {
+    if (toEntityId && toEndpointOptions.some((option) => option.entityType === toEntityType && option.entityId === toEntityId)) return;
+    const nextOption = toEndpointOptions[0] ?? null;
+    setToEntityType(nextOption?.entityType ?? "object");
+    setToEntityId(nextOption?.entityId ?? "");
+  }, [toEndpointOptions, toEntityId, toEntityType]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!relationshipTypeId || !fromEntityId || !toEntityId) return;
+    void onSave({
+      relationshipId: relationship?.id ?? null,
+      relationshipTypeId,
+      fromEntityType,
+      fromEntityId,
+      toEntityType,
+      toEntityId,
+      description: description.trim(),
+      lineShapeOverride: lineShapeOverride.trim() || null,
+      lineWeightOverride,
+      arrowheadOverride: arrowheadOverride.trim() || null,
+      colorOverride: colorOverride.trim() || null,
+      attributeValues: toRelationshipAttributePayload(attributeDefinitionsForType, attributeValues),
+    });
+  }
+
+  async function handleCreateRelationshipType(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextName = newTypeName.trim();
+    setNewTypeError("");
+    if (!nextName) {
+      setNewTypeError(t("projectCore.sources.errors.relationshipTypeNameRequired"));
+      return;
+    }
+    const existingType = relationshipTypes.find((relationshipType) => relationshipType.name.toLowerCase() === nextName.toLowerCase());
+    if (existingType) {
+      setRelationshipTypeId(existingType.id);
+      setAttributeValues({});
+      setNewTypeName("");
+      setNewTypeOpen(false);
+      return;
+    }
+
+    setNewTypeSaving(true);
+    try {
+      const saved = await savePostgresRelationshipType({
+        projectId,
+        relationshipTypeId: null,
+        name: nextName,
+        description: "",
+        lineShape: "solid",
+        lineWeight: 2,
+        arrowhead: "one_sided",
+        color: "#355070",
+        fromObjectTypeIds: [],
+        toObjectTypeIds: [],
+        fromSourceKinds: [],
+        toSourceKinds: [],
+        attributes: [],
+      });
+      onRelationshipTypeCreated(saved.relationshipType, saved.attributeDefinitions);
+      setRelationshipTypeId(saved.relationshipType.id);
+      setAttributeValues({});
+      setNewTypeName("");
+      setNewTypeOpen(false);
+    } catch (createError) {
+      setNewTypeError(createError instanceof Error ? createError.message : "Failed to create relationship type.");
+    } finally {
+      setNewTypeSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <PostgresRelationshipModal
+        title={relationship ? t("sharedModals.relationshipModal.editTitle") : t("sharedModals.relationshipModal.createTitle")}
+        ariaLabel={relationship ? "Edit relationship tabs" : "Create relationship tabs"}
+        tab={modalTab}
+        setTab={setModalTab}
+        submitLabel={relationship ? "Save" : "Create relationship"}
+        relationshipTypes={availableRelationshipTypes}
+        relationshipTypeId={relationshipTypeId}
+        setRelationshipTypeId={setRelationshipTypeId}
+        selectedType={selectedRelationshipType}
+        fromEndpointKey={fromEntityId ? `${fromEntityType}:${fromEntityId}` : ""}
+        setFromEndpointKey={(key) => {
+          if (typeof key !== "string") return;
+          const [nextEntityType, ...nextIdParts] = key.split(":");
+          const nextEntityId = nextIdParts.join(":");
+          if ((nextEntityType === "object" || nextEntityType === "source") && nextEntityId) {
+            setFromEntityType(nextEntityType);
+            setFromEntityId(nextEntityId);
+          }
+        }}
+        toEndpointKey={toEntityId ? `${toEntityType}:${toEntityId}` : ""}
+        setToEndpointKey={(key) => {
+          if (typeof key !== "string") return;
+          const [nextEntityType, ...nextIdParts] = key.split(":");
+          const nextEntityId = nextIdParts.join(":");
+          if ((nextEntityType === "object" || nextEntityType === "source") && nextEntityId) {
+            setToEntityType(nextEntityType);
+            setToEntityId(nextEntityId);
+          }
+        }}
+        availableFromEndpoints={fromEndpointOptions}
+        availableToEndpoints={toEndpointOptions}
+        description={description}
+        setDescription={setDescription}
+        lineShapeOverride={lineShapeOverride}
+        setLineShapeOverride={setLineShapeOverride}
+        lineWeightOverride={lineWeightOverride}
+        setLineWeightOverride={setLineWeightOverride}
+        arrowheadOverride={arrowheadOverride}
+        setArrowheadOverride={setArrowheadOverride}
+        colorOverride={colorOverride}
+        setColorOverride={setColorOverride}
+        attributeDefinitions={attributeDefinitionsForType}
+        attributeValues={attributeValues}
+        setAttributeValues={setAttributeValues}
+        submitting={saving}
+        error={availableRelationshipTypes.length === 0
+          ? t("projectCore.sources.errors.noRelationshipTypes")
+          : fromEndpointOptions.length === 0 && relationshipTypeId
+            ? t("projectCore.sources.errors.noFromEndpoints")
+            : toEndpointOptions.length === 0 && relationshipTypeId
+              ? t("projectCore.sources.errors.noEndpoints")
+              : error}
+        submitDisabled={!relationshipTypeId || !fromEntityId || !toEntityId}
+        onClose={onCancel}
+        onSubmit={handleSubmit}
+        onNewRelationshipType={() => {
+          setNewTypeError("");
+          setNewTypeOpen(true);
+        }}
+      />
+      {newTypeOpen ? (
+        <SettingsModal
+          title={t("projectCore.sources.relationship.addType")}
+          onClose={() => setNewTypeOpen(false)}
+          closeDisabled={newTypeSaving}
+          overlayStyle={{ zIndex: 120 }}
+        >
+          <form className="form app-settings-modal-form" onSubmit={handleCreateRelationshipType}>
+            <div className="app-settings-modal-body">
+              <label className="form-label">
+                {t("projectCore.sources.relationship.typeName")}
+                <input
+                  className="form-input"
+                  value={newTypeName}
+                  onChange={(event) => setNewTypeName(event.target.value)}
+                  autoFocus
+                />
+              </label>
+              {newTypeError ? <p className="auth-error">{newTypeError}</p> : null}
+            </div>
+            <div className="app-settings-modal-footer">
+              <button type="button" className="btn" onClick={() => setNewTypeOpen(false)} disabled={newTypeSaving}>
+                {t("projectCore.sources.cancel")}
+              </button>
+              <button type="submit" className="btn btn--primary" disabled={newTypeSaving || !newTypeName.trim()}>
+                {newTypeSaving ? t("projectCore.sources.saving") : t("projectCore.sources.relationship.addType")}
+              </button>
+            </div>
+          </form>
+        </SettingsModal>
+      ) : null}
+    </>
+  );
+
+}
+
+function PostgresSourceDetail({
+  row,
+  codeOptions,
+  relationships,
+  attributeValues,
+  currentUserId,
+  sourceLock,
+  sourceLockConflict,
+  lockSyncing,
+  canKickSourceLocks,
+  canManageAnnotations,
+  saving,
+  error,
+  onCreateAnnotation,
+  onUpdateAnnotation,
+  onDeleteAnnotation,
+  onKickSourceLock,
+  onCreateRelationship,
+  onEditRelationship,
+  canManageSourceRecord,
+  projectStoragePath,
+  onOpenAttributeHistory,
+  onEditSource,
+  onDeleteSource,
+  onBack,
+}: {
+  row: SourceRow;
+  codeOptions: CodeOption[];
+  relationships: SourceRelationshipRow[];
+  attributeValues: Array<SharedAttributeDraft & { value: string }>;
+  currentUserId: string;
+  sourceLock: PostgresSourceLock | null;
+  sourceLockConflict: PostgresSourceLock | null;
+  lockSyncing: boolean;
+  canKickSourceLocks: boolean;
+  canManageAnnotations: boolean;
+  saving: boolean;
+  error: string | null;
+  onCreateAnnotation: (sourceId: string, selection: PendingSelection, payload: { codeIds: string[]; note: string }) => Promise<void>;
+  onUpdateAnnotation: (annotation: SourceAnnotationRow, payload: { codeIds: string[]; note: string }) => Promise<void>;
+  onDeleteAnnotation: (annotationId: string) => Promise<void>;
+  onKickSourceLock: (lock: PostgresSourceLock) => Promise<void>;
+  onCreateRelationship: () => void;
+  onEditRelationship: (relationship: PostgresRelationship) => void;
+  canManageSourceRecord: boolean;
+  projectStoragePath: string;
+  onOpenAttributeHistory: (attribute: SharedAttributeDraft) => void;
+  onEditSource: () => void;
+  onDeleteSource: () => void;
+  onBack: () => void;
+}) {
+  const { t } = useI18n();
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [selectedOutlineSortOrder, setSelectedOutlineSortOrder] = useState<number | null>(null);
+  const transcriptViewerRef = useRef<HTMLDivElement | null>(null);
+  const contentSelectionRef = useRef<HTMLDivElement | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
+  const [editingAnnotation, setEditingAnnotation] = useState<SourceAnnotationRow | null>(null);
+  const [removingAnnotation, setRemovingAnnotation] = useState<SourceAnnotationRow | null>(null);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imagePreviewError, setImagePreviewError] = useState<string | null>(null);
+  const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [audioPreviewError, setAudioPreviewError] = useState<string | null>(null);
+  const [audioPreviewLoading, setAudioPreviewLoading] = useState(false);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
+  const [videoPreviewLoading, setVideoPreviewLoading] = useState(false);
+  const { textSizePx, decreaseTextSize, increaseTextSize } = useSourceTextSizePreference();
+  const [textSearchOpen, setTextSearchOpen] = useState(false);
+  const [textSearchQuery, setTextSearchQuery] = useState("");
+  const [activeTextSearchIndex, setActiveTextSearchIndex] = useState<number | null>(null);
+  const textSearchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const normalizedSourceType = normalizeSourceKindFilterValue(row.type);
+  const fileExt = row.filePath ? fileExtensionFromPath(row.filePath) : "";
+  const isPdfSource = normalizedSourceType === "pdf";
+  const isImageSource = SOURCE_IMPORT_IMAGE_EXTS.has(fileExt) || row.type.toLowerCase() === "image";
+  const isAudioSource = SOURCE_IMPORT_AUDIO_EXTS.has(fileExt) || row.type.toLowerCase() === "audio";
+  const isVideoSource = SOURCE_IMPORT_VIDEO_EXTS.has(fileExt) || row.type.toLowerCase() === "video";
+  const resolvedFilePath = resolveProjectStoragePath(projectStoragePath, row.filePath);
+  const processedTranscriptSegments =
+    normalizedSourceType === "transcript"
+      ? parseProcessedTranscriptSegments(row.structuredContentJson)
+      : [];
+  const questionOutline = getProcessedTranscriptQuestionOutline(processedTranscriptSegments);
+  const isSearchableTextSource = Boolean(row.content)
+    && (
+      normalizedSourceType === "text"
+      || normalizedSourceType === "transcript"
+    );
+  const activeTextSearchQuery = textSearchOpen ? textSearchQuery.trim() : "";
+  const textSearchMatches = useMemo(() => {
+    if (!activeTextSearchQuery) return [];
+    const matches: Array<{ startOffset: number; endOffset: number }> = [];
+    const wildcardPattern = activeTextSearchQuery.replace(/\*/g, "")
+      ? activeTextSearchQuery
+        .split("*")
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("\\S*?")
+      : "\\S+";
+    const searchRegex = new RegExp(wildcardPattern, "giu");
+    let match: RegExpExecArray | null;
+    while ((match = searchRegex.exec(row.content)) != null) {
+      const startOffset = match.index;
+      const endOffset = startOffset + match[0].length;
+      matches.push({ startOffset, endOffset });
+      if (match[0].length === 0) {
+        searchRegex.lastIndex += 1;
+      }
+    }
+    return matches;
+  }, [activeTextSearchQuery, row.content]);
+  const canEditAnnotations = canManageAnnotations && !!sourceLock && sourceLock.userId === currentUserId && !sourceLockConflict;
+  const lockStatus = describeSourceLock(sourceLock, currentUserId);
+
+  useEffect(() => {
+    if (textSearchOpen) {
+      window.setTimeout(() => textSearchInputRef.current?.focus(), 0);
+    }
+  }, [textSearchOpen]);
+
+  useEffect(() => {
+    if (textSearchMatches.length === 0) {
+      setActiveTextSearchIndex(null);
+      return;
+    }
+    setActiveTextSearchIndex(0);
+  }, [activeTextSearchQuery, row.id, textSearchMatches.length]);
+
+  useEffect(() => {
+    if (activeTextSearchIndex == null) return;
+    const container = transcriptViewerRef.current ?? contentSelectionRef.current;
+    if (!container) return;
+    const target = container.querySelector<HTMLElement>("[data-source-search-active='true']");
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.add("source-search-match-flash");
+    const timer = window.setTimeout(() => target.classList.remove("source-search-match-flash"), 1100);
+    return () => window.clearTimeout(timer);
+  }, [activeTextSearchIndex, textSearchMatches]);
+
+  useEffect(() => {
+    if (selectedOutlineSortOrder == null || !transcriptViewerRef.current) return;
+    const target = transcriptViewerRef.current.querySelector<HTMLElement>(
+      `[data-transcript-sort-order="${selectedOutlineSortOrder}"]`,
+    );
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedOutlineSortOrder]);
+
+  useEffect(() => {
+    if (!isPdfSource || !resolvedFilePath) {
+      setPdfPreviewLoading(false);
+      setPdfPreviewError(null);
+      setPdfPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setPdfPreviewLoading(true);
+    setPdfPreviewError(null);
+
+    void readTauriFile(resolvedFilePath)
+      .then((bytes) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+        setPdfPreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setPdfPreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadPdfPreviewFailed"));
+        setPdfPreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return null;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setPdfPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isPdfSource, resolvedFilePath, t]);
+
+  useEffect(() => {
+    if (!isImageSource || !resolvedFilePath) {
+      setImagePreviewLoading(false);
+      setImagePreviewError(null);
+      setImagePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setImagePreviewLoading(true);
+    setImagePreviewError(null);
+
+    void readTauriFile(resolvedFilePath)
+      .then((bytes) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes]));
+        setImagePreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setImagePreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadImagePreviewFailed"));
+        setImagePreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return null;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setImagePreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isImageSource, resolvedFilePath, t]);
+
+  useEffect(() => {
+    if (!isAudioSource || !resolvedFilePath) {
+      setAudioPreviewLoading(false);
+      setAudioPreviewError(null);
+      setAudioPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setAudioPreviewLoading(true);
+    setAudioPreviewError(null);
+
+    void readTauriFile(resolvedFilePath)
+      .then((bytes) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: uploadMediaTypeFromFileExtension(fileExt) ?? undefined }));
+        setAudioPreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setAudioPreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadAudioPreviewFailed"));
+        setAudioPreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return null;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setAudioPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [fileExt, isAudioSource, resolvedFilePath, t]);
+
+  useEffect(() => {
+    if (!isVideoSource || !resolvedFilePath) {
+      setVideoPreviewLoading(false);
+      setVideoPreviewError(null);
+      setVideoPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setVideoPreviewLoading(true);
+    setVideoPreviewError(null);
+
+    void readTauriFile(resolvedFilePath)
+      .then((bytes) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: uploadMediaTypeFromFileExtension(fileExt) ?? undefined }));
+        setVideoPreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setVideoPreviewError(loadError instanceof Error ? loadError.message : t("projectCore.sources.detail.loadVideoPreviewFailed"));
+        setVideoPreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return null;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setVideoPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [fileExt, isVideoSource, resolvedFilePath, t]);
+
+  function handleMouseUp() {
+    if (!canEditAnnotations || !contentSelectionRef.current) return;
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (!contentSelectionRef.current.contains(range.commonAncestorContainer)) return;
+    const quote = selection.toString();
+    if (!quote.trim()) return;
+
+    const preRange = document.createRange();
+    preRange.selectNodeContents(contentSelectionRef.current);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const startOffset = preRange.toString().length;
+    const endOffset = startOffset + quote.length;
+    setPendingSelection({ startOffset, endOffset, quote });
+    selection.removeAllRanges();
+  }
+
+  function goToPreviousTextSearchMatch() {
+    if (textSearchMatches.length === 0) return;
+    setActiveTextSearchIndex((current) => {
+      const currentIndex = current ?? 0;
+      return (currentIndex - 1 + textSearchMatches.length) % textSearchMatches.length;
+    });
+  }
+
+  function goToNextTextSearchMatch() {
+    if (textSearchMatches.length === 0) return;
+    setActiveTextSearchIndex((current) => {
+      const currentIndex = current ?? -1;
+      return (currentIndex + 1) % textSearchMatches.length;
+    });
+  }
+
+  function renderSearchHighlightedText(text: string, absoluteStartOffset: number, keyPrefix: string) {
+    if (textSearchMatches.length === 0) return text;
+    const absoluteEndOffset = absoluteStartOffset + text.length;
+    const overlappingMatches = textSearchMatches
+      .map((match, index) => ({ ...match, index }))
+      .filter((match) => match.startOffset < absoluteEndOffset && match.endOffset > absoluteStartOffset);
+    if (overlappingMatches.length === 0) return text;
+
+    const boundaries = new Set<number>([absoluteStartOffset, absoluteEndOffset]);
+    for (const match of overlappingMatches) {
+      boundaries.add(Math.max(absoluteStartOffset, match.startOffset));
+      boundaries.add(Math.min(absoluteEndOffset, match.endOffset));
+    }
+    const orderedBoundaries = Array.from(boundaries).sort((left, right) => left - right);
+    return orderedBoundaries.slice(0, -1).map((startOffset, partIndex) => {
+      const endOffset = orderedBoundaries[partIndex + 1];
+      const match = overlappingMatches.find((item) => item.startOffset <= startOffset && item.endOffset >= endOffset);
+      const partText = text.slice(startOffset - absoluteStartOffset, endOffset - absoluteStartOffset);
+      if (!match) return <span key={`${keyPrefix}-${startOffset}-${endOffset}`}>{partText}</span>;
+      const isActive = match.index === activeTextSearchIndex;
+      return (
+        <mark
+          key={`${keyPrefix}-${startOffset}-${endOffset}`}
+          className={`source-search-match${isActive ? " source-search-match--active" : ""}`}
+          data-source-search-active={isActive ? "true" : undefined}
+        >
+          {partText}
+        </mark>
+      );
+    });
+  }
+
+  return (
+    <div className="view doc-detail-view">
+      <ViewHeader
+        title={t("projectCore.sources.detail.pageTitle")}
+        back={{ label: t("projectDocuments.detail.backToDocuments"), onClick: onBack }}
+        titleClassName="view-title-row view-title-row--back-outside"
+        actions={(
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {canManageSourceRecord ? (
+            <>
+              <button
+                type="button"
+                className="btn card-header-icon-button"
+                onClick={onEditSource}
+                title={t("projectCore.sources.editSource")}
+                aria-label={t("projectCore.sources.editSource")}
+              >
+                <EditIcon className="card-header-icon" />
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger card-header-icon-button"
+                onClick={onDeleteSource}
+                title={t("projectCore.sources.deleteSource")}
+                aria-label={t("projectCore.sources.deleteSource")}
+              >
+                <DeleteIcon className="card-header-icon" />
+              </button>
+            </>
+          ) : null}
+          </div>
+        )}
+      />
+
+      <div className="doc-detail-layout">
+        <div className="doc-detail-left">
+          <div className="case-card">
+            <h3 className="case-card-title">{t("projectCore.sources.source")}</h3>
+            <p className="case-card-value">{row.name}</p>
+            <p className="supporting-copy" style={{ marginTop: 8, marginBottom: 0 }} title={lockStatus.title}>
+              {t("projectAnnotations.detail.lockValue", { value: lockStatus.label })}
+            </p>
+          </div>
+
+          <dl className="user-detail-meta case-detail-meta">
+            <dt>{t("projectDocuments.columns.type")}</dt> <dd>{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType, t)}</dd>
+            <dt>{t("projectDocuments.columns.created")}</dt> <dd>{fmtDate(row.createdAt)}</dd>
+            <dt>{t("projectCore.sources.detail.fileName")}</dt> <dd>{maskedFileLabel(row.filePath)}</dd>
+            <dt>{t("projectCore.sources.detail.extension")}</dt> <dd>{fileExt ? `.${fileExt}` : "\u2014"}</dd>
+            {isImageSource && row.extractedFromVideoSourceId ? (
+              <>
+                <dt>{t("projectCore.sources.detail.extractedFromVideo")}</dt> <dd>{row.extractedFromVideoSourceId}</dd>
+                <dt>{t("projectCore.sources.detail.extractedTimestamp")}</dt> <dd>{row.extractedFromVideoTimeMs != null ? formatMediaTime(row.extractedFromVideoTimeMs) : "N/A"}</dd>
+              </>
+            ) : null}
+            <dt>{t("projectCore.sources.detail.objects")}</dt> <dd>{formatCurrentNumber(row.objectCount)}</dd>
+            <dt>{t("projectCodebook.detail.annotations")}</dt> <dd>{formatCurrentNumber(row.annotationCount)}</dd>
+          </dl>
+
+          <div className="case-card">
+            <h3 className="case-card-title">{t("projectDocuments.detail.description")}</h3>
+            {row.notes ? (
+              <div className="case-notes-body" dangerouslySetInnerHTML={{ __html: row.notes }} />
+            ) : (
+              <p className="case-card-empty">{t("projectDocuments.detail.noDescription")}</p>
+            )}
+          </div>
+
+          <div className="case-card">
+            <h3 className="case-card-title">{t("projectCore.sources.detail.attributes")}</h3>
+            {attributeValues.length === 0 ? (
+              <p className="case-card-empty">{t("projectCore.sources.detail.noAttributes")}</p>
+            ) : (
+              <div className="case-detail-attributes-table-wrap">
+                <table className="case-detail-attributes-table">
+                  <thead>
+                    <tr>
+                      <th className="case-detail-attributes-label" scope="col">{t("projectCore.sources.detail.attribute")}</th>
+                      <th className="case-detail-attributes-value" scope="col">{t("projectCore.sources.detail.value")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                {attributeValues.map((attribute) => (
+                  <tr key={attribute.id ?? attribute.name}>
+                    <th className="case-detail-attributes-label" scope="row">{attribute.name}</th>
+                    <td className="case-detail-attributes-value">
+                      <button
+                        type="button"
+                        className="case-detail-attribute-value-button"
+                        onClick={() => onOpenAttributeHistory(attribute)}
+                        title={t("projectCore.sources.detail.viewAttributeHistory")}
+                      >
+                        {formatAttributeDisplay(attribute.value, attribute.dataType) || "-"}
+                      </button>
+                    </td>
+                    {/*
+                    <dt>{attribute.name}</dt> <dd>{formatAttributeDisplay(attribute.value, attribute.dataType) || "\u2014"}</dd>
+                    */}
+                  </tr>
+                ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="case-card">
+            <div className="case-card-header">
+              <h3 className="case-card-title">{t("projectCore.sources.detail.relationships")}</h3>
+              {canManageSourceRecord ? (
+                <button
+                  type="button"
+                  className="codebook-icon-action"
+                  onClick={onCreateRelationship}
+                  aria-label={t("projectCore.sources.detail.createRelationshipFromSource")}
+                  title={t("projectCore.sources.detail.createRelationship")}
+                >
+                  +
+                </button>
+              ) : null}
+            </div>
+            {relationships.length === 0 ? (
+              <p className="case-card-empty">{t("projectCore.sources.detail.noRelationships")}</p>
+            ) : (
+              <ul className="code-ann-list">
+                {relationships.map((relationship) => (
+                  <li key={relationship.id} className="code-ann-item">
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <div className="code-ann-doc">{relationship.relationshipType || "Relationship"}</div>
+                      {canManageSourceRecord ? (
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          style={{ padding: "2px 8px", fontSize: 12 }}
+                          onClick={() => onEditRelationship(relationship.relationship)}
+                        >
+                          {t("projectCore.sources.detail.edit")}
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="code-ann-meta">
+                      {relationship.otherEndpointName}
+                      {relationship.otherEndpointType ? ` (${relationship.otherEndpointType})` : ""}
+                    </div>
+                    {relationship.description.trim() ? (
+                      <div className="code-ann-meta">{relationship.description}</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+        </div>
+
+        <div className="doc-detail-right">
+          <div className="case-card doc-content-card">
+            <div className="case-card-header">
+              <div className="doc-content-header-title">
+                <div className="processed-transcript-title-row">
+                  <h3 className="case-card-title">{t("projectCore.sources.detail.contents")}</h3>
+                  {questionOutline.length > 0 && (
+                    <div className="processed-transcript-outline-wrap">
+                      <button
+                        type="button"
+                        className="processed-transcript-outline-btn"
+                        aria-label={t("projectCore.sources.detail.showTranscriptOutline")}
+                        aria-expanded={outlineOpen}
+                        onClick={() => setOutlineOpen((open) => !open)}
+                      >
+                        {"\u2261"}
+                      </button>
+                      {outlineOpen && (
+                        <div className="processed-transcript-outline-menu">
+                          {questionOutline.map((item, index) => (
+                            <button
+                              key={`${item.sortOrder}-${index}`}
+                              type="button"
+                              className="processed-transcript-outline-item"
+                              onClick={() => {
+                                setSelectedOutlineSortOrder(item.sortOrder);
+                                setOutlineOpen(false);
+                              }}
+                              title={item.label}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="source-content-header-actions">
+                {isSearchableTextSource ? (
+                  <div className="source-content-search">
+                    {textSearchOpen ? (
+                      <>
+                        <input
+                          ref={textSearchInputRef}
+                          className="source-content-search-input"
+                          value={textSearchQuery}
+                          onChange={(event) => setTextSearchQuery(event.target.value)}
+                          placeholder={t("projectCore.sources.detail.searchText")}
+                          aria-label={t("projectCore.sources.detail.searchSourceText")}
+                        />
+                        <span className="source-content-search-count">
+                          {activeTextSearchQuery
+                            ? textSearchMatches.length > 0 && activeTextSearchIndex != null
+                              ? `${activeTextSearchIndex + 1}/${textSearchMatches.length}`
+                              : "0/0"
+                            : ""}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn--small source-content-search-nav"
+                          onClick={goToPreviousTextSearchMatch}
+                          disabled={textSearchMatches.length === 0}
+                          aria-label={t("projectCore.sources.detail.previousSearchMatch")}
+                          title={t("projectCore.sources.detail.previous")}
+                        >
+                          {"\u2191"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--small source-content-search-nav"
+                          onClick={goToNextTextSearchMatch}
+                          disabled={textSearchMatches.length === 0}
+                          aria-label={t("projectCore.sources.detail.nextSearchMatch")}
+                          title={t("projectCore.sources.detail.next")}
+                        >
+                          {"\u2193"}
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="btn btn--small source-content-search-toggle"
+                      onClick={() => setTextSearchOpen((open) => !open)}
+                      aria-label={textSearchOpen ? t("projectCore.sources.detail.closeTextSearch") : t("projectCore.sources.detail.searchSourceText")}
+                      title={textSearchOpen ? t("projectCore.sources.detail.closeSearch") : t("projectCore.sources.detail.search")}
+                    >
+                      <ZoomIcon />
+                    </button>
+                  </div>
+                ) : null}
+                {!isPdfSource && !isImageSource && !isAudioSource && !isVideoSource && row.content ? (
+                  <TextSizeControls
+                    fontSizePx={textSizePx}
+                    onDecrease={decreaseTextSize}
+                    onIncrease={increaseTextSize}
+                  />
+                ) : null}
+              </div>
+            </div>
+            {isPdfSource ? (
+              pdfPreviewLoading ? (
+                <p className="supporting-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingPdfPreview")}</p>
+              ) : pdfPreviewError ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <p className="auth-error" style={{ margin: 0 }}>{pdfPreviewError}</p>
+                  <p className="supporting-copy" style={{ margin: 0 }}>
+                    {t("projectCore.sources.detail.pdfPreviewFailed")}
+                  </p>
+                </div>
+              ) : pdfPreviewUrl ? (
+                <div className="doc-content-scroll-shell" style={{ padding: 0, minHeight: "72vh" }}>
+                  <iframe
+                    title={`${row.name} PDF preview`}
+                    src={pdfPreviewUrl}
+                    style={{ width: "100%", height: "100%", minHeight: "72vh", border: "none", display: "block" }}
+                  />
+                </div>
+              ) : (
+                <p className="case-card-empty">{t("projectCore.sources.detail.noPdfPreview")}</p>
+              )
+            ) : isImageSource ? (
+              imagePreviewLoading ? (
+                <p className="supporting-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingImagePreview")}</p>
+              ) : imagePreviewError ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <p className="auth-error" style={{ margin: 0 }}>{imagePreviewError}</p>
+                  <p className="supporting-copy" style={{ margin: 0 }}>
+                    {t("projectCore.sources.detail.imagePreviewFailed")}
+                  </p>
+                </div>
+              ) : imagePreviewUrl ? (
+                <div className="doc-content-scroll-shell" style={{ padding: 0, minHeight: "72vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <img
+                    src={imagePreviewUrl}
+                    alt={row.name}
+                    style={{ display: "block", maxWidth: "100%", maxHeight: "72vh", objectFit: "contain" }}
+                  />
+                </div>
+              ) : (
+                <p className="case-card-empty">{t("projectCore.sources.detail.noImagePreview")}</p>
+              )
+            ) : isAudioSource ? (
+              audioPreviewLoading ? (
+                <div className="source-preview-busy-state" aria-live="polite">
+                  <span className="source-preview-busy-spinner" aria-hidden="true" />
+                  <p className="supporting-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingAudioPreview")}</p>
+                </div>
+              ) : audioPreviewError ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <p className="auth-error" style={{ margin: 0 }}>{audioPreviewError}</p>
+                  <p className="supporting-copy" style={{ margin: 0 }}>
+                    {t("projectCore.sources.detail.audioPreviewFailed")}
+                  </p>
+                </div>
+              ) : audioPreviewUrl ? (
+                <div className="doc-content-scroll-shell" style={{ padding: 24, minHeight: "24rem", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <audio
+                    src={audioPreviewUrl}
+                    controls
+                    style={{ display: "block", width: "100%", maxWidth: 640 }}
+                  />
+                </div>
+              ) : (
+                <p className="case-card-empty">{t("projectCore.sources.detail.noAudioPreview")}</p>
+              )
+            ) : isVideoSource ? (
+              videoPreviewLoading ? (
+                <div className="source-preview-busy-state" aria-live="polite">
+                  <span className="source-preview-busy-spinner" aria-hidden="true" />
+                  <p className="supporting-copy" style={{ margin: 0 }}>{t("projectCore.sources.detail.loadingVideoPreview")}</p>
+                </div>
+              ) : videoPreviewError ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <p className="auth-error" style={{ margin: 0 }}>{videoPreviewError}</p>
+                  <p className="supporting-copy" style={{ margin: 0 }}>
+                    {t("projectCore.sources.detail.videoPreviewFailed")}
+                  </p>
+                </div>
+              ) : videoPreviewUrl ? (
+                <div className="doc-content-scroll-shell" style={{ padding: 0, minHeight: "72vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <video
+                    src={videoPreviewUrl}
+                    controls
+                    style={{ display: "block", maxWidth: "100%", maxHeight: "72vh" }}
+                  />
+                </div>
+              ) : (
+                <p className="case-card-empty">{t("projectCore.sources.detail.noVideoPreview")}</p>
+              )
+            ) : row.content ? (
+              normalizedSourceType === "transcript" && processedTranscriptSegments.length > 0 ? (
+                <div
+                  ref={transcriptViewerRef}
+                  className="doc-content-body doc-content-body--structured text-source-content-sized"
+                  style={{ fontSize: textSizePx }}
+                >
+                  <ProcessedTranscriptView
+                    segments={processedTranscriptSegments}
+                    renderSegmentText={(segment) => renderSearchHighlightedText(
+                      segment.text,
+                      segment.startOffset,
+                      `processed-transcript-search-${segment.sortOrder}`,
+                    )}
+                    selectedSortOrder={selectedOutlineSortOrder}
+                  />
+                </div>
+              ) : (
+                <div
+                  ref={contentSelectionRef}
+                  className="doc-content-scroll-shell"
+                  onMouseUp={handleMouseUp}
+                >
+                  <pre
+                    className="doc-content-body"
+                    style={{ fontSize: textSizePx, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                  >
+                    {renderSearchHighlightedText(row.content, 0, "source-text-search")}
+                  </pre>
+                </div>
+              )
+            ) : (
+              <p className="case-card-empty">{t("projectDocuments.detail.noContent")}</p>
+            )}
+            {canManageAnnotations ? (
+              <div style={{ marginTop: 12 }}>
+                {sourceLockConflict?.reason === "kicked" ? (
+                  <p className="supporting-copy" style={{ margin: 0 }}>
+                    {t("projectCore.sources.detail.lockRemoved", { name: sourceLockConflict.userName || t("projectCore.sources.detail.projectEditorFallback") })}
+                  </p>
+                ) : sourceLockConflict?.reason === "locked" ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                    <p className="supporting-copy" style={{ margin: 0 }}>
+                      {t("projectCore.sources.detail.lockHeld", { name: sourceLockConflict.userName || t("projectCore.sources.detail.anotherUser") })}
+                    </p>
+                    {canKickSourceLocks ? (
+                      <button
+                        type="button"
+                        className="btn btn--small"
+                        onClick={() => void onKickSourceLock(sourceLockConflict)}
+                        disabled={saving || lockSyncing}
+                      >
+                        {lockSyncing ? t("projectCore.sources.detail.updating") : t("projectCore.sources.detail.takeLock")}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : canEditAnnotations ? (
+                  <p className="supporting-copy" style={{ margin: 0 }}>
+                    {t("projectCore.sources.detail.selectTextToAnnotate")}
+                  </p>
+                ) : (
+                  <p className="supporting-copy" style={{ margin: 0 }}>
+                    {lockSyncing
+                      ? t("projectCore.sources.detail.claimingLock")
+                      : isPdfSource || isImageSource || isAudioSource || isVideoSource
+                        ? t("projectCore.sources.detail.readOnlyMediaPreview", { kind: isPdfSource ? "PDF" : isImageSource ? "image" : isAudioSource ? "audio" : "video" })
+                        : t("projectCore.sources.detail.readOnlyWorkspace")}
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {pendingSelection && canEditAnnotations ? (
+        <AnnotationEditorModal
+          title={t("projectCore.sources.detail.newAnnotation")}
+          codeOptions={codeOptions}
+          selection={pendingSelection}
+          saving={saving}
+          error={error}
+          onCancel={() => {
+            if (saving) return;
+            setPendingSelection(null);
+          }}
+          onSave={async (payload) => {
+            await onCreateAnnotation(row.id, pendingSelection, payload);
+            setPendingSelection(null);
+          }}
+        />
+      ) : null}
+
+      {editingAnnotation && canEditAnnotations ? (
+        <AnnotationEditorModal
+          title={t("projectCore.sources.detail.editAnnotation")}
+          codeOptions={codeOptions}
+          selection={{
+            startOffset: editingAnnotation.startOffset ?? 0,
+            endOffset: editingAnnotation.endOffset ?? editingAnnotation.quote.length,
+            quote: editingAnnotation.quote,
+          }}
+          initialAnnotation={editingAnnotation}
+          saving={saving}
+          error={error}
+          onCancel={() => {
+            if (saving) return;
+            setEditingAnnotation(null);
+          }}
+          onSave={async (payload) => {
+            await onUpdateAnnotation(editingAnnotation, payload);
+            setEditingAnnotation(null);
+          }}
+        />
+      ) : null}
+
+      {removingAnnotation && canEditAnnotations ? (
+        <ConfirmDialog
+          title={t("projectCore.sources.detail.deleteAnnotation")}
+          onClose={() => setRemovingAnnotation(null)}
+          onConfirm={async () => {
+            await onDeleteAnnotation(removingAnnotation.id);
+            setRemovingAnnotation(null);
+          }}
+          busy={saving}
+          confirmLabel={t("common.delete")}
+          busyLabel={t("projectCore.sources.deleting")}
+          cancelLabel={t("projectCore.sources.cancel")}
+          tone="danger"
+          error={error}
+        >
+          <blockquote className="annotation-quote" style={{ margin: "0 0 16px" }}>
+            "{removingAnnotation.quote}"
+          </blockquote>
+        </ConfirmDialog>
+      ) : null}
+
+    </div>
+  );
+}
+
+export type SourcesViewProps = {
+  projectId: string;
+  currentUserId: string;
+  canManageSources: boolean;
+  canKickSourceLocks: boolean;
+  canManageAnnotations: boolean;
+  canManageMemos: boolean;
+  canCreateCodes?: boolean;
+  codingEnabled?: boolean;
+  textCodingMode?: "analysis" | "ai-assisted";
+  pageTitleOverride?: string;
+  allowedSourceKinds?: string[];
+  initialSourceId?: string | null;
+  initialAnnotationId?: string | null;
+  initialTextSegment?: { startOffset: number; endOffset: number } | null;
+  gettingStartedState?: GettingStartedState | null;
+  onGettingStartedStateChange?: (state: Partial<GettingStartedState>) => void | Promise<void>;
+  onInitialNavigationHandled?: () => void;
+  onOpenPostgresMemoDraft: (payload: { sourceIds?: string[]; annotationIds?: string[]; codeIds?: string[] }) => void;
+};
+
+export function SourcesView({
+  projectId,
+  currentUserId,
+  canManageSources,
+  canKickSourceLocks,
+  canManageAnnotations,
+  canManageMemos,
+  canCreateCodes,
+  codingEnabled = false,
+  textCodingMode = "analysis",
+  pageTitleOverride,
+  allowedSourceKinds,
+  initialSourceId,
+  initialAnnotationId,
+  initialTextSegment,
+  gettingStartedState,
+  onGettingStartedStateChange,
+  onInitialNavigationHandled,
+  onOpenPostgresMemoDraft,
+}: SourcesViewProps) {
+  const { t } = useI18n();
+  const [rows, setRows] = useState<SourceRow[]>([]);
+  const [codes, setCodes] = useState<PostgresCode[]>([]);
+  const [annotations, setAnnotations] = useState<PostgresAnnotationSummary[]>([]);
+  const [objects, setObjects] = useState<PostgresObject[]>([]);
+  const [relationships, setRelationships] = useState<PostgresRelationship[]>([]);
+  const [relationshipTypes, setRelationshipTypes] = useState<PostgresRelationshipType[]>([]);
+  const [relationshipAttributeDefinitions, setRelationshipAttributeDefinitions] = useState<PostgresRelationshipAttributeDefinition[]>([]);
+  const [sourceTypeSettings, setSourceTypeSettings] = useState<PostgresSourceTypeSetting[]>([]);
+  const [sourceLocks, setSourceLocks] = useState<PostgresSourceLock[]>([]);
+  const [sourceAttributeDefinitions, setSourceAttributeDefinitions] = useState<PostgresSourceAttributeDefinition[]>([]);
+  const [sourceAttributeValues, setSourceAttributeValues] = useState<PostgresSourceAttributeValue[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<SourceRow | null>(null);
+  const [sortCol, setSortCol] = useState<SortCol>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [showAttributesTable, setShowAttributesTable] = useState(false);
+  const [selectedSourceKindFilter, setSelectedSourceKindFilter] = useState<string>(
+    textCodingMode === "ai-assisted" ? "source_text" : "all",
+  );
+  const [sourceKindSortCol, setSourceKindSortCol] = useState<SourceKindSortCol>("label");
+  const [sourceKindSortDir, setSourceKindSortDir] = useState<SortDir>("asc");
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [attributeSortCol, setAttributeSortCol] = useState<AttributeSortCol>("name");
+  const [attributeSortDir, setAttributeSortDir] = useState<AttributeSortDir>("asc");
+  const [attributeDraft, setAttributeDraft] = useState<SourceAttributeDraft | null>(null);
+  const [attributeHistoryTarget, setAttributeHistoryTarget] = useState<PostgresAttributeValueHistoryTarget | null>(null);
+  const [activeAttributeHistoryCell, setActiveAttributeHistoryCell] = useState<{ sourceId: string; attributeDefinitionId: string } | null>(null);
+  const [hoveredAttributeColumnId, setHoveredAttributeColumnId] = useState<string | null>(null);
+  const [bulkAttributeTarget, setBulkAttributeTarget] = useState<BulkSourceAttributeTarget | null>(null);
+  const [attributeSaving, setAttributeSaving] = useState(false);
+  const [attributeError, setAttributeError] = useState<string | null>(null);
+  const [sourceImportSettings, setSourceImportSettings] = useState({
+    defaultMode: readAppSettings().documentImport.defaultMode,
+    autoNameFromFile: readAppSettings().documentImport.autoNameFromFile,
+    trimImportedText: readAppSettings().documentImport.trimImportedText,
+    warnBeforeEmptyImport: readAppSettings().documentImport.warnBeforeEmptyImport,
+    storeOriginalFileName: true,
+  });
+  const [newSourceOpen, setNewSourceOpen] = useState(false);
+  const [newRelationshipSource, setNewRelationshipSource] = useState<SourceRow | null>(null);
+  const [editingSourceRelationship, setEditingSourceRelationship] = useState<PostgresRelationship | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<SourceRow | null>(null);
+  const [deleteRow, setDeleteRow] = useState<SourceRow | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [activeSourceLock, setActiveSourceLock] = useState<PostgresSourceLock | null>(null);
+  const [sourceLockConflict, setSourceLockConflict] = useState<PostgresSourceLock | null>(null);
+  const [sourceLockSyncing, setSourceLockSyncing] = useState(false);
+  const [projectStoragePath, setProjectStoragePath] = useState("");
+  const [sourceContextMenu, setSourceContextMenu] = useState<{ x: number; y: number; row: SourceRow } | null>(null);
+  const sourceContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const sourceContextMenuStyle = useViewportContextMenuStyle(sourceContextMenu, sourceContextMenuRef);
+  const [sourceTypeContextMenu, setSourceTypeContextMenu] = useState<{ x: number; y: number; sourceKind: string } | null>(null);
+  const sourceTypeContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const sourceTypeContextMenuStyle = useViewportContextMenuStyle(sourceTypeContextMenu, sourceTypeContextMenuRef);
+  const [editingSourceTypeKind, setEditingSourceTypeKind] = useState<string | null>(null);
+  const [sourceTypeSaving, setSourceTypeSaving] = useState(false);
+  const [sourceTypeUploading, setSourceTypeUploading] = useState(false);
+  const [sourceTypeError, setSourceTypeError] = useState<string | null>(null);
+  const [sourceTypeInitialTab, setSourceTypeInitialTab] = useState<"details" | "graphics" | "attributes" | "timeline">("details");
+
+  const loadSources = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [snapshot, projects] = await Promise.all([
+        loadPostgresProjectWorkspaceSnapshot(projectId),
+        listPostgresProjects(),
+      ]);
+      setProjectStoragePath(projects.find((project) => project.id === projectId)?.storagePath ?? "");
+      setCodes(snapshot.codes);
+      setAnnotations(snapshot.annotations);
+      setObjects(snapshot.objects);
+      setRelationships(snapshot.relationships);
+      setRelationshipTypes(snapshot.relationshipTypes);
+      setRelationshipAttributeDefinitions(snapshot.relationshipAttributeDefinitions);
+      setSourceTypeSettings(snapshot.sourceTypeSettings);
+      setSourceLocks(snapshot.sourceLocks);
+      setSourceAttributeDefinitions(snapshot.sourceAttributeDefinitions);
+      setSourceAttributeValues(snapshot.sourceAttributeValues);
+      const annotationCountBySourceId = new Map<string, number>();
+      for (const annotation of snapshot.annotations) {
+        annotationCountBySourceId.set(
+          annotation.sourceId,
+          (annotationCountBySourceId.get(annotation.sourceId) ?? 0) + 1,
+        );
+      }
+      const objectCountBySourceId = new Map<string, number>();
+      for (const link of snapshot.sourceObjectLinks) {
+        objectCountBySourceId.set(
+          link.sourceId,
+          (objectCountBySourceId.get(link.sourceId) ?? 0) + 1,
+        );
+      }
+
+      setRows(
+        snapshot.sources.map((source) => {
+          const sourceVisual = getSourceKindVisual(source.sourceKind);
+          return {
+            id: source.id,
+            name: source.title,
+            type: source.sourceKind || "source",
+            sourceObjectType: sourceVisual?.label ?? source.sourceKind ?? "Source",
+            sourceObjectTypeSystemKey: sourceVisual?.systemKey ?? null,
+            notes: source.notes ?? "",
+            content: source.textContent,
+            structuredContentJson: source.structuredContentJson,
+            waveformPeaksJson: source.waveformPeaksJson ?? "",
+            videoFrameIndexJson: source.videoFrameIndexJson ?? "",
+            extractedFromVideoSourceId: source.extractedFromVideoSourceId ?? "",
+            extractedFromVideoTimeMs: source.extractedFromVideoTimeMs ?? null,
+            filePath: source.storagePath,
+            shapeOverride: source.shapeOverride ?? "",
+            colorOverride: source.colorOverride ?? "",
+            outlineColorOverride: source.outlineColorOverride ?? "",
+            fillOverride: source.fillOverride ?? "",
+            fillTransparencyOverride: source.fillTransparencyOverride ?? null,
+            outlineWidthOverride: source.outlineWidthOverride ?? null,
+            imageStoragePath: source.imageStoragePath ?? "",
+            annotationCount: annotationCountBySourceId.get(source.id) ?? 0,
+            objectCount: objectCountBySourceId.get(source.id) ?? 0,
+            createdAt: source.createdAt,
+          };
+        }),
+      );
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : typeof loadError === "string" ? loadError : "Failed to load sources.");
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void loadSources();
+  }, [loadSources]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadImportSettings() {
+      try {
+        const projectSettings = await getPostgresProjectDocumentImportSettings(projectId);
+        if (cancelled) return;
+        const appSettings = readAppSettings().documentImport;
+        setSourceImportSettings({
+          defaultMode: appSettings.defaultMode,
+          autoNameFromFile: appSettings.autoNameFromFile,
+          trimImportedText: appSettings.trimImportedText,
+          warnBeforeEmptyImport: appSettings.warnBeforeEmptyImport,
+          storeOriginalFileName: projectSettings.storeOriginalFileName,
+        });
+      } catch {
+        if (cancelled) return;
+        const appSettings = readAppSettings().documentImport;
+        setSourceImportSettings({
+          defaultMode: appSettings.defaultMode,
+          autoNameFromFile: appSettings.autoNameFromFile,
+          trimImportedText: appSettings.trimImportedText,
+          warnBeforeEmptyImport: appSettings.warnBeforeEmptyImport,
+          storeOriginalFileName: true,
+        });
+      }
+    }
+    void loadImportSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!sourceContextMenu && !sourceTypeContextMenu) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!sourceContextMenuRef.current?.contains(event.target as Node)) {
+        setSourceContextMenu(null);
+      }
+      if (!sourceTypeContextMenuRef.current?.contains(event.target as Node)) {
+        setSourceTypeContextMenu(null);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSourceContextMenu(null);
+        setSourceTypeContextMenu(null);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [sourceContextMenu, sourceTypeContextMenu]);
+
+  const allowedSourceKindSet = useMemo(() => {
+    if (!allowedSourceKinds || allowedSourceKinds.length === 0) return null;
+    return new Set(allowedSourceKinds.map(normalizeSourceKindFilterValue));
+  }, [allowedSourceKinds]);
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => sourceRowMatchesAllowedKinds(row, allowedSourceKindSet)),
+    [allowedSourceKindSet, rows],
+  );
+
+  useEffect(() => {
+    if (!initialSourceId || visibleRows.length === 0) return;
+    if (selectedRow?.id === initialSourceId) {
+      return;
+    }
+    const matchingRow = visibleRows.find((row) => row.id === initialSourceId);
+    if (!matchingRow) return;
+    setSelectedRow(matchingRow);
+  }, [initialSourceId, selectedRow?.id, visibleRows]);
+
+  useEffect(() => {
+    if (!selectedRow) return;
+    const nextSelectedRow = visibleRows.find((row) => row.id === selectedRow.id) ?? null;
+    if (!nextSelectedRow) {
+      setSelectedRow(null);
+      return;
+    }
+    if (nextSelectedRow !== selectedRow) {
+      setSelectedRow(nextSelectedRow);
+    }
+  }, [selectedRow, visibleRows]);
+
+  useEffect(() => {
+    if (!selectedRow || selectedSourceKindFilter === "all") return;
+    if ((selectedRow.sourceObjectTypeSystemKey || selectedRow.sourceObjectType) !== selectedSourceKindFilter) {
+      setSelectedRow(null);
+    }
+  }, [selectedRow, selectedSourceKindFilter]);
+
+  useEffect(() => {
+    if (!selectedRow || !canManageAnnotations || !codingEnabled) {
+      setSourceLockConflict(null);
+      if (activeSourceLock) {
+        void releasePostgresSourceLock(projectId, activeSourceLock.id);
+        setSourceLocks((current) => current.filter((lock) => lock.id !== activeSourceLock.id));
+      }
+      setActiveSourceLock(null);
+      return;
+    }
+
+    let cancelled = false;
+    let heartbeatId: ReturnType<typeof setInterval> | null = null;
+    let heldLockId: string | null = null;
+
+    const syncSourceLock = async () => {
+      setSourceLockSyncing(true);
+      try {
+        const result = await acquirePostgresSourceLock({
+          projectId,
+          sourceId: selectedRow.id,
+        });
+        if (cancelled) return;
+        if (result.ok && result.lock) {
+          heldLockId = result.lock.id;
+          setActiveSourceLock(result.lock);
+          setSourceLockConflict(null);
+          setSourceLocks((current) => {
+            const filtered = current.filter((lock) => lock.sourceId !== result.lock!.sourceId);
+            return [...filtered, result.lock!];
+          });
+        } else {
+          setActiveSourceLock(null);
+          setSourceLockConflict(result.conflict);
+          setSourceLocks((current) => {
+            const filtered = current.filter((lock) => lock.sourceId !== selectedRow.id);
+            if (result.conflict?.reason === "locked") {
+              return [...filtered, result.conflict];
+            }
+            return filtered;
+          });
+        }
+      } catch (lockError) {
+        if (!cancelled) {
+          setActiveSourceLock(null);
+          setSourceLockConflict(null);
+          setSubmitError(lockError instanceof Error ? lockError.message : "Failed to synchronize the source lock.");
+        }
+      } finally {
+        if (!cancelled) {
+          setSourceLockSyncing(false);
+        }
+      }
+    };
+
+    void syncSourceLock();
+    heartbeatId = setInterval(() => {
+      void syncSourceLock();
+    }, SOURCE_LOCK_HEARTBEAT_MS);
+
+    return () => {
+      cancelled = true;
+      if (heartbeatId) clearInterval(heartbeatId);
+      if (heldLockId) {
+        void releasePostgresSourceLock(projectId, heldLockId);
+        setSourceLocks((current) => current.filter((lock) => lock.id !== heldLockId));
+      }
+      setActiveSourceLock(null);
+    };
+  }, [canManageAnnotations, codingEnabled, projectId, selectedRow]);
+
+  const sourceKindSummaries = useMemo(() => {
+    const summaryByKind = new Map<string, {
+      label: string;
+      meta: string;
+      count: number;
+      attributeDefinitionCount: number;
+      shape: SourceObjectTypeShape;
+      color: string;
+      outlineColor: string;
+      fill: SourceObjectFill;
+      systemKey: string | null;
+    }>();
+    for (const setting of sourceTypeSettings) {
+      const systemKey = sourceObjectTypeSystemKeyFromKind(setting.sourceKind);
+      if (!systemKey) continue;
+      if (allowedSourceKindSet && ![
+        setting.sourceKind,
+        systemKey,
+        setting.name,
+      ].some((value) => allowedSourceKindSet.has(normalizeSourceKindFilterValue(value)))) {
+        continue;
+      }
+      const sourceKindAttributeKeys = new Set([
+        normalizeSourceKindFilterValue(setting.sourceKind),
+        normalizeSourceKindFilterValue(setting.name),
+        normalizeSourceKindFilterValue(sourceKindFromFilterValue(systemKey) ?? ""),
+        systemKey,
+      ].filter(Boolean));
+      summaryByKind.set(systemKey, {
+        label: setting.name,
+        meta: systemKey,
+        count: 0,
+        attributeDefinitionCount: sourceAttributeDefinitions.filter((definition) =>
+          (definition.sourceKinds ?? []).some((kind) => sourceKindAttributeKeys.has(normalizeSourceKindFilterValue(kind)))
+        ).length,
+        shape: normalizeSourceObjectTypeShape(setting.shape),
+        color: normalizeSourceObjectColor(setting.color),
+        outlineColor: normalizeOptionalSourceObjectColor(setting.outlineColor) || normalizeSourceObjectColor(setting.color),
+        fill: normalizeSourceObjectFill(setting.fill),
+        systemKey,
+      });
+    }
+    for (const row of visibleRows) {
+      const kindKey = row.sourceObjectTypeSystemKey || row.sourceObjectType || row.type || "source";
+      const normalizedKindKey = sourceObjectTypeSystemKeyFromKind(kindKey) ?? kindKey;
+      const current = summaryByKind.get(normalizedKindKey);
+      if (current) {
+        current.count += 1;
+      } else {
+        const sourceVisual = getSourceKindVisual(row.type);
+        const fallbackSystemKey = row.sourceObjectTypeSystemKey ?? sourceVisual?.systemKey ?? sourceObjectTypeSystemKeyFromKind(row.type);
+        const fallbackKind = fallbackSystemKey ?? kindKey;
+        const fallbackAttributeKeys = new Set([
+          normalizeSourceKindFilterValue(row.type),
+          normalizeSourceKindFilterValue(row.sourceObjectType),
+          normalizeSourceKindFilterValue(sourceKindFromFilterValue(fallbackKind) ?? ""),
+          normalizeSourceKindFilterValue(fallbackKind),
+        ].filter(Boolean));
+        summaryByKind.set(fallbackKind, {
+          label: sourceVisual?.label ?? row.sourceObjectType ?? row.type ?? "Source",
+          meta: row.sourceObjectTypeSystemKey || row.type || "source",
+          count: 1,
+          attributeDefinitionCount: sourceAttributeDefinitions.filter((definition) =>
+            (definition.sourceKinds ?? []).some((kind) => fallbackAttributeKeys.has(normalizeSourceKindFilterValue(kind)))
+          ).length,
+          shape: "rounded",
+          color: sourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
+          outlineColor: sourceVisual?.color ?? SOURCE_OBJECT_TYPE_DEFAULT_COLOR,
+          fill: "outline",
+          systemKey: fallbackSystemKey ?? null,
+        });
+      }
+    }
+    return [...summaryByKind.entries()]
+      .map(([kind, summary]) => ({
+        kind,
+        label: summary.label,
+        meta: summary.meta,
+        count: summary.count,
+        attributeDefinitionCount: summary.attributeDefinitionCount,
+        shape: summary.shape,
+        color: summary.color,
+        outlineColor: summary.outlineColor,
+        fill: summary.fill,
+        systemKey: summary.systemKey,
+      }))
+      .sort((left, right) => {
+        let comparison = 0;
+        if (sourceKindSortCol === "count") {
+          comparison = left.count - right.count;
+        } else {
+          comparison = left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+        }
+        if (comparison === 0) {
+          comparison = left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+        }
+        return sourceKindSortDir === "asc" ? comparison : -comparison;
+      });
+  }, [allowedSourceKindSet, sourceAttributeDefinitions, sourceKindSortCol, sourceKindSortDir, sourceTypeSettings, visibleRows]);
+  const sourceTypeOptions = useMemo(
+    () => sourceKindSummaries
+      .map((summary) => {
+        const kind = sourceKindFromFilterValue(summary.kind);
+        return kind
+          ? {
+              kind,
+              label: sourceTypeOptionLabel(kind, summary.label, t),
+              count: summary.count,
+            }
+          : null;
+      })
+      .filter((option): option is { kind: string; label: string; count: number } => option !== null),
+    [sourceKindSummaries, t],
+  );
+
+  useEffect(() => {
+    if (showAttributesTable) return;
+    if (selectedSourceKindFilter === "all") return;
+    if (!visibleRows.some((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)) {
+      setSelectedSourceKindFilter("all");
+    }
+  }, [selectedSourceKindFilter, showAttributesTable, visibleRows]);
+
+  const selectedSourceKind = sourceKindFromFilterValue(selectedSourceKindFilter);
+
+  const filteredRows = useMemo(
+    () => (
+      selectedSourceKindFilter === "all"
+        ? visibleRows
+        : visibleRows.filter((row) => (row.sourceObjectTypeSystemKey || row.sourceObjectType) === selectedSourceKindFilter)
+    ),
+    [selectedSourceKindFilter, visibleRows],
+  );
+
+  const sorted = [...filteredRows].sort((a, b) => {
+    let cmp: number;
+    if (sortCol === "annotations") {
+      cmp = a.annotationCount - b.annotationCount;
+    } else if (sortCol === "objects") {
+      cmp = a.objectCount - b.objectCount;
+    } else {
+      const aVal = String((a as unknown as Record<string, unknown>)[sortCol] ?? "");
+      const bVal = String((b as unknown as Record<string, unknown>)[sortCol] ?? "");
+      cmp = aVal.localeCompare(bVal, undefined, { sensitivity: "base" });
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+  const editingSourceType = editingSourceTypeKind
+    ? sourceTypeSettings.find((setting) => setting.sourceKind === editingSourceTypeKind) ?? null
+    : null;
+  const sourceLockBySourceId = useMemo(
+    () => new Map(sourceLocks.map((lock) => [lock.sourceId, lock])),
+    [sourceLocks],
+  );
+
+  function handleSort(col: SortCol) {
+    if (col === sortCol) setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+    else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  }
+
+  function handleSourceKindSort(col: SourceKindSortCol) {
+    if (col === sourceKindSortCol) setSourceKindSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+    else {
+      setSourceKindSortCol(col);
+      setSourceKindSortDir("asc");
+    }
+  }
+
+  function handleSelectSourceKind(kind: string) {
+    setSelectedSourceKindFilter(kind);
+    setSelectedRow(null);
+  }
+
+  function openSourceTypeContextMenu(
+    event: ReactMouseEvent<HTMLElement>,
+    summary: { kind: string; systemKey: string | null; label: string; meta: string },
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canManageSources) return;
+    const resolvedSystemKey = summary.systemKey
+      ?? sourceObjectTypeSystemKeyFromKind(summary.kind)
+      ?? sourceObjectTypeSystemKeyFromKind(summary.meta)
+      ?? sourceObjectTypeSystemKeyFromKind(summary.label);
+    const sourceKind = sourceKindFromFilterValue(resolvedSystemKey ?? summary.kind)
+      ?? sourceKindFromFilterValue(summary.meta)
+      ?? sourceKindFromFilterValue(summary.label);
+    if (!sourceKind) return;
+    setSourceContextMenu(null);
+    setSourceTypeContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      sourceKind,
+    });
+  }
+
+  function handleSourceTypeContextMouseDown(
+    event: ReactMouseEvent<HTMLElement>,
+    summary: { kind: string; systemKey: string | null; label: string; meta: string },
+  ) {
+    if (event.button !== 2) return;
+    openSourceTypeContextMenu(event, summary);
+  }
+
+  async function handleSaveSourceType(draft: SourceTypeEditModalDraft) {
+    const sourceType = editingSourceTypeKind
+      ? sourceTypeSettings.find((setting) => setting.sourceKind === editingSourceTypeKind) ?? null
+      : null;
+    if (!sourceType) return;
+    setSourceTypeSaving(true);
+    setSourceTypeError(null);
+    try {
+      const saved = await savePostgresSourceTypeSetting({
+        projectId,
+        sourceKind: sourceType.sourceKind,
+        name: draft.name.trim(),
+        description: draft.description,
+        shape: draft.shape,
+        color: normalizeSourceObjectColor(draft.color),
+        outlineColor: normalizeOptionalSourceObjectColor(draft.outlineColor) || normalizeSourceObjectColor(draft.color),
+        fill: draft.fill,
+        fillTransparency: draft.fill === "filled" ? normalizePostgresObjectFillTransparency(draft.fillTransparency) : SOURCE_GRAPHIC_DEFAULT_FILL_TRANSPARENCY,
+        outlineWidth: normalizePostgresObjectOutlineWidth(draft.outlineWidth),
+        imageStoragePath: draft.imageStoragePath || null,
+      });
+      const currentKind = normalizeSourceKindFilterValue(sourceType.sourceKind);
+      for (const removedAttributeId of draft.removedAttributeIds) {
+        const definition = sourceAttributeDefinitions.find((entry) => entry.id === removedAttributeId);
+        if (!definition) continue;
+        const remainingSourceKinds = (definition.sourceKinds ?? [])
+          .filter((kind) => normalizeSourceKindFilterValue(kind) !== currentKind);
+        if (remainingSourceKinds.length === 0) {
+          await deletePostgresSourceAttributeDefinition(projectId, removedAttributeId);
+        } else {
+          await savePostgresSourceAttribute({
+            projectId,
+            attributeDefinitionId: definition.id,
+            name: definition.name,
+            dataType: definition.dataType,
+            description: definition.description,
+            options: definition.options,
+            timelineRole: definition.timelineRole ?? "",
+            sourceKinds: remainingSourceKinds,
+            values: [],
+          });
+        }
+      }
+      for (const attributeDraft of draft.attributes) {
+        const otherSourceKinds = attributeDraft.originalSourceKinds
+          .filter((kind) => normalizeSourceKindFilterValue(kind) !== currentKind);
+        const valuesForCurrentKind = rows
+          .filter((row) => normalizeSourceKindFilterValue(row.type) === currentKind)
+          .map((row) => ({
+            sourceId: row.id,
+            value: draft.attributeValuesByDraftId[attributeDraft.localId]?.[row.id] ?? "",
+          }));
+        await savePostgresSourceAttribute({
+          projectId,
+          attributeDefinitionId: attributeDraft.id ?? null,
+          name: attributeDraft.name.trim(),
+          dataType: attributeDraft.dataType,
+          description: attributeDraft.description,
+          options: attributeDraft.options,
+          timelineRole: attributeDraft.timelineRole ?? "",
+          sourceKinds: [...otherSourceKinds, sourceType.sourceKind],
+          values: valuesForCurrentKind,
+        });
+      }
+      setSourceTypeSettings((current) => current.map((entry) => (entry.sourceKind === saved.sourceKind ? saved : entry)));
+      setEditingSourceTypeKind(null);
+      await loadSources();
+    } catch (saveError) {
+      setSourceTypeError(saveError instanceof Error ? saveError.message : "Failed to save source type.");
+    } finally {
+      setSourceTypeSaving(false);
+    }
+  }
+
+  async function handleUploadSourceTypeImage(sourceKind: string, file: File): Promise<PostgresSourceTypeSetting> {
+    setSourceTypeUploading(true);
+    setSourceTypeError(null);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const saved = await importPostgresSourceTypeImage({
+        projectId,
+        sourceKind,
+        originalFileName: file.name,
+        fileBytesBase64: bytesToBase64(bytes),
+      });
+      setSourceTypeSettings((current) => current.map((entry) => (entry.sourceKind === saved.sourceKind ? saved : entry)));
+      return saved;
+    } catch (uploadError) {
+      setSourceTypeError(uploadError instanceof Error ? uploadError.message : "Failed to upload source type image.");
+      throw uploadError;
+    } finally {
+      setSourceTypeUploading(false);
+    }
+  }
+
+  async function handleRemoveSourceTypeImage(sourceKind: string): Promise<PostgresSourceTypeSetting> {
+    setSourceTypeUploading(true);
+    setSourceTypeError(null);
+    try {
+      const saved = await removePostgresSourceTypeImage(projectId, sourceKind);
+      setSourceTypeSettings((current) => current.map((entry) => (entry.sourceKind === saved.sourceKind ? saved : entry)));
+      return saved;
+    } catch (removeError) {
+      setSourceTypeError(removeError instanceof Error ? removeError.message : "Failed to remove source type image.");
+      throw removeError;
+    } finally {
+      setSourceTypeUploading(false);
+    }
+  }
+
+  async function handleSaveSource(payload: SourceEditorPayload) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      let savedSourceId = editingRow?.id ?? "";
+      if (editingRow) {
+        if (payload.removeImage) {
+          await removePostgresSourceImage(projectId, editingRow.id);
+        }
+        const saved = await updatePostgresSource({
+          projectId,
+          sourceId: editingRow.id,
+          sourceKind: payload.sourceKind.trim(),
+          title: payload.name.trim(),
+          textContent: payload.content,
+          notes: payload.notes,
+          structuredContentJson: editingRow.structuredContentJson,
+          waveformPeaksJson: editingRow.waveformPeaksJson,
+          videoFrameIndexJson: editingRow.videoFrameIndexJson,
+          extractedFromVideoSourceId: editingRow.extractedFromVideoSourceId,
+          extractedFromVideoTimeMs: editingRow.extractedFromVideoTimeMs,
+          originalFileName: editingRow.filePath,
+          storagePath: editingRow.filePath,
+          shapeOverride: payload.shapeOverride,
+          colorOverride: payload.colorOverride,
+          outlineColorOverride: payload.outlineColorOverride,
+          fillOverride: payload.fillOverride,
+          fillTransparencyOverride: payload.fillTransparencyOverride,
+          outlineWidthOverride: payload.outlineWidthOverride,
+          imageStoragePath: payload.pendingImageFile ? editingRow.imageStoragePath || null : payload.imageStoragePath,
+        });
+        savedSourceId = saved.id;
+      } else {
+        const saved = await createPostgresSource({
+          projectId,
+          sourceKind: payload.sourceKind.trim(),
+          title: payload.name.trim(),
+          textContent: payload.content,
+          notes: payload.notes,
+          structuredContentJson: "",
+          waveformPeaksJson: "",
+          videoFrameIndexJson: "",
+          extractedFromVideoSourceId: "",
+          extractedFromVideoTimeMs: null,
+          originalFileName: "",
+          storagePath: "",
+          shapeOverride: payload.shapeOverride,
+          colorOverride: payload.colorOverride,
+          outlineColorOverride: payload.outlineColorOverride,
+          fillOverride: payload.fillOverride,
+          fillTransparencyOverride: payload.fillTransparencyOverride,
+          outlineWidthOverride: payload.outlineWidthOverride,
+          imageStoragePath: payload.imageStoragePath,
+        });
+        savedSourceId = saved.id;
+      }
+      if (payload.pendingImageFile && savedSourceId) {
+        const bytes = new Uint8Array(await payload.pendingImageFile.arrayBuffer());
+        await importPostgresSourceImage({
+          projectId,
+          sourceId: savedSourceId,
+          originalFileName: payload.pendingImageFile.name,
+          fileBytesBase64: bytesToBase64(bytes),
+        });
+      }
+
+      for (const definition of sourceAttributeDefinitions) {
+        const previousValue = savedSourceId
+          ? sourceAttributeValues.find((value) =>
+              value.sourceId === savedSourceId && value.attributeDefinitionId === definition.id
+            )?.value ?? ""
+          : "";
+        const nextValue = payload.attributeValuesByDefinitionId[definition.id] ?? "";
+        if (nextValue === previousValue) continue;
+        await savePostgresSourceAttribute({
+          projectId,
+          attributeDefinitionId: definition.id,
+          name: definition.name,
+          dataType: definition.dataType,
+          description: definition.description,
+          options: definition.options,
+          values: rows
+            .filter((row) => row.id !== savedSourceId)
+            .map((row) => ({
+              sourceId: row.id,
+              value: sourceAttributeValues.find((value) =>
+                value.sourceId === row.id && value.attributeDefinitionId === definition.id
+              )?.value ?? "",
+            }))
+            .concat({ sourceId: savedSourceId, value: nextValue }),
+        });
+      }
+      setEditorOpen(false);
+      setEditingRow(null);
+      await loadSources();
+    } catch (saveError) {
+      setSubmitError(saveError instanceof Error ? saveError.message : "Failed to save source.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCreateImportedSource(payload:
+    | {
+        mode: "paste";
+        title: string;
+        sourceKind: string;
+        notes: string;
+        content: string;
+      }
+    | {
+        mode: "upload";
+        items: Array<{
+          file: File;
+          title: string;
+          sourceKind: string;
+          notes: string;
+          extractedText: string;
+          shapeOverride: string;
+          colorOverride: string;
+          outlineColorOverride: string;
+          fillOverride: string;
+          fillTransparencyOverride: number | null;
+          outlineWidthOverride: number | null;
+          imageStoragePath: string;
+          pendingImageFile: File | null;
+          removeImage: boolean;
+          attributeValuesByDefinitionId: Record<string, string>;
+        }>;
+      }
+  ) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      let createdGuideSourceId = "";
+      if (payload.mode === "paste") {
+        const created = await createPostgresSource({
+          projectId,
+          sourceKind: payload.sourceKind,
+          title: payload.title,
+          textContent: payload.content,
+          notes: payload.notes,
+          structuredContentJson: "",
+          waveformPeaksJson: "",
+          videoFrameIndexJson: "",
+          extractedFromVideoSourceId: "",
+            extractedFromVideoTimeMs: null,
+            originalFileName: "",
+            storagePath: "",
+          });
+        createdGuideSourceId = created.id;
+      } else {
+        const createdUploadItems: Array<{ source: PostgresSource; draft: typeof payload.items[number] }> = [];
+        for (const item of payload.items) {
+          const bytes = new Uint8Array(await item.file.arrayBuffer());
+          const waveformPeaksJson = item.sourceKind === "audio" || item.sourceKind === "video"
+            ? serializeMediaWaveformCache(await createMediaWaveformCache(bytes))
+            : "";
+          const videoFrameIndexJson = item.sourceKind === "video"
+            ? serializeMediaVideoFrameIndexCache(await createMediaVideoFrameIndexCache(bytes))
+            : "";
+          const createdSource = await importPostgresSourceFile({
+            projectId,
+            sourceKind: item.sourceKind,
+            title: item.title,
+            originalFileName: sourceImportSettings.storeOriginalFileName ? item.file.name : "",
+            mediaType: inferUploadMediaType(item.file),
+            fileBytesBase64: bytesToBase64(bytes),
+            textContent: item.extractedText,
+            structuredContentJson: "",
+            waveformPeaksJson,
+            videoFrameIndexJson,
+            extractedFromVideoSourceId: "",
+            extractedFromVideoTimeMs: null,
+            notes: item.notes,
+            shapeOverride: item.shapeOverride || null,
+            colorOverride: item.colorOverride || null,
+            outlineColorOverride: item.outlineColorOverride || null,
+            fillOverride: item.fillOverride || null,
+            fillTransparencyOverride: item.fillTransparencyOverride,
+            outlineWidthOverride: item.outlineWidthOverride,
+            imageStoragePath: item.imageStoragePath || null,
+          });
+          if (item.pendingImageFile) {
+            const imageBytes = new Uint8Array(await item.pendingImageFile.arrayBuffer());
+            await importPostgresSourceImage({
+              projectId,
+              sourceId: createdSource.id,
+              originalFileName: item.pendingImageFile.name,
+              fileBytesBase64: bytesToBase64(imageBytes),
+            });
+          }
+          createdUploadItems.push({ source: createdSource, draft: item });
+          if (!createdGuideSourceId) {
+            createdGuideSourceId = createdSource.id;
+          }
+        }
+        for (const definition of sourceAttributeDefinitions) {
+          const nextCreatedValues = createdUploadItems
+            .map(({ source, draft }) => ({
+              sourceId: source.id,
+              value: draft.attributeValuesByDefinitionId[definition.id] ?? "",
+            }))
+            .filter((value) => value.value);
+          if (nextCreatedValues.length === 0) continue;
+          await savePostgresSourceAttribute({
+            projectId,
+            attributeDefinitionId: definition.id,
+            name: definition.name,
+            dataType: definition.dataType,
+            description: definition.description,
+            options: definition.options,
+            sourceKinds: definition.sourceKinds,
+            values: rows
+              .map((row) => ({
+                sourceId: row.id,
+                value: sourceAttributeValues.find((value) =>
+                  value.sourceId === row.id && value.attributeDefinitionId === definition.id
+                )?.value ?? "",
+              }))
+              .concat(nextCreatedValues),
+          });
+        }
+      }
+      setNewSourceOpen(false);
+      await loadSources();
+      if (
+        gettingStartedState?.step === "addTextSource"
+        && !gettingStartedState.dismissed
+        && !gettingStartedState.completed
+        && createdGuideSourceId
+      ) {
+        await onGettingStartedStateChange?.({
+          sourceId: createdGuideSourceId,
+          step: "openCodingView",
+        });
+      }
+    } catch (saveError) {
+      setSubmitError(saveError instanceof Error ? saveError.message : "Failed to create source.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleExtractVideoFrameSource(payload: { file: File; title: string; extractedFromVideoSourceId: string; extractedFromVideoTimeMs: number }) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const bytes = new Uint8Array(await payload.file.arrayBuffer());
+      await importPostgresSourceFile({
+        projectId,
+        sourceKind: "image",
+        title: payload.title.trim() || preliminarySourceTitleFromFileName(payload.file.name),
+        originalFileName: sourceImportSettings.storeOriginalFileName ? payload.file.name : "",
+        mediaType: inferUploadMediaType(payload.file) ?? "image/png",
+        fileBytesBase64: bytesToBase64(bytes),
+        textContent: "",
+        structuredContentJson: "",
+        waveformPeaksJson: "",
+        videoFrameIndexJson: "",
+        extractedFromVideoSourceId: payload.extractedFromVideoSourceId,
+        extractedFromVideoTimeMs: payload.extractedFromVideoTimeMs,
+        notes: "",
+      });
+      await loadSources();
+    } catch (saveError) {
+      setSubmitError(saveError instanceof Error ? saveError.message : t("projectCore.sources.errors.createFrameSourceFailed"));
+      throw saveError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteSource() {
+    if (!deleteRow) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await deletePostgresSource(projectId, deleteRow.id);
+      if (selectedRow?.id === deleteRow.id) setSelectedRow(null);
+      setDeleteRow(null);
+      await loadSources();
+    } catch (deleteError) {
+      setSubmitError(deleteError instanceof Error ? deleteError.message : t("projectCore.sources.errors.deleteSourceFailed"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCreateAnnotation(
+    sourceId: string,
+    selection: PendingSelection,
+    payload: { codeIds: string[]; note: string },
+  ) {
+    if (!activeSourceLock || activeSourceLock.sourceId !== sourceId || activeSourceLock.userId !== currentUserId) {
+      throw new Error(t("projectCore.sources.errors.lockRequiredAddAnnotation"));
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const createdAnnotation = await createPostgresAnnotation({
+        projectId,
+        sourceId,
+        codeIds: payload.codeIds,
+        startOffset: selection.startOffset,
+        endOffset: selection.endOffset,
+        timeStartMs: selection.timeStartMs ?? null,
+        timeEndMs: selection.timeEndMs ?? null,
+        quote: selection.quote,
+        note: payload.note,
+        anchorKind: selection.anchorKind ?? "text_span",
+        imageRegion: selection.imageRegion ?? null,
+      });
+      setAnnotations((current) => [...current, createdAnnotation]);
+      setRows((current) => current.map((row) => (
+        row.id === sourceId
+          ? { ...row, annotationCount: row.annotationCount + 1 }
+          : row
+      )));
+    } catch (annotationError) {
+      setSubmitError(annotationError instanceof Error ? annotationError.message : t("projectCore.sources.errors.createAnnotationFailed"));
+      throw annotationError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleUpdateAnnotation(
+    annotation: SourceAnnotationRow,
+    payload: {
+      codeIds: string[];
+      note: string;
+      startOffset?: number | null;
+      endOffset?: number | null;
+      timeStartMs?: number | null;
+      timeEndMs?: number | null;
+      quote?: string;
+      anchorKind?: string;
+      imageRegion?: PendingSelection["imageRegion"];
+    },
+  ) {
+    if (!selectedRow || !activeSourceLock || activeSourceLock.sourceId !== selectedRow.id || activeSourceLock.userId !== currentUserId) {
+      throw new Error(t("projectCore.sources.errors.lockRequiredEditAnnotation"));
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const updatedAnnotation = await updatePostgresAnnotation({
+        projectId,
+        annotationId: annotation.id,
+        codeIds: payload.codeIds,
+        startOffset: payload.startOffset ?? annotation.startOffset,
+        endOffset: payload.endOffset ?? annotation.endOffset,
+        timeStartMs: payload.timeStartMs ?? annotation.timeStartMs,
+        timeEndMs: payload.timeEndMs ?? annotation.timeEndMs,
+        quote: payload.quote ?? annotation.quote,
+        note: payload.note,
+        anchorKind: payload.anchorKind ?? annotation.anchorKind ?? "text_span",
+        imageRegion: payload.imageRegion ?? annotation.imageRegion ?? null,
+      });
+      setAnnotations((current) => current.map((entry) => (
+        entry.id === updatedAnnotation.id ? updatedAnnotation : entry
+      )));
+    } catch (annotationError) {
+      setSubmitError(annotationError instanceof Error ? annotationError.message : "Failed to update annotation.");
+      throw annotationError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteAnnotation(annotationId: string) {
+    if (!selectedRow || !activeSourceLock || activeSourceLock.sourceId !== selectedRow.id || activeSourceLock.userId !== currentUserId) {
+      throw new Error(t("projectCore.sources.errors.lockRequiredDeleteAnnotation"));
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await deletePostgresAnnotation(projectId, annotationId);
+      await loadSources();
+    } catch (annotationError) {
+      setSubmitError(annotationError instanceof Error ? annotationError.message : "Failed to delete annotation.");
+      throw annotationError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCreateSourceRelationship(payload: {
+    relationshipId: string | null;
+    relationshipTypeId: string;
+    fromEntityType: "object" | "source";
+    fromEntityId: string;
+    toEntityType: "object" | "source";
+    toEntityId: string;
+    description: string;
+    lineShapeOverride?: string | null;
+    lineWeightOverride?: number | null;
+    arrowheadOverride?: string | null;
+    colorOverride?: string | null;
+    attributeValues: Array<{ attributeDefinitionId: string; value: string }>;
+  }) {
+    if (!newRelationshipSource) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await savePostgresRelationship({
+        projectId,
+        relationshipId: payload.relationshipId,
+        fromEntityType: payload.fromEntityType,
+        fromEntityId: payload.fromEntityId,
+        toEntityType: payload.toEntityType,
+        toEntityId: payload.toEntityId,
+        relationshipTypeId: payload.relationshipTypeId,
+        description: payload.description,
+        lineShapeOverride: payload.lineShapeOverride ?? null,
+        lineWeightOverride: payload.lineWeightOverride ?? null,
+        arrowheadOverride: payload.arrowheadOverride ?? null,
+        colorOverride: payload.colorOverride ?? null,
+        attributeValues: payload.attributeValues,
+      });
+      setNewRelationshipSource(null);
+      setEditingSourceRelationship(null);
+      await loadSources();
+    } catch (relationshipError) {
+      setSubmitError(relationshipError instanceof Error ? relationshipError.message : "Failed to save relationship.");
+      throw relationshipError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleKickSourceLock(lock: PostgresSourceLock) {
+    setSourceLockSyncing(true);
+    setSubmitError(null);
+    try {
+      await kickPostgresSourceLock({
+        projectId,
+        sourceId: lock.sourceId,
+        lockId: lock.id,
+      });
+      setSourceLocks((current) => current.filter((entry) => entry.id !== lock.id));
+      const result = await acquirePostgresSourceLock({
+        projectId,
+        sourceId: lock.sourceId,
+      });
+      if (result.ok && result.lock) {
+        setActiveSourceLock(result.lock);
+        setSourceLockConflict(null);
+        setSourceLocks((current) => {
+          const filtered = current.filter((entry) => entry.sourceId !== result.lock!.sourceId);
+          return [...filtered, result.lock!];
+        });
+      } else {
+        setActiveSourceLock(null);
+        setSourceLockConflict(result.conflict);
+      }
+    } catch (lockError) {
+      setSubmitError(lockError instanceof Error ? lockError.message : "Failed to take the source lock.");
+    } finally {
+      setSourceLockSyncing(false);
+    }
+  }
+
+  function handleAttributeSort(col: AttributeSortCol) {
+    if (col === attributeSortCol) setAttributeSortDir((current) => (current === "asc" ? "desc" : "asc"));
+    else {
+      setAttributeSortCol(col);
+      setAttributeSortDir("asc");
+    }
+  }
+
+  async function handleSaveAttribute(
+    draft: SourceAttributeDraft,
+    valuesBySource: Record<string, string>,
+  ) {
+    setAttributeSaving(true);
+    setAttributeError(null);
+    try {
+      const normalizedSourceKinds = normalizeSourceAttributeKinds(draft.sourceKinds);
+      await savePostgresSourceAttribute({
+        projectId,
+        attributeDefinitionId: draft.id ?? null,
+        name: draft.name.trim(),
+        dataType: draft.dataType,
+        description: draft.description,
+        options: draft.options,
+        timelineRole: draft.timelineRole ?? "",
+        sourceKinds: normalizedSourceKinds,
+        values: rows
+          .filter((row) => normalizedSourceKinds.length === 0 || normalizedSourceKinds.includes(row.type))
+          .map((row) => ({
+            sourceId: row.id,
+            value: valuesBySource[row.id] ?? "",
+          })),
+      });
+      setAttributeDraft(null);
+      await loadSources();
+    } catch (saveError) {
+      setAttributeError(saveError instanceof Error ? saveError.message : t("projectCore.sources.errors.saveSourceAttributeFailed"));
+    } finally {
+      setAttributeSaving(false);
+    }
+  }
+
+  async function handleSaveBulkAttributeValues(
+    attribute: SourceAttributeDefinitionRow,
+    editedValuesBySource: Record<string, string>,
+  ) {
+    setAttributeSaving(true);
+    setAttributeError(null);
+    try {
+      await savePostgresSourceAttribute({
+        projectId,
+        attributeDefinitionId: attribute.id,
+        name: attribute.name.trim(),
+        dataType: attribute.dataType,
+        description: attribute.description,
+        options: attribute.options,
+        timelineRole: attribute.timelineRole ?? "",
+        sourceKinds: normalizeSourceAttributeKinds(attribute.sourceKinds),
+        values: rows
+          .filter((row) => sourceRowMatchesAttributeDefinition(row, attribute))
+          .map((row) => ({
+            sourceId: row.id,
+            value: editedValuesBySource[row.id] ?? sourceAttributeValues.find((value) =>
+              value.sourceId === row.id && value.attributeDefinitionId === attribute.id
+            )?.value ?? "",
+          })),
+      });
+      setBulkAttributeTarget(null);
+      await loadSources();
+    } catch (saveError) {
+      setAttributeError(saveError instanceof Error ? saveError.message : t("projectCore.sources.errors.saveSourceAttributeValuesFailed"));
+    } finally {
+      setAttributeSaving(false);
+    }
+  }
+
+  async function handleCreateCode(payload: { label: string; color: string; description: string; parentCodeId?: string | null }) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const createdCode = await createPostgresCode({
+        projectId,
+        label: payload.label,
+        color: payload.color,
+        description: payload.description,
+        parentCodeId: payload.parentCodeId ?? null,
+      });
+      setCodes((current) => [...current, createdCode]);
+      return createdCode;
+    } catch (createError) {
+      setSubmitError(createError instanceof Error ? createError.message : "Failed to create code.");
+      throw createError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleUpdateCode(codeId: string, payload: { label: string; color: string; description: string; parentCodeId?: string | null }) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const updatedCode = await updatePostgresCode({
+        projectId,
+        codeId,
+        label: payload.label,
+        color: payload.color,
+        description: payload.description,
+        parentCodeId: payload.parentCodeId ?? null,
+        shortcut: "",
+      });
+      setCodes((current) => current.map((code) => (code.id === updatedCode.id ? updatedCode : code)));
+      return updatedCode;
+    } catch (updateError) {
+      setSubmitError(updateError instanceof Error ? updateError.message : "Failed to update code.");
+      throw updateError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteCode(codeId: string) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await deletePostgresCode(projectId, codeId);
+      setCodes((current) => current
+        .filter((code) => code.id !== codeId)
+        .map((code) => (code.parentCodeId === codeId ? { ...code, parentCodeId: "" } : code)));
+    } catch (deleteError) {
+      setSubmitError(deleteError instanceof Error ? deleteError.message : "Failed to delete code.");
+      throw deleteError;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleUpdateSourceWaveform(sourceId: string, waveformPeaksJson: string) {
+    const sourceRow = rows.find((entry) => entry.id === sourceId);
+    if (!sourceRow) return;
+
+    await updatePostgresSource({
+      projectId,
+      sourceId: sourceRow.id,
+      sourceKind: sourceRow.type.trim(),
+      title: sourceRow.name,
+      textContent: sourceRow.content,
+      notes: sourceRow.notes,
+      structuredContentJson: sourceRow.structuredContentJson,
+      waveformPeaksJson,
+      videoFrameIndexJson: sourceRow.videoFrameIndexJson,
+      extractedFromVideoSourceId: sourceRow.extractedFromVideoSourceId,
+      extractedFromVideoTimeMs: sourceRow.extractedFromVideoTimeMs,
+      originalFileName: sourceRow.filePath,
+      storagePath: sourceRow.filePath,
+      shapeOverride: sourceRow.shapeOverride || null,
+      colorOverride: sourceRow.colorOverride || null,
+      outlineColorOverride: sourceRow.outlineColorOverride || null,
+      fillOverride: sourceRow.fillOverride || null,
+      fillTransparencyOverride: sourceRow.fillTransparencyOverride,
+      outlineWidthOverride: sourceRow.outlineWidthOverride,
+      imageStoragePath: sourceRow.imageStoragePath || null,
+    });
+
+    setRows((current) => current.map((entry) => (
+      entry.id === sourceId
+        ? { ...entry, waveformPeaksJson }
+        : entry
+    )));
+    setSelectedRow((current) => (
+      current?.id === sourceId
+        ? { ...current, waveformPeaksJson }
+        : current
+    ));
+  }
+
+  async function handleUpdateSourceVideoFrameIndex(sourceId: string, videoFrameIndexJson: string) {
+    const sourceRow = rows.find((entry) => entry.id === sourceId);
+    if (!sourceRow) return;
+
+    await updatePostgresSource({
+      projectId,
+      sourceId: sourceRow.id,
+      sourceKind: sourceRow.type.trim(),
+      title: sourceRow.name,
+      textContent: sourceRow.content,
+      notes: sourceRow.notes,
+      structuredContentJson: sourceRow.structuredContentJson,
+      waveformPeaksJson: sourceRow.waveformPeaksJson,
+      videoFrameIndexJson,
+      extractedFromVideoSourceId: sourceRow.extractedFromVideoSourceId,
+      extractedFromVideoTimeMs: sourceRow.extractedFromVideoTimeMs,
+      originalFileName: sourceRow.filePath,
+      storagePath: sourceRow.filePath,
+      shapeOverride: sourceRow.shapeOverride || null,
+      colorOverride: sourceRow.colorOverride || null,
+      outlineColorOverride: sourceRow.outlineColorOverride || null,
+      fillOverride: sourceRow.fillOverride || null,
+      fillTransparencyOverride: sourceRow.fillTransparencyOverride,
+      outlineWidthOverride: sourceRow.outlineWidthOverride,
+      imageStoragePath: sourceRow.imageStoragePath || null,
+    });
+
+    setRows((current) => current.map((entry) => (
+      entry.id === sourceId
+        ? { ...entry, videoFrameIndexJson }
+        : entry
+    )));
+    setSelectedRow((current) => (
+      current?.id === sourceId
+        ? { ...current, videoFrameIndexJson }
+        : current
+    ));
+  }
+
+  const codeOptions = useMemo(() => buildCodeOptions(codes), [codes]);
+  const sourceAttributeDefinitionsForEditor = useMemo(
+    () => [...sourceAttributeDefinitions]
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+    [sourceAttributeDefinitions],
+  );
+  const attributeDefs = useMemo<SourceAttributeDefinitionRow[]>(
+    () => sourceAttributeDefinitionsForEditor
+      .filter((definition) => !selectedSourceKind
+        || (definition.sourceKinds ?? []).length === 0
+        || (definition.sourceKinds ?? []).includes(selectedSourceKind))
+      .map((definition) => ({
+        id: definition.id,
+        name: definition.name,
+        dataType: definition.dataType,
+        description: definition.description,
+        options: definition.options,
+        sourceKinds: definition.sourceKinds ?? [],
+        timelineRole: definition.timelineRole ?? "",
+        sortOrder: definition.sortOrder,
+      })),
+    [selectedSourceKind, sourceAttributeDefinitionsForEditor],
+  );
+  const attributeValues = useMemo<Record<string, SourceAttributeValueRow>>(
+    () => Object.fromEntries(
+      sourceAttributeValues.map((value) => [
+        valueKey(value.sourceId, value.attributeDefinitionId),
+        {
+          id: value.id,
+          sourceId: value.sourceId,
+          attributeDefinitionId: value.attributeDefinitionId,
+          value: value.value,
+        },
+      ]),
+    ),
+    [sourceAttributeValues],
+  );
+
+  function sourceAttributeDraftValuesFor(row: SourceRow | null | undefined): Record<string, string> {
+    if (!row) return {};
+    return Object.fromEntries(
+      sourceAttributeDefinitionsForEditor.map((definition) => [
+        definition.id,
+        sourceAttributeValues.find((value) =>
+          value.sourceId === row.id && value.attributeDefinitionId === definition.id
+        )?.value ?? "",
+      ]),
+    );
+  }
+  const selectedSourceAnnotations = useMemo<SourceAnnotationRow[]>(() => {
+    if (!selectedRow) return [];
+    const codeById = new Map(codes.map((code) => [code.id, code]));
+    return annotations
+      .filter((annotation) => annotation.sourceId === selectedRow.id)
+      .map((annotation) => ({
+        id: annotation.id,
+        codeIds: annotation.codeIds,
+        codeLabels: annotation.codeIds.map((codeId) => codeById.get(codeId)?.label ?? annotation.primaryCodeLabel).filter(Boolean),
+        codeColors: annotation.codeIds.map((codeId) => codeById.get(codeId)?.color ?? "#888888"),
+        quote: annotation.quote,
+        note: annotation.note,
+        anchorKind: annotation.anchorKind,
+        timeStartMs: annotation.timeStartMs,
+        timeEndMs: annotation.timeEndMs,
+        imageRegion: annotation.imageRegion,
+        startOffset: annotation.startOffset,
+        endOffset: annotation.endOffset,
+        createdByName: annotation.createdByName,
+        createdAt: annotation.createdAt,
+      }))
+      .sort((left, right) => (left.startOffset ?? 0) - (right.startOffset ?? 0) || left.createdAt.localeCompare(right.createdAt));
+  }, [annotations, codes, selectedRow]);
+
+  useEffect(() => {
+    if (!initialSourceId || selectedRow?.id !== initialSourceId) return;
+    if (initialAnnotationId && !selectedSourceAnnotations.some((annotation) => annotation.id === initialAnnotationId)) return;
+    onInitialNavigationHandled?.();
+  }, [initialAnnotationId, initialSourceId, onInitialNavigationHandled, selectedRow?.id, selectedSourceAnnotations]);
+  const selectedSourceRelationships = useMemo<SourceRelationshipRow[]>(() => {
+    if (!selectedRow) return [];
+    const objectById = new Map(objects.map((object) => [object.id, object]));
+    const sourceById = new Map(rows.map((source) => [source.id, source]));
+    function endpointLabel(entityType: string, entityId: string, fallbackName: string): { name: string; type: string } {
+      if (entityType === "object") {
+        const object = objectById.get(entityId);
+        return {
+          name: object?.title || fallbackName || entityId,
+          type: object?.objectType || "Object",
+        };
+      }
+      if (entityType === "source") {
+        const source = sourceById.get(entityId);
+        return {
+          name: source?.name || fallbackName || entityId,
+          type: source?.sourceObjectType || source?.type || "Source",
+        };
+      }
+      return { name: fallbackName || entityId, type: entityType || "Endpoint" };
+    }
+    return relationships
+      .filter((relationship) =>
+        (relationship.fromEntityType === "source" && relationship.fromEntityId === selectedRow.id)
+        || (relationship.toEntityType === "source" && relationship.toEntityId === selectedRow.id)
+      )
+      .map((relationship) => {
+        const selectedIsFrom = relationship.fromEntityType === "source" && relationship.fromEntityId === selectedRow.id;
+        const other = selectedIsFrom
+          ? endpointLabel(relationship.toEntityType, relationship.toEntityId, relationship.toEntityName)
+          : endpointLabel(relationship.fromEntityType, relationship.fromEntityId, relationship.fromEntityName);
+        return {
+          id: relationship.id,
+          relationshipType: relationship.relationshipType,
+          otherEndpointName: other.name,
+          otherEndpointType: other.type,
+          description: relationship.description,
+          relationship,
+        };
+      })
+      .sort((left, right) =>
+        left.relationshipType.localeCompare(right.relationshipType, undefined, { sensitivity: "base" })
+        || left.otherEndpointName.localeCompare(right.otherEndpointName, undefined, { sensitivity: "base" })
+      );
+  }, [objects, relationships, rows, selectedRow]);
+  const selectedSourceAttributeValues = useMemo<Array<SharedAttributeDraft & { value: string }>>(() => {
+    if (!selectedRow) return [];
+    return attributeDefs
+      .map((definition) => {
+        const value = attributeValues[valueKey(selectedRow.id, definition.id)]?.value ?? "";
+        return {
+          id: definition.id,
+          name: definition.name,
+          dataType: definition.dataType,
+          description: definition.description,
+          options: definition.options,
+          value,
+        };
+      });
+  }, [attributeDefs, attributeValues, selectedRow]);
+  const sortedAttributeRows = useMemo(() => {
+    const nextRows = [...filteredRows];
+    nextRows.sort((left, right) => {
+      let comparison = 0;
+      if (attributeSortCol === "name") {
+        comparison = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      } else {
+        const definition = attributeDefs.find((item) => item.id === attributeSortCol);
+        const leftValue = attributeValues[valueKey(left.id, attributeSortCol)]?.value ?? "";
+        const rightValue = attributeValues[valueKey(right.id, attributeSortCol)]?.value ?? "";
+        if (definition?.dataType === "number") {
+          comparison = Number(leftValue || "-Infinity") - Number(rightValue || "-Infinity");
+        } else {
+          comparison = leftValue.localeCompare(rightValue, undefined, { sensitivity: "base" });
+        }
+      }
+      return attributeSortDir === "asc" ? comparison : -comparison;
+    });
+    return nextRows;
+  }, [attributeDefs, attributeSortCol, attributeSortDir, attributeValues, filteredRows]);
+
+  const selectedSourceLock = selectedRow
+    ? (activeSourceLock?.sourceId === selectedRow.id
+      ? activeSourceLock
+      : sourceLockBySourceId.get(selectedRow.id) ?? null)
+    : null;
+  const pageTitle = showAttributesTable
+    ? t("projectCore.sources.sourceAttributes")
+    : pageTitleOverride ?? (codingEnabled ? t("projectCore.sources.codeSources") : t("projectCore.entities.sources"));
+  const gettingStartedGuideActive =
+    !!gettingStartedState
+    && !gettingStartedState.dismissed
+    && !gettingStartedState.completed;
+  const gettingStartedAddSourceActive =
+    gettingStartedGuideActive
+    && gettingStartedState?.step === "addTextSource";
+  const gettingStartedOpenSourceActive =
+    gettingStartedGuideActive
+    && codingEnabled
+    && gettingStartedState?.step === "openCodingView";
+
+  function handleSourceRowClick(row: SourceRow) {
+    setSelectedRow(row);
+    if (
+      gettingStartedOpenSourceActive
+      && (!gettingStartedState?.sourceId || gettingStartedState.sourceId === row.id)
+    ) {
+      void onGettingStartedStateChange?.({ step: "createCode" });
+    }
+  }
+
+  if (codingEnabled && selectedRow) {
+    const normalizedSourceType = selectedRow.type.trim().toLowerCase();
+    const selectedFileExt = selectedRow.filePath ? fileExtensionFromPath(selectedRow.filePath) : "";
+    const isImageCodingSource = SOURCE_IMPORT_IMAGE_EXTS.has(selectedFileExt) || normalizedSourceType === "image" || normalizedSourceType === "pdf";
+    const isAudioCodingSource = SOURCE_IMPORT_AUDIO_EXTS.has(selectedFileExt) || normalizedSourceType === "audio";
+    const isVideoCodingSource = SOURCE_IMPORT_VIDEO_EXTS.has(selectedFileExt) || normalizedSourceType === "video";
+    const TextCodingView = textCodingMode === "ai-assisted" ? SourceAITextCodingView : SourceTextCodingView;
+
+    return (
+      isImageCodingSource ? (
+        <SourceImageCodingView
+          projectId={projectId}
+          row={selectedRow}
+          codes={codes}
+          annotations={selectedSourceAnnotations}
+          codeOptions={codeOptions}
+          currentUserId={currentUserId}
+          sourceLock={selectedSourceLock}
+          sourceLockConflict={sourceLockConflict}
+          lockSyncing={sourceLockSyncing}
+          canKickSourceLocks={canKickSourceLocks}
+          canManageAnnotations={canManageAnnotations && codingEnabled}
+          canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
+          initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={null}
+          projectStoragePath={projectStoragePath}
+          saving={submitting}
+          error={submitError}
+          onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onKickSourceLock={handleKickSourceLock}
+          onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onUpdateSourceVideoFrameIndex={handleUpdateSourceVideoFrameIndex}
+          onBack={() => {
+            setSelectedRow(null);
+            setSubmitError(null);
+          }}
+        />
+      ) : isAudioCodingSource ? (
+        <SourceAudioCodingView
+          projectId={projectId}
+          row={selectedRow}
+          codes={codes}
+          annotations={selectedSourceAnnotations}
+          codeOptions={codeOptions}
+          currentUserId={currentUserId}
+          sourceLock={selectedSourceLock}
+          sourceLockConflict={sourceLockConflict}
+          lockSyncing={sourceLockSyncing}
+          canKickSourceLocks={canKickSourceLocks}
+          canManageAnnotations={canManageAnnotations && codingEnabled}
+          canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
+          initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={null}
+          projectStoragePath={projectStoragePath}
+          saving={submitting}
+          error={submitError}
+          onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onKickSourceLock={handleKickSourceLock}
+          onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onUpdateSourceVideoFrameIndex={handleUpdateSourceVideoFrameIndex}
+          onBack={() => {
+            setSelectedRow(null);
+            setSubmitError(null);
+          }}
+        />
+      ) : isVideoCodingSource ? (
+        <SourceVideoCodingView
+          projectId={projectId}
+          row={selectedRow}
+          codes={codes}
+          annotations={selectedSourceAnnotations}
+          codeOptions={codeOptions}
+          currentUserId={currentUserId}
+          sourceLock={selectedSourceLock}
+          sourceLockConflict={sourceLockConflict}
+          lockSyncing={sourceLockSyncing}
+          canKickSourceLocks={canKickSourceLocks}
+          canManageAnnotations={canManageAnnotations && codingEnabled}
+          canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
+          initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={null}
+          projectStoragePath={projectStoragePath}
+          saving={submitting}
+          error={submitError}
+          onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onKickSourceLock={handleKickSourceLock}
+          onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onUpdateSourceVideoFrameIndex={handleUpdateSourceVideoFrameIndex}
+          onExtractVideoFrame={handleExtractVideoFrameSource}
+          onBack={() => {
+            setSelectedRow(null);
+            setSubmitError(null);
+          }}
+        />
+      ) : (
+        <TextCodingView
+          projectId={projectId}
+          row={selectedRow}
+          codes={codes}
+          annotations={selectedSourceAnnotations}
+          codeOptions={codeOptions}
+          currentUserId={currentUserId}
+          sourceLock={selectedSourceLock}
+          sourceLockConflict={sourceLockConflict}
+          lockSyncing={sourceLockSyncing}
+          canKickSourceLocks={canKickSourceLocks}
+          canManageAnnotations={canManageAnnotations && codingEnabled}
+          canManageMemos={canManageMemos}
+          canCreateCodes={canCreateCodes}
+          initialSelectedAnnotationId={initialAnnotationId ?? null}
+          initialTextSegment={initialTextSegment ?? null}
+          gettingStartedState={gettingStartedState ?? null}
+          onGettingStartedStateChange={onGettingStartedStateChange}
+          saving={submitting}
+          error={submitError}
+          onCreateAnnotation={handleCreateAnnotation}
+          onCreateCode={handleCreateCode}
+          onUpdateCode={handleUpdateCode}
+          onDeleteCode={handleDeleteCode}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onKickSourceLock={handleKickSourceLock}
+          onOpenMemoDraft={onOpenPostgresMemoDraft}
+          onUpdateSourceWaveform={handleUpdateSourceWaveform}
+          onBack={() => {
+            setSelectedRow(null);
+            setSubmitError(null);
+          }}
+        />
+      )
+    );
+  }
+
+  if (!codingEnabled && !showAttributesTable && selectedRow) {
+    return (
+      <div className="view view-shell">
+          <PostgresSourceDetail
+            row={selectedRow}
+            codeOptions={codeOptions}
+          relationships={selectedSourceRelationships}
+          attributeValues={selectedSourceAttributeValues}
+          currentUserId={currentUserId}
+          sourceLock={selectedSourceLock}
+          sourceLockConflict={sourceLockConflict}
+          lockSyncing={sourceLockSyncing}
+          canKickSourceLocks={canKickSourceLocks}
+          canManageAnnotations={false}
+          saving={submitting}
+          error={submitError}
+          onCreateAnnotation={handleCreateAnnotation}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
+          onKickSourceLock={handleKickSourceLock}
+          onCreateRelationship={() => {
+            setNewRelationshipSource(selectedRow);
+            setEditingSourceRelationship(null);
+            setSubmitError(null);
+          }}
+          onEditRelationship={(relationship) => {
+            setNewRelationshipSource(selectedRow);
+            setEditingSourceRelationship(relationship);
+            setSubmitError(null);
+          }}
+          canManageSourceRecord={canManageSources}
+          projectStoragePath={projectStoragePath}
+          onOpenAttributeHistory={(attribute) => {
+            if (!attribute.id) return;
+            setAttributeHistoryTarget({
+              projectId,
+              ownerKind: "source",
+              ownerId: selectedRow.id,
+              ownerName: selectedRow.name,
+              attributeDefinitionId: attribute.id,
+              attributeName: attribute.name,
+            });
+          }}
+          onEditSource={() => {
+            setEditingRow(selectedRow);
+            setEditorOpen(true);
+            setSubmitError(null);
+          }}
+          onDeleteSource={() => {
+            setDeleteRow(selectedRow);
+            setSubmitError(null);
+          }}
+          onBack={() => {
+            setSelectedRow(null);
+            setSubmitError(null);
+          }}
+        />
+        {editorOpen ? (
+          <SourceEditorModal
+            title={editingRow ? t("projectCore.sources.editSource") : t("projectCore.sources.newSource")}
+            initialRow={editingRow}
+            projectStoragePath={projectStoragePath}
+            sourceTypeSettings={sourceTypeSettings}
+            attributeDefinitions={sourceAttributeDefinitionsForEditor}
+            attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
+            saving={submitting}
+            error={submitError}
+            onCancel={() => {
+              if (submitting) return;
+              setEditorOpen(false);
+              setEditingRow(null);
+              setSubmitError(null);
+            }}
+            onSave={handleSaveSource}
+          />
+        ) : null}
+        {deleteRow ? (
+          <ConfirmDialog
+            title={t("projectCore.sources.deleteSource")}
+            onClose={() => setDeleteRow(null)}
+            onConfirm={() => void handleDeleteSource()}
+            busy={submitting}
+            confirmLabel={t("common.delete")}
+            busyLabel={t("projectCore.sources.deleting")}
+            cancelLabel={t("projectCore.sources.cancel")}
+            tone="danger"
+            error={submitError}
+          >
+            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+              {t("projectCore.sources.deletePrompt", { name: deleteRow.name })}
+            </p>
+          </ConfirmDialog>
+        ) : null}
+        {newRelationshipSource ? (
+          <CreateSourceRelationshipModal
+            source={newRelationshipSource}
+            relationship={editingSourceRelationship}
+            projectId={projectId}
+            sources={rows}
+            objects={objects}
+            relationshipTypes={relationshipTypes}
+            relationshipAttributeDefinitions={relationshipAttributeDefinitions}
+            saving={submitting}
+            error={submitError}
+            onCancel={() => {
+              if (submitting) return;
+              setNewRelationshipSource(null);
+              setEditingSourceRelationship(null);
+              setSubmitError(null);
+            }}
+            onRelationshipTypeCreated={(relationshipType, attributeDefinitions) => {
+              setRelationshipTypes((current) => [...current.filter((entry) => entry.id !== relationshipType.id), relationshipType]);
+              setRelationshipAttributeDefinitions((current) => [
+                ...current.filter((definition) => definition.relationshipTypeId !== relationshipType.id),
+                ...attributeDefinitions,
+              ]);
+            }}
+            onSave={handleCreateSourceRelationship}
+          />
+        ) : null}
+        {attributeHistoryTarget ? (
+          <PostgresAttributeValueHistoryModal
+            target={attributeHistoryTarget}
+            onClose={() => setAttributeHistoryTarget(null)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="view view-shell">
+      <ViewHeader
+        title={pageTitle}
+        help={{ label: t("projectCore.sources.help.open"), onClick: () => setHelpOpen(true) }}
+      />
+
+      {helpOpen ? (
+        <HelpModal
+          title={t("projectCore.sources.help.title")}
+          onClose={() => setHelpOpen(false)}
+          closeLabel={t("projectCore.sources.help.close")}
+          lines={[t("projectCore.sources.help.line1"), t("projectCore.sources.help.line2")]}
+        />
+      ) : null}
+      {gettingStartedAddSourceActive && !newSourceOpen ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title={t("app.gettingStarted.addSourceTitle")}
+            onDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
+          >
+            <p>{t("app.gettingStarted.addSourceBody")}</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+      {gettingStartedGuideActive && gettingStartedState?.step === "openCodingView" ? (
+        <>
+          <div className="getting-started-spotlight-overlay" aria-hidden="true" />
+          <GettingStartedGuideCallout
+            title={t("app.gettingStarted.openCodingTitle")}
+            onDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
+          >
+            <p>{t("app.gettingStarted.openCreatedSourceBody")}</p>
+          </GettingStartedGuideCallout>
+        </>
+      ) : null}
+
+      {error && <p className="alert-error">{error}</p>}
+      {attributeError && <p className="alert-error">{attributeError}</p>}
+
+      <MasterDetailLayout>
+        <div
+          className="home-primary-column"
+          style={{
+            alignSelf: "center",
+            justifyContent: "flex-start",
+            gap: 16,
+            minHeight: 0,
+            maxHeight: "100%",
+            overflowY: "auto",
+            overflowX: "hidden",
+            paddingRight: 4,
+          }}
+        >
+          {!selectedRow ? (
+            <div className="ai-assist-home-tabbar" style={{ marginBottom: 0, visibility: "hidden", pointerEvents: "none" }} aria-hidden="true">
+              <div className="segmented-control" role="presentation">
+                <button type="button" className="segmented-control-option segmented-control-option--active" tabIndex={-1}>
+                  {t("sharedModals.tabs.details")}
+                </button>
+                <button type="button" className="segmented-control-option" tabIndex={-1}>
+                  {t("sharedModals.tabs.attributes")}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          <section className="content-card" style={{ padding: 0, overflow: "hidden" }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                padding: 18,
+                borderBottom: "1px solid rgba(53, 80, 112, 0.08)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>{t("projectCore.sources.sourceTypes")}</h2>
+                  {textCodingMode === "ai-assisted" ? (
+                    <p className="supporting-copy" style={{ margin: 0, fontSize: 12 }}>
+                      {t("projectCore.sources.textAndTranscriptsOnly")}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <table className="data-table" style={{ tableLayout: "fixed" }}>
+                <thead>
+                  <tr>
+                    <th
+                      className={`data-table-header${sourceKindSortCol === "label" ? " data-table-header--sorted" : ""}`}
+                      style={{ width: "76%" }}
+                      onClick={() => handleSourceKindSort("label")}
+                    >
+                      {t("projectCore.entities.type")}
+                      <span className="data-table-sort-icon">
+                        {sourceKindSortCol === "label" ? (sourceKindSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
+                      </span>
+                    </th>
+                    <th
+                      className={`data-table-header${sourceKindSortCol === "count" ? " data-table-header--sorted" : ""}`}
+                      style={{ width: "24%" }}
+                      onClick={() => handleSourceKindSort("count")}
+                    >
+                      {t("projectCore.entities.count")}
+                      <span className="data-table-sort-icon">
+                        {sourceKindSortCol === "count" ? (sourceKindSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    className="data-table-row"
+                    style={{
+                      background: selectedSourceKindFilter === "all" ? "rgba(53, 80, 112, 0.10)" : undefined,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => handleSelectSourceKind("all")}
+                  >
+                    <td
+                      className="data-table-cell data-table-cell--name"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleSelectSourceKind("all");
+                        }
+                      }}
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span>{t("projectCore.sources.allSources")}</span>
+                      </div>
+                    </td>
+                    <td className="data-table-cell data-table-cell--muted">{visibleRows.length}</td>
+                  </tr>
+                  {sourceKindSummaries.map((summary) => (
+                    <tr
+                      key={summary.kind}
+                      className="data-table-row"
+                      style={{
+                        background: selectedSourceKindFilter === summary.kind ? "rgba(53, 80, 112, 0.10)" : undefined,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => handleSelectSourceKind(summary.kind)}
+                      onMouseDown={(event) => handleSourceTypeContextMouseDown(event, summary)}
+                      onContextMenu={(event) => openSourceTypeContextMenu(event, summary)}
+                    >
+                      <td
+                        className="data-table-cell data-table-cell--name"
+                        role="button"
+                        tabIndex={0}
+                        onMouseDown={(event) => handleSourceTypeContextMouseDown(event, summary)}
+                        onContextMenu={(event) => openSourceTypeContextMenu(event, summary)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleSelectSourceKind(summary.kind);
+                          }
+                        }}
+                      >
+                        <div className="project-type-list-cell">
+                          <div className="project-type-list-icon" aria-hidden="true">
+                            <ObjectShapeSwatch
+                              shape={summary.shape}
+                              fill={summary.fill}
+                              color={summary.color}
+                              outlineColor={summary.outlineColor}
+                              sourceVisualKey={getSourceObjectVisualKey(summary.systemKey)}
+                              width={24}
+                              minHeight={18}
+                            />
+                          </div>
+                          <div className="project-type-list-copy">
+                            <span className="project-type-list-title">
+                              {sourceTypeRowLabel(summary.label, t)}
+                            </span>
+                            <span className="entity-list-meta project-type-list-meta">
+                              {t("projectCore.sources.attributesCount", { count: summary.attributeDefinitionCount })}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                      <td
+                        className="data-table-cell data-table-cell--muted"
+                        onMouseDown={(event) => handleSourceTypeContextMouseDown(event, summary)}
+                        onContextMenu={(event) => openSourceTypeContextMenu(event, summary)}
+                      >
+                        {summary.count}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {sourceKindSummaries.length === 0 ? (
+                <div className="empty-state" style={{ minHeight: 140 }}>
+                  <p>{t("projectCore.sources.noSources")}</p>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+
+        <div className="project-workspace-col-divider" aria-hidden="true" />
+
+        <section
+          className="view-content"
+          style={{
+            alignItems: "stretch",
+            justifyContent: "center",
+            gap: 16,
+            minHeight: 0,
+            maxHeight: "100%",
+            overflowY: "auto",
+            overflowX: "hidden",
+            paddingRight: 4,
+          }}
+        >
+          {!selectedRow ? (
+            <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
+              <div className="ai-assist-home-tabbar" style={{ marginBottom: 0 }}>
+                <div className="segmented-control" role="tablist" aria-label={t("projectCore.sources.sourceWorkspaceViews")}>
+                  <button
+                    type="button"
+                    className={showAttributesTable ? "segmented-control-option" : "segmented-control-option segmented-control-option--active"}
+                    role="tab"
+                    aria-selected={!showAttributesTable}
+                    onClick={() => setShowAttributesTable(false)}
+                  >
+                    {t("sharedModals.tabs.details")}
+                  </button>
+                  <button
+                    type="button"
+                    className={showAttributesTable ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
+                    role="tab"
+                    aria-selected={showAttributesTable}
+                    onClick={() => setShowAttributesTable(true)}
+                  >
+                    {t("sharedModals.tabs.attributes")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {showAttributesTable ? (
+            <>
+            {selectedSourceKindFilter === "all" ? (
+              <div className="empty-state empty-state--full-width">
+                <p>{t("projectCore.sources.selectTypeForAttributes")}</p>
+              </div>
+            ) : (
+              <div className="content-card table-card">
+                <CardHeader
+                  title={t("sharedModals.tabs.attributes")}
+                  actions={<button
+                    className="btn btn--primary card-header-icon-button"
+                    onClick={() => {
+                      const activeSetting = sourceTypeSettings.find(
+                        (setting) => normalizeSourceKindFilterValue(setting.sourceKind) === normalizeSourceKindFilterValue(selectedSourceKindFilter),
+                      );
+                      if (!activeSetting) return;
+                      setSourceTypeInitialTab("attributes");
+                      setEditingSourceTypeKind(activeSetting.sourceKind);
+                      setAttributeError(null);
+                      setSourceTypeError(null);
+                    }}
+                    disabled={!canManageSources || !sourceTypeSettings.some(
+                      (setting) => normalizeSourceKindFilterValue(setting.sourceKind) === normalizeSourceKindFilterValue(selectedSourceKindFilter),
+                    )}
+                    title={!canManageSources ? t("projectCore.sources.cannotManageSources") : t("sharedModals.attributes.add")}
+                    aria-label={t("sharedModals.attributes.add")}
+                  >
+                    <PlusIcon className="card-header-icon" />
+                  </button>}
+                />
+              <div className="data-table-wrap case-attributes-table-wrap">
+                <table className="data-table case-attributes-table">
+                  <thead>
+                    <tr>
+                      <th
+                        className={`data-table-header case-attributes-case-col${attributeSortCol === "name" ? " data-table-header--sorted" : ""}`}
+                        onClick={() => handleAttributeSort("name")}
+                      >
+                        {t("projectCore.entities.source")}
+                        <span className="data-table-sort-icon">
+                          {attributeSortCol === "name" ? (attributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
+                        </span>
+                      </th>
+                      {attributeDefs.map((attribute) => (
+                        <th
+                          key={attribute.id}
+                          className={`data-table-header case-attributes-value-col case-attributes-value-col--editable${attributeSortCol === attribute.id ? " data-table-header--sorted" : ""}${hoveredAttributeColumnId === attribute.id ? " case-attributes-col--hovered" : ""}`}
+                          onMouseEnter={() => setHoveredAttributeColumnId(attribute.id)}
+                          onMouseLeave={() => setHoveredAttributeColumnId(null)}
+                          onClick={() => {
+                            if (!canManageSources) return;
+                            setBulkAttributeTarget({ attribute, rows: sortedAttributeRows });
+                            setAttributeError(null);
+                          }}
+                          title={canManageSources ? t("projectCore.sources.editValuesForAttribute") : t("projectCore.sources.cannotManageSources")}
+                        >
+                          {attribute.name}
+                          <span className="data-table-sort-icon">
+                            {attributeSortCol === attribute.id ? (attributeSortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}
+                          </span>
+                          <span className="case-attribute-type-label">{attribute.dataType}</span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading && <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="data-table-message">{t("projectDocuments.empty.loading")}</td></tr>}
+                    {!loading && sortedAttributeRows.length === 0 && (
+                      <tr><td colSpan={Math.max(attributeDefs.length + 1, 1)} className="data-table-message">{t("projectCore.sources.noMatchingSources")}</td></tr>
+                    )}
+                    {!loading && sortedAttributeRows.map((row) => (
+                      <tr key={row.id} className="case-attributes-row">
+                        <td className="data-table-cell data-table-cell--name case-attributes-case-cell">{row.name}</td>
+                        {attributeDefs.map((attribute) => {
+                          const cellActive = activeAttributeHistoryCell?.sourceId === row.id
+                            && activeAttributeHistoryCell.attributeDefinitionId === attribute.id;
+                          return (
+                          <td
+                            key={attribute.id}
+                            className={`data-table-cell case-attributes-value-cell${cellActive ? " case-attributes-cell--active" : ""}${hoveredAttributeColumnId === attribute.id ? " case-attributes-col--hovered" : ""}`}
+                            role="button"
+                            tabIndex={0}
+                            title={t("sharedModals.attributes.historyTitle")}
+                            onClick={() => {
+                              setActiveAttributeHistoryCell({ sourceId: row.id, attributeDefinitionId: attribute.id });
+                              setAttributeHistoryTarget({
+                                projectId,
+                                ownerKind: "source",
+                                ownerId: row.id,
+                                ownerName: row.name,
+                                attributeDefinitionId: attribute.id,
+                                attributeName: attribute.name,
+                              });
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") return;
+                              event.preventDefault();
+                              setActiveAttributeHistoryCell({ sourceId: row.id, attributeDefinitionId: attribute.id });
+                              setAttributeHistoryTarget({
+                                projectId,
+                                ownerKind: "source",
+                                ownerId: row.id,
+                                ownerName: row.name,
+                                attributeDefinitionId: attribute.id,
+                                attributeName: attribute.name,
+                              });
+                            }}
+                          >
+                            {attributeValues[valueKey(row.id, attribute.id)]?.value
+                              ? formatAttributeDisplay(attributeValues[valueKey(row.id, attribute.id)]!.value, attribute.dataType)
+                              : <span className="cases-no-docs">{"\u2014"}</span>}
+                          </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              </div>
+            )}
+            </>
+          ) : selectedRow ? (
+            <>
+              <PostgresSourceDetail
+                row={selectedRow}
+                codeOptions={codeOptions}
+                relationships={selectedSourceRelationships}
+                attributeValues={selectedSourceAttributeValues}
+                currentUserId={currentUserId}
+                sourceLock={selectedSourceLock}
+                sourceLockConflict={sourceLockConflict}
+                lockSyncing={sourceLockSyncing}
+                canKickSourceLocks={canKickSourceLocks}
+                canManageAnnotations={canManageAnnotations && codingEnabled}
+                saving={submitting}
+                error={submitError}
+                onCreateAnnotation={handleCreateAnnotation}
+                onUpdateAnnotation={handleUpdateAnnotation}
+                onDeleteAnnotation={handleDeleteAnnotation}
+                onKickSourceLock={handleKickSourceLock}
+                onCreateRelationship={() => {
+                  setNewRelationshipSource(selectedRow);
+                  setEditingSourceRelationship(null);
+                  setSubmitError(null);
+                }}
+                onEditRelationship={(relationship) => {
+                  setNewRelationshipSource(selectedRow);
+                  setEditingSourceRelationship(relationship);
+                  setSubmitError(null);
+                }}
+                canManageSourceRecord={canManageSources && !codingEnabled}
+                projectStoragePath={projectStoragePath}
+                onOpenAttributeHistory={(attribute) => {
+                  if (!attribute.id) return;
+                  setAttributeHistoryTarget({
+                    projectId,
+                    ownerKind: "source",
+                    ownerId: selectedRow.id,
+                    ownerName: selectedRow.name,
+                    attributeDefinitionId: attribute.id,
+                    attributeName: attribute.name,
+                  });
+                }}
+                onEditSource={() => {
+                  setEditingRow(selectedRow);
+                  setEditorOpen(true);
+                  setSubmitError(null);
+                }}
+                onDeleteSource={() => {
+                  setDeleteRow(selectedRow);
+                  setSubmitError(null);
+                }}
+                onBack={() => {
+                  setSelectedRow(null);
+                  setSubmitError(null);
+                }}
+              />
+              {editorOpen ? (
+                <SourceEditorModal
+                  title={editingRow ? t("projectCore.sources.editSource") : t("projectCore.sources.newSource")}
+                  initialRow={editingRow}
+                  projectStoragePath={projectStoragePath}
+                  sourceTypeSettings={sourceTypeSettings}
+                  attributeDefinitions={sourceAttributeDefinitionsForEditor}
+                  attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
+                  saving={submitting}
+                  error={submitError}
+                  onCancel={() => {
+                    if (submitting) return;
+                    setEditorOpen(false);
+                    setEditingRow(null);
+                    setSubmitError(null);
+                  }}
+                  onSave={handleSaveSource}
+                />
+              ) : null}
+              {deleteRow ? (
+                <ConfirmDialog
+                  title={t("projectCore.sources.deleteSource")}
+                  onClose={() => setDeleteRow(null)}
+                  onConfirm={() => void handleDeleteSource()}
+                  busy={submitting}
+                  confirmLabel={t("common.delete")}
+                  busyLabel={t("projectCore.sources.deleting")}
+                  tone="danger"
+                  error={submitError}
+                >
+                  <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                    {t("projectCore.sources.deletePrompt", { name: deleteRow.name })}
+                  </p>
+                </ConfirmDialog>
+              ) : null}
+            </>
+          ) : (
+            <div className="content-card table-card">
+              <CardHeader
+                title={pageTitle}
+                actions={<button
+                  type="button"
+                  className={`btn btn--primary card-header-icon-button${gettingStartedAddSourceActive && !newSourceOpen ? " getting-started-spotlight-target" : ""}`}
+                  aria-label={t("projectCore.sources.newSource")}
+                  title={!canManageSources ? t("projectCore.sources.cannotManageSources") : t("projectCore.sources.newSource")}
+                  onClick={() => {
+                    setNewSourceOpen(true);
+                    setSubmitError(null);
+                  }}
+                  disabled={!canManageSources}
+                >
+                  <PlusIcon className="card-header-icon" />
+                </button>}
+              />
+            <TableShell
+              style={{
+                maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36,
+              }}
+            >
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th
+                      style={{ width: "42%" }}
+                      className={`data-table-header${sortCol === "name" ? " data-table-header--sorted" : ""}`}
+                      onClick={() => handleSort("name")}
+                    >
+                      {t("projectDocuments.columns.name")}
+                      <span className="data-table-sort-icon">{sortCol === "name" ? (sortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}</span>
+                    </th>
+                    <th style={{ width: "18%" }} className="data-table-header">
+                      {t("projectDocuments.columns.type")}
+                    </th>
+                    <th style={{ width: "16%" }} className="data-table-header">
+                      {t("projectCore.entities.lock")}
+                    </th>
+                    <th
+                      style={{ width: "24%" }}
+                      className={`data-table-header${sortCol === "createdAt" ? " data-table-header--sorted" : ""}`}
+                      onClick={() => handleSort("createdAt")}
+                    >
+                      {t("projectDocuments.columns.created")}
+                      <span className="data-table-sort-icon">{sortCol === "createdAt" ? (sortDir === "asc" ? " \u2191" : " \u2193") : " \u2195"}</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && (
+                    <TableMessageRow colSpan={4}>{t("projectDocuments.empty.loading")}</TableMessageRow>
+                  )}
+                  {!loading && sorted.length === 0 && (
+                    <TableMessageRow colSpan={4}>{t("projectCore.sources.noMatchingSources")}</TableMessageRow>
+                  )}
+                  {!loading && sorted.map((row) => {
+                    const lock = sourceLockBySourceId.get(row.id) ?? null;
+                    const lockStatus = describeSourceLock(lock, currentUserId);
+                    return (
+                      <tr
+                        key={row.id}
+                        className={`data-table-row case-list-row${gettingStartedOpenSourceActive && gettingStartedState?.sourceId === row.id ? " source-row--getting-started" : ""}`}
+                        onClick={() => handleSourceRowClick(row)}
+                        onContextMenu={(event) => {
+                          if (!canManageSources || showAttributesTable) return;
+                          event.preventDefault();
+                          setSourceContextMenu({ x: event.clientX, y: event.clientY, row });
+                        }}
+                        title={lockStatus.title}
+                      >
+                        <td className="data-table-cell data-table-cell--name">{row.name}</td>
+                        <td className="data-table-cell data-table-cell--muted">{sourceKindDisplayLabel(row.type || "source", row.sourceObjectType, t)}</td>
+                        <td className="data-table-cell data-table-cell--muted">{lockStatus.label}</td>
+                        <td className="data-table-cell data-table-cell--muted">{fmtDate(row.createdAt)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableShell>
+            </div>
+          )}
+        </section>
+      </MasterDetailLayout>
+
+      {sourceContextMenu ? (
+        <div ref={sourceContextMenuRef} className="context-menu" style={sourceContextMenuStyle}>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              setEditingRow(sourceContextMenu.row);
+              setEditorOpen(true);
+              setSubmitError(null);
+              setSourceContextMenu(null);
+            }}
+          >
+            {t("projectCore.sources.editSource")}
+          </button>
+          <button
+            type="button"
+            className="context-menu-item context-menu-item--danger"
+            onClick={() => {
+              setDeleteRow(sourceContextMenu.row);
+              setSubmitError(null);
+              setSourceContextMenu(null);
+            }}
+          >
+            {t("projectCore.sources.deleteSource")}
+          </button>
+        </div>
+      ) : null}
+
+      {sourceTypeContextMenu ? (
+        <div ref={sourceTypeContextMenuRef} className="context-menu" style={sourceTypeContextMenuStyle}>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              setSourceTypeInitialTab("details");
+              setEditingSourceTypeKind(sourceTypeContextMenu.sourceKind);
+              setSourceTypeError(null);
+              setSourceTypeContextMenu(null);
+            }}
+          >
+            {t("projectCore.sources.detail.edit")}
+          </button>
+        </div>
+      ) : null}
+
+      {editingSourceType ? (
+        <SourceTypeEditModal
+          sourceType={editingSourceType}
+          projectStoragePath={projectStoragePath}
+          attributeDefinitions={sourceAttributeDefinitionsForEditor}
+          initialTab={sourceTypeInitialTab}
+          saving={sourceTypeSaving}
+          uploading={sourceTypeUploading}
+          error={sourceTypeError}
+          onCancel={() => {
+            if (sourceTypeSaving || sourceTypeUploading) return;
+            setEditingSourceTypeKind(null);
+            setSourceTypeError(null);
+            setAttributeError(null);
+          }}
+          onSave={(draft) => void handleSaveSourceType(draft)}
+          onUploadImage={handleUploadSourceTypeImage}
+          onRemoveImage={handleRemoveSourceTypeImage}
+          sources={rows}
+          attributeValues={sourceAttributeValues}
+        />
+      ) : null}
+
+      {newSourceOpen && (
+        <SourceImportModal
+          importSettings={sourceImportSettings}
+          attributeDefinitions={sourceAttributeDefinitions}
+          sourceTypeSettings={sourceTypeSettings}
+          saving={submitting}
+          error={submitError}
+          gettingStartedAddSourceActive={gettingStartedAddSourceActive}
+          onGettingStartedDismiss={() => void onGettingStartedStateChange?.({ dismissed: true })}
+          onCancel={() => {
+            if (submitting) return;
+            setNewSourceOpen(false);
+            setSubmitError(null);
+          }}
+          onSave={handleCreateImportedSource}
+        />
+      )}
+      {newRelationshipSource ? (
+          <CreateSourceRelationshipModal
+            source={newRelationshipSource}
+            relationship={editingSourceRelationship}
+            projectId={projectId}
+          sources={rows}
+          objects={objects}
+          relationshipTypes={relationshipTypes}
+          relationshipAttributeDefinitions={relationshipAttributeDefinitions}
+          saving={submitting}
+          error={submitError}
+          onCancel={() => {
+            if (submitting) return;
+            setNewRelationshipSource(null);
+            setEditingSourceRelationship(null);
+            setSubmitError(null);
+          }}
+          onRelationshipTypeCreated={(relationshipType, attributeDefinitions) => {
+            setRelationshipTypes((current) => [...current.filter((entry) => entry.id !== relationshipType.id), relationshipType]);
+            setRelationshipAttributeDefinitions((current) => [
+              ...current.filter((definition) => definition.relationshipTypeId !== relationshipType.id),
+              ...attributeDefinitions,
+            ]);
+          }}
+          onSave={handleCreateSourceRelationship}
+        />
+      ) : null}
+      {editorOpen && !selectedRow && (
+        <SourceEditorModal
+        title={editingRow ? t("projectCore.sources.editSource") : t("projectCore.sources.newSource")}
+        initialRow={editingRow}
+        projectStoragePath={projectStoragePath}
+        sourceTypeSettings={sourceTypeSettings}
+        attributeDefinitions={sourceAttributeDefinitionsForEditor}
+          attributeValuesByDefinitionId={sourceAttributeDraftValuesFor(editingRow)}
+          saving={submitting}
+          error={submitError}
+          onCancel={() => {
+            if (submitting) return;
+            setEditorOpen(false);
+            setEditingRow(null);
+            setSubmitError(null);
+          }}
+          onSave={handleSaveSource}
+        />
+      )}
+      {deleteRow && !selectedRow && (
+        <ConfirmDialog
+          title={t("projectCore.sources.deleteSource")}
+          onClose={() => setDeleteRow(null)}
+          onConfirm={() => void handleDeleteSource()}
+          busy={submitting}
+          confirmLabel={t("common.delete")}
+          busyLabel={t("projectCore.sources.deleting")}
+          cancelLabel={t("projectCore.sources.cancel")}
+          tone="danger"
+          error={submitError}
+        >
+          <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+            {t("projectCore.sources.deletePrompt", { name: deleteRow.name })}
+          </p>
+        </ConfirmDialog>
+      )}
+      {attributeDraft ? (
+        <SourceAttributeTypesModal
+          draft={attributeDraft}
+          sourceTypeOptions={sourceTypeOptions}
+          saving={attributeSaving}
+          error={attributeError ?? undefined}
+          onCancel={() => {
+            if (attributeSaving) return;
+            setAttributeDraft(null);
+            setAttributeError(null);
+          }}
+          onSave={(draft) => void handleSaveAttribute(draft, {})}
+        />
+      ) : null}
+      {bulkAttributeTarget ? (
+        <BulkSourceAttributeValuesModal
+          target={bulkAttributeTarget}
+          valuesBySource={attributeValues}
+          saving={attributeSaving}
+          error={attributeError}
+          onCancel={() => {
+            if (attributeSaving) return;
+            setBulkAttributeTarget(null);
+            setAttributeError(null);
+          }}
+          onSave={(valuesBySourceId) => void handleSaveBulkAttributeValues(bulkAttributeTarget.attribute, valuesBySourceId)}
+        />
+      ) : null}
+      {attributeHistoryTarget ? (
+        <PostgresAttributeValueHistoryModal
+          target={attributeHistoryTarget}
+          onClose={() => setAttributeHistoryTarget(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+

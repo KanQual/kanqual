@@ -7,8 +7,12 @@ import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { FilterIcon } from "../components/FilterIcon";
-import { DownloadIcon, HelpIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
+import { DownloadIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpModal } from "../components/HelpModal";
+import { TableMessageRow, TableShell } from "../components/TableShell";
+import { ViewHeader } from "../components/ViewHeader";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
@@ -320,7 +324,7 @@ function getCols(t: ReturnType<typeof useI18n>["t"]): { key: SortCol; label: str
 
 // ─── SVG → PNG helper ────────────────────────────────────────────────────────
 
-function svgToPngDataUrl(svgString: string): Promise<string> {
+function svgToPngDataUrl(svgString: string, noCanvasContextError: string, svgRenderError: string): Promise<string> {
   const wMatch = svgString.match(/width="(\d+)"/);
   const hMatch = svgString.match(/height="(\d+)"/);
   const w = wMatch ? parseInt(wMatch[1], 10) : 760;
@@ -330,7 +334,7 @@ function svgToPngDataUrl(svgString: string): Promise<string> {
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
-    if (!ctx) { reject(new Error("no canvas context")); return; }
+    if (!ctx) { reject(new Error(noCanvasContextError)); return; }
     const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const img = new Image();
@@ -341,7 +345,7 @@ function svgToPngDataUrl(svgString: string): Promise<string> {
       URL.revokeObjectURL(url);
       resolve(canvas.toDataURL("image/png"));
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("SVG render failed")); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(svgRenderError)); };
     img.src = url;
   });
 }
@@ -2378,7 +2382,7 @@ function ReportPage({
     return new Promise((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error("Image failed to load"));
+      image.onerror = () => reject(new Error(t("reportsCommon.errors.imageLoadFailed")));
       image.src = src;
     });
   }
@@ -3069,7 +3073,11 @@ function ReportPage({
         for (const chart of pdfCharts) {
           addText(chart.title, 11, "bold", 4);
           try {
-            const pngDataUrl = await svgToPngDataUrl(chart.svg);
+            const pngDataUrl = await svgToPngDataUrl(
+              chart.svg,
+              t("reportsCommon.errors.noCanvasContext"),
+              t("reportsCommon.errors.svgRenderFailed"),
+            );
             const wMatch = chart.svg.match(/width="(\d+)"/);
             const hMatch = chart.svg.match(/height="(\d+)"/);
             const nativeW = wMatch ? parseInt(wMatch[1], 10) : 760;
@@ -3186,7 +3194,11 @@ function ReportPage({
         for (const chart of docxCharts) {
           children.push(new Paragraph({ children: [new TextRun({ text: chart.title, bold: true })] }));
           try {
-            const pngDataUrl = await svgToPngDataUrl(chart.svg);
+            const pngDataUrl = await svgToPngDataUrl(
+              chart.svg,
+              t("reportsCommon.errors.noCanvasContext"),
+              t("reportsCommon.errors.svgRenderFailed"),
+            );
             const wMatch = chart.svg.match(/width="(\d+)"/);
             const hMatch = chart.svg.match(/height="(\d+)"/);
             const nativeW = wMatch ? parseInt(wMatch[1], 10) : 760;
@@ -3275,7 +3287,7 @@ function ReportPage({
   }
 
   return (
-    <div className="annotate-view">
+    <div className="workbench-view">
       
 
       {/* ── Top bar ── */}
@@ -3287,18 +3299,18 @@ function ReportPage({
       </div>
 
       {/* ── 2-column layout ── */}
-      <div className="annotate-layout ann-report-annotate-layout">
+      <div className="workbench-layout report-builder-layout">
 
         {/* Left: filter panels */}
-        <div className="annotate-left">
-          <div className="annotate-left-title">{t("reportsAnnotations.includeInReport")}</div>
+        <div className="workbench-sidebar">
+          <div className="workbench-sidebar-title">{t("reportsAnnotations.includeInReport")}</div>
 
           {/* Objects */}
-          <div className="annotate-card">
-            <div className="annotate-card-header" style={{ gap: 8 }}>
-              <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("cases")}>
+          <div className="workspace-panel">
+            <div className="workspace-panel-header" style={{ gap: 8 }}>
+              <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("cases")}>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="annotate-card-title">{t("reportsAnnotations.panels.cases", { count: selCaseIds.size })}</span>
+                  <span className="workspace-panel-title">{t("reportsAnnotations.panels.cases", { count: selCaseIds.size })}</span>
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
@@ -3379,11 +3391,11 @@ function ReportPage({
           </div>
 
           {/* Sources */}
-          <div className="annotate-card">
-            <div className="annotate-card-header" style={{ gap: 8 }}>
-              <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("documents")}>
+          <div className="workspace-panel">
+            <div className="workspace-panel-header" style={{ gap: 8 }}>
+              <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none", padding: 0 }} onClick={() => togglePanel("documents")}>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="annotate-card-title">{t("reportsAnnotations.panels.documents", { count: selDocIds.size })}</span>
+                  <span className="workspace-panel-title">{t("reportsAnnotations.panels.documents", { count: selDocIds.size })}</span>
                   <button
                     type="button"
                     className="filter-icon-button filter-icon-button--compact"
@@ -3462,9 +3474,9 @@ function ReportPage({
           </div>
 
           {/* Relationships */}
-          <div className="annotate-card">
-            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("relationships")}>
-              <span className="annotate-card-title">{t("reportsAnnotations.panels.relationships", { count: selRelationshipIds.size })}</span>
+          <div className="workspace-panel">
+            <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("relationships")}>
+              <span className="workspace-panel-title">{t("reportsAnnotations.panels.relationships", { count: selRelationshipIds.size })}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("relationships") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("relationships") && (
@@ -3577,9 +3589,9 @@ function ReportPage({
           </div>
 
           {/* Codes */}
-          <div className="annotate-card">
-            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("codes")}>
-              <span className="annotate-card-title">{t("reportsAnnotations.panels.codes", { count: selCodeIds.size })}</span>
+          <div className="workspace-panel">
+            <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("codes")}>
+              <span className="workspace-panel-title">{t("reportsAnnotations.panels.codes", { count: selCodeIds.size })}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("codes") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("codes") && (
@@ -3615,9 +3627,9 @@ function ReportPage({
           </div>
 
           {/* Users */}
-          <div className="annotate-card">
-            <button className="annotate-card-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("users")}>
-              <span className="annotate-card-title">{t("reportsAnnotations.panels.users", { count: selUserIds.size })}</span>
+          <div className="workspace-panel">
+            <button className="workspace-panel-header" style={{ width: "100%", cursor: "pointer", background: "none", border: "none" }} onClick={() => togglePanel("users")}>
+              <span className="workspace-panel-title">{t("reportsAnnotations.panels.users", { count: selUserIds.size })}</span>
               <span style={{ fontSize: "var(--text-base)", color: "var(--color-text-muted)" }}>{collapsed.has("users") ? "▶" : "▼"}</span>
             </button>
             {!collapsed.has("users") && (
@@ -3657,35 +3669,35 @@ function ReportPage({
         {/* Middle: report content */}
         <div
           ref={mainRef}
-          className="annotate-main"
+          className="workbench-main"
           style={{ overflowY: "auto", gap: 10, flexDirection: "column", display: "flex", paddingTop: 2, paddingBottom: 2 }}
         >
 
           {/* Title */}
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header" style={{ gap: 10 }}>
-              <span className="annotate-card-title">{t("reportsAnnotations.reportTitle")}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header" style={{ gap: 10 }}>
+              <span className="workspace-panel-title">{t("reportsAnnotations.reportTitle")}</span>
               <div className="report-action-group" style={{ gap: 8, marginLeft: "auto" }}>
                 <button
                   type="button"
-                  className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                  className="btn btn--secondary card-header-icon-button report-title-action-button"
                   title={
                     !isFrozen
                       ? t("reportsAnnotations.exportSavedOnly")
                       : !canExportReports
-                        ? "You do not have permission to export reports"
+                        ? t("reportsAnnotations.exportDenied")
                         : t("reportsAnnotations.exportTitle")
                   }
                   disabled={!isFrozen || !canExportReports}
                   onClick={() => setShowExportModal(true)}
                   aria-label={t("reportsAnnotations.exportButton")}
                 >
-                  <DownloadIcon className="project-table-header-icon" />
+                  <DownloadIcon className="card-header-icon" />
                 </button>
                 {isFrozen && onUseSettings && canStartReports && (
                   <button
                     type="button"
-                    className="btn btn--secondary project-table-header-icon-button report-title-action-button"
+                    className="btn btn--secondary card-header-icon-button report-title-action-button"
                     onClick={() => onUseSettings({
                       caseIds: row!.caseIds,
                       documentIds: row!.documentIds,
@@ -3700,19 +3712,19 @@ function ReportPage({
                     title={t("reportsAnnotations.useSettingsForNewReport")}
                     aria-label={t("reportsAnnotations.useSettingsForNewReport")}
                   >
-                    <RestartListIcon className="project-table-header-icon" />
+                    <RestartListIcon className="card-header-icon" />
                   </button>
                 )}
                 {!isFrozen && (
                   <button
                     type="button"
-                    className="btn btn--primary project-table-header-icon-button report-title-action-button"
+                    className="btn btn--primary card-header-icon-button report-title-action-button"
                     onClick={handleSave}
                     disabled={saving || !name.trim() || !canStartReports}
                     title={saving ? t("reportsAnnotations.saving") : t("reportsAnnotations.saveReport")}
                     aria-label={saving ? t("reportsAnnotations.saving") : t("reportsAnnotations.saveReport")}
                   >
-                    <SaveIcon className="project-table-header-icon" />
+                    <SaveIcon className="card-header-icon" />
                   </button>
                 )}
               </div>
@@ -3727,8 +3739,8 @@ function ReportPage({
           </div>
 
           {/* Details */}
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header"><span className="annotate-card-title">{t("reportsAnnotations.details")}</span></div>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header"><span className="workspace-panel-title">{t("reportsAnnotations.details")}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 14px", fontSize: 13 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               <span>
@@ -3757,9 +3769,9 @@ function ReportPage({
 
           {/* Report description */}
           {(!isFrozen || showDescription) && (
-            <div className="annotate-card" style={{ flexShrink: 0 }}>
-              <div className="annotate-card-header">
-                <span className="annotate-card-title">{t("reportsAnnotations.reportDescription")}</span>
+            <div className="workspace-panel" style={{ flexShrink: 0 }}>
+              <div className="workspace-panel-header">
+                <span className="workspace-panel-title">{t("reportsAnnotations.reportDescription")}</span>
                 {!isFrozen ? (
                   <label className="toggle-switch" style={{ marginBottom: 0 }}>
                     <input type="checkbox" checked={showDescription} onChange={(e) => setShowDescription(e.target.checked)} />
@@ -3788,9 +3800,9 @@ function ReportPage({
             </div>
           )}
 
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header">
-              <span className="annotate-card-title">{t("reportsAnnotations.filtersTitle")}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header">
+              <span className="workspace-panel-title">{t("reportsAnnotations.filtersTitle")}</span>
             </div>
             <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
               {!hasActiveFilters ? (
@@ -3827,7 +3839,7 @@ function ReportPage({
             {summaryCards.map(({ key, label, value, items, expandable = true }) => (
               <button
                 key={key}
-                className="annotate-card"
+                className="workspace-panel"
                 onClick={expandable ? () => toggleSummaryCard(key) : undefined}
                 aria-expanded={expandable ? expandedSummaryCards.has(key) : undefined}
                 tabIndex={expandable ? undefined : -1}
@@ -3887,9 +3899,9 @@ function ReportPage({
 
           {/* Statistics */}
           {(!isFrozen || showCoverage) && (
-            <div className="annotate-card" style={{ flexShrink: 0 }}>
-              <div className="annotate-card-header">
-                <span className="annotate-card-title">{t("reportsAnnotations.statistics")}</span>
+            <div className="workspace-panel" style={{ flexShrink: 0 }}>
+              <div className="workspace-panel-header">
+                <span className="workspace-panel-title">{t("reportsAnnotations.statistics")}</span>
                 {!isFrozen ? (
                   <label className="toggle-switch" style={{ marginBottom: 0 }}>
                     <input type="checkbox" checked={showCoverage} onChange={(e) => setShowCoverage(e.target.checked)} />
@@ -4063,9 +4075,9 @@ function ReportPage({
           )}
 
           {/* Annotations */}
-          <div className="annotate-card" style={{ flexShrink: 0 }}>
-            <div className="annotate-card-header">
-              <span className="annotate-card-title">{t("reportsAnnotations.annotationsTitle")}{filteredAnns.length > 0 ? ` (${filteredAnns.length})` : ""}</span>
+          <div className="workspace-panel" style={{ flexShrink: 0 }}>
+            <div className="workspace-panel-header">
+              <span className="workspace-panel-title">{t("reportsAnnotations.annotationsTitle")}{filteredAnns.length > 0 ? ` (${filteredAnns.length})` : ""}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
                   <span style={{ whiteSpace: "nowrap" }}>{t("reportsAnnotations.controls.groupBy")}</span>
@@ -4220,7 +4232,7 @@ function ReportPage({
                         onClick={(e) => e.stopPropagation()}
                       />
                       <span className="code-label">{typeLabel}</span>
-                      <span className="users-filter-count">
+                      <span className="filter-option-count">
                         {caseItems.filter((item) => formatObjectType(item.objectType) === typeLabel).length}
                       </span>
                     </li>
@@ -4255,7 +4267,7 @@ function ReportPage({
                           onClick={(e) => e.stopPropagation()}
                         />
                         <span className="code-label">{item.name}</span>
-                        <span className="users-filter-count">{item.dataType === "datetime" ? t("reportsAnnotations.attributeTypes.datetime") : item.dataType}</span>
+                        <span className="filter-option-count">{item.dataType === "datetime" ? t("reportsAnnotations.attributeTypes.datetime") : item.dataType}</span>
                       </li>
                     ))
               }
@@ -4299,7 +4311,7 @@ function ReportPage({
                         onClick={(e) => e.stopPropagation()}
                       />
                       <span className="code-label">{typeLabel}</span>
-                      <span className="users-filter-count">
+                      <span className="filter-option-count">
                         {reportDocs.filter((doc) => formatSourceType(doc.type) === typeLabel).length}
                       </span>
                     </li>
@@ -4334,7 +4346,7 @@ function ReportPage({
                           onClick={(e) => e.stopPropagation()}
                         />
                         <span className="code-label">{item.name}</span>
-                        <span className="users-filter-count">{item.dataType === "datetime" ? t("reportsAnnotations.attributeTypes.datetime") : item.dataType}</span>
+                        <span className="filter-option-count">{item.dataType === "datetime" ? t("reportsAnnotations.attributeTypes.datetime") : item.dataType}</span>
                       </li>
                     ))
               }
@@ -4539,87 +4551,71 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
   // ── Table ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="view users-view">
-      <header className="view-header">
-        <div className="users-title-wrap">
-          <h1>{t("reportsAnnotations.title")}</h1>
+    <div className="view view-shell">
+      <ViewHeader
+        title={t("reportsAnnotations.title")}
+        help={{ label: t("reportsAnnotations.openHelp"), onClick: () => setHelpOpen(true) }}
+        actions={(
           <button
-            type="button"
-            className="users-help-icon-btn"
-            aria-label={t("reportsAnnotations.openHelp")}
-            title={t("reportsAnnotations.openHelp")}
-            onClick={() => setHelpOpen(true)}
+            className="btn btn--primary"
+            onClick={() => setShowNew(true)}
+            disabled={!canCreateReports}
+            title={!canCreateReports ? t("reportsAnnotations.newReportDenied") : undefined}
           >
-            <HelpIcon className="users-help-icon" />
+            {t("reportsAnnotations.newReport")}
           </button>
-        </div>
-        <button
-          className="btn btn--primary"
-          onClick={() => setShowNew(true)}
-          disabled={!canCreateReports}
-          title={!canCreateReports ? t("reportsAnnotations.newReportDenied") : undefined}
-        >
-          {t("reportsAnnotations.newReport")}
-        </button>
-      </header>
+        )}
+      />
 
-      {error && <p className="users-error">{error}</p>}
+      {error && <p className="alert-error">{error}</p>}
 
-      <div className="users-content">
-        <section className="users-layout-main">
-          <div className="users-table-wrap" style={{ maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36 }}>
-            <table className="users-table">
+      <div className="view-content">
+        <section className="report-layout-main">
+          <TableShell style={{ maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36 }}>
+            <table className="data-table">
               <thead>
                 <tr>
                   {cols.map((col) => (
                     <th key={col.key} style={{ width: col.width }}
-                      className={`users-th${sortCol === col.key ? " users-th--sorted" : ""}`}
+                      className={`data-table-header${sortCol === col.key ? " data-table-header--sorted" : ""}`}
                       onClick={() => handleSort(col.key)}
                     >
                       {col.label}
-                      <span className="users-sort-icon">{sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
+                      <span className="data-table-sort-icon">{sortCol === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}</span>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={3} className="users-td-msg">{t("reportsAnnotations.loading")}</td></tr>}
-                {!loading && sorted.length === 0 && <tr><td colSpan={3} className="users-td-msg">{t("reportsAnnotations.noReports")}</td></tr>}
+                {loading && <TableMessageRow colSpan={3}>{t("reportsAnnotations.loading")}</TableMessageRow>}
+                {!loading && sorted.length === 0 && <TableMessageRow colSpan={3}>{t("reportsAnnotations.noReports")}</TableMessageRow>}
                 {!loading && sorted.map((row) => (
-                  <tr key={row.id} className="users-row"
+                  <tr key={row.id} className="data-table-row"
                     onClick={() => setOpenRow(row)}
                     onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, row }); }}
                   >
-                    <td className="users-td users-td--name">{row.name}</td>
-                    <td className="users-td users-td--muted">{row.createdByName}</td>
-                    <td className="users-td users-td--muted">{fmtDate(row.createdAt)}</td>
+                    <td className="data-table-cell data-table-cell--name">{row.name}</td>
+                    <td className="data-table-cell data-table-cell--muted">{row.createdByName}</td>
+                    <td className="data-table-cell data-table-cell--muted">{fmtDate(row.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableShell>
         </section>
       </div>
 
       {helpOpen && (
-        <SettingsModal title={t("reportsAnnotations.help.title")} onClose={() => setHelpOpen(false)} modalClassName="modal--help">
-          <div className="app-settings-modal-body">
-            <p className="users-guide-copy">
-              {t("reportsAnnotations.help.line1")}
-            </p>
-            <p className="users-guide-copy">
-              {t("reportsAnnotations.help.line2")}
-            </p>
-            <p className="users-guide-copy">
-              {t("reportsAnnotations.help.line3")}
-            </p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button type="button" className="btn btn--primary" onClick={() => setHelpOpen(false)}>
-              {t("reportsAnnotations.close")}
-            </button>
-          </div>
-        </SettingsModal>
+        <HelpModal
+          title={t("reportsAnnotations.help.title")}
+          onClose={() => setHelpOpen(false)}
+          closeLabel={t("reportsAnnotations.close")}
+          lines={[
+            t("reportsAnnotations.help.line1"),
+            t("reportsAnnotations.help.line2"),
+            t("reportsAnnotations.help.line3"),
+          ]}
+        />
       )}
 
       {contextMenu && (
@@ -4634,20 +4630,21 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
       )}
 
       {confirmDelete && (
-        <SettingsModal title={t("reportsAnnotations.deleteTitle")} onClose={() => setConfirmDelete(null)} closeDisabled={deleteLoading}>
-          <div className="app-settings-modal-body">
-            <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-              {t("reportsAnnotations.deleteBody", { name: confirmDelete.name })}
-            </p>
-            <p className="modal-warning-text">{t("reportsAnnotations.deleteWarning")}</p>
-          </div>
-          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
-            <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleteLoading}>{t("reportsAnnotations.cancel")}</button>
-            <button className="btn btn--danger" onClick={handleDelete} disabled={deleteLoading}>
-              {deleteLoading ? t("reportsAnnotations.deleting") : t("reportsAnnotations.deleteReport")}
-            </button>
-          </div>
-        </SettingsModal>
+        <ConfirmDialog
+          title={t("reportsAnnotations.deleteTitle")}
+          warning={t("reportsAnnotations.deleteWarning")}
+          busy={deleteLoading}
+          confirmLabel={t("reportsAnnotations.deleteReport")}
+          busyLabel={t("reportsAnnotations.deleting")}
+          cancelLabel={t("reportsAnnotations.cancel")}
+          tone="danger"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={handleDelete}
+        >
+          <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
+            {t("reportsAnnotations.deleteBody", { name: confirmDelete.name })}
+          </p>
+        </ConfirmDialog>
       )}
     </div>
   );

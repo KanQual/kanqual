@@ -1,8 +1,12 @@
 import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { ModalTabSelector } from "./ModalTabSelector";
 import { SettingsModal } from "./SettingsModal";
 import {
+  PostgresGraphicModeTabs,
+  PostgresImageUploadActions,
   PostgresObjectGraphicPreviewCard,
-  PostgresObjectShapePicker,
+  PostgresObjectSelectGraphicControls,
+  PostgresObjectUploadGraphicControls,
 } from "./PostgresGraphicsControls";
 import {
   isVisibleItemTimelineAttribute,
@@ -144,36 +148,15 @@ export function PostgresObjectModal(config: {
       modalClassName="modal--wide"
     >
       <form onSubmit={config.onSubmit} className="form app-settings-modal-body">
-        <div className="segmented-control modal-segmented-control" role="tablist" aria-label={config.ariaLabel}>
-          <button
-            type="button"
-            className={`segmented-control-option ${config.tab === "details" ? "segmented-control-option--active" : ""}`}
-            onClick={() => config.setTab("details")}
-          >
-            {formatObjectModalTab("details", t)}
-          </button>
-          <button
-            type="button"
-            className={`segmented-control-option ${config.tab === "graphics" ? "segmented-control-option--active" : ""}`}
-            onClick={() => config.setTab("graphics")}
-          >
-            {formatObjectModalTab("graphics", t)}
-          </button>
-          <button
-            type="button"
-            className={`segmented-control-option ${config.tab === "attributes" ? "segmented-control-option--active" : ""}`}
-            onClick={() => config.setTab("attributes")}
-          >
-            {formatObjectModalTab("attributes", t)}
-          </button>
-          <button
-            type="button"
-            className={`segmented-control-option ${config.tab === "timeline" ? "segmented-control-option--active" : ""}`}
-            onClick={() => config.setTab("timeline")}
-          >
-            {formatObjectModalTab("timeline", t)}
-          </button>
-        </div>
+        <ModalTabSelector
+          value={config.tab}
+          options={(["details", "graphics", "attributes", "timeline"] as const).map((tab) => ({
+            value: tab,
+            label: formatObjectModalTab(tab, t),
+          }))}
+          ariaLabel={config.ariaLabel}
+          onChange={config.setTab}
+        />
         {config.tab === "details" ? (
           <>
             <label className="form-label">
@@ -209,196 +192,60 @@ export function PostgresObjectModal(config: {
             </label>
           </>
         ) : config.tab === "graphics" ? (
-          <div className="source-graphics-layout">
-            <div className="source-graphics-controls">
-              <div style={{ display: "flex", justifyContent: "center" }}>
-                <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--three" role="tablist" aria-label={t("sharedModals.graphics.objectGraphicSource")}>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={config.graphicMode === "inherit"}
-                    className={`segmented-control-option ${config.graphicMode === "inherit" ? "segmented-control-option--active" : ""}`}
-                    onClick={() => setGraphicMode("inherit")}
-                    disabled={disabled}
-                  >
-                    {t("common.inherit")}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={config.graphicMode === "select"}
-                    className={`segmented-control-option ${config.graphicMode === "select" ? "segmented-control-option--active" : ""}`}
-                    onClick={() => setGraphicMode("select")}
-                    disabled={disabled}
-                  >
-                    {t("common.select")}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={config.graphicMode === "upload"}
-                    className={`segmented-control-option ${config.graphicMode === "upload" ? "segmented-control-option--active" : ""}`}
-                    onClick={() => setGraphicMode("upload", false)}
-                    disabled={disabled}
-                  >
-                    {t("common.upload")}
-                  </button>
-                </div>
-              </div>
+          <div className="graphics-editor-layout">
+            <div className="graphics-editor-controls">
+              <PostgresGraphicModeTabs
+                value={config.graphicMode}
+                options={[
+                  { value: "inherit", label: t("common.inherit") },
+                  { value: "select", label: t("common.select") },
+                  { value: "upload", label: t("common.upload") },
+                ]}
+                ariaLabel={t("sharedModals.graphics.objectGraphicSource")}
+                onChange={(mode) => setGraphicMode(mode, mode !== "upload")}
+                disabled={disabled}
+              />
               {config.graphicMode === "inherit" ? (
                 <p className="auth-hint" style={{ margin: "4px 0 0", textAlign: "center" }}>
                   {t("sharedModals.graphics.inheritObjectHelp")}
                 </p>
               ) : config.graphicMode === "upload" ? (
                 <>
-                  <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      className="btn btn--small"
-                      onClick={config.onImportImage}
-                      disabled={disabled || !config.onImportImage}
-                    >
-                      {hasUploadedObjectImage ? t("sharedModals.graphics.replaceImage") : t("sharedModals.graphics.uploadImage")}
-                    </button>
-                    {hasUploadedObjectImage ? (
-                      <button
-                        type="button"
-                        className="btn btn--ghost-danger btn--small"
-                        onClick={config.onRemoveImage}
-                        disabled={disabled || !config.onRemoveImage}
-                      >
-                        {t("common.remove")}
-                      </button>
-                    ) : null}
-                  </div>
+                  <PostgresImageUploadActions
+                    hasImage={hasUploadedObjectImage}
+                    disabled={disabled}
+                    importDisabled={!config.onImportImage}
+                    removeDisabled={!config.onRemoveImage}
+                    onImport={() => config.onImportImage?.()}
+                    onRemove={() => config.onRemoveImage?.()}
+                  />
                   {showObjectUploadDetails ? (
-                    <label className="form-label">
-                      {t("sharedModals.graphics.outline")}
-                      <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-                        <input
-                          className="form-input form-input--color"
-                          type="color"
-                          value={effectiveOutlineColor}
-                          onChange={(event) => config.setOutlineColorOverride(event.target.value)}
-                          style={{ width: 92, minWidth: 92, height: 56 }}
-                        />
-                        <input
-                          className="form-input"
-                          value={outlineColorInherited ? inheritedOutlineColor : config.outlineColorOverride}
-                          onChange={(event) => config.setOutlineColorOverride(event.target.value)}
-                          style={{ flex: "0 0 148px", fontFamily: "monospace" }}
-                        />
-                      </div>
-                    </label>
+                    <PostgresObjectUploadGraphicControls
+                      outlineColor={effectiveOutlineColor}
+                      outlineColorText={outlineColorInherited ? inheritedOutlineColor : config.outlineColorOverride}
+                      onOutlineColorChange={config.setOutlineColorOverride}
+                      textWidth={148}
+                    />
                   ) : null}
                 </>
               ) : (
-                <>
-                  <label className="form-label">
-                    {t("sharedModals.graphics.shape")}
-                    <PostgresObjectShapePicker
-                      value={effectiveShape}
-                      onChange={(value) => config.setShapeOverride(value === inheritedShape ? "" : value)}
-                      previewColor={effectiveColor}
-                      previewOutlineColor={effectiveOutlineColor}
-                      previewFill={effectiveFill}
-                      previewFillTransparency={effectiveFillTransparency}
-                      previewOutlineWidth={effectiveOutlineWidth}
-                    />
-                  </label>
-                  <div className="source-graphics-setting-row">
-                    <span className="form-label">{t("sharedModals.graphics.fillStyle")}</span>
-                    <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label={t("sharedModals.graphics.objectFillStyle")}>
-                      {(["outline", "filled"] as const).map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          className={`segmented-control-option ${effectiveFill === option ? "segmented-control-option--active" : ""}`}
-                          onClick={() => config.setFillOverride(option === inheritedFill ? "" : option)}
-                          aria-pressed={effectiveFill === option}
-                        >
-                          {option === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {effectiveFill === "filled" ? (
-                    <>
-                      <label className="form-label">
-                        {t("sharedModals.graphics.fill")}
-                        <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-                          <input
-                            className="form-input form-input--color"
-                            type="color"
-                            value={effectiveColor}
-                            onChange={(event) => config.setColorOverride(event.target.value)}
-                            style={{ width: 92, minWidth: 92, height: 56 }}
-                          />
-                          <input
-                            className="form-input"
-                            value={colorInherited ? inheritedColor : config.colorOverride}
-                            onChange={(event) => config.setColorOverride(event.target.value)}
-                            style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
-                          />
-                        </div>
-                      </label>
-                      <label className="form-label timeline-group-opacity-control">
-                        {t("sharedModals.graphics.fillTransparency")}
-                        <div className="timeline-group-slider-row">
-                          <input
-                            className="form-range"
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={effectiveFillTransparency}
-                            onChange={(event) => {
-                              const nextValue = Number(event.target.value);
-                              config.setFillTransparencyOverride(nextValue === inheritedFillTransparency ? null : nextValue);
-                            }}
-                          />
-                          <span className="timeline-group-slider-value">{effectiveFillTransparency}%</span>
-                        </div>
-                      </label>
-                    </>
-                  ) : null}
-                  <label className="form-label">
-                    {t("sharedModals.graphics.outline")}
-                    <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-                      <input
-                        className="form-input form-input--color"
-                        type="color"
-                        value={effectiveOutlineColor}
-                        onChange={(event) => config.setOutlineColorOverride(event.target.value)}
-                        style={{ width: 92, minWidth: 92, height: 56 }}
-                      />
-                      <input
-                        className="form-input"
-                        value={outlineColorInherited ? inheritedOutlineColor : config.outlineColorOverride}
-                        onChange={(event) => config.setOutlineColorOverride(event.target.value)}
-                        style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
-                      />
-                    </div>
-                  </label>
-                  <label className="form-label timeline-group-opacity-control">
-                    {t("sharedModals.graphics.outlineWidth")}
-                    <div className="timeline-group-slider-row">
-                      <input
-                        className="form-range"
-                        type="range"
-                        min="1"
-                        max="10"
-                        step="1"
-                        value={effectiveOutlineWidth}
-                        onChange={(event) => {
-                          const nextValue = Number(event.target.value);
-                          config.setOutlineWidthOverride(nextValue === inheritedOutlineWidth ? null : nextValue);
-                        }}
-                      />
-                      <span className="timeline-group-slider-value">{effectiveOutlineWidth}px</span>
-                    </div>
-                  </label>
-                </>
+                <PostgresObjectSelectGraphicControls
+                  shape={effectiveShape}
+                  fill={effectiveFill}
+                  color={effectiveColor}
+                  colorText={colorInherited ? inheritedColor : config.colorOverride}
+                  outlineColor={effectiveOutlineColor}
+                  outlineColorText={outlineColorInherited ? inheritedOutlineColor : config.outlineColorOverride}
+                  fillTransparency={effectiveFillTransparency}
+                  outlineWidth={effectiveOutlineWidth}
+                  fillStyleAriaLabel={t("sharedModals.graphics.objectFillStyle")}
+                  onShapeChange={(value) => config.setShapeOverride(value === inheritedShape ? "" : value)}
+                  onFillChange={(value) => config.setFillOverride(value === inheritedFill ? "" : value)}
+                  onColorChange={config.setColorOverride}
+                  onOutlineColorChange={config.setOutlineColorOverride}
+                  onFillTransparencyChange={(value) => config.setFillTransparencyOverride(value === inheritedFillTransparency ? null : value)}
+                  onOutlineWidthChange={(value) => config.setOutlineWidthOverride(value === inheritedOutlineWidth ? null : value)}
+                />
               )}
             </div>
             <PostgresObjectGraphicPreviewCard

@@ -3,9 +3,13 @@ import {
   EditableAttributesMatrix,
   type EditableAttributeMatrixValues,
 } from "./EditableAttributesMatrix";
+import { ModalTabSelector } from "./ModalTabSelector";
 import {
+  PostgresGraphicModeTabs,
+  PostgresImageUploadActions,
   PostgresObjectGraphicPreviewCard,
-  PostgresObjectShapePicker,
+  PostgresObjectSelectGraphicControls,
+  PostgresObjectUploadGraphicControls,
 } from "./PostgresGraphicsControls";
 import { SettingsModal } from "./SettingsModal";
 import type { SharedAttributeDraft } from "./AttributeValuesModal";
@@ -13,7 +17,7 @@ import {
   TIMELINE_FIELD_OPTIONS,
   type TimelineFieldRole,
   type TypeAttributeDraft,
-} from "../views/Postgres_Project_Home_Timeline_Fields";
+} from "../views/Project_Home_Timeline_Fields";
 import {
   normalizeOptionalPostgresObjectTypeColor,
   normalizePostgresObjectFillTransparency,
@@ -34,184 +38,14 @@ function formatObjectTypeModalTab(tab: PostgresObjectTypeModalTab, t: ReturnType
   return t("sharedModals.tabs.timeline");
 }
 
-function PostgresObjectTypeUploadGraphicControls(props: {
-  effectiveOutlineColor: string;
-  outlineColor: string;
-  outlineWidth: number;
-  onOutlineColorChange: Dispatch<SetStateAction<string>>;
-  onOutlineWidthChange: Dispatch<SetStateAction<number>>;
-}) {
-  const { t } = useI18n();
-  const effectiveOutlineWidth = normalizePostgresObjectOutlineWidth(props.outlineWidth);
-  return (
-    <>
-      <label className="form-label">
-        {t("sharedModals.graphics.outline")}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-          <input
-            className="form-input form-input--color"
-            type="color"
-            value={props.effectiveOutlineColor}
-            onChange={(event) => props.onOutlineColorChange(event.target.value)}
-            style={{ width: 92, minWidth: 92, height: 56 }}
-          />
-          <input
-            className="form-input"
-            value={props.outlineColor || props.effectiveOutlineColor}
-            onChange={(event) => props.onOutlineColorChange(event.target.value)}
-            style={{ flex: "0 0 132px", fontFamily: "monospace" }}
-          />
-        </div>
-      </label>
-      <label className="form-label timeline-group-opacity-control">
-        {t("sharedModals.graphics.outlineWidth")}
-        <div className="timeline-group-slider-row">
-          <input
-            className="form-range"
-            type="range"
-            min="1"
-            max="10"
-            step="1"
-            value={effectiveOutlineWidth}
-            onChange={(event) => props.onOutlineWidthChange(Number(event.target.value))}
-          />
-          <span className="timeline-group-slider-value">{effectiveOutlineWidth}px</span>
-        </div>
-      </label>
-    </>
-  );
-}
-
-function PostgresObjectTypeSelectGraphicControls(props: {
-  shape: PostgresObjectTypeShape;
-  color: string;
-  outlineColor: string;
-  fill: PostgresObjectFill;
-  fillTransparency: number;
-  outlineWidth: number;
-  onShapeChange: Dispatch<SetStateAction<PostgresObjectTypeShape>>;
-  onColorChange: Dispatch<SetStateAction<string>>;
-  onOutlineColorChange: Dispatch<SetStateAction<string>>;
-  onFillChange: Dispatch<SetStateAction<PostgresObjectFill>>;
-  onFillTransparencyChange: Dispatch<SetStateAction<number>>;
-  onOutlineWidthChange: Dispatch<SetStateAction<number>>;
-}) {
-  const { t } = useI18n();
-  const effectiveColor = normalizePostgresObjectTypeColor(props.color);
-  const effectiveFillTransparency = normalizePostgresObjectFillTransparency(props.fillTransparency);
-  const effectiveOutlineWidth = normalizePostgresObjectOutlineWidth(props.outlineWidth);
-  return (
-    <>
-      <label className="form-label">
-        {t("sharedModals.graphics.shape")}
-        <PostgresObjectShapePicker
-          value={props.shape}
-          onChange={(value) => props.onShapeChange((value || "rounded") as PostgresObjectTypeShape)}
-          previewColor={effectiveColor}
-          previewOutlineColor={props.outlineColor}
-          previewFill={props.fill}
-          previewFillTransparency={effectiveFillTransparency}
-          previewOutlineWidth={effectiveOutlineWidth}
-        />
-      </label>
-      <div className="source-graphics-setting-row">
-        <span className="form-label">{t("sharedModals.graphics.fillStyle")}</span>
-        <div className="segmented-control source-graphics-fill-control" role="tablist" aria-label={t("sharedModals.graphics.objectTypeFillStyle")}>
-          {(["outline", "filled"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              className={`segmented-control-option ${props.fill === option ? "segmented-control-option--active" : ""}`}
-              onClick={() => props.onFillChange(option)}
-              aria-pressed={props.fill === option}
-            >
-              {option === "outline" ? t("sharedModals.graphics.outline") : t("sharedModals.graphics.filled")}
-            </button>
-          ))}
-        </div>
-      </div>
-      {props.fill === "filled" ? (
-        <>
-          <label className="form-label">
-            {t("sharedModals.graphics.fill")}
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-              <input
-                className="form-input form-input--color"
-                type="color"
-                value={effectiveColor}
-                onChange={(event) => props.onColorChange(event.target.value)}
-                style={{ width: 92, minWidth: 92, height: 56 }}
-              />
-              <input
-                className="form-input"
-                value={props.color}
-                onChange={(event) => props.onColorChange(event.target.value)}
-                style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
-              />
-            </div>
-          </label>
-          <label className="form-label timeline-group-opacity-control">
-            {t("sharedModals.graphics.fillTransparency")}
-            <div className="timeline-group-slider-row">
-              <input
-                className="form-range"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={effectiveFillTransparency}
-                onChange={(event) => props.onFillTransparencyChange(Number(event.target.value))}
-              />
-              <span className="timeline-group-slider-value">{effectiveFillTransparency}%</span>
-            </div>
-          </label>
-        </>
-      ) : null}
-      <label className="form-label">
-        {t("sharedModals.graphics.outline")}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-          <input
-            className="form-input form-input--color"
-            type="color"
-            value={props.outlineColor}
-            onChange={(event) => props.onOutlineColorChange(event.target.value)}
-            style={{ width: 92, minWidth: 92, height: 56 }}
-          />
-          <input
-            className="form-input"
-            value={props.outlineColor}
-            onChange={(event) => props.onOutlineColorChange(event.target.value)}
-            style={{ flex: "1 1 132px", minWidth: 0, fontFamily: "monospace" }}
-          />
-        </div>
-      </label>
-      <label className="form-label timeline-group-opacity-control">
-        {t("sharedModals.graphics.outlineWidth")}
-        <div className="timeline-group-slider-row">
-          <input
-            className="form-range"
-            type="range"
-            min="1"
-            max="10"
-            step="1"
-            value={effectiveOutlineWidth}
-            onChange={(event) => props.onOutlineWidthChange(Number(event.target.value))}
-          />
-          <span className="timeline-group-slider-value">{effectiveOutlineWidth}px</span>
-        </div>
-      </label>
-    </>
-  );
-}
-
 function PostgresObjectTypeTimelineFields(props: {
   drafts: TypeAttributeDraft[];
   onChange: (role: TimelineFieldRole, value: string) => void;
 }) {
   const { t } = useI18n();
   return (
-    <div className="postgres-attribute-modal-section">
-      <div className="postgres-attribute-modal-title">{t("sharedModals.tabs.timelineFields")}</div>
+    <div className="attribute-editor-section">
+      <div className="attribute-editor-title">{t("sharedModals.tabs.timelineFields")}</div>
       <div className="case-detail-attributes-table-wrap">
         <table className="case-detail-attributes-table">
           <tbody>
@@ -308,19 +142,16 @@ export function PostgresObjectTypeModal(props: {
       closeDisabled={props.submitting}
       modalClassName="modal--wide"
     >
-      <form onSubmit={props.onSubmit} className={`form app-settings-modal-body ${props.tab === "graphics" ? "source-editor-modal-body--graphics source-editor-form--graphics" : ""}`}>
-        <div className="segmented-control modal-segmented-control" role="tablist" aria-label={props.ariaLabel}>
-          {(["details", "graphics", "attributes", "timeline"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={`segmented-control-option ${props.tab === tab ? "segmented-control-option--active" : ""}`}
-              onClick={() => props.setTab(tab)}
-            >
-              {formatObjectTypeModalTab(tab, t)}
-            </button>
-          ))}
-        </div>
+      <form onSubmit={props.onSubmit} className={`form app-settings-modal-body ${props.tab === "graphics" ? "modal-body--graphics modal-form--graphics" : ""}`}>
+        <ModalTabSelector
+          value={props.tab}
+          options={(["details", "graphics", "attributes", "timeline"] as const).map((tab) => ({
+            value: tab,
+            label: formatObjectTypeModalTab(tab, t),
+          }))}
+          ariaLabel={props.ariaLabel}
+          onChange={props.setTab}
+        />
         {props.tab === "details" ? (
           <>
             <label className="form-label">
@@ -343,80 +174,55 @@ export function PostgresObjectTypeModal(props: {
             </label>
           </>
         ) : props.tab === "graphics" ? (
-          <div className="source-graphics-layout">
-            <div className="source-graphics-controls">
+          <div className="graphics-editor-layout">
+            <div className="graphics-editor-controls">
               <label className="form-label">
                 {t("sharedModals.graphics.image")}
-                <div style={{ display: "flex", justifyContent: "center" }}>
-                  <div className="segmented-control modal-segmented-control modal-secondary-segmented-control modal-secondary-segmented-control--two" role="tablist" aria-label={t("sharedModals.graphics.objectTypeGraphicSource")}>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={props.graphicMode === "select"}
-                      className={`segmented-control-option ${props.graphicMode === "select" ? "segmented-control-option--active" : ""}`}
-                      onClick={() => props.onGraphicModeChange("select")}
-                      disabled={disabled}
-                    >
-                      {t("common.select")}
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={props.graphicMode === "upload"}
-                      className={`segmented-control-option ${props.graphicMode === "upload" ? "segmented-control-option--active" : ""}`}
-                      onClick={() => props.onGraphicModeChange("upload")}
-                      disabled={disabled}
-                    >
-                      {t("common.upload")}
-                    </button>
-                  </div>
-                </div>
+                <PostgresGraphicModeTabs
+                  value={props.graphicMode}
+                  options={[
+                    { value: "select", label: t("common.select") },
+                    { value: "upload", label: t("common.upload") },
+                  ]}
+                  ariaLabel={t("sharedModals.graphics.objectTypeGraphicSource")}
+                  onChange={props.onGraphicModeChange}
+                  disabled={disabled}
+                />
               </label>
               {props.graphicMode === "upload" ? (
-                <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="btn btn--small"
-                    onClick={props.onImportImage}
-                    disabled={disabled}
-                  >
-                    {hasImage ? t("sharedModals.graphics.replaceImage") : t("sharedModals.graphics.uploadImage")}
-                  </button>
-                  {hasImage ? (
-                    <button
-                      type="button"
-                      className="btn btn--ghost-danger btn--small"
-                      onClick={props.onRemoveImage}
-                      disabled={disabled}
-                    >
-                      {t("common.remove")}
-                    </button>
-                  ) : null}
-                </div>
+                <PostgresImageUploadActions
+                  hasImage={hasImage}
+                  disabled={disabled}
+                  onImport={props.onImportImage}
+                  onRemove={props.onRemoveImage}
+                />
               ) : null}
               {props.graphicMode === "upload" && hasImage ? (
-                <PostgresObjectTypeUploadGraphicControls
-                  effectiveOutlineColor={effectiveOutlineColor}
-                  outlineColor={props.outlineColor}
+                <PostgresObjectUploadGraphicControls
+                  outlineColor={effectiveOutlineColor}
+                  outlineColorText={props.outlineColor || effectiveOutlineColor}
                   outlineWidth={props.outlineWidth}
-                  onOutlineColorChange={props.setOutlineColor}
-                  onOutlineWidthChange={props.setOutlineWidth}
+                  onOutlineColorChange={(value) => props.setOutlineColor(value)}
+                  onOutlineWidthChange={(value) => props.setOutlineWidth(value)}
                 />
               ) : null}
               {props.graphicMode === "select" ? (
-                <PostgresObjectTypeSelectGraphicControls
+                <PostgresObjectSelectGraphicControls
                   shape={props.shape}
-                  color={props.color}
+                  color={effectiveColor}
+                  colorText={props.color}
                   outlineColor={effectiveOutlineColor}
+                  outlineColorText={props.outlineColor}
                   fill={props.fill}
                   fillTransparency={props.fillTransparency}
                   outlineWidth={props.outlineWidth}
-                  onShapeChange={props.setShape}
-                  onColorChange={props.setColor}
-                  onOutlineColorChange={props.setOutlineColor}
-                  onFillChange={props.setFill}
-                  onFillTransparencyChange={props.setFillTransparency}
-                  onOutlineWidthChange={props.setOutlineWidth}
+                  fillStyleAriaLabel={t("sharedModals.graphics.objectTypeFillStyle")}
+                  onShapeChange={(value) => props.setShape(value)}
+                  onColorChange={(value) => props.setColor(value)}
+                  onOutlineColorChange={(value) => props.setOutlineColor(value)}
+                  onFillChange={(value) => props.setFill(value)}
+                  onFillTransparencyChange={(value) => props.setFillTransparency(value)}
+                  onOutlineWidthChange={(value) => props.setOutlineWidth(value)}
                 />
               ) : null}
             </div>
