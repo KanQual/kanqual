@@ -1091,14 +1091,31 @@ pub async fn start_runtime(
         });
     }
 
+    let startup_log_path = Path::new(&paths.logs_dir).join("postgres-startup.log");
+    let startup_log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&startup_log_path)
+        .map_err(|e| {
+            format!(
+                "Could not open bundled PostgreSQL startup log at {}: {e}",
+                startup_log_path.display()
+            )
+        })?;
+    let startup_stderr = startup_log.try_clone().map_err(|e| {
+        format!(
+            "Could not prepare bundled PostgreSQL startup logging at {}: {e}",
+            startup_log_path.display()
+        )
+    })?;
     let child = Command::new(&paths.postgres_binary)
         .arg("-D")
         .arg(&paths.data_dir)
         .current_dir(&paths.bin_dir)
         .env("PGDATA", &paths.data_dir)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(startup_log))
+        .stderr(Stdio::from(startup_stderr))
         .spawn()
         .map_err(|e| {
             append_runtime_diagnostics_event_best_effort(
@@ -1109,6 +1126,7 @@ pub async fn start_runtime(
                 serde_json::json!({
                     "postgresBinary": paths.postgres_binary,
                     "dataDir": paths.data_dir,
+                    "startupLog": path_string(&startup_log_path),
                     "error": e.to_string(),
                 }),
             );
@@ -1127,6 +1145,35 @@ pub async fn start_runtime(
     )
     .await;
     let next_status = status(app.clone()).await?;
+    let process_exit_code = if ready {
+        None
+    } else {
+        let mut guard = child_slot.lock().unwrap();
+        let exit_code = guard
+            .as_mut()
+            .and_then(|child| child.try_wait().ok().flatten())
+            .and_then(|status| status.code());
+        if exit_code.is_some() {
+            *guard = None;
+        }
+        exit_code
+    };
+    let startup_log_text = if ready {
+        String::new()
+    } else {
+        fs::read_to_string(&startup_log_path)
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    let failure_message = if ready {
+        String::new()
+    } else if startup_log_text.is_empty() {
+        "Bundled PostgreSQL was launched but did not become reachable before the timeout."
+            .to_string()
+    } else {
+        format!("Bundled PostgreSQL failed to start: {startup_log_text}")
+    };
     append_runtime_diagnostics_event_best_effort(
         &app,
         "bundled_postgres.start",
@@ -1138,15 +1185,18 @@ pub async fn start_runtime(
                 "Bundled PostgreSQL started."
             }
         } else {
-            "Bundled PostgreSQL was launched but did not become reachable before the timeout."
+            &failure_message
         },
         serde_json::json!({
             "processId": process_id,
+            "processExitCode": process_exit_code,
             "host": crate::POSTGRES_DEFAULT_HOST,
             "port": crate::POSTGRES_DEFAULT_PORT,
             "reachable": ready,
             "recoveredStalePid": recovered_stale_pid,
             "latestLogPath": next_status.latest_log_path,
+            "startupLog": path_string(&startup_log_path),
+            "startupLogText": startup_log_text,
         }),
     );
     Ok(BundledPostgresRuntimeResult {
@@ -1163,8 +1213,7 @@ pub async fn start_runtime(
                 "Bundled PostgreSQL started.".to_string()
             }
         } else {
-            "Bundled PostgreSQL was launched but did not become reachable before the timeout."
-                .to_string()
+            failure_message
         },
     })
 }

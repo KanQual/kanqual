@@ -9843,10 +9843,10 @@ async fn initialize_bundled_postgres_cluster_command(
 
     let start_result = bundled_postgres::start_runtime(app.clone(), &postgres_process.0).await?;
     if !start_result.status.reachable {
-        return Err(
-            "Bundled PostgreSQL was initialized, but Kanqual could not start the local runtime."
-                .to_string(),
-        );
+        return Err(format!(
+            "Bundled PostgreSQL was initialized, but Kanqual could not start the local runtime. {}",
+            start_result.message
+        ));
     }
 
     identity.host = POSTGRES_DEFAULT_HOST.to_string();
@@ -26127,6 +26127,30 @@ async fn run_packaged_postgres_smoke_test(
         return Err(packaged_smoke_failure(
             phase,
             "The smoke-test user does not have the expected project owner role.".to_string(),
+        ));
+    }
+
+    let phase = "stopping-postgresql";
+    update_packaged_smoke_test_state(
+        &app,
+        phase,
+        "Stopping the temporary bundled PostgreSQL runtime.",
+        false,
+        None,
+        Some(&project.id),
+        Some(&user_email),
+    )
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    let stop_result = bundled_postgres::stop_runtime(
+        app.clone(),
+        &app.state::<BundledPostgresProcess>().0,
+    )
+    .await
+    .map_err(|error| packaged_smoke_failure(phase, error))?;
+    if !stop_result.stopped {
+        return Err(packaged_smoke_failure(
+            phase,
+            "The temporary bundled PostgreSQL runtime did not stop cleanly.".to_string(),
         ));
     }
 

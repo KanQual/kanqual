@@ -64,6 +64,32 @@ async function readJsonIfExists(targetPath) {
   }
 }
 
+async function readTextTail(targetPath, maxLength = 8000) {
+  if (!await pathExists(targetPath)) return "";
+  const text = await fs.readFile(targetPath, "utf8").catch(() => "");
+  return text.length > maxLength ? text.slice(-maxLength) : text;
+}
+
+async function collectRuntimeDiagnostics(dataDir) {
+  const diagnosticsPath = path.join(dataDir, "logs", "runtime-diagnostics.jsonl");
+  const postgresLogsDir = path.join(dataDir, "postgres", "logs");
+  const details = [];
+  const diagnostics = await readTextTail(diagnosticsPath);
+  if (diagnostics.trim()) {
+    details.push(formatOutputTail("Runtime diagnostics", diagnostics));
+  }
+
+  const postgresLogs = await fs.readdir(postgresLogsDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of postgresLogs.filter((candidate) => candidate.isFile())) {
+    const logPath = path.join(postgresLogsDir, entry.name);
+    const logText = await readTextTail(logPath);
+    if (logText.trim()) {
+      details.push(formatOutputTail(`PostgreSQL log (${entry.name})`, logText));
+    }
+  }
+  return details;
+}
+
 async function walk(rootDir) {
   const results = [];
 
@@ -351,6 +377,7 @@ async function main() {
   if (smokeError) {
     const latestState = await readJsonIfExists(smoke.statePath);
     const output = launched.getOutput();
+    const runtimeDiagnostics = await collectRuntimeDiagnostics(smoke.dataDir);
     const details = [
       smokeError instanceof Error ? smokeError.message : String(smokeError),
       `- Mode: ${target.mode}`,
@@ -361,6 +388,7 @@ async function main() {
       `- Full stderr log: ${stderrPath}`,
       formatOutputTail("Recent stdout", output.stdout),
       formatOutputTail("Recent stderr", output.stderr),
+      ...runtimeDiagnostics,
     ];
     throw new Error(details.join("\n"));
   }
