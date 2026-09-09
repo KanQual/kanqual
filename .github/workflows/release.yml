@@ -48,7 +48,7 @@ jobs:
             smoke_packaged_args: ""
             appimage_extract_and_run: "1"
             postgres_runtime_target: "linux-x86_64"
-            bundle_targets: "appimage,deb"
+            bundle_targets: "deb,appimage"
             artifact_glob: "src-tauri/target/release/bundle/**/*"
             runtime_smoke_command: "xvfb-run -a npm run smoke:runtime -- --platform linux --hold-ms 3000 --timeout-ms 150000"
 
@@ -162,6 +162,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # linuxdeploy must be able to resolve libraries shipped inside the
+          # bundled PostgreSQL runtime while it scans packaged ELF files.
+          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/src-tauri/resources/runtime/postgresql-17/lib', github.workspace) || '' }}
         with:
           projectPath: .
           tagName: ${{ github.ref_name }}
@@ -170,7 +173,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
-          args: --bundles ${{ matrix.bundle_targets }}
+          args: --bundles ${{ matrix.bundle_targets }} ${{ runner.os == 'Linux' && '--verbose' || '' }}
 
       - name: Create Windows portable bundle
         if: runner.os == 'Windows'
