@@ -14,7 +14,7 @@ const runtimeRoot = path.join(repoRoot, "src-tauri", "postgres-runtimes");
 const requiredExecutables = ["postgres", "initdb", "pg_ctl", "psql", "pg_dump"];
 const unwantedDirectoryNames = new Set(["doc", "docs", "include", "pgxs", "pkgconfig"]);
 const unwantedFileExtensions = new Set([".a", ".la", ".lib", ".pdb"]);
-const unwantedFileNameFragments = ["pgadmin", "stackbuilder", "plpython"];
+const unwantedFileNameFragments = ["pgadmin", "stackbuilder", "plpython", "uuid-ossp"];
 
 function parseArgs(argv) {
   const args = {
