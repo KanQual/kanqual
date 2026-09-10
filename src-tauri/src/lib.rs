@@ -32778,16 +32778,18 @@ mod tests {
     use super::{
         decrypt_encrypted_backup_payload_text, derive_encrypted_backup_key,
         encrypt_backup_payload_text, extract_transcript_leading_metadata,
-        project_role_allows_embedding_build, EncryptedBackupEnvelope, BASE64_STANDARD,
-        ENCRYPTED_BACKUP_NONCE_BYTES, ENCRYPTED_BACKUP_SALT_BYTES,
+        project_role_allows_embedding_build, uuid_like_token, EncryptedBackupEnvelope,
+        BASE64_STANDARD, ENCRYPTED_BACKUP_NONCE_BYTES, ENCRYPTED_BACKUP_SALT_BYTES,
     };
 
     #[test]
     fn encrypted_backup_key_is_derived_from_password_and_salt() {
-        let salt = b"test-salt-16byte";
-        let key = derive_encrypted_backup_key(b"correct horse battery staple", salt)
+        let salt = rand::random::<[u8; ENCRYPTED_BACKUP_SALT_BYTES]>();
+        let password = uuid_like_token(32);
+        let other_password = uuid_like_token(32);
+        let key = derive_encrypted_backup_key(password.as_bytes(), &salt)
             .expect("backup key derivation should succeed");
-        let other_key = derive_encrypted_backup_key(b"different password", salt)
+        let other_key = derive_encrypted_backup_key(other_password.as_bytes(), &salt)
             .expect("backup key derivation should succeed");
 
         assert_ne!(key, [0_u8; 32]);
@@ -32797,10 +32799,10 @@ mod tests {
     #[test]
     fn encrypted_backups_use_fresh_random_salts_and_nonces() {
         let payload = r#"{"kind":"crypto-regression-test","payload":"same plaintext"}"#;
-        let password = "correct horse battery staple";
-        let first = encrypt_backup_payload_text(payload.to_string(), password.to_string())
+        let password = uuid_like_token(32);
+        let first = encrypt_backup_payload_text(payload.to_string(), password.clone())
             .expect("first backup encryption should succeed");
-        let second = encrypt_backup_payload_text(payload.to_string(), password.to_string())
+        let second = encrypt_backup_payload_text(payload.to_string(), password.clone())
             .expect("second backup encryption should succeed");
         let first_envelope: EncryptedBackupEnvelope =
             serde_json::from_str(&first).expect("first encrypted envelope should be valid JSON");
@@ -32834,7 +32836,7 @@ mod tests {
             second_envelope.ciphertext_b64
         );
 
-        let decrypted = decrypt_encrypted_backup_payload_text(&first, password, None)
+        let decrypted = decrypt_encrypted_backup_payload_text(&first, &password, None)
             .expect("encrypted backup should decrypt with its password");
         assert_eq!(decrypted, payload);
     }
