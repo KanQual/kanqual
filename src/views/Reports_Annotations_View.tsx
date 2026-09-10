@@ -18,6 +18,7 @@ import { useI18n } from "../i18n/provider";
 import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
 import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
 import type { Code, Document as ProjectDocument } from "../types";
+import { richTextHtmlToPlainText as htmlToPlainText, sanitizeRichTextHtml } from "../lib/safeHtml";
 
 const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
 const ANNOTATION_LENGTH_SUBTITLE = "Number of characters";
@@ -145,7 +146,7 @@ export interface ReportSnapshot {
 
 function hasDescriptionContent(html: string | undefined): boolean {
   if (!html) return false;
-  return html.replace(/<[^>]*>/g, "").trim().length > 0;
+  return htmlToPlainText(html).length > 0;
 }
 
 function formatSourceType(value: string | undefined): string {
@@ -254,11 +255,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function htmlToPlainText(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  return doc.body.textContent?.replace(/\s+\n/g, "\n").trim() ?? "";
 }
 
 function quantile(sortedValues: number[], p: number): number {
@@ -671,7 +667,7 @@ function ReportPage({
   // Load frozen description into the editor once it's ready
   useEffect(() => {
     if (isFrozen && editor && frozenDescription && !editor.isDestroyed) {
-      editor.commands.setContent(frozenDescription);
+      editor.commands.setContent(sanitizeRichTextHtml(frozenDescription));
     }
   }, [isFrozen, editor, frozenDescription]);
 
@@ -2002,8 +1998,8 @@ function ReportPage({
   }
 
   function getExportDescriptionHtml(): string {
-    if (isFrozen) return frozenDescription ?? "";
-    const html = editor?.getHTML() ?? "";
+    if (isFrozen) return sanitizeRichTextHtml(frozenDescription ?? "");
+    const html = sanitizeRichTextHtml(editor?.getHTML() ?? "");
     return hasDescriptionContent(html) ? html : "";
   }
 

@@ -25,6 +25,7 @@ import {
   type PostgresSourceObjectVisualKey,
 } from "../lib/postgresGraphics";
 import { usePostgresStoredImageUrl } from "../lib/postgresStoredImages";
+import { sanitizeSvgMarkup } from "../lib/safeHtml";
 
 export type PostgresGraphicModeOption<T extends string> = {
   value: T;
@@ -425,7 +426,7 @@ export function ObjectShapeSwatch(props: {
       ) : (
         <span
           style={{ position: "absolute", inset: 0, display: "block", opacity: selected ? 1 : undefined }}
-          dangerouslySetInnerHTML={{ __html: svgMarkup }}
+          dangerouslySetInnerHTML={{ __html: sanitizeSvgMarkup(svgMarkup) }}
         />
       )}
     </span>

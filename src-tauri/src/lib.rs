@@ -12443,10 +12443,7 @@ async fn list_postgres_experiment_projects_command(
             }
             Ok(None) => {}
             Err(error) => {
-                eprintln!(
-                    "Skipping PostgreSQL project database {} while listing projects for {}: {}",
-                    registry.database_name, session.user.username, error
-                );
+                eprintln!("Skipping a project database while listing visible projects: {error}");
             }
         }
     }
@@ -24459,14 +24456,6 @@ async fn save_postgres_experiment_object_command(
         return Err("Enter an object title.".to_string());
     }
 
-    eprintln!(
-        "[kanqual] save_postgres_experiment_object_command:start object_id={:?} object_type_id={} title={} attribute_values={}",
-        object_id,
-        object_type_id,
-        title,
-        attribute_values.len()
-    );
-
     let project = load_postgres_experiment_project_record(&app, &project_id).await?;
     let session =
         require_postgres_experiment_project_access(&app, Some(&runtime_auth_state), &project)
@@ -24535,18 +24524,9 @@ async fn save_postgres_experiment_object_command(
         event_is_instant,
     )
     .await?;
-    eprintln!(
-        "[kanqual] save_postgres_experiment_object_command:values_saved object_id={} object_type_id={}",
-        resolved_object_id,
-        object_type.id
-    );
     tx.commit()
         .await
         .map_err(|e| format!("Could not commit PostgreSQL experiment object save: {e}"))?;
-    eprintln!(
-        "[kanqual] save_postgres_experiment_object_command:committed object_id={} created={}",
-        resolved_object_id, created
-    );
     let attribute_values_by_object_id =
         load_postgres_experiment_object_attribute_values_for_client(&client).await?;
     let saved = load_postgres_experiment_object_for_client(
@@ -24582,12 +24562,6 @@ async fn save_postgres_experiment_object_command(
         "object",
         &resolved_object_id,
         if created { "created" } else { "updated" },
-    );
-    eprintln!(
-        "[kanqual] save_postgres_experiment_object_command:done object_id={} object_type_id={} attribute_values={}",
-        resolved_object_id,
-        saved.object_type_id,
-        saved.attribute_values.len()
     );
     Ok(saved)
 }
@@ -32799,9 +32773,71 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine as _;
+
     use super::{
-        extract_transcript_leading_metadata, project_role_allows_embedding_build,
+        decrypt_encrypted_backup_payload_text, derive_encrypted_backup_key,
+        encrypt_backup_payload_text, extract_transcript_leading_metadata,
+        project_role_allows_embedding_build, EncryptedBackupEnvelope, BASE64_STANDARD,
+        ENCRYPTED_BACKUP_NONCE_BYTES, ENCRYPTED_BACKUP_SALT_BYTES,
     };
+
+    #[test]
+    fn encrypted_backup_key_is_derived_from_password_and_salt() {
+        let salt = b"test-salt-16byte";
+        let key = derive_encrypted_backup_key(b"correct horse battery staple", salt)
+            .expect("backup key derivation should succeed");
+        let other_key = derive_encrypted_backup_key(b"different password", salt)
+            .expect("backup key derivation should succeed");
+
+        assert_ne!(key, [0_u8; 32]);
+        assert_ne!(key, other_key);
+    }
+
+    #[test]
+    fn encrypted_backups_use_fresh_random_salts_and_nonces() {
+        let payload = r#"{"kind":"crypto-regression-test","payload":"same plaintext"}"#;
+        let password = "correct horse battery staple";
+        let first = encrypt_backup_payload_text(payload.to_string(), password.to_string())
+            .expect("first backup encryption should succeed");
+        let second = encrypt_backup_payload_text(payload.to_string(), password.to_string())
+            .expect("second backup encryption should succeed");
+        let first_envelope: EncryptedBackupEnvelope =
+            serde_json::from_str(&first).expect("first encrypted envelope should be valid JSON");
+        let second_envelope: EncryptedBackupEnvelope =
+            serde_json::from_str(&second).expect("second encrypted envelope should be valid JSON");
+        let first_salt = BASE64_STANDARD
+            .decode(first_envelope.kdf.salt_b64)
+            .expect("first salt should be valid base64");
+        let second_salt = BASE64_STANDARD
+            .decode(second_envelope.kdf.salt_b64)
+            .expect("second salt should be valid base64");
+        let first_nonce = BASE64_STANDARD
+            .decode(first_envelope.nonce_b64)
+            .expect("first nonce should be valid base64");
+        let second_nonce = BASE64_STANDARD
+            .decode(second_envelope.nonce_b64)
+            .expect("second nonce should be valid base64");
+
+        assert_eq!(first_salt.len(), ENCRYPTED_BACKUP_SALT_BYTES);
+        assert_eq!(second_salt.len(), ENCRYPTED_BACKUP_SALT_BYTES);
+        assert_eq!(first_nonce.len(), ENCRYPTED_BACKUP_NONCE_BYTES);
+        assert_eq!(second_nonce.len(), ENCRYPTED_BACKUP_NONCE_BYTES);
+        assert!(first_salt.iter().any(|byte| *byte != 0));
+        assert!(second_salt.iter().any(|byte| *byte != 0));
+        assert!(first_nonce.iter().any(|byte| *byte != 0));
+        assert!(second_nonce.iter().any(|byte| *byte != 0));
+        assert_ne!(first_salt, second_salt);
+        assert_ne!(first_nonce, second_nonce);
+        assert_ne!(
+            first_envelope.ciphertext_b64,
+            second_envelope.ciphertext_b64
+        );
+
+        let decrypted = decrypt_encrypted_backup_payload_text(&first, password, None)
+            .expect("encrypted backup should decrypt with its password");
+        assert_eq!(decrypted, payload);
+    }
 
     #[test]
     fn embedding_build_allows_owner_and_editor_project_roles() {

@@ -26,7 +26,9 @@ function compareRows(a, b) {
 }
 
 function escapeCell(value) {
-  return String(value ?? "").replace(/\|/g, "\\|");
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|");
 }
 
 function toMarkdownTable(headers, rows) {

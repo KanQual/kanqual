@@ -11,7 +11,7 @@ This inventory is generated from:
 
 Generation details:
 
-- Generated at: `2026-09-01T15:36:11.492Z`
+- Generated at: `2026-09-10T17:37:40.506Z`
 - JavaScript scope: `runtime dependencies only`
 - Rust scope: `runtime dependency graph only`
 
@@ -52,47 +52,43 @@ The corresponding license text files included with KanQual releases are kept in 
 | `@napi-rs/canvas-linux-x64-musl` | `1.0.8` | `MIT` |
 | `@napi-rs/canvas-win32-arm64-msvc` | `1.0.8` | `MIT` |
 | `@napi-rs/canvas-win32-x64-msvc` | `1.0.8` | `MIT` |
-| `@tauri-apps/api` | `2.10.1` | `Apache-2.0 OR MIT` |
+| `@tauri-apps/api` | `2.11.1` | `Apache-2.0 OR MIT` |
 | `@tauri-apps/plugin-dialog` | `2.7.0` | `MIT OR Apache-2.0` |
 | `@tauri-apps/plugin-fs` | `2.5.0` | `MIT OR Apache-2.0` |
 | `@tauri-apps/plugin-opener` | `2.5.3` | `MIT OR Apache-2.0` |
-| `@tiptap/core` | `3.22.4` | `MIT` |
-| `@tiptap/extension-blockquote` | `3.22.4` | `MIT` |
-| `@tiptap/extension-bold` | `3.22.4` | `MIT` |
-| `@tiptap/extension-bubble-menu` | `3.22.4` | `MIT` |
-| `@tiptap/extension-bullet-list` | `3.22.4` | `MIT` |
-| `@tiptap/extension-code` | `3.22.4` | `MIT` |
-| `@tiptap/extension-code-block` | `3.22.4` | `MIT` |
-| `@tiptap/extension-color` | `3.22.4` | `MIT` |
-| `@tiptap/extension-document` | `3.22.4` | `MIT` |
-| `@tiptap/extension-dropcursor` | `3.22.4` | `MIT` |
-| `@tiptap/extension-floating-menu` | `3.22.4` | `MIT` |
-| `@tiptap/extension-gapcursor` | `3.22.4` | `MIT` |
-| `@tiptap/extension-hard-break` | `3.22.4` | `MIT` |
-| `@tiptap/extension-heading` | `3.22.4` | `MIT` |
-| `@tiptap/extension-horizontal-rule` | `3.22.4` | `MIT` |
-| `@tiptap/extension-italic` | `3.22.4` | `MIT` |
-| `@tiptap/extension-link` | `3.22.4` | `MIT` |
-| `@tiptap/extension-list` | `3.22.4` | `MIT` |
-| `@tiptap/extension-list-item` | `3.22.4` | `MIT` |
-| `@tiptap/extension-list-keymap` | `3.22.4` | `MIT` |
-| `@tiptap/extension-ordered-list` | `3.22.4` | `MIT` |
-| `@tiptap/extension-paragraph` | `3.22.4` | `MIT` |
-| `@tiptap/extension-strike` | `3.22.4` | `MIT` |
-| `@tiptap/extension-text` | `3.22.4` | `MIT` |
-| `@tiptap/extension-text-align` | `3.22.4` | `MIT` |
-| `@tiptap/extension-text-style` | `3.22.4` | `MIT` |
-| `@tiptap/extension-underline` | `3.22.4` | `MIT` |
-| `@tiptap/extensions` | `3.22.4` | `MIT` |
-| `@tiptap/pm` | `3.22.4` | `MIT` |
-| `@tiptap/react` | `3.22.4` | `MIT` |
-| `@tiptap/starter-kit` | `3.22.4` | `MIT` |
+| `@tiptap/core` | `3.31.3` | `MIT` |
+| `@tiptap/extension-blockquote` | `3.31.3` | `MIT` |
+| `@tiptap/extension-bold` | `3.31.3` | `MIT` |
+| `@tiptap/extension-bubble-menu` | `3.31.3` | `MIT` |
+| `@tiptap/extension-bullet-list` | `3.31.3` | `MIT` |
+| `@tiptap/extension-code` | `3.31.3` | `MIT` |
+| `@tiptap/extension-code-block` | `3.31.3` | `MIT` |
+| `@tiptap/extension-document` | `3.31.3` | `MIT` |
+| `@tiptap/extension-dropcursor` | `3.31.3` | `MIT` |
+| `@tiptap/extension-floating-menu` | `3.31.3` | `MIT` |
+| `@tiptap/extension-gapcursor` | `3.31.3` | `MIT` |
+| `@tiptap/extension-hard-break` | `3.31.3` | `MIT` |
+| `@tiptap/extension-heading` | `3.31.3` | `MIT` |
+| `@tiptap/extension-horizontal-rule` | `3.31.3` | `MIT` |
+| `@tiptap/extension-italic` | `3.31.3` | `MIT` |
+| `@tiptap/extension-link` | `3.31.3` | `MIT` |
+| `@tiptap/extension-list` | `3.31.3` | `MIT` |
+| `@tiptap/extension-list-item` | `3.31.3` | `MIT` |
+| `@tiptap/extension-list-keymap` | `3.31.3` | `MIT` |
+| `@tiptap/extension-ordered-list` | `3.31.3` | `MIT` |
+| `@tiptap/extension-paragraph` | `3.31.3` | `MIT` |
+| `@tiptap/extension-strike` | `3.31.3` | `MIT` |
+| `@tiptap/extension-text` | `3.31.3` | `MIT` |
+| `@tiptap/extension-underline` | `3.31.3` | `MIT` |
+| `@tiptap/extensions` | `3.31.3` | `MIT` |
+| `@tiptap/pm` | `3.31.3` | `MIT` |
+| `@tiptap/react` | `3.31.3` | `MIT` |
+| `@tiptap/starter-kit` | `3.31.3` | `MIT` |
 | `@types/node` | `25.6.0` | `MIT` |
 | `@types/pako` | `2.0.4` | `MIT` |
 | `@types/raf` | `3.4.3` | `MIT` |
 | `@types/trusted-types` | `2.0.7` | `MIT` |
 | `@types/use-sync-external-store` | `0.0.6` | `MIT` |
-| `@xmldom/xmldom` | `0.9.10` | `MIT` |
 | `abort-controller` | `3.0.0` | `MIT` |
 | `archiver-node` | `8.0.8` | `MIT` |
 | `async` | `3.2.6` | `MIT` |
@@ -106,12 +102,10 @@ The corresponding license text files included with KanQual releases are kept in 
 | `bare-url` | `2.4.5` | `Apache-2.0` |
 | `base64-arraybuffer` | `1.0.2` | `MIT` |
 | `base64-js` | `1.5.1` | `MIT` |
-| `bluebird` | `3.7.2` | `MIT` |
 | `brace-expansion` | `5.0.9` | `MIT` |
 | `buffer` | `6.0.3` | `MIT` |
 | `buffer-crc32` | `1.0.0` | `MIT` |
 | `canvg` | `3.0.11` | `MIT` |
-| `ce-la-react` | `0.3.2` | `BSD-3-Clause` |
 | `compress-commons` | `7.0.1` | `MIT` |
 | `core-js` | `3.49.0` | `MIT` |
 | `core-util-is` | `1.0.3` | `MIT` |
@@ -120,10 +114,8 @@ The corresponding license text files included with KanQual releases are kept in 
 | `css-line-break` | `2.1.0` | `MIT` |
 | `cssesc` | `3.0.0` | `MIT` |
 | `cytoscape` | `3.34.0` | `MIT` |
-| `cytoscape-grid-guide` | `2.3.3` | `MIT` |
 | `docx` | `9.6.1` | `MIT` |
 | `dompurify` | `3.4.14` | `(MPL-2.0 OR Apache-2.0)` |
-| `duplexer2` | `0.1.4` | `BSD-3-Clause` |
 | `echarts` | `6.1.0` | `Apache-2.0` |
 | `elkjs` | `0.11.1` | `EPL-2.0` |
 | `event-target-shim` | `5.0.1` | `MIT` |
@@ -132,11 +124,8 @@ The corresponding license text files included with KanQual releases are kept in 
 | `fast-equals` | `5.4.0` | `MIT` |
 | `fast-fifo` | `1.3.2` | `MIT` |
 | `fast-png` | `6.4.0` | `MIT` |
-| `fflate` | `0.8.2` | `MIT` |
+| `fflate` | `0.8.3` | `MIT` |
 | `font-family-papandreou` | `0.2.0-patch2` | `MIT` |
-| `fs-extra` | `11.3.5` | `MIT` |
-| `functional-red-black-tree` | `1.0.1` | `MIT` |
-| `graceful-fs` | `4.2.11` | `ISC` |
 | `hash.js` | `1.1.7` | `MIT` |
 | `html2canvas` | `1.4.1` | `MIT` |
 | `ieee754` | `1.2.1` | `BSD-3-Clause` |
@@ -146,18 +135,15 @@ The corresponding license text files included with KanQual releases are kept in 
 | `iobuffer` | `5.4.0` | `MIT` |
 | `is-stream` | `4.0.1` | `MIT` |
 | `isarray` | `1.0.0` | `MIT` |
-| `jsonfile` | `6.2.1` | `MIT` |
 | `jspdf` | `4.2.1` | `MIT` |
 | `jszip` | `3.10.1` | `(MIT OR GPL-3.0-or-later)` |
 | `lie` | `3.3.0` | `MIT` |
-| `linkifyjs` | `4.3.2` | `MIT` |
+| `linkifyjs` | `4.3.3` | `MIT` |
 | `lucide-react` | `1.39.0` | `ISC` |
-| `media-chrome` | `4.19.2` | `MIT` |
 | `minimalistic-assert` | `1.0.1` | `ISC` |
 | `minimatch` | `10.2.5` | `BlueOak-1.0.0` |
 | `mp4box` | `2.4.1` | `BSD-3-Clause` |
 | `nanoid` | `5.1.16` | `MIT` |
-| `node-int64` | `0.4.0` | `MIT` |
 | `normalize-path` | `3.0.0` | `MIT` |
 | `orderedmap` | `2.1.1` | `MIT` |
 | `pako` | `1.0.11` | `(MIT AND Zlib)` |
@@ -171,17 +157,17 @@ The corresponding license text files included with KanQual releases are kept in 
 | `prosemirror-dropcursor` | `1.8.2` | `MIT` |
 | `prosemirror-gapcursor` | `1.4.1` | `MIT` |
 | `prosemirror-history` | `1.5.0` | `MIT` |
+| `prosemirror-inputrules` | `1.5.1` | `MIT` |
 | `prosemirror-keymap` | `1.2.3` | `MIT` |
-| `prosemirror-model` | `1.25.4` | `MIT` |
+| `prosemirror-model` | `1.25.11` | `MIT` |
 | `prosemirror-schema-list` | `1.5.1` | `MIT` |
 | `prosemirror-state` | `1.4.4` | `MIT` |
 | `prosemirror-tables` | `1.8.5` | `MIT` |
 | `prosemirror-transform` | `1.12.0` | `MIT` |
-| `prosemirror-view` | `1.41.8` | `MIT` |
+| `prosemirror-view` | `1.42.3` | `MIT` |
 | `raf` | `3.4.1` | `MIT` |
 | `react` | `19.2.5` | `MIT` |
 | `react-dom` | `19.2.5` | `MIT` |
-| `read-excel-file` | `9.0.10` | `MIT` |
 | `readable-stream` | `2.3.8` | `MIT` |
 | `readable-stream` | `4.7.0` | `MIT` |
 | `readdir-glob` | `3.0.0` | `Apache-2.0` |
@@ -207,8 +193,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `text-segmentation` | `1.0.3` | `MIT` |
 | `tslib` | `2.3.0` | `0BSD` |
 | `undici-types` | `7.19.2` | `MIT` |
-| `universalify` | `2.0.1` | `MIT` |
-| `unzipper` | `0.12.3` | `MIT` |
 | `use-sync-external-store` | `1.6.0` | `MIT` |
 | `util-deprecate` | `1.0.2` | `MIT` |
 | `utrie` | `1.0.2` | `MIT` |
@@ -265,6 +249,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `blocking` | `1.6.2` | `Apache-2.0 OR MIT` | `` |
 | `brotli` | `8.0.2` | `BSD-3-Clause AND MIT` | `` |
 | `brotli-decompressor` | `5.0.0` | `BSD-3-Clause/MIT` | `` |
+| `bs58` | `0.5.1` | `MIT/Apache-2.0` | `` |
 | `bumpalo` | `3.20.2` | `MIT OR Apache-2.0` | `` |
 | `bytemuck` | `1.25.0` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `bytemuck_derive` | `1.10.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
@@ -289,7 +274,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `combine` | `4.6.7` | `MIT` | `` |
 | `compact_str` | `0.9.0` | `MIT` | `` |
 | `concurrent-queue` | `2.5.0` | `Apache-2.0 OR MIT` | `` |
-| `console` | `0.15.11` | `MIT` | `` |
+| `console` | `0.16.3` | `MIT` | `` |
 | `const-oid` | `0.10.2` | `Apache-2.0 OR MIT` | `` |
 | `convert_case` | `0.4.0` | `MIT` | `` |
 | `cookie` | `0.18.1` | `MIT OR Apache-2.0` | `` |
@@ -310,7 +295,8 @@ The corresponding license text files included with KanQual releases are kept in 
 | `cssparser` | `0.29.6` | `MPL-2.0` | `` |
 | `cssparser` | `0.36.0` | `MPL-2.0` | `` |
 | `cssparser-macros` | `0.6.1` | `MPL-2.0` | `` |
-| `ctor` | `0.2.9` | `Apache-2.0 OR MIT` | `` |
+| `ctor` | `0.8.0` | `Apache-2.0 OR MIT` | `` |
+| `ctor-proc-macro` | `0.0.7` | `Apache-2.0 OR MIT` | `` |
 | `ctr` | `0.9.2` | `MIT OR Apache-2.0` | `` |
 | `ctutils` | `0.4.2` | `Apache-2.0 OR MIT` | `` |
 | `darling` | `0.20.11` | `MIT` | `` |
@@ -320,6 +306,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `darling_macro` | `0.20.11` | `MIT` | `` |
 | `darling_macro` | `0.23.0` | `MIT` | `` |
 | `dary_heap` | `0.3.9` | `MIT OR Apache-2.0` | `` |
+| `dbus` | `0.9.12` | `Apache-2.0/MIT` | `` |
 | `deranged` | `0.5.8` | `MIT OR Apache-2.0` | `` |
 | `derive_builder` | `0.20.2` | `MIT OR Apache-2.0` | `` |
 | `derive_builder_core` | `0.20.2` | `MIT OR Apache-2.0` | `` |
@@ -339,6 +326,8 @@ The corresponding license text files included with KanQual releases are kept in 
 | `dpi` | `0.1.2` | `Apache-2.0 AND MIT` | `` |
 | `dtoa` | `1.0.11` | `MIT OR Apache-2.0` | `` |
 | `dtoa-short` | `0.3.5` | `MPL-2.0` | `` |
+| `dtor` | `0.3.0` | `Apache-2.0 OR MIT` | `` |
+| `dtor-proc-macro` | `0.0.6` | `Apache-2.0 OR MIT` | `` |
 | `dunce` | `1.0.5` | `CC0-1.0 OR MIT-0 OR Apache-2.0` | `` |
 | `dyn-clone` | `1.0.20` | `MIT OR Apache-2.0` | `` |
 | `dyn-stack` | `0.13.2` | `MIT` | `` |
@@ -346,7 +335,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `either` | `1.15.0` | `MIT OR Apache-2.0` | `` |
 | `embed_plist` | `1.2.2` | `MIT OR Apache-2.0` | `` |
 | `encode_unicode` | `1.0.0` | `Apache-2.0 OR MIT` | `` |
-| `encoding_rs` | `0.8.35` | `(Apache-2.0 OR MIT) AND BSD-3-Clause` | `` |
 | `endi` | `1.1.1` | `MIT` | `` |
 | `enum-as-inner` | `0.6.1` | `MIT/Apache-2.0` | `` |
 | `enumflags2` | `0.7.12` | `MIT OR Apache-2.0` | `` |
@@ -447,7 +435,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `idna_adapter` | `1.2.1` | `Apache-2.0 OR MIT` | `` |
 | `indexmap` | `1.9.3` | `Apache-2.0 OR MIT` | `` |
 | `indexmap` | `2.14.0` | `Apache-2.0 OR MIT` | `` |
-| `indicatif` | `0.17.11` | `MIT` | `` |
+| `indicatif` | `0.18.4` | `MIT` | `` |
 | `infer` | `0.19.0` | `MIT` | `` |
 | `inout` | `0.1.4` | `MIT OR Apache-2.0` | `` |
 | `ipnet` | `2.12.0` | `MIT OR Apache-2.0` | `` |
@@ -471,6 +459,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `libappindicator` | `0.9.0` | `Apache-2.0 OR MIT` | `` |
 | `libappindicator-sys` | `0.9.0` | `Apache-2.0 OR MIT` | `` |
 | `libc` | `0.2.185` | `MIT OR Apache-2.0` | `` |
+| `libdbus-sys` | `0.2.7` | `Apache-2.0/MIT` | `` |
 | `libloading` | `0.7.4` | `ISC` | `` |
 | `libm` | `0.2.16` | `MIT` | `` |
 | `libredox` | `0.1.16` | `MIT` | `` |
@@ -496,9 +485,8 @@ The corresponding license text files included with KanQual releases are kept in 
 | `mio` | `1.2.0` | `MIT` | `` |
 | `monostate` | `0.1.18` | `MIT OR Apache-2.0` | `` |
 | `monostate-impl` | `0.1.18` | `MIT OR Apache-2.0` | `` |
-| `muda` | `0.17.2` | `Apache-2.0 OR MIT` | `` |
+| `muda` | `0.19.3` | `Apache-2.0 OR MIT` | `` |
 | `ndk` | `0.9.0` | `MIT OR Apache-2.0` | `` |
-| `ndk-context` | `0.1.1` | `MIT OR Apache-2.0` | `` |
 | `ndk-sys` | `0.6.0+11769913` | `MIT OR Apache-2.0` | `` |
 | `new_debug_unreachable` | `1.0.6` | `MIT` | `` |
 | `nodrop` | `0.1.14` | `MIT/Apache-2.0` | `` |
@@ -509,11 +497,15 @@ The corresponding license text files included with KanQual releases are kept in 
 | `num-complex` | `0.4.6` | `MIT OR Apache-2.0` | `` |
 | `num-conv` | `0.2.1` | `MIT OR Apache-2.0` | `` |
 | `num-traits` | `0.2.19` | `MIT OR Apache-2.0` | `` |
-| `number_prefix` | `0.4.0` | `MIT` | `` |
 | `objc2` | `0.6.4` | `MIT` | `` |
 | `objc2-app-kit` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
+| `objc2-cloud-kit` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
+| `objc2-core-data` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `objc2-core-foundation` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `objc2-core-graphics` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
+| `objc2-core-image` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
+| `objc2-core-location` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
+| `objc2-core-text` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `objc2-encode` | `4.1.0` | `MIT` | `` |
 | `objc2-exception-helper` | `0.1.1` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `objc2-foundation` | `0.3.2` | `MIT` | `` |
@@ -521,6 +513,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `objc2-quartz-core` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `objc2-system-configuration` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `objc2-ui-kit` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
+| `objc2-user-notifications` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `objc2-web-kit` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `once_cell` | `1.21.4` | `MIT OR Apache-2.0` | `` |
 | `onig` | `6.5.3` | `MIT` | `` |
@@ -529,7 +522,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `open` | `5.3.3` | `MIT` | `` |
 | `option-ext` | `0.2.0` | `MPL-2.0` | `` |
 | `ordered-stream` | `0.2.0` | `MIT OR Apache-2.0` | `` |
-| `os_pipe` | `1.2.3` | `MIT` | `` |
 | `pango` | `0.18.3` | `MIT` | `` |
 | `pango-sys` | `0.18.0` | `MIT` | `` |
 | `parking` | `2.2.1` | `Apache-2.0 OR MIT` | `` |
@@ -544,10 +536,8 @@ The corresponding license text files included with KanQual releases are kept in 
 | `phf` | `0.13.1` | `MIT` | `` |
 | `phf` | `0.8.0` | `MIT` | `` |
 | `phf_generator` | `0.10.0` | `MIT` | `` |
-| `phf_generator` | `0.11.3` | `MIT` | `` |
 | `phf_generator` | `0.13.1` | `MIT` | `` |
 | `phf_macros` | `0.10.0` | `MIT` | `` |
-| `phf_macros` | `0.11.3` | `MIT` | `` |
 | `phf_macros` | `0.13.1` | `MIT` | `` |
 | `phf_shared` | `0.10.0` | `MIT` | `` |
 | `phf_shared` | `0.11.3` | `MIT` | `` |
@@ -557,6 +547,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `piper` | `0.2.5` | `MIT OR Apache-2.0` | `` |
 | `plist` | `1.8.0` | `MIT` | `` |
 | `png` | `0.17.16` | `MIT OR Apache-2.0` | `` |
+| `png` | `0.18.1` | `MIT OR Apache-2.0` | `` |
 | `polling` | `3.11.0` | `Apache-2.0 OR MIT` | `` |
 | `polyval` | `0.6.2` | `Apache-2.0 OR MIT` | `` |
 | `portable-atomic` | `1.13.1` | `Apache-2.0 OR MIT` | `` |
@@ -578,13 +569,13 @@ The corresponding license text files included with KanQual releases are kept in 
 | `pulp-wasm-simd-flag` | `0.1.0` | `MIT` | `` |
 | `quick-xml` | `0.38.4` | `MIT` | `` |
 | `quinn` | `0.11.9` | `MIT OR Apache-2.0` | `` |
-| `quinn-proto` | `0.11.14` | `MIT OR Apache-2.0` | `` |
+| `quinn-proto` | `0.11.15` | `MIT OR Apache-2.0` | `` |
 | `quinn-udp` | `0.5.14` | `MIT OR Apache-2.0` | `` |
 | `quote` | `1.0.45` | `MIT OR Apache-2.0` | `` |
 | `r-efi` | `5.3.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | `` |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | `` |
 | `rand` | `0.10.1` | `MIT OR Apache-2.0` | `` |
-| `rand` | `0.8.5` | `MIT OR Apache-2.0` | `` |
+| `rand` | `0.8.8` | `MIT OR Apache-2.0` | `` |
 | `rand` | `0.9.4` | `MIT OR Apache-2.0` | `` |
 | `rand_chacha` | `0.3.1` | `MIT OR Apache-2.0` | `` |
 | `rand_chacha` | `0.9.0` | `MIT OR Apache-2.0` | `` |
@@ -637,8 +628,8 @@ The corresponding license text files included with KanQual releases are kept in 
 | `serde_spanned` | `0.6.9` | `MIT OR Apache-2.0` | `` |
 | `serde_spanned` | `1.1.1` | `MIT OR Apache-2.0` | `` |
 | `serde_urlencoded` | `0.7.1` | `MIT/Apache-2.0` | `` |
-| `serde_with` | `3.18.0` | `MIT OR Apache-2.0` | `` |
-| `serde_with_macros` | `3.18.0` | `MIT OR Apache-2.0` | `` |
+| `serde_with` | `3.21.0` | `MIT OR Apache-2.0` | `` |
+| `serde_with_macros` | `3.21.0` | `MIT OR Apache-2.0` | `` |
 | `serde-untagged` | `0.1.9` | `MIT OR Apache-2.0` | `` |
 | `serialize-to-javascript` | `0.1.2` | `MIT OR Apache-2.0` | `` |
 | `serialize-to-javascript-impl` | `0.1.2` | `MIT OR Apache-2.0` | `` |
@@ -646,9 +637,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `servo_arc` | `0.4.3` | `MIT OR Apache-2.0` | `` |
 | `sha2` | `0.10.9` | `MIT OR Apache-2.0` | `` |
 | `sha2` | `0.11.0` | `MIT OR Apache-2.0` | `` |
-| `shared_child` | `1.1.1` | `MIT` | `` |
-| `sigchld` | `0.2.4` | `MIT` | `` |
-| `signal-hook` | `0.3.18` | `Apache-2.0/MIT` | `` |
 | `signal-hook-registry` | `1.4.8` | `MIT OR Apache-2.0` | `` |
 | `simd-adler32` | `0.3.9` | `MIT` | `` |
 | `siphasher` | `0.3.11` | `MIT/Apache-2.0` | `` |
@@ -673,17 +661,17 @@ The corresponding license text files included with KanQual releases are kept in 
 | `sync_wrapper` | `1.0.2` | `Apache-2.0` | `` |
 | `synstructure` | `0.13.2` | `MIT` | `` |
 | `sysctl` | `0.6.0` | `MIT` | `` |
-| `tao` | `0.34.8` | `Apache-2.0` | `` |
+| `tao` | `0.35.3` | `Apache-2.0` | `` |
 | `tao-macros` | `0.1.3` | `MIT OR Apache-2.0` | `` |
-| `tauri` | `2.10.3` | `Apache-2.0 OR MIT` | `` |
-| `tauri-codegen` | `2.5.5` | `Apache-2.0 OR MIT` | `` |
-| `tauri-macros` | `2.5.5` | `Apache-2.0 OR MIT` | `` |
+| `tauri` | `2.11.1` | `Apache-2.0 OR MIT` | `` |
+| `tauri-codegen` | `2.6.3` | `Apache-2.0 OR MIT` | `` |
+| `tauri-macros` | `2.6.3` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-dialog` | `2.7.0` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-fs` | `2.5.0` | `Apache-2.0 OR MIT` | `` |
 | `tauri-plugin-opener` | `2.5.3` | `Apache-2.0 OR MIT` | `` |
-| `tauri-runtime` | `2.10.1` | `Apache-2.0 OR MIT` | `` |
-| `tauri-runtime-wry` | `2.10.1` | `Apache-2.0 OR MIT` | `` |
-| `tauri-utils` | `2.8.3` | `Apache-2.0 OR MIT` | `` |
+| `tauri-runtime` | `2.11.3` | `Apache-2.0 OR MIT` | `` |
+| `tauri-runtime-wry` | `2.11.4` | `Apache-2.0 OR MIT` | `` |
+| `tauri-utils` | `2.9.3` | `Apache-2.0 OR MIT` | `` |
 | `tempfile` | `3.27.0` | `MIT OR Apache-2.0` | `` |
 | `tendril` | `0.4.3` | `MIT/Apache-2.0` | `` |
 | `tendril` | `0.5.0` | `MIT OR Apache-2.0` | `` |
@@ -697,7 +685,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `tinystr` | `0.8.3` | `Unicode-3.0` | `` |
 | `tinyvec` | `1.11.0` | `Zlib OR Apache-2.0 OR MIT` | `` |
 | `tinyvec_macros` | `0.1.1` | `MIT OR Apache-2.0 OR Zlib` | `` |
-| `tokenizers` | `0.21.4` | `Apache-2.0` | `` |
 | `tokenizers` | `0.22.2` | `Apache-2.0` | `` |
 | `tokio` | `1.52.0` | `MIT` | `` |
 | `tokio-postgres` | `0.7.18` | `MIT OR Apache-2.0` | `` |
@@ -719,7 +706,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `tracing` | `0.1.44` | `MIT` | `` |
 | `tracing-attributes` | `0.1.31` | `MIT` | `` |
 | `tracing-core` | `0.1.36` | `MIT` | `` |
-| `tray-icon` | `0.21.3` | `MIT OR Apache-2.0` | `` |
+| `tray-icon` | `0.23.1` | `MIT OR Apache-2.0` | `` |
 | `try-lock` | `0.2.5` | `MIT` | `` |
 | `typed-path` | `0.12.3` | `MIT OR Apache-2.0` | `` |
 | `typeid` | `1.0.3` | `MIT OR Apache-2.0` | `` |
@@ -739,6 +726,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `unicode-segmentation` | `1.13.2` | `MIT OR Apache-2.0` | `` |
 | `unicode-width` | `0.2.2` | `MIT OR Apache-2.0` | `` |
 | `unicode-xid` | `0.2.6` | `MIT OR Apache-2.0` | `` |
+| `unit-prefix` | `0.5.2` | `MIT` | `` |
 | `universal-hash` | `0.5.1` | `MIT OR Apache-2.0` | `` |
 | `untrusted` | `0.9.0` | `ISC` | `` |
 | `url` | `2.5.8` | `MIT OR Apache-2.0` | `` |
@@ -803,7 +791,6 @@ The corresponding license text files included with KanQual releases are kept in 
 | `windows_x86_64_msvc` | `0.53.1` | `MIT OR Apache-2.0` | `` |
 | `windows-collections` | `0.2.0` | `MIT OR Apache-2.0` | `` |
 | `windows-core` | `0.61.2` | `MIT OR Apache-2.0` | `` |
-| `windows-core` | `0.62.2` | `MIT OR Apache-2.0` | `` |
 | `windows-future` | `0.2.1` | `MIT OR Apache-2.0` | `` |
 | `windows-implement` | `0.60.2` | `MIT OR Apache-2.0` | `` |
 | `windows-interface` | `0.59.3` | `MIT OR Apache-2.0` | `` |
@@ -811,9 +798,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `windows-link` | `0.2.1` | `MIT OR Apache-2.0` | `` |
 | `windows-numerics` | `0.2.0` | `MIT OR Apache-2.0` | `` |
 | `windows-result` | `0.3.4` | `MIT OR Apache-2.0` | `` |
-| `windows-result` | `0.4.1` | `MIT OR Apache-2.0` | `` |
 | `windows-strings` | `0.4.2` | `MIT OR Apache-2.0` | `` |
-| `windows-strings` | `0.5.1` | `MIT OR Apache-2.0` | `` |
 | `windows-sys` | `0.45.0` | `MIT OR Apache-2.0` | `` |
 | `windows-sys` | `0.52.0` | `MIT OR Apache-2.0` | `` |
 | `windows-sys` | `0.59.0` | `MIT OR Apache-2.0` | `` |
@@ -834,7 +819,7 @@ The corresponding license text files included with KanQual releases are kept in 
 | `wit-component` | `0.244.0` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `wit-parser` | `0.244.0` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | `` |
 | `writeable` | `0.6.3` | `Unicode-3.0` | `` |
-| `wry` | `0.54.4` | `Apache-2.0 OR MIT` | `` |
+| `wry` | `0.55.1` | `Apache-2.0 OR MIT` | `` |
 | `x11` | `2.21.0` | `MIT` | `` |
 | `x11-dl` | `2.21.0` | `MIT` | `` |
 | `yoke` | `0.8.2` | `Unicode-3.0` | `` |

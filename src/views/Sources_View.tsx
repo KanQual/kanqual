@@ -38,6 +38,7 @@ import { useI18n } from "../i18n/provider";
 import { readAppSettings } from "../lib/appSettings";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
 import { createMediaWaveformCache, serializeMediaWaveformCache } from "../lib/mediaWaveform";
+import { richTextHtmlToPlainText, sanitizeRichTextHtml } from "../lib/safeHtml";
 import { createMediaVideoFrameIndexCache, serializeMediaVideoFrameIndexCache } from "../lib/mediaVideoFrameIndex";
 import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import {
@@ -916,18 +917,11 @@ function extractWordXmlText(xml: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xml, "application/xml");
   if (doc.getElementsByTagName("parsererror").length > 0) {
-    return xml
+    return richTextHtmlToPlainText(xml
       .replace(/<w:tab[^>]*\/>/g, "\t")
       .replace(/<w:br[^>]*\/>/g, "\n")
       .replace(/<w:cr[^>]*\/>/g, "\n")
-      .replace(/<\/w:p>/g, "\n")
-      .replace(/<[^>]+>/g, "")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/ {2,}/g, " ")
-      .trim();
+      .replace(/<\/w:p>/g, "\n"));
   }
 
   const wordNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -1587,7 +1581,7 @@ function RichTextEditor({
   minRows?: number;
 }) {
   useEffect(() => {
-    if (editorRef.current) editorRef.current.innerHTML = initialHtml;
+    if (editorRef.current) editorRef.current.innerHTML = sanitizeRichTextHtml(initialHtml);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1603,6 +1597,13 @@ function RichTextEditor({
         contentEditable
         suppressContentEditableWarning
         onInput={onChange}
+        onPaste={(event) => {
+          const clipboardHtml = event.clipboardData.getData("text/html");
+          if (!clipboardHtml) return;
+          event.preventDefault();
+          document.execCommand("insertHTML", false, sanitizeRichTextHtml(clipboardHtml));
+          onChange?.();
+        }}
         style={contentStyle}
       />
     </div>
@@ -2093,7 +2094,7 @@ export function SourceImportModal({
             disabled={saving || !canSubmit}
             onClick={() => {
               if (mode === "paste") {
-                const rawContent = pastedRef.current?.innerHTML ?? "";
+                const rawContent = sanitizeRichTextHtml(pastedRef.current?.innerHTML ?? "");
                 const content = importSettings.trimImportedText ? rawContent.trim() : rawContent;
                 void onSave({
                   mode,
@@ -3435,7 +3436,7 @@ function PostgresSourceDetail({
           <div className="case-card">
             <h3 className="case-card-title">{t("projectDocuments.detail.description")}</h3>
             {row.notes ? (
-              <div className="case-notes-body" dangerouslySetInnerHTML={{ __html: row.notes }} />
+              <div className="case-notes-body" style={{ whiteSpace: "pre-wrap" }}>{row.notes}</div>
             ) : (
               <p className="case-card-empty">{t("projectDocuments.detail.noDescription")}</p>
             )}

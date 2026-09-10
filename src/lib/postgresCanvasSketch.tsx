@@ -12,10 +12,11 @@ import {
   type PostgresObjectFill,
   type PostgresRelationshipLineShape,
 } from "./postgresGraphics";
+import { richTextHtmlToPlainText, sanitizeRichTextHtml } from "./safeHtml";
 
 export function normalizeCanvasSvgTextHtml(html: string): string {
-  const trimmed = html.trim();
-  return trimmed ? html : "<div>Text</div>";
+  const sanitized = sanitizeRichTextHtml(html).trim();
+  return sanitized || "<div>Text</div>";
 }
 
 export function escapeSvgText(value: string): string {
@@ -49,16 +50,7 @@ export function formatCanvasSketchShapeLabel(shape: PostgresCanvasDisplayShape):
 }
 
 export function stripCanvasRichText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(div|p|li|h1|h2|h3|h4|h5|h6)>/gi, "\n")
-    .replace(/<li>/gi, "* ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .trim();
+  return richTextHtmlToPlainText(html);
 }
 
 export function renderCanvasTextForeignObjectSvg(

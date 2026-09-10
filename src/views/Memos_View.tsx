@@ -24,6 +24,7 @@ import { HelpModal } from "../components/HelpModal";
 import { TableMessageRow, TableShell } from "../components/TableShell";
 import { ViewHeader } from "../components/ViewHeader";
 import { orderedCodesWithDepth } from "./Source_Coding_Shared";
+import { sanitizeRichTextHtml } from "../lib/safeHtml";
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
@@ -317,7 +318,7 @@ function draftFromMemo(memo: PostgresMemo): MemoEditorDraft {
   return {
     memoId: memo.id,
     title: memo.title,
-    body: memo.body,
+    body: sanitizeRichTextHtml(memo.body),
     sourceIds: new Set(memo.sourceIds),
     annotationIds: new Set(memo.annotationIds),
     codeIds: new Set(memo.codeIds),
@@ -352,7 +353,7 @@ function MemoRichTextEditor({
 
   useEffect(() => {
     if (!loadedInitialHtmlRef.current && editorRef.current) {
-      editorRef.current.innerHTML = initialHtml;
+      editorRef.current.innerHTML = sanitizeRichTextHtml(initialHtml);
       loadedInitialHtmlRef.current = true;
     }
   }, [initialHtml]);
@@ -360,7 +361,7 @@ function MemoRichTextEditor({
   function runCommand(command: string) {
     editorRef.current?.focus();
     document.execCommand(command, false);
-    onChange(editorRef.current?.innerHTML ?? "");
+    onChange(sanitizeRichTextHtml(editorRef.current?.innerHTML ?? ""));
   }
 
   return (
@@ -386,7 +387,14 @@ function MemoRichTextEditor({
         className="rte-content"
         contentEditable
         suppressContentEditableWarning
-        onInput={() => onChange(editorRef.current?.innerHTML ?? "")}
+        onInput={() => onChange(sanitizeRichTextHtml(editorRef.current?.innerHTML ?? ""))}
+        onPaste={(event) => {
+          const clipboardHtml = event.clipboardData.getData("text/html");
+          if (!clipboardHtml) return;
+          event.preventDefault();
+          document.execCommand("insertHTML", false, sanitizeRichTextHtml(clipboardHtml));
+          onChange(sanitizeRichTextHtml(editorRef.current?.innerHTML ?? ""));
+        }}
       />
     </div>
   );
@@ -526,7 +534,7 @@ export function MemosView({
       const payload = {
         projectId,
         title,
-        body: editorDraft.body,
+        body: sanitizeRichTextHtml(editorDraft.body),
         sourceIds: [...editorDraft.sourceIds],
         annotationIds: [...editorDraft.annotationIds],
         codeIds: [...editorDraft.codeIds],

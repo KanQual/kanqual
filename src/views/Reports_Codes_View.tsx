@@ -18,6 +18,7 @@ import { useI18n } from "../i18n/provider";
 import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
 import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
 import { getFloatingTooltipStyle } from "./Source_Coding_Shared";
+import { richTextHtmlToPlainText as htmlToPlainText, sanitizeRichTextHtml } from "../lib/safeHtml";
 
 const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
 
@@ -248,7 +249,7 @@ function formatObjectType(value: string | undefined): string {
 
 function hasDescriptionContent(html: string | undefined): boolean {
   if (!html) return false;
-  return html.replace(/<[^>]*>/g, "").trim().length > 0;
+  return htmlToPlainText(html).length > 0;
 }
 
 function escapeHtml(value: string): string {
@@ -258,11 +259,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function htmlToPlainText(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  return doc.body.textContent?.replace(/\s+\n/g, "\n").trim() ?? "";
 }
 
 function parseNumericValue(value: string | undefined): number | null {
@@ -1555,7 +1551,7 @@ function CodeReportCreationPage({
     extensions: [StarterKit],
     editorProps: { attributes: { class: "report-description-editor" } },
     editable: !isFrozen,
-    content: frozenSnapshot?.description ?? "",
+    content: sanitizeRichTextHtml(frozenSnapshot?.description ?? ""),
   });
   const documents = frozenSnapshot?.documents ?? postgresDocuments ?? [];
   const codes = frozenSnapshot?.codes ?? postgresCodes ?? [];
@@ -2855,7 +2851,7 @@ function CodeReportCreationPage({
 
   function currentDescriptionHtml(): string | undefined {
     if (!showDescription) return undefined;
-    const html = descriptionEditor?.getHTML() ?? frozenSnapshot?.description ?? "";
+    const html = sanitizeRichTextHtml(descriptionEditor?.getHTML() ?? frozenSnapshot?.description ?? "");
     return hasDescriptionContent(html) ? html : undefined;
   }
 
