@@ -1,9 +1,10 @@
+use crate::background_process;
 use serde::Serialize;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
@@ -297,7 +298,7 @@ fn read_postmaster_pid(paths: &BundledPostgresPaths) -> Option<u32> {
 
 #[cfg(windows)]
 fn process_is_running(pid: u32) -> Option<bool> {
-    let output = Command::new("tasklist")
+    let output = background_process::command("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .output()
         .ok()?;
@@ -314,7 +315,7 @@ fn process_is_running(pid: u32) -> Option<bool> {
 
 #[cfg(unix)]
 fn process_is_running(pid: u32) -> Option<bool> {
-    let status = Command::new("kill")
+    let status = background_process::command("kill")
         .args(["-0", &pid.to_string()])
         .status()
         .ok()?;
@@ -328,7 +329,7 @@ fn process_is_running(_pid: u32) -> Option<bool> {
 
 #[cfg(windows)]
 fn process_diagnostic(pid: u32) -> serde_json::Value {
-    let output = Command::new("tasklist")
+    let output = background_process::command("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/V", "/FO", "CSV", "/NH"])
         .output();
     match output {
@@ -347,7 +348,7 @@ fn process_diagnostic(pid: u32) -> serde_json::Value {
 
 #[cfg(unix)]
 fn process_diagnostic(pid: u32) -> serde_json::Value {
-    let output = Command::new("ps")
+    let output = background_process::command("ps")
         .args(["-p", &pid.to_string(), "-o", "pid=,ppid=,comm=,args="])
         .output();
     match output {
@@ -904,7 +905,7 @@ pub async fn initialize_cluster(
         })?;
     }
 
-    let output = Command::new(&paths.initdb_binary)
+    let output = background_process::command(&paths.initdb_binary)
         .args([
             "-D",
             &paths.data_dir,
@@ -1108,7 +1109,7 @@ pub async fn start_runtime(
             startup_log_path.display()
         )
     })?;
-    let child = Command::new(&paths.postgres_binary)
+    let child = background_process::command(&paths.postgres_binary)
         .arg("-D")
         .arg(&paths.data_dir)
         .current_dir(&paths.bin_dir)
@@ -1231,7 +1232,7 @@ pub async fn stop_runtime(
         }
     }
 
-    let pg_ctl_status = Command::new(&paths.pg_ctl_binary)
+    let pg_ctl_status = background_process::command(&paths.pg_ctl_binary)
         .args(["-D", &paths.data_dir, "-m", "fast", "-w", "stop"])
         .current_dir(&paths.bin_dir)
         .stdin(Stdio::null())
@@ -1312,7 +1313,7 @@ pub fn kill_managed_process(child_slot: &std::sync::Mutex<Option<Child>>) {
 pub fn shutdown_runtime_sync(app: &tauri::AppHandle, child_slot: &std::sync::Mutex<Option<Child>>) {
     if let Ok(paths) = resolve_paths(app) {
         if Path::new(&paths.pg_ctl_binary).is_file() && Path::new(&paths.data_dir).exists() {
-            let _ = Command::new(&paths.pg_ctl_binary)
+            let _ = background_process::command(&paths.pg_ctl_binary)
                 .args(["-D", &paths.data_dir, "-m", "fast", "-w", "stop"])
                 .current_dir(&paths.bin_dir)
                 .stdin(Stdio::null())

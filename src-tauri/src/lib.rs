@@ -19,7 +19,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -32,6 +32,7 @@ use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use tokio_postgres::{error::SqlState, Config as PgConfig, GenericClient, NoTls};
 use zeroize::Zeroizing;
 
+mod background_process;
 mod bundled_postgres;
 
 const POSTGRES_BOOTSTRAP_IDENTITY_FILE: &str = "postgres_bootstrap_identity.json";
@@ -1297,7 +1298,7 @@ fn run_psql_command_with_binary(
     database: &str,
     sql: &str,
 ) -> Result<String, String> {
-    let output = Command::new(psql_path)
+    let output = background_process::command(psql_path)
         .env("PGPASSWORD", password)
         .args([
             "-v",
@@ -26569,7 +26570,7 @@ fn run_pg_dump_command(
     password: &str,
     database: &str,
 ) -> Result<String, String> {
-    let output = Command::new(pg_dump_path)
+    let output = background_process::command(pg_dump_path)
         .env("PGPASSWORD", password)
         .args([
             "-h",
@@ -26605,7 +26606,7 @@ fn run_psql_script_with_binary(
     database: &str,
     sql: &str,
 ) -> Result<(), String> {
-    let mut child = Command::new(psql_path)
+    let mut child = background_process::command(psql_path)
         .env("PGPASSWORD", password)
         .args([
             "-v",
