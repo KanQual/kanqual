@@ -39,6 +39,12 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Fetch bundled PostgreSQL runtime
+        run: npm run fetch:bundled-postgres -- --target windows-x86_64
+
+      - name: Validate bundled PostgreSQL runtime staging
+        run: npm run prepare:bundled-postgres:strict
+
       - name: Run native tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
