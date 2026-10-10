@@ -381,6 +381,7 @@ export function ProjectHomeGraphView({
     fill: "filled" | "outline";
     outlineWidth: number;
     sourceImage?: string;
+    sourceImagePath?: string;
     sourceImageWidth?: number;
     sourceImageHeight?: number;
     sourceSilhouettePolygon?: string;

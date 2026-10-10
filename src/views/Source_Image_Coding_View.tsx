@@ -1,3 +1,5 @@
+import { openOriginalImage, useImageRevision } from "../lib/imagePreviews";
+import { releaseMediaUrl } from "../lib/mediaStream";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -258,6 +260,7 @@ export function SourceImageCodingView({
   const [draftRect, setDraftRect] = useState<DraftRect | null>(null);
   const [interactionState, setInteractionState] = useState<InteractionState | null>(null);
   const [previewRegions, setPreviewRegions] = useState<Record<string, NonNullable<SourceAnnotationRow["imageRegion"]>>>({});
+  const imageRevision = useImageRevision();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [pdfPagePreviewUrls, setPdfPagePreviewUrls] = useState<Record<number, string>>({});
   const [pdfPageCount, setPdfPageCount] = useState(0);
@@ -421,7 +424,7 @@ export function SourceImageCodingView({
     setSelectedPdfPage(initialSelectedPdfPage);
     setPdfPageCount(0);
     setPdfPagePreviewUrls((current) => {
-      Object.values(current).forEach((url) => URL.revokeObjectURL(url));
+      Object.values(current).forEach((url) => releaseMediaUrl(url));
       return {};
     });
   }, [initialSelectedPdfPage, row.id]);
@@ -431,7 +434,7 @@ export function SourceImageCodingView({
       setImagePreviewLoading(false);
       setImagePreviewError(null);
       setImagePreviewUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       return;
@@ -472,11 +475,11 @@ export function SourceImageCodingView({
           setSelectedPdfPage(safePage);
           setPdfPagePreviewUrls((current) => {
             const existing = current[safePage];
-            if (existing) URL.revokeObjectURL(existing);
+            if (existing) releaseMediaUrl(existing);
             return { ...current, [safePage]: objectUrl as string };
           });
           setImagePreviewUrl((current) => {
-            if (current && !isPdfSource) URL.revokeObjectURL(current);
+            if (current && !isPdfSource) releaseMediaUrl(current);
             return objectUrl;
           });
         })
@@ -494,12 +497,12 @@ export function SourceImageCodingView({
       };
     }
 
-    void readTauriFile(resolvedFilePath)
-      .then((bytes) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes]));
+    void openOriginalImage(resolvedFilePath)
+      .then((url) => {
+        if (cancelled) { releaseMediaUrl(url); return; }
+        objectUrl = url;
         setImagePreviewUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
       })
@@ -507,7 +510,7 @@ export function SourceImageCodingView({
         if (cancelled) return;
         setImagePreviewError(loadError instanceof Error ? loadError.message : "Failed to load image preview.");
         setImagePreviewUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
       })
@@ -517,9 +520,9 @@ export function SourceImageCodingView({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
-  }, [isImageSource, isPdfSource, resolvedFilePath, selectedPdfPage, t]);
+  }, [isImageSource, isPdfSource, resolvedFilePath, selectedPdfPage, t, imageRevision]);
 
   useEffect(() => {
     const imageElement = imageRef.current;

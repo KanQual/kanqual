@@ -21,7 +21,7 @@ import type {
   PostgresRelationship,
   PostgresRelationshipAttributeDefinition,
   PostgresRelationshipType,
-  PostgresSource,
+  PostgresSourceSummary,
   PostgresSourceAttributeDefinition,
   PostgresSourceTypeSetting,
   PostgresSourceAttributeValue,
@@ -1094,7 +1094,7 @@ export function ProjectHomeTimelineView({
   onReorderTimelineGroupRows,
   onSetTimelineItemGroup,
 }: {
-  sources: PostgresSource[];
+  sources: PostgresSourceSummary[];
   sourceTypeSettings: PostgresSourceTypeSetting[];
   sourceAttributeDefinitions: PostgresSourceAttributeDefinition[];
   sourceAttributeValues: PostgresSourceAttributeValue[];

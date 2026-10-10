@@ -19,6 +19,7 @@ export type ProjectExportData = {
   project: Record<string, unknown>;
   tables: ExportTable[];
   assets: ProjectExportAsset[];
+  postgresTables?: ExportTable[];
 };
 
 export type ProjectBackupReason = "automatic" | "manual" | "session";
@@ -804,6 +805,7 @@ export function makeRefiQdaProject(data: ProjectExportData): Uint8Array {
   const projectStorageAssets = data.assets.filter((asset) => asset.collection === "project_storage_files");
   const files = [
     { path: uniqueZipPath("project.qde", usedPaths), content: makeRefiProjectXml(data) },
+    { path: uniqueZipPath("kanqual-project.json", usedPaths), content: makeProjectBackupJson(data) },
     ...documents.map((doc) => ({
       path: uniqueZipPath(`Sources/${safeSourceFileName(String(doc.name || "source"), doc.id)}`, usedPaths),
       content: String(doc.content ?? ""),

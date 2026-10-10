@@ -8,6 +8,7 @@ import { GettingStartedGuideCallout } from "../components/GettingStartedGuideCal
 import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
+import { ProjectImportModal } from "../components/ProjectImportModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpModal } from "../components/HelpModal";
 import { SettingsOverviewCard, SettingsOverviewSection } from "../components/SettingsOverviewCard";
@@ -136,6 +137,7 @@ type AppSettingsModalId =
   | "permissions"
   | "gettingStarted"
   | "addProject"
+  | "importProject"
   | "manageProjects"
   | "addUser"
   | "manageUsers"
@@ -847,6 +849,13 @@ export function AdminSettingsView({
       tone: "admin" as const,
     },
     {
+      id: "importProject",
+      title: t("projectImport.title"),
+      description: t("projectImport.cardDescription"),
+      icon: <DownloadIcon />,
+      tone: "admin" as const,
+    },
+    {
       id: "manageProjects",
       title: t("adminSettings.cards.manageProjects.title"),
       description: t("adminSettings.cards.manageProjects.description"),
@@ -883,7 +892,7 @@ export function AdminSettingsView({
     {
       id: "projects",
       sectionHeading: t("adminSettings.overviewSections.projects"),
-      cardIds: ["addProject", "manageProjects"],
+      cardIds: ["addProject", "importProject", "manageProjects"],
     },
     {
       id: "features",
@@ -4834,6 +4843,18 @@ export function AdminSettingsView({
               <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
             </div>
         </SettingsModal>
+      ) : null}
+
+      {activeModal === "importProject" && authSession.authKind === "postgres_admin" ? (
+        <ProjectImportModal
+          onClose={() => setActiveModal(null)}
+          onImported={(project) => {
+            setProjects((current) => [...current.filter((item) => item.id !== project.id), project]
+              .sort((a, b) => a.name.localeCompare(b.name)));
+            setNotice(t("projectImport.success", { name: project.name }));
+            setActiveModal(null);
+          }}
+        />
       ) : null}
 
       {activeModal === "addProject" ? (

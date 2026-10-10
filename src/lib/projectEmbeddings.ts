@@ -1,7 +1,7 @@
 import { readAppSettings, type LlmSettings } from "./appSettings";
 import { htmlToPlainText } from "./htmlText";
 import {
-  loadPostgresProjectWorkspaceSnapshot,
+  loadPostgresProjectWorkspaceWithSourceDetails,
   type PostgresProjectWorkspaceSnapshot,
 } from "./postgresProjectWorkspace";
 
@@ -653,6 +653,6 @@ export async function buildPostgresProjectEmbeddingSourcesForProject(
   projectId: string,
   llmSettings: LlmSettings = readAppSettings().llm,
 ): Promise<ProjectEmbeddingBuildSource[]> {
-  const snapshot = await loadPostgresProjectWorkspaceSnapshot(projectId);
+  const snapshot = await loadPostgresProjectWorkspaceWithSourceDetails(projectId);
   return buildPostgresProjectEmbeddingSources(snapshot, llmSettings);
 }

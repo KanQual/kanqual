@@ -1,0 +1,18 @@
+import {build} from 'esbuild';
+import {mkdir, mkdtemp} from 'node:fs/promises';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+import assert from 'node:assert/strict';
+await mkdir('.tmp',{recursive:true});
+const dir=await mkdtemp(path.resolve('.tmp/list-cache-test-'));
+const outfile=path.join(dir,'cache.mjs');
+await build({entryPoints:['src/lib/listVisitCache.tsx'],bundle:true,platform:'node',format:'esm',outfile,external:['react','react/jsx-runtime'],logLevel:'silent'});
+const {ListVisitCache}=await import(pathToFileURL(outfile));
+const cache=new ListVisitCache(80,2,10);
+cache.write('a','aa');cache.write('b','bb');assert.equal(cache.read('a'),'aa');cache.write('c','cc');assert.equal(cache.read('b'),undefined);
+cache.write('huge','x'.repeat(100));assert.equal(cache.read('huge'),undefined);
+const revision=cache.revision;cache.clear();cache.write('late','old',revision);assert.equal(cache.read('late'),undefined);
+cache.remember('filter','text');cache.clear();assert.equal(cache.preference('filter'),'text');
+cache.write('expires','yes');await new Promise(resolve=>setTimeout(resolve,20));assert.equal(cache.read('expires'),undefined);
+assert.equal(new ListVisitCache().read('a'),undefined);
+console.log('List cache: entry/byte limits, LRU eviction, expiry, invalidation, late-write rejection, preferences and session isolation passed');

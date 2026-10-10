@@ -1,9 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useListPreference } from "../lib/listVisitCache";
+import { TablePagination } from "../components/TablePagination";
+import { usePostgresTablePage } from "../lib/usePostgresTablePage";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import {
-  POSTGRES_PROJECT_CHANGED_EVENT,
-  listPostgresReports,
-  type PostgresProjectChangeEvent,
   type PostgresReport,
 } from "../lib/postgres";
 import { formatCurrentDateTime } from "../i18n/formatters";
@@ -241,11 +240,12 @@ export function ReportsView({ projectId, projectStoragePath }: ReportsViewProps)
   const { t } = useI18n();
   const [activeBuilder, setActiveBuilder] = useState<ActiveReportBuilder | null>(null);
   const [showNewReportModal, setShowNewReportModal] = useState(false);
-  const [selectedReportTypeFilter, setSelectedReportTypeFilter] = useState<ReportTypeFilter>("all");
+  const [selectedReportTypeFilter, setSelectedReportTypeFilter] = useListPreference<ReportTypeFilter>(JSON.stringify([projectId, "Reports_View.tsx", "selectedReportTypeFilter"]), "all");
   const [reportTypeSortCol, setReportTypeSortCol] = useState<ReportTypeSortCol>("type");
   const [reportTypeSortDir, setReportTypeSortDir] = useState<"asc" | "desc">("asc");
-  const [reports, setReports] = useState<PostgresReport[]>([]);
-  const [loadingReports, setLoadingReports] = useState(false);
+  const reportPage = usePostgresTablePage<PostgresReport>(projectId, { entity: "reports", kind: selectedReportTypeFilter === "all" ? "" : selectedReportTypeFilter, sort: "updatedAt", descending: true });
+  const reports = reportPage.rows;
+  const loadingReports = reportPage.loading;
   const [reportError, setReportError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const reportTypes = useMemo<ReportTypeOption[]>(() => [
@@ -307,47 +307,10 @@ export function ReportsView({ projectId, projectStoragePath }: ReportsViewProps)
     },
   ], [t]);
 
-  const loadReports = useCallback(async () => {
-    setLoadingReports(true);
-    setReportError(null);
-    try {
-      const nextReports = await listPostgresReports(projectId);
-      setReports(nextReports);
-    } catch (error) {
-      setReportError(error instanceof Error ? error.message : t("reportsLanding.unableToLoadReports"));
-    } finally {
-      setLoadingReports(false);
-    }
-  }, [projectId, t]);
-
-  useEffect(() => {
-    void loadReports();
-  }, [loadReports]);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    async function subscribe() {
-      unlisten = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
-        if (disposed) return;
-        if (event.payload.projectId !== projectId) return;
-        if (event.payload.entityType !== "report") return;
-        void loadReports();
-      });
-    }
-
-    void subscribe();
-    return () => {
-      disposed = true;
-      if (unlisten) unlisten();
-    };
-  }, [loadReports, projectId]);
-
   const reportTypeSummaries = useMemo(
     () => reportTypes.map((type) => ({
       ...type,
-      count: reports.filter((report) => getReportFilterType(report) === type.id).length,
+      count: reportPage.counts[type.id] ?? 0,
     })).sort((left, right) => {
       let comparison = 0;
       if (reportTypeSortCol === "count") {
@@ -360,7 +323,7 @@ export function ReportsView({ projectId, projectStoragePath }: ReportsViewProps)
       }
       return reportTypeSortDir === "asc" ? comparison : -comparison;
     }),
-    [reportTypeSortCol, reportTypeSortDir, reportTypes, reports],
+    [reportTypeSortCol, reportTypeSortDir, reportTypes, reportPage.counts],
   );
 
   function handleReportTypeSort(column: ReportTypeSortCol) {
@@ -372,19 +335,7 @@ export function ReportsView({ projectId, projectStoragePath }: ReportsViewProps)
     setReportTypeSortDir("asc");
   }
 
-  const filteredReports = useMemo(
-    () => (
-      selectedReportTypeFilter === "all"
-        ? reports
-        : reports.filter((report) => getReportFilterType(report) === selectedReportTypeFilter)
-    ),
-    [reports, selectedReportTypeFilter],
-  );
-
-  const sortedReports = useMemo(
-    () => [...filteredReports].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [filteredReports],
-  );
+  const sortedReports = reports;
 
   const backToReportsLanding = () => setActiveBuilder(null);
 
@@ -477,8 +428,6 @@ export function ReportsView({ projectId, projectStoragePath }: ReportsViewProps)
         <section
           className="home-primary-column"
           style={{
-            alignSelf: "center",
-            justifyContent: "flex-start",
             gap: 16,
             minHeight: 0,
             maxHeight: "100%",
@@ -551,7 +500,7 @@ export function ReportsView({ projectId, projectStoragePath }: ReportsViewProps)
                     >
                       {t("reportsLanding.allReports")}
                     </td>
-                    <td className="data-table-cell data-table-cell--muted">{reports.length}</td>
+                    <td className="data-table-cell data-table-cell--muted">{Object.values(reportPage.counts).reduce((sum, count) => sum + count, 0)}</td>
                   </tr>
                   {reportTypeSummaries.map((summary) => (
                     <tr
@@ -612,9 +561,10 @@ export function ReportsView({ projectId, projectStoragePath }: ReportsViewProps)
               </button>}
             />
 
-            {reportError ? <p className="alert-error" style={{ margin: 16 }}>{reportError}</p> : null}
+            {reportError || reportPage.error ? <p className="alert-error" style={{ margin: 16 }}>{reportError || reportPage.error}</p> : null}
 
-            <div className="data-table-wrap">
+            <TablePagination {...reportPage.controls} />
+            <div ref={reportPage.tableRef} className="data-table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>

@@ -325,6 +325,17 @@ export const SourceMediaTimeline = forwardRef<SourceMediaTimelineHandle, SourceM
   const onZoomUiStateChangeRef = useRef(onZoomUiStateChange);
   const seekBoundsRef = useRef<MediaSeekBounds | null>(seekBounds);
   const [waveReady, setWaveReady] = useState(false);
+  const [mediaDuration, setMediaDuration] = useState(0);
+  useEffect(() => {
+    const update = () => setMediaDuration(Number.isFinite(mediaElement?.duration) ? mediaElement!.duration : 0);
+    update();
+    mediaElement?.addEventListener("loadedmetadata", update);
+    mediaElement?.addEventListener("durationchange", update);
+    return () => {
+      mediaElement?.removeEventListener("loadedmetadata", update);
+      mediaElement?.removeEventListener("durationchange", update);
+    };
+  }, [mediaElement]);
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<MediaTimelineTooltip | null>(null);
   const [zoomPxPerSec, setZoomPxPerSec] = useState<number | null>(null);
@@ -465,7 +476,7 @@ export const SourceMediaTimeline = forwardRef<SourceMediaTimelineHandle, SourceM
 
   useEffect(() => {
     const container = waveformContainerRef.current;
-    if (!container || !mediaElement) return;
+    if (!container || !mediaElement || (!waveformCache && mediaDuration <= 0)) return;
 
     openTimingStartRef.current = performance.now();
     initialRegionsLoggedRef.current = false;
@@ -481,8 +492,10 @@ export const SourceMediaTimeline = forwardRef<SourceMediaTimelineHandle, SourceM
       container,
       media: mediaElement,
       backend: "MediaElement",
-      peaks: waveformCache?.peaks,
-      duration: waveformCache?.durationSeconds,
+      // Supplying a flat placeholder prevents WaveSurfer fetching/decoding the
+      // complete media when analysis is missing. Timing and regions still work.
+      peaks: waveformCache?.peaks ?? [[0, 0]],
+      duration: waveformCache?.durationSeconds ?? mediaDuration,
       waveColor: BASE_WAVE_COLOR,
       progressColor: BASE_PROGRESS_COLOR,
       cursorColor: "#1f2933",
@@ -603,7 +616,7 @@ export const SourceMediaTimeline = forwardRef<SourceMediaTimelineHandle, SourceM
       resetWaveScrollContainerStyles(scrollContainer);
       waveSurfer.destroy();
     };
-  }, [mediaElement, reserveScrollbarGutter, waveformCache, waveformHeight]);
+  }, [mediaElement, mediaDuration, reserveScrollbarGutter, waveformCache, waveformHeight]);
 
   useEffect(() => {
     const container = waveformContainerRef.current;

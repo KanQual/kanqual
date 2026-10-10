@@ -11,6 +11,7 @@ export type SidebarCollaborationStatus = "idle" | "active-solo" | "active-shared
 
 type SidebarProps = {
   activeScreen: string;
+  onPreloadScreen?: (screen: string) => void;
   activeProject: PostgresProject | null;
   authSession: PostgresAuthSession;
   networkMode?: SidebarNetworkMode;
@@ -45,6 +46,7 @@ type SidebarProps = {
 
 export function Sidebar({
   activeScreen,
+  onPreloadScreen,
   activeProject,
   authSession,
   networkMode = "unknown",
@@ -216,6 +218,8 @@ export function Sidebar({
                 key={item.id}
                 type="button"
                 className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}${guideSpotlightItemId === item.id ? " getting-started-spotlight-target" : ""}`}
+                onPointerEnter={(event) => { if (!item.disabled && event.pointerType !== "touch") onPreloadScreen?.(item.id); }}
+                onFocus={() => { if (!item.disabled) onPreloadScreen?.(item.id); }}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
                 title={undefined}
@@ -244,6 +248,8 @@ export function Sidebar({
                 key={item.id}
                 type="button"
                 className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}${guideSpotlightItemId === item.id ? " getting-started-spotlight-target" : ""}`}
+                onPointerEnter={(event) => { if (!item.disabled && event.pointerType !== "touch") onPreloadScreen?.(item.id); }}
+                onFocus={() => { if (!item.disabled) onPreloadScreen?.(item.id); }}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
                 title={undefined}
@@ -272,6 +278,8 @@ export function Sidebar({
                 key={item.id}
                 type="button"
                 className={`nav-item ${activeScreen === item.id ? "nav-item--active" : ""}${guideSpotlightItemId === item.id ? " getting-started-spotlight-target" : ""}`}
+                onPointerEnter={(event) => { if (!item.disabled && event.pointerType !== "touch") onPreloadScreen?.(item.id); }}
+                onFocus={() => { if (!item.disabled) onPreloadScreen?.(item.id); }}
                 onClick={() => item.onClick?.()}
                 disabled={item.disabled}
                 title={item.disabled ? t("sidebar.nav.openPostgresProjectFirst") : undefined}
@@ -286,6 +294,8 @@ export function Sidebar({
           <button
             type="button"
             className={`sidebar-section-header sidebar-section-header--link ${activeScreen === "app-settings" ? "sidebar-section-header--active" : ""}`}
+            onPointerEnter={(event) => { if (event.pointerType !== "touch") onPreloadScreen?.("app-settings"); }}
+            onFocus={() => onPreloadScreen?.("app-settings")}
             onClick={() => onShowAppSettings?.()}
           >
             <span>{t("sidebar.sections.settings")}</span>

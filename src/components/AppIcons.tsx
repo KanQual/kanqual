@@ -57,6 +57,8 @@ import {
   Waypoints,
   Workflow,
   X,
+  SkipBack,
+  SkipForward,
   StepBack,
   StepForward,
 } from "lucide-react";
@@ -308,4 +310,12 @@ export function StepForwardIcon({ className }: IconProps) {
 
 export function VolumeIcon({ className, muted }: IconProps & { muted?: boolean }) {
   return <LucideAppIcon Icon={muted ? VolumeX : Volume1} className={className} />;
+}
+
+export function SkipBackIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={SkipBack} className={className} />;
+}
+
+export function SkipForwardIcon({ className }: IconProps) {
+  return <LucideAppIcon Icon={SkipForward} className={className} />;
 }

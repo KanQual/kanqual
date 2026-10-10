@@ -1,3 +1,6 @@
+import { usePostgresStoredImageUrlMap } from "../lib/postgresStoredImages";
+import { openOriginalImage } from "../lib/imagePreviews";
+import { releaseMediaUrl } from "../lib/mediaStream";
 import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
@@ -320,6 +323,7 @@ export function ExploreCanvasView({
     fill: "filled" | "outline";
     outlineWidth: number;
     sourceImage?: string;
+    sourceImagePath?: string;
     sourceImageWidth?: number;
     sourceImageHeight?: number;
     sourceSilhouettePolygon?: string;
@@ -622,6 +626,30 @@ export function ExploreCanvasView({
     event.stopPropagation();
     event.nativeEvent.stopImmediatePropagation?.();
   }, []);
+  const [imagePreviewSize, setImagePreviewSize] = useState<number | null>(128);
+  const [visibleImageNodeIds, setVisibleImageNodeIds] = useState<string[]>([]);
+  const visibleImagePaths = useMemo(() => visibleImageNodeIds.flatMap((id) => {
+    const object = objectById.get(id);
+    if (!object) return [];
+    const path = getObjectAppearance(object, objectTypeById.get(object.objectTypeId) ?? null).sourceImagePath;
+    return path ? [path] : [];
+  }), [visibleImageNodeIds, objectById, objectTypeById, getObjectAppearance]);
+  const previewUrls = usePostgresStoredImageUrlMap("", visibleImagePaths, imagePreviewSize);
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    if (graphExportBusy) return;
+    // Cytoscape caches decoded images by URL without an eviction policy. Remove
+    // revoked preview entries as nodes leave the viewport, retaining built-in SVGs.
+    const renderer = (cy as unknown as { renderer: () => unknown }).renderer() as unknown as { imageCache?: Record<string, { image: HTMLImageElement }> };
+    const keep = new Set(previewUrls.values());
+    for (const [url, entry] of Object.entries(renderer.imageCache ?? {})) {
+      if (url.startsWith("http://127.0.0.1:") && !keep.has(url)) {
+        entry.image.src = "";
+        delete renderer.imageCache![url];
+      }
+    }
+  }, [previewUrls, graphExportBusy]);
   const graphElements = useMemo(
     () => {
       const visibleNodeIds = new Set(
@@ -638,7 +666,7 @@ export function ExploreCanvasView({
         const surface = getObjectSurfaceStyle(appearance.color, appearance.fill, false, outlineColor);
         const { width, height } = getNodeRenderedDimensions(object, objectTypeRecord, nodeState);
         const isFilled = appearance.fill === "filled";
-        const sourceImage = appearance.sourceImage ?? "";
+        const sourceImage = (appearance.sourceImagePath ? previewUrls.get(appearance.sourceImagePath) : "") || appearance.sourceImage || "";
         const sourceImageWidth = Math.max(42, width * 0.98);
         const sourceImageHeight = Math.max(42, height * 0.98);
 
@@ -656,6 +684,7 @@ export function ExploreCanvasView({
             fill: appearance.fill,
             shape: appearance.shape,
             sourceImage,
+            imagePath: appearance.sourceImagePath ?? "",
             sourceImageWidth: appearance.sourceImageWidth ?? sourceImageWidth,
             sourceImageHeight: appearance.sourceImageHeight ?? sourceImageHeight,
             sourceSilhouettePolygon: sourceImage ? (appearance.sourceSilhouettePolygon ?? POSTGRES_SOURCE_DOCUMENT_SILHOUETTE_POLYGON) : "",
@@ -702,7 +731,7 @@ export function ExploreCanvasView({
 
       return [...nodes, ...edges];
     },
-    [canvasNodes, getNodeRenderedDimensions, getObjectAppearance, getObjectSurfaceStyle, getRelationshipAppearance, getRelationshipStrokeWidth, hiddenCanvasRelationshipIds, objectTypeById, objects, relationshipTypes, relationships],
+    [previewUrls, canvasNodes, getNodeRenderedDimensions, getObjectAppearance, getObjectSurfaceStyle, getRelationshipAppearance, getRelationshipStrokeWidth, hiddenCanvasRelationshipIds, objectTypeById, objects, relationshipTypes, relationships],
   );
   const selectedObject = selectedNodeId ? objectById.get(selectedNodeId) ?? null : null;
   const selectedRelationship = selectedEdgeId ? relationshipById.get(selectedEdgeId) ?? null : null;
@@ -813,12 +842,29 @@ export function ExploreCanvasView({
     }
     setGraphExportBusy(true);
     setGraphExportError("");
+    const restored: Array<{ node: cytoscape.NodeSingular; image: string; label: string; classes: string[]; url: string }> = [];
     try {
       const path = await save({
         defaultPath: "kanqual-graph.png",
         filters: [{ name: "PNG Image", extensions: ["png"] }],
       });
       if (!path) return;
+      for (const node of cy.nodes()) {
+        const object = objectById.get(node.id());
+        if (!object) continue;
+        const original = getObjectAppearance(object, objectTypeById.get(object.objectTypeId) ?? null).sourceImagePath;
+        if (!original) continue;
+        const url = await openOriginalImage(original);
+        restored.push({ node, image: node.data("sourceImage"), label: node.data("label"), classes: node.classes(), url });
+        node.data({ sourceImage: url, label: "" }); node.addClass("canvas-object--source-image");
+        // Wait for Cytoscape's own image cache as well as the browser decoder.
+        await new Promise<void>((resolve, reject) => {
+          const renderer = (cy as unknown as { renderer: () => unknown }).renderer() as unknown as { getCachedImage: (url: string, origin: string, onLoad: () => void) => HTMLImageElement };
+          const image = renderer.getCachedImage(url, "anonymous", resolve);
+          if (image.complete && image.naturalWidth) resolve();
+          else image.addEventListener("error", () => reject(new Error("Could not render export image")), { once: true });
+        });
+      }
       const dataUrl = cy.png({
         full: true,
         scale: 2,
@@ -836,6 +882,13 @@ export function ExploreCanvasView({
     } catch (error) {
       setGraphExportError(error instanceof Error ? error.message : String(error));
     } finally {
+      const renderer = (cy as unknown as { renderer: () => unknown }).renderer() as unknown as { imageCache?: Record<string, { image: HTMLImageElement }> };
+      for (const entry of restored) {
+        entry.node.data({ sourceImage: entry.image, label: entry.label }); entry.node.classes(entry.classes);
+        const cached = renderer.imageCache?.[entry.url];
+        if (cached) { cached.image.src = ""; delete renderer.imageCache![entry.url]; }
+        releaseMediaUrl(entry.url);
+      }
       setGraphExportBusy(false);
     }
   }
@@ -1053,6 +1106,20 @@ export function ExploreCanvasView({
     cy.on("cxttap", handleBackgroundContextMenu);
     cy.on("dragfree", "node", handleNodeDragFree);
     const handleCanvasViewportChange = () => {
+      const extent = cy.extent();
+      const ids = cy.nodes().filter((node) => {
+        const bounds = node.boundingBox();
+        return bounds.x2 >= extent.x1 && bounds.x1 <= extent.x2 && bounds.y2 >= extent.y1 && bounds.y1 <= extent.y2;
+      }).sort((a, b) => {
+        const center = { x: (extent.x1 + extent.x2) / 2, y: (extent.y1 + extent.y2) / 2 };
+        return Math.hypot((a as cytoscape.NodeSingular).position('x') - center.x, (a as cytoscape.NodeSingular).position('y') - center.y) - Math.hypot((b as cytoscape.NodeSingular).position('x') - center.x, (b as cytoscape.NodeSingular).position('y') - center.y);
+      }).slice(0, 48).map((node) => node.id()).sort();
+      const largest = Math.max(0, ...ids.map((id) => {
+        const node = cy.getElementById(id);
+        return node.data("imagePath") ? Math.max(node.renderedWidth(), node.renderedHeight()) * window.devicePixelRatio : 0;
+      }));
+      setImagePreviewSize(largest <= 128 ? 128 : largest <= 384 ? 384 : largest <= 1024 ? 1024 : null);
+      setVisibleImageNodeIds((current) => JSON.stringify(current) === JSON.stringify(ids) ? current : ids);
       updateConnectorHandleRef.current();
       updateResizeHandleRef.current();
       const nextZoomPercent = Math.round(cy.zoom() * 100);
@@ -1078,6 +1145,7 @@ export function ExploreCanvasView({
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
+    if (graphExportBusy) return;
     const pendingViewportRestore = pendingViewportRestoreRef.current;
     pendingViewportRestoreRef.current = null;
     const previousZoom = pendingViewportRestore?.zoom ?? cy.zoom();
@@ -1106,7 +1174,7 @@ export function ExploreCanvasView({
       updateConnectorHandleRef.current();
       updateResizeHandleRef.current();
     });
-  }, [graphElements]);
+  }, [graphElements, graphExportBusy]);
 
   useEffect(() => {
     const cy = cyRef.current;

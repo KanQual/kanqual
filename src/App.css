@@ -4578,29 +4578,41 @@ input[type="password"].form-input::-ms-clear {
 .codebook-table-shell {
   display: grid;
   min-height: calc(100vh - 260px);
-  place-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  place-items: stretch;
 }
 
 .codebook-table-wrap {
-  width: fit-content;
-  max-width: min(760px, calc(100vw - 96px));
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   max-height: min(620px, calc(100vh - 300px));
-  align-self: center;
-  justify-self: center;
+  align-self: stretch;
+  justify-self: stretch;
 }
 
 .codebook-table-card {
-  width: fit-content;
-  max-width: min(760px, calc(100vw - 96px));
-  align-self: center;
-  justify-self: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-self: stretch;
+  justify-self: stretch;
 }
 
 .codebook-table-wrap .data-table {
-  width: auto;
+  width: 100%;
   min-width: 0;
-  table-layout: auto;
+  table-layout: fixed;
 }
+
+.codebook-table-wrap .data-table-header {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.codebook-table-wrap .code-tree-cell { min-width: 0; overflow: hidden; }
+.codebook-table-wrap .code-tree-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 .code-list-empty {
   padding: 12px 14px;
@@ -6686,10 +6698,11 @@ input[type="password"].form-input::-ms-clear {
 }
 
 .data-table-wrap.codebook-table-wrap {
-  width: fit-content;
-  max-width: min(760px, calc(100vw - 96px));
-  align-self: center;
-  justify-self: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-self: stretch;
+  justify-self: stretch;
 }
 
 @media (max-width: 1024px) {
@@ -16476,3 +16489,130 @@ input[type="password"].form-input::-ms-clear {
 }
 
 
+
+/* Keep list scrollports within the available screen; row count is not a height. */
+.view-shell > .view-header { flex-shrink: 0; }
+.view-shell .master-detail-grid { grid-template-rows: minmax(0, 1fr); }
+/* Keep the first and last filter cards reachable, even in the stacked layout. */
+.master-detail-grid > .home-primary-column {
+  align-self: stretch;
+  justify-content: flex-start;
+  min-height: 0;
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.master-detail-grid > .home-primary-column > * { flex-shrink: 0; }
+.codebook-table-shell { min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.table-card,
+.ai-process-doc-source-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+}
+.table-card > .card-header,
+.ai-process-doc-source-card > .ai-process-doc-source-card-header,
+.table-card > .table-pagination { flex-shrink: 0; }
+.table-card > .data-table-wrap,
+.ai-process-doc-source-card > .data-table-wrap,
+.report-layout-main > .data-table-wrap {
+  min-height: 0;
+  flex: 0 1 auto;
+}
+.view-content > .report-layout-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  width: 100%;
+}
+.table-pagination { display: flex; align-items: center; justify-content: center; align-self: stretch; gap: 8px; padding: 12px; }
+@media (max-width: 1024px) {
+  .view-shell .master-detail-grid { grid-template-rows: minmax(0, 1fr) minmax(0, 2fr); }
+}
+
+/* Paginated standalone lists and attribute workspaces share the same bounds. */
+.table-pagination { flex-shrink: 0; }
+.view-content > .data-table-wrap { min-height: 0; flex: 0 1 auto; }
+.analysis-list-shell { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.analysis-list-table-wrap { max-height: none; min-height: 0; }
+
+/* Bound Home details to the space below the heading and view tabs. */
+.project-home-details-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.project-home-details-dashboard {
+  height: 100%;
+  grid-template-columns: minmax(0, 340px) minmax(0, 520px);
+  grid-template-rows: minmax(0, 1fr);
+}
+.project-home-details-dashboard .project-home-stats-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+}
+.project-home-details-dashboard .project-home-primary-column {
+  height: var(--project-home-stats-height, auto);
+  max-height: 100%;
+  justify-content: flex-start;
+  overflow: auto;
+}
+@media (max-width: 1120px) {
+  .project-home-details-dashboard {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: max-content max-content;
+    overflow: auto;
+  }
+  .project-home-details-dashboard .project-home-primary-column {
+    height: auto;
+    max-height: none;
+  }
+  .project-home-details-dashboard .project-home-stats-grid {
+    max-height: none;
+    overflow: visible;
+  }
+}
+@media (max-width: 640px) {
+  .project-home-details-dashboard .project-home-stats-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.table-pagination-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.table-pagination-button svg { width: 18px; height: 18px; }
+.table-pagination-button:hover:not(:disabled) { background: var(--color-surface-alt); }
+.table-pagination-button:disabled { opacity: 0.4; cursor: default; }
+.table-pagination-counter { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+
+.sources-list-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  flex-shrink: 0;
+}
+.sources-list-toolbar > input { min-width: 0; width: 100%; max-width: 220px; box-sizing: border-box; }
+.sources-list-toolbar > .table-pagination { padding: 0; }
+@media (max-width: 640px) {
+  .sources-list-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+}

@@ -1,3 +1,7 @@
+import { useListPreference, useListVisitCache } from "../lib/listVisitCache";
+import { TablePagination, useTablePagination } from "../components/TablePagination";
+import { openImagePreview, useImageRevision, usePreviewVisibility } from "../lib/imagePreviews";
+import { openMediaStream, releaseMediaUrl } from "../lib/mediaStream";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -11,12 +15,15 @@ import { TableMessageRow, TableShell } from "../components/TableShell";
 import { ViewHeader } from "../components/ViewHeader";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
-import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
+
 import {
+  getCodebookSummary,
+  listCodeAnnotations,
+  listPostgresSources,
   createPostgresCode,
   deletePostgresCode,
   type PostgresAnnotationSummary,
-  type PostgresSource,
+  type PostgresSourceSummary,
   updatePostgresCode,
 } from "../lib/postgres";
 
@@ -112,7 +119,13 @@ function mediaTypeFromFileExtension(ext: string): string | null {
   return null;
 }
 
-function CodebookAnnotationMediaPreview({
+function CodebookAnnotationMediaPreview(props: Parameters<typeof CodebookAnnotationMediaPreviewContent>[0]) {
+  const { ref, visible, height } = usePreviewVisibility();
+  const image = ["image", "pdf"].includes(props.annotation.sourceKind || "");
+  return <div ref={ref} style={{ minHeight: image ? Math.max(48, height) : undefined }}>{!image || visible ? <CodebookAnnotationMediaPreviewContent {...props} /> : null}</div>;
+}
+
+function CodebookAnnotationMediaPreviewContent({
   annotation,
   projectStoragePath,
 }: {
@@ -120,6 +133,7 @@ function CodebookAnnotationMediaPreview({
   projectStoragePath?: string;
 }) {
   const { t } = useI18n();
+  const imageRevision = useImageRevision();
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -133,7 +147,7 @@ function CodebookAnnotationMediaPreview({
   useEffect(() => {
     if (!resolvedPath || !["audio", "video", "image", "pdf"].includes(sourceKind)) {
       setMediaUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       setLoadError(null);
@@ -141,13 +155,12 @@ function CodebookAnnotationMediaPreview({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
+    setMediaUrl(null);
     let objectUrl: string | null = null;
     setLoadError(null);
 
     async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
-      if (sourceKind !== "pdf") {
-        return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
-      }
       if (!region) throw new Error(t("projectCodebook.errors.pdfRegionUnavailable"));
       const pdfjsLib = await loadCodebookPdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -169,22 +182,24 @@ function CodebookAnnotationMediaPreview({
       return URL.createObjectURL(blob);
     }
 
-    void readTauriFile(resolvedPath)
-      .then(async (bytes) => {
-        objectUrl = await buildPreviewUrl(bytes);
+    void (sourceKind === "audio" || sourceKind === "video"
+      ? openMediaStream(resolvedPath)
+      : sourceKind === "image" ? openImagePreview(resolvedPath, 1024, controller.signal) : readTauriFile(resolvedPath).then(buildPreviewUrl))
+      .then((url) => {
+        objectUrl = url;
         if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
+          releaseMediaUrl(objectUrl);
           return;
         }
         setMediaUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
       })
       .catch((error) => {
         if (cancelled) return;
         setMediaUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
         setLoadError(error instanceof Error ? error.message : t("projectCodebook.errors.annotationMediaLoadFailed"));
@@ -192,9 +207,10 @@ function CodebookAnnotationMediaPreview({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
-  }, [mediaType, region, resolvedPath, sourceKind, t]);
+  }, [mediaType, region, resolvedPath, sourceKind, t, imageRevision]);
 
   if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
   if (loadError) return <p className="code-ann-media-error">{loadError}</p>;
@@ -215,7 +231,7 @@ function CodebookAnnotationMediaPreview({
   if (sourceKind === "audio") {
     return (
       <div className="code-ann-media" onClick={(event) => event.stopPropagation()}>
-        <audio
+        <audio crossOrigin="anonymous" onError={() => setLoadError(t("analysisMemos.annotationPreview.mediaLoadFailed"))}
           ref={(element) => { mediaRef.current = element; }}
           controls
           preload="metadata"
@@ -230,7 +246,7 @@ function CodebookAnnotationMediaPreview({
   if (sourceKind === "video") {
     return (
       <div className="code-ann-media" onClick={(event) => event.stopPropagation()}>
-        <video
+        <video crossOrigin="anonymous" onError={() => setLoadError(t("analysisMemos.annotationPreview.mediaLoadFailed"))}
           ref={(element) => { mediaRef.current = element; }}
           className="code-ann-video"
           controls
@@ -336,10 +352,10 @@ function getVisibleNodes(tree: CodeNode[], collapsed: Set<string>): CodeNode[] {
 // Column definitions
 
 const COLS: { key: SortCol; label: string; width: string }[] = [
-  { key: "label",         label: "Name",       width: "22rem" },
-  { key: "createdByName", label: "Created By", width: "9rem" },
-  { key: "createdAt",     label: "Created",    width: "10rem" },
-  { key: "sourcesCount",  label: "Sources",    width: "5rem" },
+  { key: "label",         label: "Name",       width: "48%" },
+  { key: "createdByName", label: "Created By", width: "20%" },
+  { key: "createdAt",     label: "Created",    width: "20%" },
+  { key: "sourcesCount",  label: "Sources",    width: "12%" },
 ];
 
 // Color swatch
@@ -384,14 +400,16 @@ export function CodebookView({
   const canDeleteCodes = !!postgresCanDeleteCodes;
   const canMemoAboutCodes = !!postgresCanMemoAboutCodes;
 
-  const [rows,    setRows]    = useState<CodeRow[]>([]);
-  const [postgresSources, setPostgresSources] = useState<PostgresSource[]>([]);
-  const [postgresAnnotations, setPostgresAnnotations] = useState<PostgresAnnotationSummary[]>([]);
+  const visitCache = useListVisitCache();
+  const visitKey = JSON.stringify(["codebook", activeProjectId]);
+  const [rows, setRows] = useState<CodeRow[]>(() => visitCache.read<CodeRow[]>(visitKey) ?? []);
+  const [detailData, setDetailData] = useState<{ key: string; sources: PostgresSourceSummary[]; annotations: PostgresAnnotationSummary[]; error: string | null } | null>(null);
+  const [detailRetry, setDetailRetry] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
-  const [sortCol, setSortCol] = useState<SortCol>("label");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortCol, setSortCol] = useListPreference(visitKey + ":sort", "label" as SortCol);
+  const [sortDir, setSortDir] = useListPreference(visitKey + ":direction", "asc" as SortDir);
 
   // Collapsed node IDs
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -419,25 +437,18 @@ export function CodebookView({
 
   // Load
 
+  const codeListGeneration = useRef(0);
   const loadCodes = useCallback(async () => {
     if (!activeProjectId) return;
-    setLoading(true);
+    const generation = ++codeListGeneration.current;
+    const revision = visitCache.revision;
+    setLoading(!visitCache.read(visitKey));
     setError(null);
     try {
-      const snapshot = await loadPostgresProjectWorkspaceSnapshot(activeProjectId);
-      setPostgresSources(snapshot.sources);
-      setPostgresAnnotations(snapshot.annotations);
-      const docsByCode: Record<string, Set<string>> = {};
-      for (const annotation of snapshot.annotations) {
-        for (const codeId of annotation.codeIds) {
-          if (!docsByCode[codeId]) docsByCode[codeId] = new Set();
-          docsByCode[codeId].add(annotation.sourceId);
-        }
-      }
-
+      const snapshot = await getCodebookSummary(activeProjectId);
+      if (generation !== codeListGeneration.current) return;
       const codeLabelById = Object.fromEntries(snapshot.codes.map((code) => [code.id, code.label]));
-      setRows(
-        snapshot.codes.map((code) => ({
+      const nextRows = snapshot.codes.map((code) => ({
           id: code.id,
           label: code.label,
           color: code.color ?? "",
@@ -446,17 +457,20 @@ export function CodebookView({
           parentLabel: code.parentCodeId ? codeLabelById[code.parentCodeId] ?? "" : "",
           createdByName: code.createdByName || "-",
           createdAt: code.createdAt,
-          sourcesCount: docsByCode[code.id]?.size ?? 0,
-        })),
-      );
+          sourcesCount: snapshot.sourceCounts[code.id] ?? 0,
+        }));
+      setRows(nextRows);
+      visitCache.write(visitKey, nextRows, revision);
     } catch (e) {
+      if (generation !== codeListGeneration.current) return;
+      visitCache.clear(); setRows([]);
       setError(e instanceof Error ? e.message : t("projectCodebook.errors.loadFailed"));
     } finally {
-      setLoading(false);
+      if (generation === codeListGeneration.current) setLoading(false);
     }
   }, [activeProjectId, t]);
 
-  useEffect(() => { loadCodes(); }, [loadCodes]);
+  useEffect(() => { void loadCodes(); return () => { codeListGeneration.current++; }; }, [loadCodes]);
 
   // Close context menu on outside click / Escape
 
@@ -477,7 +491,11 @@ export function CodebookView({
   // Tree + visible rows
 
   const tree    = useMemo(() => buildTree(rows, sortCol, sortDir), [rows, sortCol, sortDir]);
-  const visible = useMemo(() => getVisibleNodes(tree, collapsed), [tree, collapsed]);
+  const [codeSearch, setCodeSearch] = useListPreference(visitKey + ":search", "");
+  const visible = useMemo(() => codeSearch.trim()
+    ? getVisibleNodes(tree, new Set()).filter(node => [node.label, node.description, node.parentLabel, node.createdByName].join(" ").toLowerCase().includes(codeSearch.trim().toLowerCase()))
+    : getVisibleNodes(tree, collapsed), [tree, collapsed, codeSearch]);
+  const codeTable = useTablePagination(visible, `${activeProjectId}:${sortCol}:${sortDir}:${codeSearch}:${[...collapsed].join(",")}`, visitKey + ":page");
 
   function toggleCollapse(id: string) {
     setCollapsed((prev) => {
@@ -500,6 +518,7 @@ export function CodebookView({
     try {
       if (!activeProjectId) throw new Error(t("projectCodebook.errors.projectRequiredDeleteCode"));
       await deletePostgresCode(activeProjectId, confirmDelete.id);
+      visitCache.clear();
       setRows((prev) => prev
         .filter((r) => r.id !== confirmDelete.id)
         .map((r) => (r.parentId === confirmDelete.id ? { ...r, parentId: "", parentLabel: "" } : r)));
@@ -554,6 +573,28 @@ export function CodebookView({
     }
   }
 
+  const detailCodeId = (selectedRow ?? editStartRow)?.id;
+  const detailKey = JSON.stringify([activeProjectId, detailCodeId, detailRetry]);
+  const matchingDetail = detailData?.key === detailKey ? detailData : null;
+  const postgresSources = matchingDetail?.sources ?? [];
+  const postgresAnnotations = matchingDetail?.annotations ?? [];
+  useEffect(() => {
+    let cancelled = false;
+    setDetailData(null);
+    if (!activeProjectId || !detailCodeId) return;
+    void (async () => {
+      try {
+        const annotations = await listCodeAnnotations(activeProjectId, detailCodeId);
+        const ids = [...new Set(annotations.map(annotation => annotation.sourceId))];
+        const sources = ids.length ? await listPostgresSources(activeProjectId, ids) : [];
+        if (!cancelled) setDetailData({ key: detailKey, annotations, sources, error: null });
+      } catch (error) {
+        if (!cancelled) setDetailData({ key: detailKey, annotations: [], sources: [], error: String(error) });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectId, detailCodeId, detailKey]);
+
   // Detail / edit
 
   const postgresSourceNameById = useMemo(
@@ -566,9 +607,9 @@ export function CodebookView({
   );
 
   const postgresDetailAnnotations = useMemo(() => {
-    if (!selectedRow) return [];
+    if (!detailCodeId) return [];
     return postgresAnnotations
-      .filter((annotation) => annotation.codeIds.includes(selectedRow.id))
+      .filter((annotation) => annotation.codeIds.includes(detailCodeId))
       .map((annotation) => ({
         id: annotation.id,
         quote: annotation.quote ?? "",
@@ -578,7 +619,7 @@ export function CodebookView({
         createdByName: annotation.createdByName || "-",
         createdAt: annotation.createdAt,
       }));
-  }, [postgresAnnotations, postgresSourceNameById, selectedRow]);
+  }, [postgresAnnotations, postgresSourceNameById, detailCodeId]);
 
   const postgresDetailAnnotationsWithMedia = useMemo(() => (
     postgresDetailAnnotations.map((row) => {
@@ -603,6 +644,9 @@ export function CodebookView({
           row={detailRow}
           allCodes={rows}
           annotations={postgresDetailAnnotationsWithMedia}
+          annotationsLoading={!matchingDetail}
+          annotationsError={matchingDetail?.error ?? null}
+          onRetryAnnotations={() => setDetailRetry(value => value + 1)}
           projectStoragePath={postgresProjectStoragePath}
           startEditing={editStartRow !== null && canEditCodes}
           canEditCode={canEditCodes}
@@ -673,11 +717,9 @@ export function CodebookView({
             <PlusIcon className="card-header-icon" />
           </button>}
         />
-      <TableShell
+      <TablePagination {...codeTable.controls} search={{ value: codeSearch, onChange: setCodeSearch }} />
+      <TableShell ref={codeTable.tableRef}
         className="codebook-table-wrap"
-        style={{
-          maxHeight: 34 + (Math.max(loading || visible.length === 0 ? 1 : visible.length, 1) + 2) * 36,
-        }}
       >
         <table className="data-table">
           <thead>
@@ -705,7 +747,7 @@ export function CodebookView({
             {!loading && visible.length === 0 && (
               <TableMessageRow colSpan={5}>{t("projectCodebook.empty.noCodes")}</TableMessageRow>
             )}
-            {!loading && visible.map((node) => (
+            {!loading && codeTable.rows.map((node) => (
               <tr
                 key={node.id}
                 className="data-table-row codebook-list-row"
@@ -736,10 +778,10 @@ export function CodebookView({
                       <span className="code-collapse-spacer" />
                     )}
                     <ColorSwatch color={node.color} />
-                    <span>{node.label}</span>
+                    <span className="code-tree-label" title={node.label}>{node.label}</span>
                   </span>
                 </td>
-                <td className="data-table-cell data-table-cell--muted">{node.createdByName}</td>
+                <td className="data-table-cell data-table-cell--muted" title={node.createdByName}>{node.createdByName}</td>
                 <td className="data-table-cell data-table-cell--muted">{fmtDate(node.createdAt)}</td>
                 <td className="data-table-cell data-table-cell--muted">{node.sourcesCount}</td>
               </tr>
@@ -901,6 +943,9 @@ function PostgresCodeDetail({
   row: initialRow,
   allCodes,
   annotations,
+  annotationsLoading,
+  annotationsError,
+  onRetryAnnotations,
   projectStoragePath,
   startEditing,
   canEditCode,
@@ -913,6 +958,9 @@ function PostgresCodeDetail({
   row: CodeRow;
   allCodes: CodeRow[];
   annotations: AnnotationRow[];
+  annotationsLoading: boolean;
+  annotationsError: string | null;
+  onRetryAnnotations: () => void;
   projectStoragePath?: string;
   startEditing: boolean;
   canEditCode: boolean;
@@ -1031,7 +1079,9 @@ function PostgresCodeDetail({
             <h3 className="case-card-title">
               {t("projectCodebook.detail.annotations")}{annotations.length > 0 ? ` (${annotations.length})` : ""}
             </h3>
-            {annotations.length === 0 ? (
+            {annotationsLoading ? <p role="status">{t("projectCodebook.statuses.loading")}</p> : annotationsError ? (
+              <div><p role="alert">{annotationsError}</p><button className="btn" onClick={onRetryAnnotations}>{t("common.retry")}</button></div>
+            ) : annotations.length === 0 ? (
               <p className="case-card-empty">{t("projectCodebook.detail.noAnnotations")}</p>
             ) : (
               <ul className="code-ann-list">

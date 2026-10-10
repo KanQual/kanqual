@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { HomeCardHeader } from "../components/CardHeader";
 import { useI18n } from "../i18n/provider";
 import type { PostgresProject, PostgresProjectUser } from "../lib/postgres";
@@ -90,14 +90,7 @@ export function ProjectHomeDetailsView({
     <div className="home-dashboard project-home-dashboard project-home-details-dashboard">
       <div
         className="home-primary-column project-home-primary-column"
-        style={
-          statsHeight > 0
-            ? {
-              height: statsHeight,
-              maxHeight: statsHeight,
-            }
-            : undefined
-        }
+        style={{ "--project-home-stats-height": statsHeight > 0 ? `${statsHeight}px` : undefined } as CSSProperties}
       >
         <section className="content-card" aria-label={t("projectCore.home.titleAria")}>
           <HomeCardHeader title={t("projectCore.home.titleHeading")} />

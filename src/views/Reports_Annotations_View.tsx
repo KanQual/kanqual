@@ -1,3 +1,9 @@
+import { useListPreference } from "../lib/listVisitCache";
+import { TablePagination } from "../components/TablePagination";
+import { usePostgresTablePage } from "../lib/usePostgresTablePage";
+import type { PostgresReport } from "../lib/postgres";
+import { openImagePreview, openOriginalImage, useImageRevision, usePreviewVisibility } from "../lib/imagePreviews";
+import { openMediaStream, releaseMediaUrl } from "../lib/mediaStream";
 import { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -15,9 +21,10 @@ import { TableMessageRow, TableShell } from "../components/TableShell";
 import { ViewHeader } from "../components/ViewHeader";
 import { formatCurrentDateTime, formatCurrentNumber } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
-import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
+import { getPostgresSource, createPostgresReport, deletePostgresReport, logPostgresReportExport } from "../lib/postgres";
 import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
-import type { Code, Document as ProjectDocument } from "../types";
+import type { Code } from "../types";
+import type { ReportSourceSummary as ProjectDocument } from "../lib/postgresReportAdapters";
 import { richTextHtmlToPlainText as htmlToPlainText, sanitizeRichTextHtml } from "../lib/safeHtml";
 
 const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
@@ -338,10 +345,10 @@ function svgToPngDataUrl(svgString: string, noCanvasContextError: string, svgRen
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
+      releaseMediaUrl(url);
       resolve(canvas.toDataURL("image/png"));
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(svgRenderError)); };
+    img.onerror = () => { releaseMediaUrl(url); reject(new Error(svgRenderError)); };
     img.src = url;
   });
 }
@@ -443,7 +450,13 @@ function ExportModal({
 
 // ─── Report page ──────────────────────────────────────────────────────────────
 
-function AnnotationMediaPreview({
+function AnnotationMediaPreview(props: Parameters<typeof AnnotationMediaPreviewContent>[0]) {
+  const { ref, visible, height } = usePreviewVisibility();
+  const image = ["image", "pdf"].includes(props.annotation.sourceKind || props.source?.type || "");
+  return <div ref={ref} style={{ minHeight: image ? Math.max(48, height) : undefined }}>{!image || visible ? <AnnotationMediaPreviewContent {...props} /> : null}</div>;
+}
+
+function AnnotationMediaPreviewContent({
   annotation,
   source,
   projectStoragePath,
@@ -453,6 +466,7 @@ function AnnotationMediaPreview({
   projectStoragePath?: string;
 }) {
   const { t } = useI18n();
+  const imageRevision = useImageRevision();
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const sourceKind = (annotation.sourceKind || source?.type || "").trim().toLowerCase();
@@ -464,7 +478,7 @@ function AnnotationMediaPreview({
   useEffect(() => {
     if (!resolvedPath || !["audio", "video", "image", "pdf"].includes(sourceKind)) {
       setMediaUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       setLoadError(null);
@@ -472,14 +486,13 @@ function AnnotationMediaPreview({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
+    setMediaUrl(null);
     let objectUrl: string | null = null;
     const cropRegion = region;
     setLoadError(null);
 
     async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
-      if (sourceKind !== "pdf") {
-        return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
-      }
       if (!cropRegion) throw new Error(t("analysisMemos.annotationPreview.pdfRegionUnavailable"));
       const pdfjsLib = await loadPdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -501,22 +514,24 @@ function AnnotationMediaPreview({
       return URL.createObjectURL(blob);
     }
 
-    void readTauriFile(resolvedPath)
-      .then(async (bytes) => {
-        objectUrl = await buildPreviewUrl(bytes);
+    void (sourceKind === "audio" || sourceKind === "video"
+      ? openMediaStream(resolvedPath)
+      : sourceKind === "image" ? openImagePreview(resolvedPath, 1024, controller.signal) : readTauriFile(resolvedPath).then(buildPreviewUrl))
+      .then((url) => {
+        objectUrl = url;
         if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
+          releaseMediaUrl(objectUrl);
           return;
         }
         setMediaUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
       })
       .catch((error) => {
         if (cancelled) return;
         setMediaUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
         setLoadError(error instanceof Error ? error.message : t("analysisMemos.annotationPreview.mediaLoadFailed"));
@@ -524,9 +539,10 @@ function AnnotationMediaPreview({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
-  }, [mediaType, region, resolvedPath, sourceKind, t]);
+  }, [mediaType, region, resolvedPath, sourceKind, t, imageRevision]);
 
   if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
 
@@ -558,9 +574,9 @@ function AnnotationMediaPreview({
       ) : !mediaUrl ? (
         <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>{t("reportsAnnotations.loadingMedia")}</p>
       ) : sourceKind === "audio" ? (
-        <audio controls preload="metadata" src={mediaUrl} style={{ width: "100%" }} />
+        <audio crossOrigin="anonymous" onError={() => setLoadError(t("analysisMemos.annotationPreview.mediaLoadFailed"))} controls preload="metadata" src={mediaUrl} style={{ width: "100%" }} />
       ) : sourceKind === "video" ? (
-        <video controls preload="metadata" playsInline src={mediaUrl} style={{ width: "100%", maxHeight: 360, borderRadius: 6, background: "#000" }} />
+        <video crossOrigin="anonymous" onError={() => setLoadError(t("analysisMemos.annotationPreview.mediaLoadFailed"))} controls preload="metadata" playsInline src={mediaUrl} style={{ width: "100%", maxHeight: 360, borderRadius: 6, background: "#000" }} />
       ) : region ? (
         <div
           style={{
@@ -738,15 +754,7 @@ function ReportPage({
   const frozenCaseDocLinks = row?.snapshot?.caseDocLinks ?? [];
   const frozenCounts    = row?.snapshot?.summaryCounts;
 
-  const effectiveDocContentMap = useMemo(() => {
-    const merged = new Map(docContentMap);
-    for (const doc of reportDocs) {
-      if (typeof doc.content === "string" && doc.content.length > 0 && !merged.has(doc.id)) {
-        merged.set(doc.id, doc.content);
-      }
-    }
-    return merged;
-  }, [docContentMap, reportDocs]);
+  const effectiveDocContentMap = docContentMap;
 
   useEffect(() => {
     if (!isFrozen) return;
@@ -781,7 +789,7 @@ function ReportPage({
         const codeById = new Map(data.codes.map((code) => [code.id, code]));
         setPostgresDocs(data.documents);
         setPostgresCodes(data.codes);
-        setDocContentMap(new Map(data.documents.map((doc) => [doc.id, doc.content ?? ""])));
+        setDocContentMap(new Map());
         if (isFrozen) return;
         setCaseItems(data.cases);
         setRelationshipItems(data.relationships);
@@ -1056,6 +1064,30 @@ function ReportPage({
       return true;
     });
   }, [isFrozen, frozenAnns, allAnns, caseFilterDocIds, selDocIds, docIdsMatchingSelectedTypes, docIdsMatchingSelectedAttributes, selCodeIds, selUserIds]);
+
+  const requiredContentIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (showContext) for (const annotation of filteredAnns) if (reportDocById.has(annotation.documentId)) ids.add(annotation.documentId);
+    if (showCoverage) for (const doc of reportDocs) if (selDocIds.has(doc.id)) ids.add(doc.id);
+    return [...ids].sort();
+  }, [showContext, showCoverage, filteredAnns, reportDocs, selDocIds]);
+  const requiredContentKey = JSON.stringify(requiredContentIds);
+  const sourceContentReady = requiredContentIds.every((id) => docContentMap.has(id));
+  useEffect(() => {
+    let cancelled = false;
+    setDocContentMap(new Map());
+    if (!postgresProjectId || requiredContentIds.length === 0) return;
+    void (async () => {
+      const contents = new Map<string, string>();
+      for (const id of requiredContentIds) {
+        if (cancelled) return;
+        const source = await getPostgresSource(postgresProjectId, id);
+        contents.set(id, source.textContent);
+      }
+      if (!cancelled) setDocContentMap(contents);
+    })().catch((error) => { if (!cancelled) setError(error instanceof Error ? error.message : String(error)); });
+    return () => { cancelled = true; };
+  }, [postgresProjectId, requiredContentKey, postgresDocs]);
 
   const coverageStats = useMemo(() => {
     const empty = { rows: [] as { codeName: string; codeColor: string; chars: number; pct: number }[], totalChars: 0 };
@@ -2320,7 +2352,13 @@ function ReportPage({
 
   async function buildExportContentMap(): Promise<Map<string, string>> {
     if (!showContext) return new Map<string, string>();
-    return effectiveDocContentMap;
+    const contents = new Map(effectiveDocContentMap);
+    if (postgresProjectId) {
+      for (const id of new Set(filteredAnns.map((annotation) => annotation.documentId))) {
+        if (reportDocById.has(id) && !contents.has(id)) contents.set(id, (await getPostgresSource(postgresProjectId, id)).textContent);
+      }
+    }
+    return contents;
   }
 
   function annContext(ann: AnnItem, contentMap: Map<string, string>) {
@@ -2377,6 +2415,7 @@ function ReportPage({
   function loadImage(src: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
       const image = new Image();
+      image.crossOrigin = "anonymous";
       image.onload = () => resolve(image);
       image.onerror = () => reject(new Error(t("reportsCommon.errors.imageLoadFailed")));
       image.src = src;
@@ -2392,9 +2431,7 @@ function ReportPage({
     if (sourceKind === "image") {
       let objectUrl = "";
       try {
-        const bytes = await readTauriFile(resolvedPath);
-        const mediaType = mediaTypeFromFileExtension(fileExtensionFromPath(resolvedPath)) ?? "image/png";
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaType }));
+        objectUrl = await openOriginalImage(resolvedPath);
         const image = await loadImage(objectUrl);
         const sourceWidth = Math.max(region.imageWidth, region.width, 1);
         const sourceHeight = Math.max(region.imageHeight, region.height, 1);
@@ -2412,7 +2449,7 @@ function ReportPage({
         ctx.drawImage(image, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
         return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
       } finally {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        if (objectUrl) releaseMediaUrl(objectUrl);
       }
     }
 
@@ -3290,6 +3327,7 @@ function ReportPage({
       <div className="workspace-back-row workspace-back-row--annotate workspace-back-row--split">
         {!hideBackButton && <button className="btn" onClick={onBack}>{t("reportsAnnotations.backToReports")}</button>}
         <div className="report-action-group" style={{ gap: 10, marginLeft: "auto" }}>
+          {!sourceContentReady && !error && <span role="status">{t("projectCore.sources.loadingSourceDetails")}</span>}
           {error && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{error}</span>}
         </div>
       </div>
@@ -3684,7 +3722,7 @@ function ReportPage({
                         ? t("reportsAnnotations.exportDenied")
                         : t("reportsAnnotations.exportTitle")
                   }
-                  disabled={!isFrozen || !canExportReports}
+                  disabled={!isFrozen || !canExportReports || !sourceContentReady}
                   onClick={() => setShowExportModal(true)}
                   aria-label={t("reportsAnnotations.exportButton")}
                 >
@@ -4388,12 +4426,10 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
   const canCreateReports = true;
   const canDeleteReports = true;
 
-  const [rows,    setRows]    = useState<ReportRow[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
-  const [sortCol, setSortCol] = useState<SortCol>("createdAt");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortCol, setSortCol] = useListPreference<SortCol>(JSON.stringify([postgresProjectId, "Reports_Annotations_View.tsx", "sortCol"]), "createdAt");
+  const [sortDir, setSortDir] = useListPreference<SortDir>(JSON.stringify([postgresProjectId, "Reports_Annotations_View.tsx", "sortDir"]), "desc");
 
   const [contextMenu,   setContextMenu]   = useState<{ x: number; y: number; row: ReportRow } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -4409,12 +4445,9 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
-  const loadReports = useCallback(async () => {
-    if (!postgresProjectId) return [];
-    setLoading(true);
-    setError(null);
-    try {
-      const records = await listPostgresReports(postgresProjectId);
+  const reportPage = usePostgresTablePage<PostgresReport>(postgresProjectId, { entity: "reports", reportType: "annotations", sort: sortCol, descending: sortDir === "desc" });
+  const loading = reportPage.loading;
+  function mapReports(records: PostgresReport[]): ReportRow[] {
       const mappedRows = records
         .filter((record) => record.reportType === "annotations")
         .map((record) => {
@@ -4437,17 +4470,14 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
           }
         })
         .filter(Boolean) as ReportRow[];
-      setRows(mappedRows);
       return mappedRows;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("reportsAnnotations.errors.loadReportsFailed"));
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  }, [postgresProjectId, t]);
+  }
+  const rows = mapReports(reportPage.rows);
+  const loadReports = useCallback(async (selectedId?: string) => {
+    const page = await reportPage.reload(selectedId);
+    return page ? mapReports(page.selected ? [...page.rows, page.selected] : page.rows) : [];
+  }, [reportPage.reload]);
 
-  useEffect(() => { loadReports(); }, [loadReports]);
 
   useEffect(() => {
     function onPointerDown(e: MouseEvent) {
@@ -4465,10 +4495,7 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
     };
   }, []);
 
-  const sorted = [...rows].sort((a, b) => {
-    const cmp = String(a[sortCol]).localeCompare(String(b[sortCol]), undefined, { sensitivity: "base" });
-    return sortDir === "asc" ? cmp : -cmp;
-  });
+  const sorted = rows;
 
   function handleSort(col: SortCol) {
     if (col === sortCol) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -4481,7 +4508,7 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
     try {
       if (!postgresProjectId) throw new Error(t("reportsCommon.projectWorkspaceRequired"));
       await deletePostgresReport(postgresProjectId, confirmDelete.id);
-      setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
+      await loadReports();
       setConfirmDelete(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("reportsAnnotations.errors.deleteReportFailed"));
@@ -4505,7 +4532,7 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
         onSaved={async (id) => { 
           setShowNew(false); 
           setNewFromSettings(null); 
-          const newRows = await loadReports();
+          const newRows = await loadReports(id);
           if (id) {
             const newRow = newRows.find((r) => r.id === id);
             if (newRow) setOpenRow(newRow);
@@ -4563,11 +4590,12 @@ export function CodeReportsView({ initialNewReportOpen = false, initialSavedRepo
         )}
       />
 
-      {error && <p className="alert-error">{error}</p>}
+      {(error || reportPage.error) && <p className="alert-error">{error || reportPage.error}</p>}
 
       <div className="view-content">
         <section className="report-layout-main">
-          <TableShell style={{ maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36 }}>
+          <TablePagination {...reportPage.controls} />
+          <TableShell ref={reportPage.tableRef}>
             <table className="data-table">
               <thead>
                 <tr>

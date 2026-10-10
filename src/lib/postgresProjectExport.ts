@@ -9,7 +9,7 @@ import {
   type PostgresProjectExportTable,
   type PostgresProject,
 } from "./postgres";
-import { loadPostgresProjectWorkspaceSnapshot } from "./postgresProjectWorkspace";
+import { loadPostgresProjectWorkspaceWithSourceDetails } from "./postgresProjectWorkspace";
 import type { ProjectExportData, RefiCodeNode } from "./projectExport";
 
 function rowFromRecord<T extends Record<string, unknown>>(record: T): Record<string, unknown> {
@@ -52,7 +52,7 @@ function parseSupplementTable(table: PostgresProjectExportTable): { name: string
 
 export async function fetchPostgresProjectExportData(project: PostgresProject): Promise<ProjectExportData> {
   const [snapshot, users, projectLog, reports, aiAnalyses, losslessBundle] = await Promise.all([
-    loadPostgresProjectWorkspaceSnapshot(project.id),
+    loadPostgresProjectWorkspaceWithSourceDetails(project.id),
     listPostgresProjectUsers(project.id),
     listPostgresProjectLog(project.id),
     listPostgresReports(project.id),
@@ -257,6 +257,7 @@ export async function fetchPostgresProjectExportData(project: PostgresProject): 
     exportedAt: new Date().toISOString(),
     project: projectRow,
     assets: losslessBundle.assets,
+    postgresTables: losslessBundle.tables.map(parseSupplementTable),
     tables,
   };
 }

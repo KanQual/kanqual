@@ -1,3 +1,4 @@
+import { useTextAnnotationSelection } from "../lib/useTextAnnotationSelection";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FilterIcon } from "../components/FilterIcon";
@@ -373,50 +374,7 @@ export function SourceAITextCodingView({
     };
   }, [annotationLaneById, rangedAnnotations]);
 
-  useEffect(() => {
-    function handleSelectionChange() {
-      if (!pendingSelection || !contentSelectionRef.current) return;
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-        setPendingSelection(null);
-        return;
-      }
-      const range = selection.getRangeAt(0);
-      if (!contentSelectionRef.current.contains(range.commonAncestorContainer)) {
-        setPendingSelection(null);
-      }
-    }
-
-    document.addEventListener("selectionchange", handleSelectionChange);
-    return () => {
-      document.removeEventListener("selectionchange", handleSelectionChange);
-    };
-  }, [pendingSelection]);
-
-  function handleMouseUp() {
-    if (!canEditAnnotations || !contentSelectionRef.current) return;
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      setPendingSelection(null);
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    if (!contentSelectionRef.current.contains(range.commonAncestorContainer)) {
-      setPendingSelection(null);
-      return;
-    }
-    const quote = selection.toString();
-    if (!quote.trim()) {
-      setPendingSelection(null);
-      return;
-    }
-    const preRange = document.createRange();
-    preRange.selectNodeContents(contentSelectionRef.current);
-    preRange.setEnd(range.startContainer, range.startOffset);
-    const startOffset = preRange.toString().length;
-    const endOffset = startOffset + quote.length;
-    setPendingSelection({ startOffset, endOffset, quote });
-  }
+  useTextAnnotationSelection(contentSelectionRef, canEditAnnotations, row.id, setPendingSelection);
 
   async function handleQuickCode(codeId: string) {
     setSelectedCodeId(codeId);
@@ -940,7 +898,7 @@ export function SourceAITextCodingView({
               }}
             >
               {row.content ? (
-                <div ref={contentSelectionRef} onMouseUp={handleMouseUp}>
+                <div ref={contentSelectionRef}>
                   {renderCodingContent()}
                 </div>
               ) : (

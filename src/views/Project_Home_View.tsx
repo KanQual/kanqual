@@ -1,3 +1,6 @@
+import { preloadableLazy } from "../lib/preloadableLazy";
+import { ListVisitCacheProvider } from "../lib/listVisitCache";
+import { TablePagination, useTablePagination } from "../components/TablePagination";
 import {
   type ComponentType,
   type Dispatch,
@@ -79,12 +82,11 @@ import {
   listPostgresObjectTypes,
   listPostgresAnnotationSummaries,
   listPostgresCodes,
-  listPostgresMemos,
+  getPostgresProjectListCounts,
   listPostgresProjectUsers,
   listPostgresRelationshipAttributeDefinitions,
   listPostgresRelationships,
   listPostgresRelationshipTypes,
-  listPostgresReports,
   listPostgresSavedDrawingSummaries,
   listPostgresTimelineGroups,
   listPostgresTimelineGroupRowOrders,
@@ -92,6 +94,9 @@ import {
   listPostgresSourceAttributeDefinitions,
   listPostgresSourceAttributeValues,
   listPostgresSources,
+  getPostgresSource,
+  toSourceSummary,
+  type PostgresSourceSummary,
   listPostgresSourceTypeSettings,
   reorderPostgresTimelineGroups,
   reorderPostgresTimelineGroupRows,
@@ -267,16 +272,17 @@ import {
 } from "../lib/postgresCanvasSketch";
 import {
   getPostgresImageMimeType,
-  usePostgresStoredImageUrlMap,
+
+  resolvePostgresStoragePath,
 } from "../lib/postgresStoredImages";
 
-const AppSettingsViewLazy = lazy(
+const AppSettingsViewLazy = preloadableLazy(
   () => import("./App_Settings_View").then((m) => ({ default: m.AppSettingsView })),
 );
 const UserSettingsViewLazy = lazy(
   () => import("./User_Settings_View").then((m) => ({ default: m.UserSettingsView })),
 );
-const ProjectSourcesViewLazy = lazy(
+const ProjectSourcesViewLazy = preloadableLazy(
   () => import("./Project_Sources_View").then((m) => ({ default: m.ProjectSourcesView })),
 );
 const SourceImportModalLazy = lazy(
@@ -285,7 +291,7 @@ const SourceImportModalLazy = lazy(
 const SourceEditorModalLazy = lazy(
   () => import("./Sources_View").then((m) => ({ default: m.SourceEditorModal })),
 );
-const ProjectHomeDetailsViewLazy = lazy(
+const ProjectHomeDetailsViewLazy = preloadableLazy(
   () => import("./Project_Home_Details_View").then((m) => ({ default: m.ProjectHomeDetailsView })),
 );
 const ProjectHomeTimelineViewLazy = lazy(
@@ -294,7 +300,7 @@ const ProjectHomeTimelineViewLazy = lazy(
 const ProjectHomeGraphViewLazy = lazy(
   () => import("./Project_Home_Graph_View").then((m) => ({ default: m.ProjectHomeGraphView })),
 );
-const AnalysisCodeSourcesViewLazy = lazy(
+const AnalysisCodeSourcesViewLazy = preloadableLazy(
   () => import("./Analysis_Code_Sources_View").then((m) => ({ default: m.AnalysisCodeSourcesView })),
 );
 function RemovedCanvasPlaceholder(_props: { children?: ReactNode; [key: string]: unknown }) {
@@ -304,44 +310,62 @@ function RemovedCanvasPlaceholder(_props: { children?: ReactNode; [key: string]:
 const AnalysisDrawViewLazy = RemovedCanvasPlaceholder;
 const AnalysisDrawCanvasViewLazy = RemovedCanvasPlaceholder;
 const AnalysisNetworkViewLazy = RemovedCanvasPlaceholder;
-const AIAssistAssistedCodingViewLazy = lazy(
+const AIAssistAssistedCodingViewLazy = preloadableLazy(
   () => import("./AIAssist_Assisted_Coding_View").then((m) => ({ default: m.AIAssistAssistedCodingView })),
 );
 const FreeDrawCanvasViewLazy = RemovedCanvasPlaceholder;
 const ExploreCanvasViewLazy = lazy(
   () => import("./Explore_Canvas_View").then((m) => ({ default: m.ExploreCanvasView })),
 );
-const ProjectMemosViewLazy = lazy(
+const ProjectMemosViewLazy = preloadableLazy(
   () => import("./Project_Memos_View").then((m) => ({ default: m.ProjectMemosView })),
 );
-const ReportsViewLazy = lazy(
+const ReportsViewLazy = preloadableLazy(
   () => import("./Reports_View").then((m) => ({ default: m.ReportsView })),
 );
-const AIAssistHomeViewLazy = lazy(
+const AIAssistHomeViewLazy = preloadableLazy(
   () => import("./AIAssist_Home_View").then((m) => ({ default: m.AIAssistHomeView })),
 );
-const AIAssistChatViewLazy = lazy(
+const AIAssistChatViewLazy = preloadableLazy(
   () => import("./AIAssist_Chat_View").then((m) => ({ default: m.AIAssistChatView })),
 );
-const AIAssistAnalyzeViewLazy = lazy(
+const AIAssistAnalyzeViewLazy = preloadableLazy(
   () => import("./AIAssist_Analyze_View").then((m) => ({ default: m.AIAssistAnalyzeView })),
 );
-const AIAssistAttributesViewLazy = lazy(
+const AIAssistAttributesViewLazy = preloadableLazy(
   () => import("./AIAssist_Attributes_View").then((m) => ({ default: m.AIAssistAttributesView })),
 );
-const AIAssistProcessSourcesViewLazy = lazy(
+const AIAssistProcessSourcesViewLazy = preloadableLazy(
   () => import("./AIAssist_ProcessSources_View").then((m) => ({ default: m.AIAssistProcessSourcesView })),
 );
-const CodebookViewLazy = lazy(
+const CodebookViewLazy = preloadableLazy(
   () => import("./Project_Codebook_View").then((m) => ({
     default: m.CodebookView as ComponentType<import("./Project_Codebook_View").CodebookViewProps>,
   })),
 );
-const AnnotationsViewLazy = lazy(
+const AnnotationsViewLazy = preloadableLazy(
   () => import("./Project_Annotations_View").then((m) => ({
     default: m.AnnotationsView as ComponentType<import("./Project_Annotations_View").AnnotationsViewProps>,
   })),
 );
+
+const navigationPreloads: Record<string, { preload: () => void }> = {
+  home: ProjectHomeDetailsViewLazy,
+  sources: ProjectSourcesViewLazy,
+  "code-text": AnalysisCodeSourcesViewLazy,
+  memos: ProjectMemosViewLazy,
+  reports: ReportsViewLazy,
+  codebook: CodebookViewLazy,
+  annotations: AnnotationsViewLazy,
+  "ai-assist": AIAssistHomeViewLazy,
+  "ai-assist-chat": AIAssistChatViewLazy,
+  "ai-assisted-coding": AIAssistAssistedCodingViewLazy,
+  "ai-analyze": AIAssistAnalyzeViewLazy,
+  "ai-assist-source-attributes": AIAssistAttributesViewLazy,
+  "ai-assist-process-documents": AIAssistProcessSourcesViewLazy,
+  "app-settings": AppSettingsViewLazy,
+};
+function preloadNavigation(screen: string) { navigationPreloads[screen]?.preload(); }
 
 export type ProjectHomeViewProps = {
   project: PostgresProject;
@@ -811,7 +835,12 @@ async function loadSvgToPdf() {
   return svgToPdfPromise;
 }
 
-export function ProjectHomeView({
+export function ProjectHomeView(props: ProjectHomeViewProps) {
+  const sessionKey = JSON.stringify([props.project.id, props.authSession.authKind, props.authSession.user.id, props.authSession.user.role]);
+  return <ListVisitCacheProvider key={sessionKey} projectId={props.project.id}><ProjectHomeViewContent {...props} /></ListVisitCacheProvider>;
+}
+
+function ProjectHomeViewContent({
   project,
   authSession,
   onAuthSessionUpdated,
@@ -826,6 +855,10 @@ export function ProjectHomeView({
   const { t } = useI18n();
   const PROJECT_ROLE_OPTIONS = ["owner", "editor", "coder", "viewer"] as const;
   const [activeScreen, setActiveScreen] = useState<PostgresProjectScreen>("home");
+  const activeScreenRef = useRef(activeScreen);
+  activeScreenRef.current = activeScreen;
+  const [deferredGraphRefreshProject, setDeferredGraphRefreshProject] = useState<string | null>(null);
+
   const [projectHomeTab, setProjectHomeTab] = useState<ProjectHomeTab>("details");
   const [projectHelpModal, setProjectHelpModal] = useState<PostgresProjectHelpModalId | null>(null);
   const [projectHomeGraphFitKey, setProjectHomeGraphFitKey] = useState(0);
@@ -860,7 +893,7 @@ export function ProjectHomeView({
   const [selectedUserRoleFilter, setSelectedUserRoleFilter] = useState<(typeof PROJECT_ROLE_OPTIONS)[number] | "all">("all");
   const [objectTypes, setObjectTypes] = useState<PostgresObjectType[]>([]);
   const [objects, setObjects] = useState<PostgresObject[]>([]);
-  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [sources, setSources] = useState<PostgresSourceSummary[]>([]);
   const [sourceTypeSettings, setSourceTypeSettings] = useState<PostgresSourceTypeSetting[]>([]);
   const [sourceAttributeDefinitions, setSourceAttributeDefinitions] = useState<PostgresSourceAttributeDefinition[]>([]);
   const [sourceAttributeValues, setSourceAttributeValues] = useState<PostgresSourceAttributeValue[]>([]);
@@ -1930,8 +1963,18 @@ export function ProjectHomeView({
     })),
     [codes],
   );
+  const [homeSourceDetail, setHomeSourceDetail] = useState<PostgresSource | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setHomeSourceDetail(null);
+    if (!editingHomeCanvasSourceId) return;
+    void getPostgresSource(project.id, editingHomeCanvasSourceId).then((source) => {
+      if (!cancelled) setHomeSourceDetail(source);
+    }).catch((error) => { if (!cancelled) setGraphError(error instanceof Error ? error.message : String(error)); });
+    return () => { cancelled = true; };
+  }, [project.id, editingHomeCanvasSourceId]);
   const sourceRowsForEditor = useMemo<SourceRow[]>(
-    () => sources.map((source) => ({
+    () => (homeSourceDetail && homeSourceDetail.id === editingHomeCanvasSourceId ? [homeSourceDetail] : []).map((source) => ({
       id: source.id,
       name: source.title,
       type: source.sourceKind,
@@ -1956,7 +1999,7 @@ export function ProjectHomeView({
       objectCount: 0,
       createdAt: source.createdAt,
     })),
-    [annotationSummaries, sources, t],
+    [annotationSummaries, homeSourceDetail, editingHomeCanvasSourceId, t],
   );
   const editingHomeCanvasSource = editingHomeCanvasSourceId
     ? sourceRowsForEditor.find((source) => source.id === editingHomeCanvasSourceId) ?? null
@@ -2637,7 +2680,7 @@ export function ProjectHomeView({
       }
 
       if (createdSources.length > 0) {
-        setSources((current) => [...current, ...createdSources]);
+        setSources((current) => [...current, ...createdSources.map(toSourceSummary)]);
       }
       if (pendingTimelineCreateStart) {
         await applyTimelineStartToCreatedSources(createdSources, pendingTimelineCreateStart);
@@ -2731,7 +2774,7 @@ export function ProjectHomeView({
         });
       }
 
-      setSources((current) => current.map((entry) => (entry.id === savedWithImage.id ? savedWithImage : entry)));
+      setSources((current) => current.map((entry) => (entry.id === savedWithImage.id ? toSourceSummary(savedWithImage) : entry)));
       setSourceAttributeValues((current) => {
         let nextValues = current;
         for (const definition of sourceAttributeDefinitions) {
@@ -3346,29 +3389,16 @@ export function ProjectHomeView({
       updatedAt: code.updatedAt,
     })),
   ], [codes, objects, sources, t]);
-  const canvasObjectImageStoragePaths = useMemo(
-    () => Array.from(new Set([
-      ...objects.map((object) => object.imageStoragePath ?? ""),
-      ...sources.map((source) => source.imageStoragePath ?? ""),
-      ...objectTypes.map((objectType) => objectType.imageStoragePath ?? ""),
-      ...homeCanvasVirtualObjectTypes.map((objectType) => objectType.imageStoragePath ?? ""),
-    ].map((path) => path.trim()).filter(Boolean))).sort(),
-    [homeCanvasVirtualObjectTypes, objectTypes, objects, sources],
-  );
-  const canvasObjectImageUrlByStoragePath = usePostgresStoredImageUrlMap(project.storagePath, canvasObjectImageStoragePaths);
   const getCanvasPostgresObjectAppearance = useCallback((
     object: Parameters<typeof getPostgresObjectAppearance>[0],
     objectTypeRecord: Parameters<typeof getPostgresObjectAppearance>[1],
   ) => {
     const appearance = getPostgresObjectAppearance(object, objectTypeRecord);
-    const uploadedImageUrl = appearance.imageStoragePath
-      ? canvasObjectImageUrlByStoragePath.get(appearance.imageStoragePath) ?? ""
-      : "";
     return {
       ...appearance,
-      sourceImage: uploadedImageUrl || appearance.sourceImage,
+      sourceImagePath: appearance.imageStoragePath ? resolvePostgresStoragePath(project.storagePath, appearance.imageStoragePath) : "",
     };
-  }, [canvasObjectImageUrlByStoragePath]);
+  }, [project.storagePath]);
   const resizeHomeCanvasNodeGroup = useCallback((nodeIds: string[], scale: number) => {
     const targetIds = new Set(nodeIds);
     if (targetIds.size === 0) return;
@@ -3383,7 +3413,7 @@ export function ProjectHomeView({
         if (!object || !currentNode) return;
         const objectTypeRecord = homeObjectTypeById.get(object.objectTypeId) ?? null;
         const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-        const defaultDimensions = appearance.sourceImage
+        const defaultDimensions = (appearance.sourceImage || appearance.sourceImagePath)
           ? getSourceCanvasNodeDefaultDimensions()
           : getCanvasNodeDefaultDimensions(appearance.shape);
         const width = Math.round(defaultDimensions.width * scale);
@@ -3413,7 +3443,7 @@ export function ProjectHomeView({
       if (!object || !node) return [];
       const objectTypeRecord = homeObjectTypeById.get(object.objectTypeId) ?? null;
       const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-      const defaultDimensions = appearance.sourceImage
+      const defaultDimensions = (appearance.sourceImage || appearance.sourceImagePath)
         ? getSourceCanvasNodeDefaultDimensions()
         : getCanvasNodeDefaultDimensions(appearance.shape);
       if (defaultDimensions.width <= 0) return [];
@@ -3600,7 +3630,7 @@ export function ProjectHomeView({
     drawCanvasObjects.forEach((object, index) => {
       const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
       const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-      const defaultDimensions = appearance.sourceImage
+      const defaultDimensions = (appearance.sourceImage || appearance.sourceImagePath)
         ? getSourceCanvasNodeDefaultDimensions()
         : getCanvasNodeDefaultDimensions(appearance.shape);
       const column = index % 4;
@@ -4172,8 +4202,7 @@ export function ProjectHomeView({
           nextTimelineItemGroupAssignments,
           nextSavedDrawings,
           nextCanvasState,
-          nextMemos,
-          nextReports,
+          nextListCounts,
         ] = await Promise.all([
           listPostgresObjectTypes(project.id),
           listPostgresRelationshipTypes(project.id),
@@ -4190,8 +4219,7 @@ export function ProjectHomeView({
           listPostgresTimelineItemGroupAssignments(project.id),
           listPostgresSavedDrawingSummaries(project.id),
           getPostgresProjectCanvasState(project.id),
-          listPostgresMemos(project.id),
-          listPostgresReports(project.id),
+          getPostgresProjectListCounts(project.id),
         ]);
         if (!cancelled) {
           setObjectTypes(nextObjectTypes);
@@ -4208,13 +4236,13 @@ export function ProjectHomeView({
           setTimelineGroupRowOrders(nextTimelineGroupRowOrders);
           setTimelineItemGroupAssignments(nextTimelineItemGroupAssignments);
           setSavedDrawings(nextSavedDrawings);
-          setMemoCount(nextMemos.length);
-          setReportCount(nextReports.length);
+          setMemoCount(nextListCounts.memos);
+          setReportCount(nextListCounts.reports);
           setFromObjectId((current) => current || (nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
           setToObjectId((current) => current || (nextObjects[1] ? `object:${nextObjects[1].id}` : nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
           setRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
           setCanvasRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
-          if (activeScreen !== "free-draw") {
+          if (activeScreenRef.current !== "free-draw" && activeScreenRef.current !== "explore") {
             setCanvasScale(nextCanvasState.viewport.zoom || 1);
             setCanvasOffset({
               x: nextCanvasState.viewport.x || 140,
@@ -4257,7 +4285,7 @@ export function ProjectHomeView({
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, project.id]);
+  }, [project.id]);
 
   useEffect(() => {
     if (activeScreen !== "home" && activeScreen !== "explore") return;
@@ -4661,8 +4689,7 @@ export function ProjectHomeView({
         nextTimelineItemGroupAssignments,
         nextSavedDrawings,
         nextCanvasState,
-        nextMemos,
-        nextReports,
+        nextListCounts,
       ] = await Promise.all([
         listPostgresObjectTypes(project.id),
         listPostgresRelationshipTypes(project.id),
@@ -4681,8 +4708,7 @@ export function ProjectHomeView({
         listPostgresTimelineItemGroupAssignments(project.id),
         listPostgresSavedDrawingSummaries(project.id),
         getPostgresProjectCanvasState(project.id),
-        listPostgresMemos(project.id),
-        listPostgresReports(project.id),
+        getPostgresProjectListCounts(project.id),
       ]);
       setObjectTypes(nextObjectTypes);
       setRelationshipTypes(nextRelationshipTypes);
@@ -4700,13 +4726,13 @@ export function ProjectHomeView({
       setTimelineGroupRowOrders(nextTimelineGroupRowOrders);
       setTimelineItemGroupAssignments(nextTimelineItemGroupAssignments);
       setSavedDrawings(nextSavedDrawings);
-      setMemoCount(nextMemos.length);
-      setReportCount(nextReports.length);
+      setMemoCount(nextListCounts.memos);
+      setReportCount(nextListCounts.reports);
       setFromObjectId((current) => current || (nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
       setToObjectId((current) => current || (nextObjects[1] ? `object:${nextObjects[1].id}` : nextObjects[0] ? `object:${nextObjects[0].id}` : ""));
       setRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
       setCanvasRelationshipTypeId((current) => current || nextRelationshipTypes[0]?.id || "");
-      if (activeScreen !== "free-draw") {
+      if (activeScreenRef.current !== "free-draw" && activeScreenRef.current !== "explore") {
         setCanvasScale(nextCanvasState.viewport.zoom || 1);
         setCanvasOffset({
           x: nextCanvasState.viewport.x || 140,
@@ -4742,7 +4768,7 @@ export function ProjectHomeView({
     } finally {
       setGraphLoading(false);
     }
-  }, [activeScreen, project.id]);
+  }, [project.id]);
 
   useEffect(() => {
     let disposed = false;
@@ -4752,16 +4778,16 @@ export function ProjectHomeView({
       unlisten = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
         if (disposed) return;
         if (event.payload.projectId !== project.id) return;
+        const activeScreen = activeScreenRef.current;
 
         if (event.payload.entityType === "saved_drawing") {
-          if (activeScreen !== "free-draw") {
-            void refreshSavedDrawings();
-          }
+          void refreshSavedDrawings();
           return;
         }
 
         if (activeScreen === "users") {
           void refreshUsers();
+          void refreshGraph();
           return;
         }
 
@@ -4775,6 +4801,7 @@ export function ProjectHomeView({
         }
 
         if (activeScreen === "explore") {
+          setDeferredGraphRefreshProject(project.id);
           return;
         }
 
@@ -4788,7 +4815,14 @@ export function ProjectHomeView({
       disposed = true;
       if (unlisten) unlisten();
     };
-  }, [activeScreen, project.id, refreshGraph, refreshSavedDrawings, refreshUsers]);
+  }, [project.id, refreshGraph, refreshSavedDrawings, refreshUsers]);
+
+  // Explore owns its live canvas. Apply deferred shared-data changes when leaving it.
+  useEffect(() => {
+    if (!deferredGraphRefreshProject || activeScreen === "explore") return;
+    setDeferredGraphRefreshProject(null);
+    if (deferredGraphRefreshProject === project.id) void refreshGraph();
+  }, [activeScreen, deferredGraphRefreshProject, project.id, refreshGraph]);
 
   useEffect(() => {
     if (selectedObjectTypeFilter === "all") return;
@@ -4880,7 +4914,7 @@ export function ProjectHomeView({
         const existing = current[object.id];
         const objectTypeRecord = objectTypeById.get(object.objectTypeId) ?? null;
         const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-        const defaultDimensions = appearance.sourceImage
+        const defaultDimensions = (appearance.sourceImage || appearance.sourceImagePath)
           ? getSourceCanvasNodeDefaultDimensions()
           : getCanvasNodeDefaultDimensions(appearance.shape);
         const column = index % 4;
@@ -6366,13 +6400,13 @@ export function ProjectHomeView({
             getRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
             getNodeDefaultDimensions={(object, objectTypeRecord) => {
               const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-              return appearance.sourceImage
+              return (appearance.sourceImage || appearance.sourceImagePath)
                 ? getSourceCanvasNodeDefaultDimensions()
                 : getCanvasNodeDefaultDimensions(appearance.shape);
             }}
             getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
               const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-              return appearance.sourceImage
+              return (appearance.sourceImage || appearance.sourceImagePath)
                 ? getSourceCanvasNodeRenderedDimensions(nodeState)
                 : getCanvasNodeRenderedDimensions(appearance.shape, nodeState);
             }}
@@ -6538,10 +6572,20 @@ export function ProjectHomeView({
     </Suspense>
   );
 
+  const [objectSearch, setObjectSearch] = useState("");
+  const [relationshipSearch, setRelationshipSearch] = useState("");
+  const objectTable = useTablePagination(filteredObjects.filter(row => [row.title, row.description, row.objectType].join(" ").toLowerCase().includes(objectSearch.trim().toLowerCase())), `${project.id}:${selectedObjectTypeFilter}:${objectSearch}`);
+  const relationshipTable = useTablePagination(filteredRelationships.filter(row => [row.relationshipType, row.description, row.fromEntityName, row.toEntityName, objectById.get(row.fromObjectId)?.title, objectById.get(row.toObjectId)?.title].join(" ").toLowerCase().includes(relationshipSearch.trim().toLowerCase())), `${project.id}:${selectedRelationshipTypeFilter}:${relationshipSearch}`);
+  const objectAttributeTable = useTablePagination(sortedObjectAttributeRows, `${project.id}:${selectedObjectTypeFilter}:${objectAttributeSortCol}:${objectAttributeSortDir}`);
+  const relationshipAttributeTable = useTablePagination(sortedRelationshipAttributeRows, `${project.id}:${selectedRelationshipTypeFilter}:${relationshipAttributeSortCol}:${relationshipAttributeSortDir}`);
+  const userTable = useTablePagination(filteredProjectUsers, `${project.id}:${selectedUserRoleFilter}`);
+  const drawingTable = useTablePagination(filteredSavedDrawings, `${project.id}:${selectedCanvasViewKind}`);
+
   return (
     <div className="app-shell">
       <Sidebar
         activeScreen={activeScreen}
+        onPreloadScreen={preloadNavigation}
         activeProject={project}
         authSession={authSession}
         networkMode={sidebarNetworkMode}
@@ -6712,7 +6756,7 @@ export function ProjectHomeView({
                 </>
               ) : null}
               {projectHomeTab === "details" ? (
-                <div className={guideDetailsTourActive ? "getting-started-spotlight-target" : undefined}>
+                <div className={`project-home-details-container${guideDetailsTourActive ? " getting-started-spotlight-target" : ""}`}>
                   <Suspense fallback={<ViewLoadingFallback />}>
                     <ProjectHomeDetailsViewLazy
                       project={project}
@@ -6814,13 +6858,13 @@ export function ProjectHomeView({
                   getRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
                   getNodeDefaultDimensions={(object, objectTypeRecord) => {
                     const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-                    return appearance.sourceImage
+                    return (appearance.sourceImage || appearance.sourceImagePath)
                       ? getSourceCanvasNodeDefaultDimensions()
                       : getCanvasNodeDefaultDimensions(appearance.shape);
                   }}
                   getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
                     const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-                    return appearance.sourceImage
+                    return (appearance.sourceImage || appearance.sourceImagePath)
                       ? getSourceCanvasNodeRenderedDimensions(nodeState)
                       : getCanvasNodeRenderedDimensions(appearance.shape, nodeState);
                   }}
@@ -6978,8 +7022,6 @@ export function ProjectHomeView({
                     <div
                       className="home-primary-column"
                       style={{
-                        alignSelf: "center",
-                        justifyContent: "flex-start",
                         gap: 16,
                         minHeight: 0,
                         maxHeight: "100%",
@@ -7110,7 +7152,9 @@ export function ProjectHomeView({
                           <p>{t("projectCore.homeShell.noUsersMatchRole")}</p>
                         </div>
                       ) : (
-                        <TableShell className="data-table-wrap--elevated" style={{ maxHeight: 520 }}>
+                        <>
+                        <TablePagination {...userTable.controls} />
+                        <TableShell ref={userTable.tableRef} className="data-table-wrap--elevated">
                           <table className="data-table">
                             <thead>
                               <tr>
@@ -7121,7 +7165,7 @@ export function ProjectHomeView({
                               </tr>
                             </thead>
                             <tbody>
-                              {filteredProjectUsers.map((user) => (
+                              {userTable.rows.map((user) => (
                                 <tr
                                   key={user.id}
                                   className="data-table-row project-data-table-row"
@@ -7145,6 +7189,7 @@ export function ProjectHomeView({
                             </tbody>
                           </table>
                         </TableShell>
+                        </>
                       )}
                     </section>
                   </MasterDetailLayout>
@@ -7668,8 +7713,6 @@ export function ProjectHomeView({
                   <div
                     className="home-primary-column"
                     style={{
-                      alignSelf: "center",
-                      justifyContent: "center",
                       gap: 16,
                       minHeight: 0,
                       maxHeight: "100%",
@@ -7968,7 +8011,8 @@ export function ProjectHomeView({
                                 <PlusIcon className="card-header-icon" />
                               </button>}
                             />
-                          <div className="data-table-wrap case-attributes-table-wrap">
+                          <TablePagination {...objectAttributeTable.controls} />
+                          <div ref={objectAttributeTable.tableRef} className="data-table-wrap case-attributes-table-wrap">
                             <table className="data-table case-attributes-table">
                               <thead>
                                 <tr>
@@ -8012,7 +8056,7 @@ export function ProjectHomeView({
                                     </td>
                                   </tr>
                                 ) : (
-                                  sortedObjectAttributeRows.map((row) => (
+                                  objectAttributeTable.rows.map((row) => (
                                     <tr key={row.id} className="case-attributes-row">
                                       <td className="data-table-cell data-table-cell--name case-attributes-case-cell">{row.name}</td>
                                       {objectAttributeDefinitionsForWorkspace.map((definition) => {
@@ -8076,7 +8120,8 @@ export function ProjectHomeView({
                             <PlusIcon className="card-header-icon" />
                           </button>}
                         />
-                      <TableShell className="data-table-wrap--elevated">
+                      <TablePagination {...objectTable.controls} search={{ value: objectSearch, onChange: setObjectSearch }} />
+                      <TableShell ref={objectTable.tableRef} className="data-table-wrap--elevated">
                         <table className="data-table">
                           <thead>
                             <tr>
@@ -8086,7 +8131,7 @@ export function ProjectHomeView({
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredObjects.length === 0 ? (
+                            {objectTable.controls.total === 0 ? (
                               <TableMessageRow colSpan={3}>
                                 {selectedObjectTypeFilter === "all"
                                   ? t("projectCore.homeShell.objects.noObjects")
@@ -8095,7 +8140,7 @@ export function ProjectHomeView({
                                     })}
                               </TableMessageRow>
                             ) : (
-                              filteredObjects.map((object) => {
+                              objectTable.rows.map((object) => {
                                 return (
                                   <tr
                                     key={object.id}
@@ -8555,8 +8600,6 @@ export function ProjectHomeView({
                   <div
                     className="home-primary-column"
                     style={{
-                      alignSelf: "center",
-                      justifyContent: "center",
                       gap: 16,
                       minHeight: 0,
                       maxHeight: "100%",
@@ -8877,7 +8920,8 @@ export function ProjectHomeView({
                                 <PlusIcon className="card-header-icon" />
                               </button>}
                             />
-                          <div className="data-table-wrap case-attributes-table-wrap">
+                          <TablePagination {...relationshipAttributeTable.controls} />
+                          <div ref={relationshipAttributeTable.tableRef} className="data-table-wrap case-attributes-table-wrap">
                             <table className="data-table case-attributes-table">
                               <thead>
                                 <tr>
@@ -8923,7 +8967,7 @@ export function ProjectHomeView({
                                     </td>
                                   </tr>
                                 ) : (
-                                  sortedRelationshipAttributeRows.map((row) => (
+                                  relationshipAttributeTable.rows.map((row) => (
                                     <tr key={row.id} className="case-attributes-row">
                                       <td className="data-table-cell data-table-cell--name case-attributes-case-cell">{row.name}</td>
                                       {relationshipAttributeDefinitionsForWorkspace.map((definition) => {
@@ -8987,7 +9031,8 @@ export function ProjectHomeView({
                             <PlusIcon className="card-header-icon" />
                           </button>}
                         />
-                      <TableShell className="data-table-wrap--elevated">
+                      <TablePagination {...relationshipTable.controls} search={{ value: relationshipSearch, onChange: setRelationshipSearch }} />
+                      <TableShell ref={relationshipTable.tableRef} className="data-table-wrap--elevated">
                         <table className="data-table">
                           <thead>
                             <tr>
@@ -8998,7 +9043,7 @@ export function ProjectHomeView({
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredRelationships.length === 0 ? (
+                            {relationshipTable.controls.total === 0 ? (
                               <TableMessageRow colSpan={4}>
                                 {selectedRelationshipTypeFilter === "all"
                                   ? t("projectCore.homeShell.relationships.noRelationships")
@@ -9006,7 +9051,7 @@ export function ProjectHomeView({
                                       type: relationshipTypeById.get(selectedRelationshipTypeFilter)?.name ?? t("projectCore.homeShell.relationships.selectedTypeFallback"),
                                     })}
                               </TableMessageRow>
-                            ) : filteredRelationships.map((relationship) => {
+                            ) : relationshipTable.rows.map((relationship) => {
                               const fromObject = objectById.get(relationship.fromObjectId);
                               const toObject = objectById.get(relationship.toObjectId);
                               return (
@@ -9317,13 +9362,13 @@ export function ProjectHomeView({
                 getRelationshipStrokeWidth={getPostgresRelationshipStrokeWidth}
                 getNodeDefaultDimensions={(object, objectTypeRecord) => {
                   const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-                  return appearance.sourceImage
+                  return (appearance.sourceImage || appearance.sourceImagePath)
                     ? getSourceCanvasNodeDefaultDimensions()
                     : getCanvasNodeDefaultDimensions(appearance.shape);
                 }}
                 getNodeRenderedDimensions={(object, objectTypeRecord, nodeState) => {
                   const appearance = getCanvasPostgresObjectAppearance(object, objectTypeRecord);
-                  return appearance.sourceImage
+                  return (appearance.sourceImage || appearance.sourceImagePath)
                     ? getSourceCanvasNodeRenderedDimensions(nodeState)
                     : getCanvasNodeRenderedDimensions(appearance.shape, nodeState);
                 }}
@@ -9467,7 +9512,9 @@ export function ProjectHomeView({
                       <p>{t("projectCore.homeShell.savedCanvases.noSavedPrefix")} {formatCanvasKindLabel(selectedCanvasViewKind).toLowerCase()} {t("projectCore.homeShell.savedCanvases.noSavedSuffix")}</p>
                     </div>
                   ) : (
-                    <div className="data-table-wrap data-table-wrap--elevated">
+                    <>
+                    <TablePagination {...drawingTable.controls} />
+                    <div ref={drawingTable.tableRef} className="data-table-wrap data-table-wrap--elevated">
                       <table className="data-table">
                         <thead>
                           <tr>
@@ -9479,7 +9526,7 @@ export function ProjectHomeView({
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredSavedDrawings.map((drawing) => (
+                          {drawingTable.rows.map((drawing) => (
                             <tr key={drawing.id} className="data-table-row">
                               <td className="data-table-cell data-table-cell--name">{drawing.name}</td>
                               <td className="data-table-cell data-table-cell--muted">{formatCanvasKindLabel(drawing.canvasKind)}</td>
@@ -9640,6 +9687,7 @@ export function ProjectHomeView({
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
                 </section>
               </div>

@@ -22,6 +22,8 @@ import {
   listPostgresSourceAttributeDefinitions,
   listPostgresSourceAttributeValues,
   listPostgresSources,
+  getPostgresSource,
+  type PostgresSource,
   savePostgresObject,
   savePostgresRelationship,
   savePostgresSourceAttribute,
@@ -30,7 +32,7 @@ import {
   type PostgresObjectAttributeDefinition,
   type PostgresRelationship,
   type PostgresRelationshipAttributeDefinition,
-  type PostgresSource,
+  type PostgresSourceSummary,
   type PostgresSourceAttributeDefinition,
   type PostgresSourceAttributeValue,
 } from "../lib/postgres";
@@ -62,6 +64,7 @@ type AttributeOwnerRow = {
   typeLabel: string;
   currentValue: string;
   content: string;
+  sourceIds: string[];
 };
 
 type EvidenceModalState = {
@@ -239,12 +242,12 @@ function getSourceAiTextContent(source: PostgresSource): string {
     .join("\n\n");
 }
 
-function sourceHasAiAttributeContent(source: PostgresSource): boolean {
+function sourceHasAiAttributeContent(source: PostgresSourceSummary): boolean {
   const kind = normalizeSourceKind(source.sourceKind);
-  return (kind === "text" || kind === "transcript") && getSourceAiTextContent(source).trim().length > 0;
+  return (kind === "text" || kind === "transcript") && (source.hasTextContent || (kind === "transcript" && source.hasStructuredContent));
 }
 
-function sourceMatchesAttributeKinds(source: PostgresSource, definition: PostgresSourceAttributeDefinition): boolean {
+function sourceMatchesAttributeKinds(source: PostgresSourceSummary, definition: PostgresSourceAttributeDefinition): boolean {
   const allowedKinds = definition.sourceKinds.map(normalizeSourceKind).filter(Boolean);
   if (allowedKinds.length === 0) return true;
   return allowedKinds.includes(normalizeSourceKind(source.sourceKind));
@@ -258,7 +261,7 @@ export function AIAssistAttributesView({
   canUseAiAttributeTools: boolean;
 }) {
   const { t } = useI18n();
-  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [sources, setSources] = useState<PostgresSourceSummary[]>([]);
   const [objects, setObjects] = useState<PostgresObject[]>([]);
   const [relationships, setRelationships] = useState<PostgresRelationship[]>([]);
   const [definitions, setDefinitions] = useState<PostgresSourceAttributeDefinition[]>([]);
@@ -448,7 +451,7 @@ export function AIAssistAttributesView({
   }, [values]);
 
   const sourcesById = useMemo(() => {
-    const map = new Map<string, PostgresSource>();
+    const map = new Map<string, PostgresSourceSummary>();
     for (const source of sources) {
       map.set(source.id, source);
     }
@@ -456,7 +459,7 @@ export function AIAssistAttributesView({
   }, [sources]);
 
   const linkedTextSourcesByObjectId = useMemo(() => {
-    const map = new Map<string, PostgresSource[]>();
+    const map = new Map<string, PostgresSourceSummary[]>();
     const addLinkedSource = (objectId: string, sourceId: string) => {
       const source = sourcesById.get(sourceId);
       if (!source || !sourceHasAiAttributeContent(source)) return;
@@ -486,7 +489,8 @@ export function AIAssistAttributesView({
           ownerName: source.title || source.originalFileName || "Untitled source",
           typeLabel: formatSourceKindLabel(source.sourceKind),
           currentValue: valueRow?.value ?? "",
-          content: getSourceAiTextContent(source),
+          content: "",
+          sourceIds: [source.id],
         };
       });
     }
@@ -497,12 +501,13 @@ export function AIAssistAttributesView({
         .map((object) => {
           const valueRow = object.attributeValues.find((value) => value.attributeDefinitionId === selectedObjectAttribute.id);
           const existingAttributes = formatAttributeValuesForPrompt(object.attributeValues, selectedObjectAttribute.id);
-          const linkedSourceContent = formatLinkedSourcesForPrompt(linkedTextSourcesByObjectId.get(object.id) ?? []);
+          const linkedSourceIds = (linkedTextSourcesByObjectId.get(object.id) ?? []).map((source) => source.id);
           return {
-          ownerId: object.id,
-          ownerName: object.title || "Untitled object",
-          typeLabel: object.objectType || "Object",
-          currentValue: valueRow?.value ?? "",
+            ownerId: object.id,
+            ownerName: object.title || "Untitled object",
+            typeLabel: object.objectType || "Object",
+            currentValue: valueRow?.value ?? "",
+            sourceIds: linkedSourceIds,
             content: joinContentLines([
               `Object: ${object.title || "Untitled object"}`,
               `Type: ${object.objectType}`,
@@ -510,7 +515,6 @@ export function AIAssistAttributesView({
               object.eventStartAt ? `Event start: ${object.eventStartAt}` : "",
               object.eventEndAt ? `Event end: ${object.eventEndAt}` : "",
               existingAttributes ? `Existing attributes:\n${existingAttributes}` : "",
-              linkedSourceContent ? `Directly linked text sources:\n${linkedSourceContent}` : "",
             ]),
           };
         });
@@ -521,7 +525,7 @@ export function AIAssistAttributesView({
       .map((relationship) => {
         const valueRow = relationship.attributeValues.find((value) => value.attributeDefinitionId === selectedRelationshipAttribute.id);
         const existingAttributes = formatAttributeValuesForPrompt(relationship.attributeValues, selectedRelationshipAttribute.id);
-        const linkedSources = new Map<string, PostgresSource>();
+        const linkedSources = new Map<string, PostgresSourceSummary>();
         const addSourceById = (sourceId: string) => {
           const source = sourcesById.get(sourceId);
           if (source && sourceHasAiAttributeContent(source)) linkedSources.set(source.id, source);
@@ -535,18 +539,18 @@ export function AIAssistAttributesView({
         if (relationship.toEntityType === "source") addSourceById(relationship.toEntityId);
         if (relationship.fromEntityType === "object") addSourcesLinkedToObject(relationship.fromEntityId);
         if (relationship.toEntityType === "object") addSourcesLinkedToObject(relationship.toEntityId);
-        const linkedSourceContent = formatLinkedSourcesForPrompt([...linkedSources.values()]);
+        const linkedSourceIds = [...linkedSources.keys()];
         return {
           ownerId: relationship.id,
           ownerName: `${relationship.fromEntityName || "Unknown"} -> ${relationship.toEntityName || "Unknown"}`,
           typeLabel: relationship.relationshipType || "Relationship",
           currentValue: valueRow?.value ?? "",
+          sourceIds: linkedSourceIds,
           content: joinContentLines([
             `Relationship: ${relationship.fromEntityName || "Unknown"} -> ${relationship.toEntityName || "Unknown"}`,
             `Type: ${relationship.relationshipType}`,
             relationship.description ? `Description: ${relationship.description}` : "",
             existingAttributes ? `Existing attributes:\n${existingAttributes}` : "",
-            linkedSourceContent ? `Directly linked text sources:\n${linkedSourceContent}` : "",
           ]),
         };
       });
@@ -562,6 +566,15 @@ export function AIAssistAttributesView({
     sourcesById,
     valuesBySourceAndAttribute,
   ]);
+
+  async function loadOwnerContent(owner: AttributeOwnerRow): Promise<string> {
+    const linkedSources: PostgresSource[] = [];
+    for (const sourceId of owner.sourceIds) linkedSources.push(await getPostgresSource(projectId, sourceId));
+    if (attributeKind === "source") return linkedSources[0] ? getSourceAiTextContent(linkedSources[0]) : "";
+    const linkedContent = formatLinkedSourcesForPrompt(linkedSources);
+    return joinContentLines([owner.content, linkedContent ? `Directly linked text sources:
+${linkedContent}` : ""]);
+  }
 
   const selectedOwnerIds = selectedAttributeId ? (selectedOwnerIdsByAttribute[selectedAttributeId] ?? []) : [];
   const selectedOwnerIdSet = useMemo(() => new Set(selectedOwnerIds), [selectedOwnerIds]);
@@ -757,6 +770,10 @@ export function AIAssistAttributesView({
     try {
       const settings = await getPostgresInstallationSettings();
       const runtime = buildLlmInvokeRequestFields(settings.llm);
+      const items: Array<{ id: string; name: string; content: string }> = [];
+      for (const owner of selectedOwnerRows) {
+        items.push({ id: owner.ownerId, name: owner.ownerName, content: await loadOwnerContent(owner) });
+      }
       const response = await invoke<{
         model: string;
         baseUrl: string;
@@ -768,11 +785,7 @@ export function AIAssistAttributesView({
           attributeDataType: selectedAttribute.dataType,
           attributeDescription: selectedAttribute.description,
           attributeOptions: selectedAttribute.options,
-          items: selectedOwnerRows.map((row) => ({
-            id: row.ownerId,
-            name: row.ownerName,
-            content: row.content,
-          })),
+          items,
           ...runtime,
         },
       });
@@ -957,22 +970,25 @@ export function AIAssistAttributesView({
     setEditSuggestionModal(null);
   }
 
-  function handleOpenEvidence(row: AttributeSuggestionRow) {
+  async function handleOpenEvidence(row: AttributeSuggestionRow) {
     const owner = attributeOwnerRows.find((item) => item.ownerId === row.ownerId);
     if (!owner) {
       setError("The row for this suggestion could not be found.");
       return;
     }
-    const range = findEvidenceRangeInText(owner.content, row.evidenceText);
+    let content: string;
+    try { content = await loadOwnerContent(owner); }
+    catch (error) { setError(error instanceof Error ? error.message : String(error)); return; }
+    const range = findEvidenceRangeInText(content, row.evidenceText);
     const contextPadding = 420;
     const beforeText = range
-      ? owner.content.slice(Math.max(0, range.startOffset - contextPadding), range.startOffset)
+      ? content.slice(Math.max(0, range.startOffset - contextPadding), range.startOffset)
       : "";
     const evidenceText = range
-      ? owner.content.slice(range.startOffset, range.endOffset)
+      ? content.slice(range.startOffset, range.endOffset)
       : row.evidenceText.trim();
     const afterText = range
-      ? owner.content.slice(range.endOffset, Math.min(owner.content.length, range.endOffset + contextPadding))
+      ? content.slice(range.endOffset, Math.min(content.length, range.endOffset + contextPadding))
       : "";
     setEvidenceModal({
       sourceName: owner.ownerName,

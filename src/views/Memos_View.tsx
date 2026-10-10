@@ -1,3 +1,7 @@
+import { TablePagination } from "../components/TablePagination";
+import { usePostgresTablePage } from "../lib/usePostgresTablePage";
+import { openImagePreview, useImageRevision, usePreviewVisibility } from "../lib/imagePreviews";
+import { openMediaStream, releaseMediaUrl } from "../lib/mediaStream";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
@@ -6,15 +10,14 @@ import {
   POSTGRES_PROJECT_CHANGED_EVENT,
   createPostgresMemo,
   deletePostgresMemo,
-  listPostgresMemos,
+  listPostgresSources, listPostgresCodes, listPostgresAnnotationSummaries,
   type PostgresAnnotationSummary,
   type PostgresCode,
   type PostgresMemo,
   type PostgresProjectChangeEvent,
-  type PostgresSource,
+  type PostgresSourceSummary,
   updatePostgresMemo,
 } from "../lib/postgres";
-import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
 import { PlusIcon } from "../components/AppIcons";
@@ -156,16 +159,23 @@ function annotationTooltipContent(
   };
 }
 
-function MemoAnnotationMediaPreview({
+function MemoAnnotationMediaPreview(props: Parameters<typeof MemoAnnotationMediaPreviewContent>[0]) {
+  const { ref, visible, height } = usePreviewVisibility();
+  const image = ["image", "pdf"].includes(props.source?.sourceKind || props.annotation.sourceKind || "");
+  return <div ref={ref} style={{ minHeight: image ? Math.max(48, height) : undefined }}>{!image || visible ? <MemoAnnotationMediaPreviewContent {...props} /> : null}</div>;
+}
+
+function MemoAnnotationMediaPreviewContent({
   annotation,
   source,
   projectStoragePath,
 }: {
   annotation: PostgresAnnotationSummary;
-  source: PostgresSource | null;
+  source: PostgresSourceSummary | null;
   projectStoragePath?: string;
 }) {
   const { t } = useI18n();
+  const imageRevision = useImageRevision();
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const resolvedPath = resolveProjectStoragePath(projectStoragePath, source?.storagePath);
@@ -176,7 +186,7 @@ function MemoAnnotationMediaPreview({
   useEffect(() => {
     if (!resolvedPath || !["audio", "video", "image", "pdf"].includes(sourceKind)) {
       setMediaUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       setLoadError(null);
@@ -184,13 +194,12 @@ function MemoAnnotationMediaPreview({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
+    setMediaUrl(null);
     let objectUrl: string | null = null;
     setLoadError(null);
 
     async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
-      if (sourceKind !== "pdf") {
-        return URL.createObjectURL(new Blob([bytes], { type: mediaType ?? undefined }));
-      }
       if (!region) throw new Error(t("analysisMemos.annotationPreview.pdfRegionUnavailable"));
       const pdfjsLib = await loadPdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -212,22 +221,24 @@ function MemoAnnotationMediaPreview({
       return URL.createObjectURL(blob);
     }
 
-    void readTauriFile(resolvedPath)
-      .then(async (bytes) => {
-        objectUrl = await buildPreviewUrl(bytes);
+    void (sourceKind === "audio" || sourceKind === "video"
+      ? openMediaStream(resolvedPath)
+      : sourceKind === "image" ? openImagePreview(resolvedPath, 1024, controller.signal) : readTauriFile(resolvedPath).then(buildPreviewUrl))
+      .then((url) => {
+        objectUrl = url;
         if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
+          releaseMediaUrl(objectUrl);
           return;
         }
         setMediaUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
       })
       .catch((error) => {
         if (cancelled) return;
         setMediaUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
         setLoadError(error instanceof Error ? error.message : t("analysisMemos.annotationPreview.mediaLoadFailed"));
@@ -235,9 +246,10 @@ function MemoAnnotationMediaPreview({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
-  }, [mediaType, region, resolvedPath, sourceKind, t]);
+  }, [mediaType, region, resolvedPath, sourceKind, t, imageRevision]);
 
   if (!["audio", "video", "image", "pdf"].includes(sourceKind)) return null;
   if (loadError) return <p className="memo-builder-annotation-tooltip-error">{loadError}</p>;
@@ -245,7 +257,7 @@ function MemoAnnotationMediaPreview({
 
   if (sourceKind === "audio") {
     return (
-      <audio
+      <audio crossOrigin="anonymous" onError={() => setLoadError(t("analysisMemos.annotationPreview.mediaLoadFailed"))}
         className="memo-builder-annotation-tooltip-audio"
         controls
         preload="metadata"
@@ -256,7 +268,7 @@ function MemoAnnotationMediaPreview({
 
   if (sourceKind === "video") {
     return (
-      <video
+      <video crossOrigin="anonymous" onError={() => setLoadError(t("analysisMemos.annotationPreview.mediaLoadFailed"))}
         className="memo-builder-annotation-tooltip-video"
         controls
         preload="metadata"
@@ -418,11 +430,13 @@ export function MemosView({
   onInitialDraftHandled?: () => void;
 }) {
   const { t } = useI18n();
-  const [memos, setMemos] = useState<PostgresMemo[]>([]);
-  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const memoPage = usePostgresTablePage<PostgresMemo>(projectId, { entity: "memos", sort: "updatedAt", descending: true });
+  const memos = memoPage.rows;
+  const [sources, setSources] = useState<PostgresSourceSummary[]>([]);
   const [codes, setCodes] = useState<PostgresCode[]>([]);
   const [annotations, setAnnotations] = useState<PostgresAnnotationSummary[]>([]);
-  const [loading, setLoading] = useState(false);
+  const loading = memoPage.loading;
+  const [selectorLoading, setSelectorLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -433,28 +447,26 @@ export function MemosView({
   const [deleteMemoId, setDeleteMemoId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const load = memoPage.reload;
+  const selectorGeneration = useRef(0);
+  const editorOpen = editorDraft !== null;
+  const loadSelectors = useCallback(async () => {
+    if (!editorOpen) return;
+    const token = ++selectorGeneration.current;
+    setSelectorLoading(true);
     try {
-      const [snapshot, memoRows] = await Promise.all([
-        loadPostgresProjectWorkspaceSnapshot(projectId),
-        listPostgresMemos(projectId),
+      const [nextSources, nextCodes, nextAnnotations] = await Promise.all([
+        listPostgresSources(projectId), listPostgresCodes(projectId), listPostgresAnnotationSummaries(projectId),
       ]);
-      setSources(snapshot.sources);
-      setCodes(snapshot.codes);
-      setAnnotations(snapshot.annotations);
-      setMemos(memoRows);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t("analysisMemos.errors.loadFailed"));
+      if (token !== selectorGeneration.current) return;
+      setSources(nextSources); setCodes(nextCodes); setAnnotations(nextAnnotations);
+    } catch (e) {
+      if (token === selectorGeneration.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (token === selectorGeneration.current) setSelectorLoading(false);
     }
-  }, [projectId, t]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  }, [projectId, editorOpen]);
+  useEffect(() => { void loadSelectors(); return () => { selectorGeneration.current++; }; }, [loadSelectors]);
 
   useEffect(() => {
     return () => {
@@ -490,20 +502,21 @@ export function MemosView({
     let unlisten: (() => void) | undefined;
 
     async function subscribe() {
-      unlisten = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
+      const stop = await listen<PostgresProjectChangeEvent>(POSTGRES_PROJECT_CHANGED_EVENT, (event) => {
         if (disposed) return;
         if (event.payload.projectId !== projectId) return;
         if (!["memo", "source", "annotation", "code", "object"].includes(event.payload.entityType)) return;
-        void load();
+        void loadSelectors();
       });
+      if (disposed) stop(); else unlisten = stop;
     }
 
-    void subscribe();
+    void subscribe().catch(() => {});
     return () => {
       disposed = true;
       if (unlisten) unlisten();
     };
-  }, [load, projectId]);
+  }, [loadSelectors, projectId]);
 
   const sourceById = useMemo(
     () => new Map(sources.map((source) => [source.id, source])),
@@ -520,7 +533,7 @@ export function MemosView({
   const draftAnnotations = editorDraft ? annotations.filter((annotation) => editorDraft.annotationIds.has(annotation.id)) : [];
 
   async function handleSaveMemo() {
-    if (!editorDraft) return;
+    if (!editorDraft || selectorLoading) return;
     const title = editorDraft.title.trim();
     if (!title) {
       setError("Enter a memo title.");
@@ -657,7 +670,7 @@ export function MemosView({
                 type="button"
                 className="btn btn--primary"
                 onClick={() => void handleSaveMemo()}
-                disabled={submitting}
+                disabled={submitting || selectorLoading}
               >
                 {submitting ? t("common.saving") : t("common.save")}
               </button>
@@ -665,7 +678,7 @@ export function MemosView({
           )}
         />
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        {error || memoPage.error ? <div className="error-banner">{error || memoPage.error}</div> : null}
 
         {helpOpen ? (
           <HelpModal
@@ -966,7 +979,7 @@ export function MemosView({
         />
       ) : null}
 
-      {error ? <div className="error-banner">{error}</div> : null}
+      {error || memoPage.error ? <div className="error-banner">{error || memoPage.error}</div> : null}
       {notice ? <div className="success-banner">{notice}</div> : null}
 
       <div className="analysis-list-shell">
@@ -989,7 +1002,8 @@ export function MemosView({
               </button>
             ) : null}
           />
-        <TableShell className="analysis-list-table-wrap">
+        <TablePagination {...memoPage.controls} />
+        <TableShell ref={memoPage.tableRef} className="analysis-list-table-wrap">
           <table className="data-table">
             <thead>
               <tr>

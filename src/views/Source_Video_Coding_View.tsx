@@ -1,5 +1,5 @@
+import { openMediaStream, releaseMediaUrl, runMediaAnalysis } from "../lib/mediaStream";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import { SettingsModal } from "../components/SettingsModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpModal } from "../components/HelpModal";
@@ -315,7 +315,7 @@ function AnnotationVideoClipPlayer({
   return (
     <div className="annotation-excerpt annotation-excerpt--clip" onClick={(event) => event.stopPropagation()}>
       <div className="annotation-excerpt-label">{clipLabel}</div>
-      <video
+      <video crossOrigin="anonymous" key={previewUrl}
         ref={videoRef}
         preload="metadata"
         onLoadedMetadata={handleLoadedMetadata}
@@ -367,7 +367,9 @@ export function SourceVideoCodingView({
   const [pendingClipCodeIds, setPendingClipCodeIds] = useState<string[]>([]);
   const [selectedClipDraft, setSelectedClipDraft] = useState<SelectedClipDraft | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<SourceAnnotationRow | null>(null);
-  const [previewBytes, setPreviewBytes] = useState<Uint8Array | null>(null);
+  const [analysisRunning, setAnalysisRunning] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -414,8 +416,6 @@ export function SourceVideoCodingView({
   const mediaTimelineRef = useRef<SourceMediaTimelineHandle | null>(null);
   const playbackRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const playbackMonitorFrameRef = useRef<number | null>(null);
-  const waveformRecoveryAttemptedRef = useRef<string | null>(null);
-  const frameIndexRecoveryAttemptedRef = useRef<string | null>(null);
   const openTimingStartRef = useRef<number>(performance.now());
   const volumeControlCloseTimeoutRef = useRef<number | null>(null);
   const zoomControlCloseTimeoutRef = useRef<number | null>(null);
@@ -588,17 +588,14 @@ export function SourceVideoCodingView({
 
   useEffect(() => {
     setGeneratedWaveformCache(null);
-    waveformRecoveryAttemptedRef.current = null;
-    frameIndexRecoveryAttemptedRef.current = null;
   }, [row.id, row.waveformPeaksJson, row.videoFrameIndexJson]);
 
   useEffect(() => {
     if (!resolvedFilePath) {
       setPreviewLoading(false);
-      setPreviewBytes(null);
       setPreviewError(null);
       setPreviewUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       return;
@@ -609,29 +606,26 @@ export function SourceVideoCodingView({
 
     setPreviewLoading(true);
     setPreviewError(null);
-    logOpenTiming("file-read-start", { path: resolvedFilePath });
+    logOpenTiming("stream-open-start", { path: resolvedFilePath });
 
-    void readTauriFile(resolvedFilePath)
-      .then((bytes) => {
-        if (cancelled) return;
-        setPreviewBytes(bytes);
-        logOpenTiming("file-read-complete", { bytes: bytes.byteLength });
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaTypeFromFileExtension(fileExt) ?? undefined }));
+    void openMediaStream(resolvedFilePath)
+      .then((url) => {
+        if (cancelled) { releaseMediaUrl(url); return; }
+        objectUrl = url;
         setPreviewUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
         logOpenTiming("preview-url-ready");
       })
       .catch((loadError) => {
         if (cancelled) return;
-        setPreviewBytes(null);
-        logOpenTiming("file-read-error", {
+        logOpenTiming("stream-open-error", {
           message: loadError instanceof Error ? loadError.message : "unknown",
         });
         setPreviewError(loadError instanceof Error ? loadError.message : `Failed to load ${mediaKind} preview.`);
         setPreviewUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
       })
@@ -641,46 +635,53 @@ export function SourceVideoCodingView({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
   }, [fileExt, mediaKind, resolvedFilePath]);
 
   useEffect(() => {
-    if (waveformCache || !previewBytes) return;
-    if (waveformRecoveryAttemptedRef.current === row.id) return;
+    setAnalysisRunning(false);
+    setAnalysisError(null);
+    return () => { analysisAbortRef.current?.abort(); };
+  }, [resolvedFilePath, row.id]);
 
-    waveformRecoveryAttemptedRef.current = row.id;
-    let cancelled = false;
-
-    void createMediaWaveformCache(previewBytes).then((nextCache) => {
-      if (cancelled || !nextCache) return;
-      setGeneratedWaveformCache(nextCache);
-      void onUpdateSourceWaveform(row.id, serializeMediaWaveformCache(nextCache)).catch(() => {});
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [onUpdateSourceWaveform, previewBytes, row.id, waveformCache]);
-
-  useEffect(() => {
-    if (videoFrameIndexCache || !previewBytes || !onUpdateSourceVideoFrameIndex) return;
-    if (frameIndexRecoveryAttemptedRef.current === row.id) return;
-    if (waveformCache && !row.waveformPeaksJson && waveformRecoveryAttemptedRef.current === row.id) return;
-    if (!waveformCache && waveformRecoveryAttemptedRef.current !== row.id) return;
-
-    frameIndexRecoveryAttemptedRef.current = row.id;
-    let cancelled = false;
-
-    void createMediaVideoFrameIndexCache(previewBytes).then((nextCache) => {
-      if (cancelled || !nextCache) return;
-      void onUpdateSourceVideoFrameIndex(row.id, serializeMediaVideoFrameIndexCache(nextCache)).catch(() => {});
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [onUpdateSourceVideoFrameIndex, previewBytes, row.id, row.waveformPeaksJson, videoFrameIndexCache, waveformCache]);
+  async function generateMissingMediaData() {
+    if (!previewUrl || previewLoading || analysisRunning) return;
+    const controller = new AbortController();
+    analysisAbortRef.current = controller;
+    setAnalysisRunning(true);
+    setAnalysisError(null);
+    try {
+      await runMediaAnalysis(async () => {
+        if (controller.signal.aborted) return;
+        const response = await fetch(previewUrl, { signal: controller.signal });
+        if (!response.ok) throw new Error(t("sourceCoding.media.analysisFailed"));
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (controller.signal.aborted) return;
+        if (!waveformCache) {
+          const cache = await createMediaWaveformCache(bytes);
+          if (controller.signal.aborted) return;
+          if (cache) {
+            await onUpdateSourceWaveform(row.id, serializeMediaWaveformCache(cache));
+            if (controller.signal.aborted) return;
+            setGeneratedWaveformCache(cache);
+          } else {
+            setAnalysisError(t("sourceCoding.media.analysisFailed"));
+          }
+        }
+        if (!videoFrameIndexCache && onUpdateSourceVideoFrameIndex) {
+          const cache = await createMediaVideoFrameIndexCache(bytes);
+          if (controller.signal.aborted) return;
+          if (!cache) throw new Error(t("sourceCoding.media.analysisFailed"));
+          await onUpdateSourceVideoFrameIndex(row.id, serializeMediaVideoFrameIndexCache(cache));
+        }
+      });
+    } catch (error) {
+      if (!controller.signal.aborted) setAnalysisError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (!controller.signal.aborted) setAnalysisRunning(false);
+    }
+  }
 
   useEffect(() => {
     setMediaElement(null);
@@ -1196,7 +1197,7 @@ export function SourceVideoCodingView({
 
   useEffect(() => {
     return () => {
-      if (frameSourceDraft?.previewUrl) URL.revokeObjectURL(frameSourceDraft.previewUrl);
+      if (frameSourceDraft?.previewUrl) releaseMediaUrl(frameSourceDraft.previewUrl);
     };
   }, [frameSourceDraft?.previewUrl]);
 
@@ -1368,7 +1369,7 @@ export function SourceVideoCodingView({
       const fileNameTime = String(timeMs).padStart(8, "0");
       const file = new File([blob], `${fileNameBase}-frame-${fileNameTime}ms.png`, { type: "image/png" });
       setFrameSourceDraft((currentDraft) => {
-        if (currentDraft?.previewUrl) URL.revokeObjectURL(currentDraft.previewUrl);
+        if (currentDraft?.previewUrl) releaseMediaUrl(currentDraft.previewUrl);
         return {
           file,
           title,
@@ -1395,7 +1396,7 @@ export function SourceVideoCodingView({
         extractedFromVideoSourceId: frameSourceDraft.extractedFromVideoSourceId,
         extractedFromVideoTimeMs: frameSourceDraft.extractedFromVideoTimeMs,
       });
-      URL.revokeObjectURL(frameSourceDraft.previewUrl);
+      releaseMediaUrl(frameSourceDraft.previewUrl);
       setFrameSourceDraft(null);
     } catch (approveError) {
       setFrameExtractError(approveError instanceof Error ? approveError.message : t("sourceCoding.media.failedToCreateFrameSource"));
@@ -1407,7 +1408,7 @@ export function SourceVideoCodingView({
   function cancelFrameSourceDraft() {
     if (frameExtracting) return;
     setFrameSourceDraft((currentDraft) => {
-      if (currentDraft?.previewUrl) URL.revokeObjectURL(currentDraft.previewUrl);
+      if (currentDraft?.previewUrl) releaseMediaUrl(currentDraft.previewUrl);
       return null;
     });
     setFrameExtractError(null);
@@ -1549,6 +1550,15 @@ export function SourceVideoCodingView({
               </div>
             ) : null}
 
+            {previewUrl && (!waveformCache || (!videoFrameIndexCache && !!onUpdateSourceVideoFrameIndex)) ? (
+              <div className="supporting-copy">
+                <button type="button" className="btn btn--small" disabled={analysisRunning || previewLoading} onClick={() => void generateMissingMediaData()}>
+                  {t(analysisRunning ? "sourceCoding.media.generatingAnalysis" : "sourceCoding.media.generateAnalysis")}
+                </button>
+                <p>{t("sourceCoding.media.analysisMemoryNote")}</p>
+                {analysisError ? <p className="auth-error">{analysisError}</p> : null}
+              </div>
+            ) : null}
             {previewLoading ? (
               <p className="supporting-copy" style={{ margin: 0 }}>{t("sourceCoding.media.loadingPreview", { kind: mediaKind })}</p>
             ) : previewError ? (
@@ -1578,7 +1588,7 @@ export function SourceVideoCodingView({
                       <span className="doc-name">{row.name}</span>
                     </div>
                     <div className="media-player-video-preview">
-                      <video
+                      <video crossOrigin="anonymous" preload="metadata"
                         className="media-player-video-preview-element"
                         ref={videoPreviewElementCallbackRef}
                         src={previewUrl}
@@ -1819,8 +1829,9 @@ export function SourceVideoCodingView({
                     </div>
                   </div>
 
-                  <video
+                  <video crossOrigin="anonymous" preload="metadata"
                     ref={mediaElementCallbackRef}
+                      onError={() => setPreviewError(t("sourceCoding.media.previewOpenFailed", { kind: mediaKind }))}
                     src={previewUrl}
                     playsInline
                     style={{

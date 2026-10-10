@@ -43,7 +43,7 @@ import {
   type PostgresAuthSession,
   type PostgresProject,
   type PostgresProjectLogEntry,
-  type PostgresSource,
+  type PostgresSourceSummary,
   type PostgresUserPreferences,
 } from "../lib/postgres";
 import {
@@ -351,7 +351,7 @@ function EmbeddedPostgresProjectSettings({
   const [submitting, setSubmitting] = useState<"details" | "delete" | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [sources, setSources] = useState<PostgresSourceSummary[]>([]);
   const [projectLogEntries, setProjectLogEntries] = useState<PostgresProjectLogEntry[]>([]);
   const [expandedLogIds, setExpandedLogIds] = useState<Record<string, boolean>>({});
   const [projectLogFilterOpen, setProjectLogFilterOpen] = useState(false);

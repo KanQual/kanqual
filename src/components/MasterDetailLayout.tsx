@@ -11,7 +11,7 @@ export function MasterDetailLayout({ className, children, style, ...props }: Mas
         gridTemplateColumns: "minmax(280px, 340px) auto minmax(0, 1fr)",
         gap: 0,
         alignItems: "stretch",
-        flex: "0 0 auto",
+        flex: "1 1 0",
         minHeight: 0,
         ...style,
       }}

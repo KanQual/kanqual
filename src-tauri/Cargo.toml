@@ -25,7 +25,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["time", "net"] }
+tokio = { version = "1", features = ["time", "net", "io-util", "fs", "sync"] }
 tokio-postgres = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 candle-core = "0.10.2"
@@ -39,6 +39,13 @@ rand = "0.8.6"
 zeroize = "1"
 flate2 = "1"
 sha2 = "0.10"
+tempfile = { version = "3", default-features = false }
+zip = { version = "7.2", default-features = false, features = ["deflate-flate2"] }
+quick-xml = "0.38"
+ctr = "0.9"
+ghash = "0.5"
+subtle = "2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
 
 [profile.dev.package."*"]
 opt-level = 3

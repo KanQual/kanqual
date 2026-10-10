@@ -12,11 +12,13 @@ import {
   type PostgresProjectLogEntry,
   type PostgresProjectUser,
   type PostgresRelationship,
-  type PostgresSource,
+  type PostgresSourceSummary,
   type PostgresSourceAttributeDefinition,
   type PostgresSourceAttributeValue,
 } from "./postgres";
 import { loadPostgresProjectWorkspaceSnapshot } from "./postgresProjectWorkspace";
+
+export type ReportSourceSummary = Omit<ProjectDocument, "content" | "structuredContentJson">;
 
 export type ReportCaseItem = { id: string; name: string; objectType?: string };
 export type ReportRelationshipItem = {
@@ -43,7 +45,7 @@ export type PostgresReportBuilderData = {
   cases: ReportCaseItem[];
   relationships: ReportRelationshipItem[];
   users: ReportUserItem[];
-  documents: ProjectDocument[];
+  documents: ReportSourceSummary[];
   codes: Code[];
   annotations: ReportAnnotation[];
   caseDocumentLinks: Array<{ caseId: string; documentId: string }>;
@@ -85,15 +87,13 @@ function mapRelationship(
   };
 }
 
-function mapSourceToDocument(source: PostgresSource): ProjectDocument {
+function mapSourceToDocument(source: PostgresSourceSummary): ReportSourceSummary {
   return {
     id: source.id,
     projectId: source.projectId,
     name: source.title,
     type: source.sourceKind,
     filePath: source.storagePath,
-    content: source.textContent,
-    structuredContentJson: source.structuredContentJson,
     importedAt: source.createdAt,
   };
 }

@@ -1,3 +1,7 @@
+import { useListVisitCache } from "../lib/listVisitCache";
+import { TablePagination } from "../components/TablePagination";
+import { openImagePreview, useImageRevision, usePreviewVisibility } from "../lib/imagePreviews";
+import { openMediaStream, releaseMediaUrl } from "../lib/mediaStream";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -8,7 +12,8 @@ import { MasterDetailLayout } from "../components/MasterDetailLayout";
 import { TableMessageRow, TableShell } from "../components/TableShell";
 import { ViewHeader } from "../components/ViewHeader";
 import { useI18n } from "../i18n/provider";
-import { loadPostgresProjectWorkspaceSnapshot } from "../lib/postgresProjectWorkspace";
+import { listen } from "@tauri-apps/api/event";
+import { listPostgresAnnotationPage, listPostgresSources, listPostgresCodes, listPostgresObjectTypes, listPostgresSourceLocks, type PostgresProjectChangeEvent } from "../lib/postgres";
 import type { PostgresCode } from "../lib/postgres";
 import { visibleCodeNodes, type CodeTreeNode } from "./Source_Coding_Shared";
 
@@ -225,7 +230,7 @@ function AudioAnnotationClip({
   useEffect(() => {
     if (!resolvedPath || startMs == null || endMs == null) {
       setAudioUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       setLoadError(null);
@@ -235,19 +240,19 @@ function AudioAnnotationClip({
     let cancelled = false;
     let objectUrl: string | null = null;
     setLoadError(null);
-    void readTauriFile(resolvedPath)
-      .then((bytes) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaType ?? "audio/*" }));
+    void openMediaStream(resolvedPath)
+      .then((url) => {
+        if (cancelled) { releaseMediaUrl(url); return; }
+        objectUrl = url;
         setAudioUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
       })
       .catch((error) => {
         if (cancelled) return;
         setAudioUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
         setLoadError(error instanceof Error ? error.message : t("projectAnnotations.errors.audioClipLoadFailed"));
@@ -255,7 +260,7 @@ function AudioAnnotationClip({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
   }, [endMs, mediaType, resolvedPath, startMs, t]);
 
@@ -324,7 +329,7 @@ function AudioAnnotationClip({
           <p className="auth-error" style={{ margin: 0 }}>{loadError}</p>
         ) : audioUrl ? (
           <div className="annotation-clip-player">
-            <audio
+            <audio crossOrigin="anonymous" onError={() => setLoadError(t("projectAnnotations.errors.audioClipLoadFailed"))}
               ref={audioRef}
               preload="metadata"
               onLoadedMetadata={handleLoadedMetadata}
@@ -391,7 +396,7 @@ function VideoAnnotationClip({
   useEffect(() => {
     if (!resolvedPath || startMs == null || endMs == null) {
       setVideoUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       setLoadError(null);
@@ -401,19 +406,19 @@ function VideoAnnotationClip({
     let cancelled = false;
     let objectUrl: string | null = null;
     setLoadError(null);
-    void readTauriFile(resolvedPath)
-      .then((bytes) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mediaType ?? "video/*" }));
+    void openMediaStream(resolvedPath)
+      .then((url) => {
+        if (cancelled) { releaseMediaUrl(url); return; }
+        objectUrl = url;
         setVideoUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
       })
       .catch((error) => {
         if (cancelled) return;
         setVideoUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
         setLoadError(error instanceof Error ? error.message : t("projectAnnotations.errors.videoClipLoadFailed"));
@@ -421,7 +426,7 @@ function VideoAnnotationClip({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
   }, [endMs, mediaType, resolvedPath, startMs, t]);
 
@@ -443,7 +448,7 @@ function VideoAnnotationClip({
           <p className="auth-error" style={{ margin: 0 }}>{loadError}</p>
         ) : videoUrl ? (
           <div className="annotation-video-clip">
-            <video
+            <video crossOrigin="anonymous" onError={() => setLoadError(t("projectAnnotations.errors.videoClipLoadFailed"))}
               ref={videoRef}
               className="annotation-video-clip-media"
               preload="metadata"
@@ -462,7 +467,13 @@ function VideoAnnotationClip({
   );
 }
 
-function ImageAnnotationCrop({
+function ImageAnnotationCrop(props: Parameters<typeof ImageAnnotationCropContent>[0]) {
+  const { ref, visible, height } = usePreviewVisibility();
+  const image = ["image", "pdf"].includes(props.sourceKind || "");
+  return <div ref={ref} style={{ minHeight: image ? Math.max(48, height) : undefined }}>{!image || visible ? <ImageAnnotationCropContent {...props} /> : null}</div>;
+}
+
+function ImageAnnotationCropContent({
   sourcePath,
   sourceKind,
   projectStoragePath,
@@ -474,6 +485,7 @@ function ImageAnnotationCrop({
   imageRegion?: AnnRow["imageRegion"];
 }) {
   const { t } = useI18n();
+  const imageRevision = useImageRevision();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const resolvedPath = resolveProjectStoragePath(projectStoragePath, sourcePath);
@@ -483,7 +495,7 @@ function ImageAnnotationCrop({
   useEffect(() => {
     if (!resolvedPath || !region) {
       setImageUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
+        if (current) releaseMediaUrl(current);
         return null;
       });
       setLoadError(null);
@@ -491,14 +503,13 @@ function ImageAnnotationCrop({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
+    setImageUrl(null);
     let objectUrl: string | null = null;
     const cropRegion = region;
     setLoadError(null);
 
     async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
-      if (!isPdf) {
-        return URL.createObjectURL(new Blob([bytes]));
-      }
 
       const pdfjsLib = await loadPdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -520,23 +531,22 @@ function ImageAnnotationCrop({
       return URL.createObjectURL(blob);
     }
 
-    void readTauriFile(resolvedPath)
-      .then(async (bytes) => {
-        if (cancelled) return;
-        objectUrl = await buildPreviewUrl(bytes);
+    void (isPdf ? readTauriFile(resolvedPath).then(buildPreviewUrl) : openImagePreview(resolvedPath, 1024, controller.signal))
+      .then((url) => {
+        objectUrl = url;
         if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
+          releaseMediaUrl(objectUrl);
           return;
         }
         setImageUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return objectUrl;
         });
       })
       .catch((error) => {
         if (cancelled) return;
         setImageUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
+          if (current) releaseMediaUrl(current);
           return null;
         });
         setLoadError(error instanceof Error ? error.message : t("projectAnnotations.errors.cropLoadFailed", { kind: isPdf ? "PDF" : "image" }));
@@ -544,9 +554,10 @@ function ImageAnnotationCrop({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
-  }, [isPdf, region, resolvedPath, t]);
+  }, [isPdf, region, resolvedPath, t, imageRevision]);
 
   if (!region) return null;
 
@@ -656,33 +667,81 @@ export function AnnotationsView(props: AnnotationsViewProps) {
     { ...COLS[5], label: t("projectAnnotations.table.createdBy") },
   ];
 
-  const [rows, setRows] = useState<AnnRow[]>([]);
-  const [codes, setCodes] = useState<PostgresCode[]>([]);
+  const visitCache = useListVisitCache();
+  const visitKey = JSON.stringify(["annotations", postgresProjectId, postgresCurrentUserId]);
+  type AnnotationListVisit = { rows: AnnRow[]; codes: PostgresCode[]; sortCol: SortCol; sortDir: SortDir; filter: string; query: string; offset: number; total: number; counts: Record<string, number> };
+  const [visit] = useState(() => visitCache.read<AnnotationListVisit>(visitKey) ?? visitCache.preference<AnnotationListVisit>(visitKey + ":controls"));
+  const [rows, setRows] = useState<AnnRow[]>(visit?.rows ?? []);
+  const [codes, setCodes] = useState<PostgresCode[]>(visit?.codes ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [sortCol, setSortCol] = useState<SortCol>("documentName");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [selectedCodeFilter, setSelectedCodeFilter] = useState<string>("all");
+  const [sortCol, setSortCol] = useState<SortCol>(visit?.sortCol ?? "documentName");
+  const [sortDir, setSortDir] = useState<SortDir>(visit?.sortDir ?? "asc");
+  const [selectedCodeFilter, setSelectedCodeFilter] = useState<string>(visit?.filter ?? "all");
   const [collapsedCodeIds, setCollapsedCodeIds] = useState<Set<string>>(new Set());
   const [codeFilterSortCol, setCodeFilterSortCol] = useState<CodeFilterSortCol>("code");
   const [codeFilterSortDir, setCodeFilterSortDir] = useState<SortDir>("asc");
   const [selectedRow, setSelectedRow] = useState<AnnRow | null>(null);
 
+  const [annotationSearch, setAnnotationSearch] = useState(visit?.query ?? "");
+  const [annotationQuery, setAnnotationQuery] = useState(visit?.query ?? "");
+  useEffect(() => { const timer = setTimeout(() => { if (annotationSearch.trim() !== annotationQuery) { setAnnotationQuery(annotationSearch.trim()); setPageOffset(0); } }, 200); return () => clearTimeout(timer); }, [annotationSearch]);
+  const [pageOffset, setPageOffset] = useState(visit?.offset ?? 0);
+  const [pageTotal, setPageTotal] = useState(visit?.total ?? 0);
+  const [annotationCountByCodeId, setAnnotationCountByCodeId] = useState<Map<string, number>>(new Map(Object.entries(visit?.counts ?? {})));
+  const requestGeneration = useRef(0);
+  const selectedId = useRef<string | undefined>(undefined);
+  selectedId.current = selectedRow?.id;
+  const tableRef = useRef<HTMLDivElement>(null);
+  const handledDeepLink = useRef<string | undefined>(undefined);
+  const onDeepLinkHandled = useRef(onInitialPostgresAnnotationHandled);
+  onDeepLinkHandled.current = onInitialPostgresAnnotationHandled;
+
+  const previousProject = useRef(postgresProjectId);
   useEffect(() => {
-    if (!initialPostgresAnnotationId || rows.length === 0) return;
-    const matchingRow = rows.find((row) => row.id === initialPostgresAnnotationId);
-    if (!matchingRow) return;
-    setSelectedRow(matchingRow);
-    onInitialPostgresAnnotationHandled?.();
-  }, [initialPostgresAnnotationId, onInitialPostgresAnnotationHandled, rows]);
+    if (previousProject.current === postgresProjectId) return;
+    previousProject.current = postgresProjectId;
+    selectedId.current = undefined;
+    handledDeepLink.current = undefined;
+    setSelectedRow(null);
+    setRows([]);
+    setCodes([]);
+    setPageOffset(0);
+    setPageTotal(0);
+    setSelectedCodeFilter("all");
+    setAnnotationCountByCodeId(new Map());
+  }, [postgresProjectId]);
 
   const load = useCallback(async () => {
     if (!postgresProjectId) return;
-    setLoading(true);
+    const generation = ++requestGeneration.current;
+    const revision = visitCache.revision;
+    const previous = visitCache.read<typeof visit>(visitKey);
+    setLoading(!previous || previous.query !== annotationQuery || previous.offset !== pageOffset || previous.filter !== selectedCodeFilter || previous.sortCol !== sortCol || previous.sortDir !== sortDir);
     setError(null);
     try {
-      const snapshot = await loadPostgresProjectWorkspaceSnapshot(postgresProjectId);
+      const deepLink = initialPostgresAnnotationId && handledDeepLink.current !== initialPostgresAnnotationId ? initialPostgresAnnotationId : undefined;
+      const requestedSelectedId = deepLink || selectedId.current;
+      const page = await listPostgresAnnotationPage(postgresProjectId, {
+        query: annotationQuery,
+        codeId: selectedCodeFilter === "all" ? "" : selectedCodeFilter,
+        sort: sortCol, descending: sortDir === "desc", offset: pageOffset,
+        annotationId: requestedSelectedId,
+        currentUserId: postgresCurrentUserId || "",
+        lockLabels: [t("projectAnnotations.values.available"), t("projectAnnotations.values.you"), t("projectAnnotations.values.locked")],
+        sourceKindLabels: Object.fromEntries(["text", "pdf", "image", "audio", "video", "transcript", "processed transcript"].map(kind => [kind, formatSourceType(kind, t)])),
+      });
+      const annotations = page.selected ? [...page.annotations, page.selected] : page.annotations;
+      const [sources, codes, objectTypes, sourceLocks] = await Promise.all([
+        listPostgresSources(postgresProjectId, [...new Set(annotations.map(a => a.sourceId))]),
+        listPostgresCodes(postgresProjectId), listPostgresObjectTypes(postgresProjectId), listPostgresSourceLocks(postgresProjectId),
+      ]);
+      if (generation !== requestGeneration.current) return;
+      const snapshot = { sources, codes, objectTypes, sourceLocks, annotations };
+      setPageTotal(page.total);
+      setPageOffset(page.offset);
+      setAnnotationCountByCodeId(new Map(Object.entries(page.counts)));
       const sourceById = Object.fromEntries(snapshot.sources.map((source) => [source.id, source]));
       const primaryCodeById = Object.fromEntries(snapshot.codes.map((code) => [code.id, code]));
       const sourceObjectTypeBySystemKey = new Map(
@@ -694,7 +753,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
         snapshot.sourceLocks.map((lock) => [lock.sourceId, lock]),
       );
       setCodes(snapshot.codes);
-      setRows(snapshot.annotations.map((annotation) => {
+      const mappedRows = snapshot.annotations.map((annotation) => {
         const source = sourceById[annotation.sourceId];
         const primaryCode = primaryCodeById[annotation.primaryCodeId];
         const sourceLock = sourceLockById[annotation.sourceId];
@@ -736,19 +795,56 @@ export function AnnotationsView(props: AnnotationsViewProps) {
           lockTitle: lockStatus.title,
           createdAt: annotation.createdAt,
         };
-      }));
+      });
+      setRows(mappedRows.slice(0, page.annotations.length));
+      visitCache.remember(visitKey + ":controls", { sortCol, sortDir, filter: selectedCodeFilter, query: annotationQuery, offset: page.offset, rows: [], codes: [], total: 0, counts: {} });
+      visitCache.write(visitKey, { rows: mappedRows.slice(0, page.annotations.length), codes: snapshot.codes, sortCol, sortDir, filter: selectedCodeFilter, query: annotationQuery, offset: page.offset, total: page.total, counts: page.counts }, revision);
+      if (deepLink) {
+        handledDeepLink.current = deepLink;
+        setSelectedRow(page.selected ? mappedRows[mappedRows.length - 1] : null);
+        onDeepLinkHandled.current?.();
+      } else if (selectedId.current && selectedId.current === requestedSelectedId) {
+        setSelectedRow(page.selected ? mappedRows[mappedRows.length - 1] : null);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("projectAnnotations.errors.loadFailed"));
+      if (generation === requestGeneration.current) { visitCache.clear(); setRows([]); setError(e instanceof Error ? e.message : t("projectAnnotations.errors.loadFailed")); }
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
     }
-  }, [postgresCurrentUserId, postgresProjectId, t]);
+  }, [annotationQuery, postgresCurrentUserId, postgresProjectId, t, pageOffset, selectedCodeFilter, sortCol, sortDir, initialPostgresAnnotationId]);
+
+  useEffect(() => {
+    if (!initialPostgresAnnotationId) handledDeepLink.current = undefined;
+  }, [initialPostgresAnnotationId]);
 
   useEffect(() => {
     void load();
+    return () => { requestGeneration.current++; };
   }, [load]);
 
+  useEffect(() => {
+    if (tableRef.current) tableRef.current.scrollTop = 0;
+  }, [pageOffset, selectedCodeFilter, sortCol, sortDir]);
+
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void listen<PostgresProjectChangeEvent>("postgres-project-changed", ({ payload }) => {
+      if (payload.projectId !== postgresProjectId) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => { void load(); }, 100);
+    }).then(unlisten => { if (disposed) unlisten(); else stop = unlisten; }).catch(() => {});
+    return () => { disposed = true; clearTimeout(timer); stop?.(); };
+  }, [load, postgresProjectId]);
+
+  function changeCodeFilter(codeId: string) {
+    setSelectedCodeFilter(codeId);
+    setPageOffset(0);
+  }
+
   function handleSort(col: SortCol) {
+    setPageOffset(0);
     if (col === sortCol) setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
     else {
       setSortCol(col);
@@ -774,15 +870,6 @@ export function AnnotationsView(props: AnnotationsViewProps) {
       annotationId: row.id,
     });
   }
-
-  const annotationCountByCodeId = useMemo(() => {
-    const countByCode = new Map<string, number>();
-    for (const row of rows) {
-      const codeId = row.codeId || "__unknown__";
-      countByCode.set(codeId, (countByCode.get(codeId) ?? 0) + 1);
-    }
-    return countByCode;
-  }, [rows]);
 
   const codeTree = useMemo(() => {
     const children = new Map<string | null, PostgresCode[]>();
@@ -824,7 +911,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
   useEffect(() => {
     if (selectedCodeFilter === "all") return;
     if (!codes.some((code) => code.id === selectedCodeFilter)) {
-      setSelectedCodeFilter("all");
+      changeCodeFilter("all");
     }
   }, [selectedCodeFilter, codes]);
 
@@ -837,25 +924,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
     });
   }
 
-  const filteredRows = useMemo(
-    () => selectedCodeFilter === "all"
-      ? rows
-      : rows.filter((row) => (row.codeId || "__unknown__") === selectedCodeFilter),
-    [rows, selectedCodeFilter],
-  );
-
-  const sorted = [...filteredRows].sort((a, b) => {
-    let cmp = 0;
-    if (sortCol === "documentName") cmp = a.documentName.localeCompare(b.documentName);
-    else if (sortCol === "sourceKind") cmp = formatSourceType(a.sourceKind, t).localeCompare(formatSourceType(b.sourceKind, t));
-    else if (sortCol === "codeLabel") cmp = a.codeLabel.localeCompare(b.codeLabel);
-    else if (sortCol === "lockLabel") cmp = (a.lockLabel ?? "").localeCompare(b.lockLabel ?? "");
-    else if (sortCol === "createdAt") cmp = (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
-    else if (sortCol === "createdByName") cmp = a.createdByName.localeCompare(b.createdByName);
-    return sortDir === "asc" ? cmp : -cmp;
-  });
-
-  const rowCount = loading || sorted.length === 0 ? 1 : sorted.length;
+  const sorted = rows;
 
   if (selectedRow) {
     return (
@@ -978,8 +1047,6 @@ export function AnnotationsView(props: AnnotationsViewProps) {
         <div
           className="home-primary-column"
           style={{
-            alignSelf: "center",
-            justifyContent: "flex-start",
             gap: 16,
             minHeight: 0,
             maxHeight: "100%",
@@ -1049,17 +1116,17 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                       className="data-table-cell data-table-cell--name"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedCodeFilter("all")}
+                      onClick={() => changeCodeFilter("all")}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setSelectedCodeFilter("all");
+                          changeCodeFilter("all");
                         }
                       }}
                     >
                       <span>{t("projectAnnotations.detail.allAnnotations")}</span>
                     </td>
-                    <td className="data-table-cell data-table-cell--muted">{rows.length}</td>
+                    <td className="data-table-cell data-table-cell--muted">{Array.from(annotationCountByCodeId.values()).reduce((sum, count) => sum + count, 0)}</td>
                   </tr>
                   {visibleCodes.map(({ code, depth, hasChildren }) => (
                     <tr
@@ -1073,11 +1140,11 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                         className="data-table-cell data-table-cell--name"
                         role="button"
                         tabIndex={0}
-                        onClick={() => setSelectedCodeFilter(code.id)}
+                        onClick={() => changeCodeFilter(code.id)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            setSelectedCodeFilter(code.id);
+                            changeCodeFilter(code.id);
                           }
                         }}
                       >
@@ -1135,9 +1202,8 @@ export function AnnotationsView(props: AnnotationsViewProps) {
         >
           <div className="content-card table-card">
             <CardHeader title={t("projectAnnotations.pageTitle")} />
-          <TableShell
-            style={{ maxHeight: 34 + (Math.max(rowCount, 1) + 2) * 36 }}
-          >
+          <TablePagination offset={pageOffset} total={pageTotal} onChange={setPageOffset} loading={loading} search={{ value: annotationSearch, onChange: setAnnotationSearch }} />
+          <TableShell ref={tableRef}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -1170,7 +1236,7 @@ export function AnnotationsView(props: AnnotationsViewProps) {
                 {!loading && sorted.length === 0 && (
                   <TableMessageRow colSpan={7}>{t("projectAnnotations.empty")}</TableMessageRow>
                 )}
-                {!loading && sorted.map((row) => (
+                {!loading && !error && sorted.map((row) => (
                   <tr
                     key={row.id}
                     className="data-table-row annotations-list-row"

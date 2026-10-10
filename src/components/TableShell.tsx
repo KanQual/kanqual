@@ -1,14 +1,14 @@
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 type TableShellProps = ComponentPropsWithoutRef<"div">;
 
-export function TableShell({ className, children, ...props }: TableShellProps) {
+export const TableShell = forwardRef<HTMLDivElement, TableShellProps>(function TableShell({ className, children, ...props }, ref) {
   return (
-    <div className={["data-table-wrap", className].filter(Boolean).join(" ")} {...props}>
+    <div ref={ref} className={["data-table-wrap", className].filter(Boolean).join(" ")} {...props}>
       {children}
     </div>
   );
-}
+});
 
 export function TableMessageRow({
   children,

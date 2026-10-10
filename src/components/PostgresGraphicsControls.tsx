@@ -24,7 +24,7 @@ import {
   type PostgresRelationshipLineShape,
   type PostgresSourceObjectVisualKey,
 } from "../lib/postgresGraphics";
-import { usePostgresStoredImageUrl } from "../lib/postgresStoredImages";
+import { usePostgresStoredImage } from "../lib/postgresStoredImages";
 import { sanitizeSvgMarkup } from "../lib/safeHtml";
 
 export type PostgresGraphicModeOption<T extends string> = {
@@ -379,7 +379,7 @@ export function ObjectShapeSwatch(props: {
     selected = false,
     style,
   } = props;
-  const imageUrl = usePostgresStoredImageUrl(projectStoragePath, imageStoragePath);
+  const { url: imageUrl, ref: previewRef } = usePostgresStoredImage(projectStoragePath, imageStoragePath);
   const hasUploadedImage = Boolean(imageStoragePath);
   const frameWidth = hasUploadedImage ? minHeight : width;
   const normalizedOutlineWidth = normalizePostgresObjectOutlineWidth(outlineWidth);
@@ -394,6 +394,7 @@ export function ObjectShapeSwatch(props: {
 
   return (
     <span
+      ref={previewRef}
       aria-hidden="true"
       style={{
         position: "relative",
@@ -824,10 +825,10 @@ export function PostgresObjectGraphicPreviewCard(props: {
     sourceVisualKey = null,
     empty = false,
   } = props;
-  const imageUrl = usePostgresStoredImageUrl(projectStoragePath, imageStoragePath);
+  const { url: imageUrl, ref: previewRef } = usePostgresStoredImage(projectStoragePath, imageStoragePath, 384);
   const displayImageUrl = previewUrl || imageUrl;
   return (
-    <div className="graphics-editor-preview-card" aria-label={label}>
+    <div ref={previewRef} className="graphics-editor-preview-card" aria-label={label}>
       <span className="form-label">{t("common.preview")}</span>
       <div className="graphics-editor-preview-stage">
         {empty ? null : displayImageUrl ? (

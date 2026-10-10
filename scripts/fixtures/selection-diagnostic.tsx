@@ -1,0 +1,11 @@
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {I18nProvider} from './src/i18n/provider';
+import {SourceTextCodingView} from './src/views/Source_Text_Coding_View';
+import {SourceAITextCodingView} from './src/views/Source_AI_Text_Coding_View';
+window.__TAURI_INTERNALS__={invoke:async()=>({}),transformCallback:()=>0};
+const app=createRoot(document.getElementById('root'));
+let version=0;
+window.createdAnnotations=[];
+window.renderCoding=(mode='manual',locked=true,reset=true)=>{if(reset)version++;const View=mode==='ai'?SourceAITextCodingView:SourceTextCodingView;app.render(<I18nProvider key={version} initialLocale="en"><View row={{id:'source',name:'Selection diagnostic',type:'text',content:'Alpha beta gamma delta epsilon. Second sentence for selection testing.',structuredContentJson:'',filePath:'',createdAt:'2026-01-01'}} codes={[{id:'code',label:'Test code',parentId:'',color:'#355070',description:'',createdAt:'2026-01-01',sourcesCount:0}]} codeOptions={[]} annotations={[]} currentUserId="user" sourceLock={locked?{userId:'user',sourceId:'source'}:null} sourceLockConflict={null} lockSyncing={!locked} canManageAnnotations canManageMemos={false} canCreateCodes={false} saving={false} onCreateAnnotation={async(...args)=>{window.createdAnnotations.push(args)}} onUpdateAnnotation={async()=>{}} onDeleteAnnotation={async()=>{}} onKickSourceLock={async()=>{}} onOpenMemoDraft={()=>{}} onBack={()=>{}} /></I18nProvider>)};
+window.renderCoding();

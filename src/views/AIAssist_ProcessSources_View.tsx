@@ -1,3 +1,4 @@
+import { TablePagination, useTablePagination } from "../components/TablePagination";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DeleteIcon, PlusIcon, ProcessTranscriptIcon } from "../components/AppIcons";
@@ -25,10 +26,11 @@ import {
   listPostgresSourceAttributeValues,
   listPostgresProcessedDocumentReviews,
   listPostgresSources,
+  getPostgresSource,
   savePostgresSourceAttribute,
   upsertPostgresProcessedDocumentReview,
   type PostgresProcessedDocumentReview,
-  type PostgresSource,
+  type PostgresSourceSummary,
   type PostgresSourceAttributeDefinition,
 } from "../lib/postgres";
 
@@ -490,9 +492,9 @@ function collectProperNameCandidates(
   return [...names.values()].sort((left, right) => left.text.localeCompare(right.text));
 }
 
-function isTextProcessableSource(source: PostgresSource): boolean {
+function isTextProcessableSource(source: PostgresSourceSummary): boolean {
   const kind = source.sourceKind.trim().toLowerCase().replace(/_/g, " ");
-  return Boolean(source.textContent.trim()) && (kind === "text" || kind === "transcript" || kind === "processed transcript");
+  return source.hasTextContent && (kind === "text" || kind === "transcript" || kind === "processed transcript");
 }
 
 export function AIAssistProcessSourcesView({
@@ -505,7 +507,7 @@ export function AIAssistProcessSourcesView({
   canReviewProcessedDocuments: boolean;
 }) {
   const { t } = useI18n();
-  const [sources, setSources] = useState<PostgresSource[]>([]);
+  const [sources, setSources] = useState<PostgresSourceSummary[]>([]);
   const [reviews, setReviews] = useState<PostgresProcessedDocumentReview[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -567,6 +569,9 @@ export function AIAssistProcessSourcesView({
     [reviews],
   );
   const reviewRecords = useMemo(() => reviews.map(toProcessedSourceReviewRecord), [reviews]);
+  const sourceTable = useTablePagination(processableSources, `${projectId}:${selectedProcessGroup}`);
+  const reviewTable = useTablePagination(reviewRecords, `${projectId}:${selectedProcessGroup}`);
+
   const selectedReviewRecord = useMemo(
     () => reviewRecords.find((review) => review.id === selectedReviewId) ?? null,
     [reviewRecords, selectedReviewId],
@@ -927,7 +932,7 @@ export function AIAssistProcessSourcesView({
       const failures: Array<{ documentName: string; message: string }> = [];
       let processedCount = 0;
       for (let sourceIndex = 0; sourceIndex < selectedSources.length; sourceIndex += 1) {
-        const source = selectedSources[sourceIndex];
+        const source = await getPostgresSource(projectId, selectedSources[sourceIndex].id);
         const chunks = splitProcessingChunks(source.textContent, settings.llm.ollamaNumCtx);
         if (chunks.length === 0) throw new Error(`${source.title} has no text to process.`);
         const sourceContentHash = await hashContent(source.textContent);
@@ -1428,8 +1433,6 @@ export function AIAssistProcessSourcesView({
         <div
           className="home-primary-column"
           style={{
-            alignSelf: "center",
-            justifyContent: "flex-start",
             gap: 16,
             minHeight: 0,
             maxHeight: "100%",
@@ -1527,12 +1530,8 @@ export function AIAssistProcessSourcesView({
                 </button>
               ) : null}
             </div>
-            <div
-              className="data-table-wrap"
-              style={{
-                maxHeight: 34 + (Math.max(loading ? 1 : selectedProcessGroup === "raw" ? processableSources.length : reviewRecords.length, 1) + 2) * 36,
-              }}
-            >
+            <TablePagination {...(selectedProcessGroup === "raw" ? sourceTable.controls : reviewTable.controls)} />
+            <div ref={selectedProcessGroup === "raw" ? sourceTable.tableRef : reviewTable.tableRef} className="data-table-wrap">
             <table className="data-table">
               <thead>
                 {selectedProcessGroup === "raw" ? (
@@ -1563,7 +1562,7 @@ export function AIAssistProcessSourcesView({
                       <td colSpan={5} className="data-table-message">{t("aiAssist.processSources.noRawTextSources")}</td>
                     </tr>
                   ) : (
-                    processableSources.map((source) => {
+                    sourceTable.rows.map((source) => {
                       const checked = selectedSourceIds.includes(source.id);
                       const review = reviewBySourceId.get(source.id);
                       const status = review
@@ -1601,7 +1600,7 @@ export function AIAssistProcessSourcesView({
                     <td colSpan={4} className="data-table-message">{t("aiAssist.processSources.noProcessedSources")}</td>
                   </tr>
                 ) : (
-                  reviewRecords.map((record) => (
+                  reviewTable.rows.map((record) => (
                     <tr
                       key={record.id}
                       className={`data-table-row case-list-row${selectedReviewRecord?.id === record.id ? " assoc-doc-row--selected" : ""}`}

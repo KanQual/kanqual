@@ -15,6 +15,8 @@ import {
   listPostgresSourceObjectLinks,
   listPostgresSourceTypeSettings,
   listPostgresSources,
+  listPostgresSourceDetails,
+  type PostgresSourceSummary,
   type PostgresAnnotationSummary,
   type PostgresCode,
   type PostgresMemo,
@@ -49,6 +51,14 @@ export type PostgresProjectWorkspaceSnapshot = {
   sourceAttributeValues: PostgresSourceAttributeValue[];
   sourceTypeSettings: PostgresSourceTypeSetting[];
 };
+
+export type PostgresProjectWorkspaceSummary = Omit<PostgresProjectWorkspaceSnapshot, "sources"> & { sources: PostgresSourceSummary[] };
+
+/** Only call when the operation actually requires all source content. */
+export async function loadPostgresProjectWorkspaceWithSourceDetails(projectId: string): Promise<PostgresProjectWorkspaceSnapshot> {
+  const [snapshot, sources] = await Promise.all([loadPostgresProjectWorkspaceSnapshot(projectId), listPostgresSourceDetails(projectId)]);
+  return { ...snapshot, sources };
+}
 
 export type PostgresProjectWorkspaceLegacySnapshot = {
   documents: Document[];
@@ -103,7 +113,7 @@ function mapAnnotationToLegacyAnnotation(annotation: PostgresAnnotationSummary):
 
 export async function loadPostgresProjectWorkspaceSnapshot(
   projectId: string,
-): Promise<PostgresProjectWorkspaceSnapshot> {
+): Promise<PostgresProjectWorkspaceSummary> {
   const [sources, codes, annotations, memos, objects, objectTypes, objectAttributeDefinitions, relationships, relationshipTypes, relationshipAttributeDefinitions, sourceLocks, sourceObjectLinks, sourceAttributeDefinitions, sourceAttributeValues, sourceTypeSettings] = await Promise.all([
     listPostgresSources(projectId),
     listPostgresCodes(projectId),
@@ -144,7 +154,7 @@ export async function loadPostgresProjectWorkspaceSnapshot(
 export async function loadPostgresProjectWorkspaceLegacySnapshot(
   projectId: string,
 ): Promise<PostgresProjectWorkspaceLegacySnapshot> {
-  const snapshot = await loadPostgresProjectWorkspaceSnapshot(projectId);
+  const snapshot = await loadPostgresProjectWorkspaceWithSourceDetails(projectId);
   return {
     documents: snapshot.sources.map(mapSourceToLegacyDocument),
     cases: [],

@@ -1,3 +1,5 @@
+import { openImagePreview, useImageRevision, usePreviewVisibility } from "../lib/imagePreviews";
+import { releaseMediaUrl } from "../lib/mediaStream";
 import { useEffect, useState } from "react";
 import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -55,12 +57,16 @@ export function HomeAnnotationImagePreview({
   imageRegion: NonNullable<PostgresAnnotationSummary["imageRegion"]>;
 }) {
   const { t } = useI18n();
+  const { ref, visible, height } = usePreviewVisibility();
+  const imageRevision = useImageRevision();
   const [imageUrl, setImageUrl] = useState("");
   const [loadError, setLoadError] = useState("");
   const resolvedPath = resolvePostgresStoragePath(projectStoragePath, sourceStoragePath);
   const isPdf = sourceKind.trim().toLowerCase() === "pdf";
 
   useEffect(() => {
+    if (!visible) return;
+    const controller = new AbortController();
     let active = true;
     let objectUrl = "";
     setLoadError("");
@@ -71,7 +77,6 @@ export function HomeAnnotationImagePreview({
     }
 
     async function buildPreviewUrl(bytes: Uint8Array): Promise<string> {
-      if (!isPdf) return URL.createObjectURL(new Blob([bytes]));
 
       const pdfjsLib = await loadPostgresHomePdfJs();
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -88,11 +93,11 @@ export function HomeAnnotationImagePreview({
       return URL.createObjectURL(blob);
     }
 
-    void readTauriFile(resolvedPath)
-      .then(async (bytes) => {
-        objectUrl = await buildPreviewUrl(bytes);
+    void (isPdf ? readTauriFile(resolvedPath).then(buildPreviewUrl) : openImagePreview(resolvedPath, 1024, controller.signal))
+      .then((url) => {
+        objectUrl = url;
         if (!active) {
-          URL.revokeObjectURL(objectUrl);
+          releaseMediaUrl(objectUrl);
           return;
         }
         setImageUrl(objectUrl);
@@ -103,9 +108,11 @@ export function HomeAnnotationImagePreview({
 
     return () => {
       active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      setImageUrl("");
+      if (objectUrl) releaseMediaUrl(objectUrl);
     };
-  }, [imageRegion, isPdf, resolvedPath, t]);
+  }, [imageRegion, isPdf, resolvedPath, t, visible, imageRevision]);
 
   const safeRegionWidth = Math.max(imageRegion.width, 1);
   const safeRegionHeight = Math.max(imageRegion.height, 1);
@@ -113,7 +120,7 @@ export function HomeAnnotationImagePreview({
   const safeImageHeight = Math.max(imageRegion.imageHeight, safeRegionHeight);
 
   return (
-    <div className="graph-canvas-inspector-preview">
+    <div ref={ref} className="graph-canvas-inspector-preview" style={{ minHeight: height }}>
       <div className="annotation-excerpt annotation-excerpt--clip">
         <div className="annotation-excerpt-label">
           {isPdf ? `${t("projectCore.graph.pageLabel", { page: imageRegion.pageNumber ?? 1 })} - ` : ""}

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { readFile as readTauriFile } from "@tauri-apps/plugin-fs";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { openImagePreview, useImageRevision, usePreviewVisibility } from "./imagePreviews";
+import { releaseMediaUrl } from "./mediaStream";
 
 export function getPostgresImageMimeType(storagePath: string): string {
   const extension = storagePath.split(".").pop()?.toLowerCase() ?? "";
@@ -13,7 +14,7 @@ export function getPostgresImageMimeType(storagePath: string): string {
 export function resolvePostgresStoragePath(projectStoragePath: string, relativeStoragePath: string): string {
   const trimmedRelativePath = relativeStoragePath.trim();
   if (!trimmedRelativePath) return "";
-  if (/^[a-zA-Z]:[\\/]/.test(trimmedRelativePath) || trimmedRelativePath.startsWith("\\\\")) {
+  if (/^[a-zA-Z]:[\\/]/.test(trimmedRelativePath) || trimmedRelativePath.startsWith("\\\\") || trimmedRelativePath.startsWith("/")) {
     return trimmedRelativePath;
   }
   const trimmedProjectPath = projectStoragePath.trim().replace(/[\\/]+$/, "");
@@ -21,76 +22,56 @@ export function resolvePostgresStoragePath(projectStoragePath: string, relativeS
   return trimmedProjectPath ? `${trimmedProjectPath}\\${normalizedRelativePath}` : normalizedRelativePath;
 }
 
-export function usePostgresStoredImageUrl(projectStoragePath: string, imageStoragePath: string): string {
-  const [imageUrl, setImageUrl] = useState("");
-
+export function usePostgresStoredImage(projectStoragePath: string, imageStoragePath: string, size = 128) {
+  const { ref, visible } = usePreviewVisibility<HTMLElement>();
+  const revision = useImageRevision();
+  const [url, setUrl] = useState("");
   useEffect(() => {
-    let active = true;
-    let objectUrl = "";
-    const resolvedPath = resolvePostgresStoragePath(projectStoragePath, imageStoragePath);
-    if (!resolvedPath) {
-      setImageUrl("");
-      return;
-    }
-    void readTauriFile(resolvedPath)
-      .then((bytes) => {
-        if (!active) return;
-        const blob = new Blob([bytes], { type: getPostgresImageMimeType(imageStoragePath) });
-        objectUrl = URL.createObjectURL(blob);
-        setImageUrl(objectUrl);
-      })
-      .catch(() => {
-        if (active) setImageUrl("");
-      });
-    return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [projectStoragePath, imageStoragePath]);
-
-  return imageUrl;
+    setUrl("");
+    const path = resolvePostgresStoragePath(projectStoragePath, imageStoragePath);
+    if (!path || !visible) return;
+    const controller = new AbortController();
+    let loaded = "";
+    void openImagePreview(path, size, controller.signal).then((next) => {
+      if (controller.signal.aborted) { releaseMediaUrl(next); return; }
+      loaded = next; setUrl(next);
+    }).catch(() => {});
+    return () => { controller.abort(); releaseMediaUrl(loaded); };
+  }, [projectStoragePath, imageStoragePath, visible, size, revision]);
+  return { url, ref };
 }
 
-export function usePostgresStoredImageUrlMap(projectStoragePath: string, imageStoragePaths: string[]): Map<string, string> {
-  const [imageUrlEntries, setImageUrlEntries] = useState<Array<[string, string]>>([]);
-  const imageStoragePathKey = useMemo(
-    () => Array.from(new Set(imageStoragePaths.map((path) => path.trim()).filter(Boolean))).sort().join("\n"),
-    [imageStoragePaths],
-  );
-
+/** Callers supply only viewport-visible paths. The graph retains at most 48 previews. */
+export function usePostgresStoredImageUrlMap(projectStoragePath: string, imageStoragePaths: string[], size: number | null = 128): Map<string, string> {
+  const [entries, setEntries] = useState<Array<[string, string]>>([]);
+  const active = useRef(new Map<string, { controller: AbortController; url: string }>());
+  const revision = useImageRevision();
+  const identity = `${projectStoragePath}:${revision}:${size}`;
+  const previousIdentity = useRef(identity);
+  const key = JSON.stringify([...new Set(imageStoragePaths.filter(Boolean))].slice(0, 48).sort());
   useEffect(() => {
-    const paths = imageStoragePathKey.split("\n").filter(Boolean);
-    let active = true;
-    const objectUrls: string[] = [];
-
-    if (!projectStoragePath || paths.length === 0) {
-      setImageUrlEntries([]);
-      return;
-    }
-
-    void Promise.all(paths.map(async (imageStoragePath) => {
-      const resolvedPath = resolvePostgresStoragePath(projectStoragePath, imageStoragePath);
-      if (!resolvedPath) return null;
-      try {
-        const bytes = await readTauriFile(resolvedPath);
-        if (!active) return null;
-        const blob = new Blob([bytes], { type: getPostgresImageMimeType(imageStoragePath) });
-        const objectUrl = URL.createObjectURL(blob);
-        objectUrls.push(objectUrl);
-        return [imageStoragePath, objectUrl] as [string, string];
-      } catch {
-        return null;
+    const paths = new Set(JSON.parse(key) as string[]);
+    for (const [path, entry] of active.current) {
+      if (!paths.has(path) || previousIdentity.current !== identity) {
+        entry.controller.abort(); releaseMediaUrl(entry.url); active.current.delete(path);
       }
-    })).then((entries) => {
-      if (!active) return;
-      setImageUrlEntries(entries.filter((entry): entry is [string, string] => Boolean(entry)));
-    });
-
-    return () => {
-      active = false;
-      objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
-    };
-  }, [imageStoragePathKey, projectStoragePath]);
-
-  return useMemo(() => new Map(imageUrlEntries), [imageUrlEntries]);
+    }
+    previousIdentity.current = identity;
+    const publish = () => setEntries([...active.current].flatMap(([path, entry]) => entry.url ? [[path, entry.url] as [string, string]] : []));
+    publish();
+    for (const path of paths) {
+      if (active.current.has(path)) continue;
+      const entry = { controller: new AbortController(), url: "" };
+      active.current.set(path, entry);
+      void openImagePreview(resolvePostgresStoragePath(projectStoragePath, path), size, entry.controller.signal).then((url) => {
+        if (entry.controller.signal.aborted) { releaseMediaUrl(url); return; }
+        entry.url = url; publish();
+      }).catch(() => {});
+    }
+  }, [key, projectStoragePath, identity, size]);
+  useEffect(() => () => {
+    for (const entry of active.current.values()) { entry.controller.abort(); releaseMediaUrl(entry.url); }
+    active.current.clear();
+  }, []);
+  return useMemo(() => new Map(entries), [entries]);
 }

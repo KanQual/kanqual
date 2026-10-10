@@ -1,8 +1,13 @@
+import { useListPreference } from "../lib/listVisitCache";
+import { TablePagination } from "../components/TablePagination";
+import { usePostgresTablePage } from "../lib/usePostgresTablePage";
+import type { PostgresReport } from "../lib/postgres";
+import type { ReportSourceSummary as ProjectDocument } from "../lib/postgresReportAdapters";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import type { Annotation, Code, Document as ProjectDocument, ProjectLogEntry } from "../types";
+import type { Annotation, Code, ProjectLogEntry } from "../types";
 import type { EChartsCoreOption } from "echarts/core";
 import { DownloadIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
@@ -18,7 +23,7 @@ import {
   projectLogActionLabel,
   projectLogDescriptionLabel,
 } from "./Project_Log_View";
-import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
+import { createPostgresReport, deletePostgresReport, logPostgresReportExport } from "../lib/postgres";
 import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
 
 const EChart = lazy(() => import("../components/EChart").then((module) => ({ default: module.EChart })));
@@ -2005,11 +2010,9 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
   const [newReportKind, setNewReportKind] = useState<CoderReportKind | null>(initialNewReportKind ?? null);
   const [openSavedRow, setOpenSavedRow] = useState<CoderReportRow | null>(initialSavedReport);
   const [newFromSettings, setNewFromSettings] = useState<CoderReportSettings | null>(null);
-  const [rows, setRows] = useState<CoderReportRow[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sortCol, setSortCol] = useState<CoderReportSortCol>("createdAt");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortCol, setSortCol] = useListPreference<CoderReportSortCol>(JSON.stringify([postgresProjectId, "Reports_Users_View.tsx", "sortCol"]), "createdAt");
+  const [sortDir, setSortDir] = useListPreference<SortDir>(JSON.stringify([postgresProjectId, "Reports_Users_View.tsx", "sortDir"]), "desc");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: CoderReportRow } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<CoderReportRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -2017,12 +2020,9 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
 
-  const loadReports = useCallback(async () => {
-    if (!postgresProjectId) return [];
-    setLoading(true);
-    setError(null);
-    try {
-      const records = await listPostgresReports(postgresProjectId);
+  const reportPage = usePostgresTablePage<PostgresReport>(postgresProjectId, { entity: "reports", reportType: "coder-report", kindLabels: { "user-activity": reportLabel(t, "activity"), "user-comparison": reportLabel(t, "comparison"), "user-agreement": reportLabel(t, "agreement") }, sort: sortCol, descending: sortDir === "desc" });
+  const loading = reportPage.loading;
+  function mapReports(records: PostgresReport[]): CoderReportRow[] {
       const mappedRows = records
         .filter((record) => record.reportType === "coder-report")
         .map((record) => {
@@ -2041,19 +2041,14 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
           }
         })
         .filter(Boolean) as CoderReportRow[];
-      setRows(mappedRows);
       return mappedRows;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("reportsUsers.errors.loadReports"));
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  }, [postgresProjectId, t]);
+  }
+  const rows = mapReports(reportPage.rows);
+  const loadReports = useCallback(async (selectedId?: string) => {
+    const page = await reportPage.reload(selectedId);
+    return page ? mapReports(page.selected ? [...page.rows, page.selected] : page.rows) : [];
+  }, [reportPage.reload]);
 
-  useEffect(() => {
-    loadReports();
-  }, [loadReports]);
 
   useEffect(() => {
     function handleClick(event: MouseEvent) {
@@ -2065,12 +2060,7 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const sorted = [...rows].sort((a, b) => {
-    const aValue = sortCol === "kind" ? reportLabel(t, a.snapshot.kind) : String(a[sortCol]);
-    const bValue = sortCol === "kind" ? reportLabel(t, b.snapshot.kind) : String(b[sortCol]);
-    const cmp = aValue.localeCompare(bValue, undefined, { sensitivity: "base" });
-    return sortDir === "asc" ? cmp : -cmp;
-  });
+  const sorted = rows;
 
   function handleSort(col: CoderReportSortCol) {
     if (col === sortCol) setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
@@ -2086,7 +2076,7 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
     try {
       if (!postgresProjectId) throw new Error(t("reportsCommon.projectWorkspaceRequired"));
       await deletePostgresReport(postgresProjectId, confirmDelete.id);
-      setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
+      await loadReports();
       setConfirmDelete(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("reportsCodes.errors.deleteReport"));
@@ -2113,7 +2103,7 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
         onSaved={(row) => {
           setNewReportKind(null);
           setNewFromSettings(null);
-          setRows((prev) => [row, ...prev.filter((item) => item.id !== row.id)]);
+          void loadReports();
           setOpenSavedRow(row);
         }}
       />
@@ -2159,11 +2149,12 @@ export function ReportsUsersView({ initialNewModalOpen = false, initialNewReport
         )}
       />
 
-      {error && <div className="settings-error">{error}</div>}
+      {(error || reportPage.error) && <div className="settings-error">{error || reportPage.error}</div>}
 
       <div className="view-content">
         <section className="report-layout-main">
-          <TableShell>
+          <TablePagination {...reportPage.controls} />
+          <TableShell ref={reportPage.tableRef}>
             <table className="data-table">
               <thead>
                 <tr>

@@ -614,6 +614,15 @@ export type PostgresSource = {
   updatedAt: string;
 };
 
+export type PostgresSourceSummary = Omit<PostgresSource,
+  "textContent" | "structuredContentJson" | "waveformPeaksJson" | "videoFrameIndexJson"
+> & { hasTextContent: boolean; hasStructuredContent: boolean };
+
+export function toSourceSummary(source: PostgresSource): PostgresSourceSummary {
+  const { textContent, structuredContentJson, waveformPeaksJson: _wave, videoFrameIndexJson: _frames, ...summary } = source;
+  return { ...summary, hasTextContent: textContent.length > 0, hasStructuredContent: structuredContentJson.length > 2 };
+}
+
 export type PostgresSourceTypeSetting = {
   projectId: string;
   sourceKind: string;
@@ -1613,7 +1622,20 @@ export async function deletePostgresSavedDrawing(
   });
 }
 
-export async function listPostgresSources(projectId: string): Promise<PostgresSource[]> {
+export async function listPostgresSources(projectId: string, sourceIds?: string[]): Promise<PostgresSourceSummary[]> {
+  return invoke<PostgresSourceSummary[]>("list_source_summaries_command", { projectId, sourceIds });
+}
+
+export async function getPostgresSource(projectId: string, sourceId: string): Promise<PostgresSource> {
+  return invoke<PostgresSource>("get_source_details_command", { projectId, sourceId });
+}
+
+export async function searchPostgresSourceIds(projectId: string, query: string): Promise<string[]> {
+  return invoke<string[]>("search_source_ids_command", { projectId, query });
+}
+
+/** Explicit full-content batch read for exports and embedding builds. */
+export async function listPostgresSourceDetails(projectId: string): Promise<PostgresSource[]> {
   return invoke<PostgresSource[]>("list_postgres_experiment_sources_command", {
     projectId,
   });
@@ -1808,9 +1830,11 @@ export async function listPostgresSourceAttributeDefinitions(
 
 export async function listPostgresSourceAttributeValues(
   projectId: string,
+  sourceIds?: string[],
 ): Promise<PostgresSourceAttributeValue[]> {
   return invoke<PostgresSourceAttributeValue[]>("list_postgres_experiment_source_attribute_values_command", {
     projectId,
+    sourceIds,
   });
 }
 
@@ -1978,9 +2002,11 @@ export async function deletePostgresCode(projectId: string, codeId: string): Pro
 
 export async function listPostgresAnnotationSummaries(
   projectId: string,
+  sourceId?: string,
 ): Promise<PostgresAnnotationSummary[]> {
   return invoke<PostgresAnnotationSummary[]>("list_postgres_experiment_annotation_summaries_command", {
     projectId,
+    sourceId,
   });
 }
 
@@ -2368,9 +2394,10 @@ export async function waitForPostgresAiJobTerminalState(
   throw new Error("Timed out waiting for AI processing.");
 }
 
-export async function listPostgresObjects(projectId: string): Promise<PostgresObject[]> {
+export async function listPostgresObjects(projectId: string, sourceId?: string): Promise<PostgresObject[]> {
   return invoke<PostgresObject[]>("list_postgres_experiment_objects_command", {
     projectId,
+    sourceId,
   });
 }
 
@@ -2741,9 +2768,10 @@ export async function removePostgresSourceImage(
   });
 }
 
-export async function listPostgresRelationships(projectId: string): Promise<PostgresRelationship[]> {
+export async function listPostgresRelationships(projectId: string, sourceId?: string): Promise<PostgresRelationship[]> {
   return invoke<PostgresRelationship[]>("list_postgres_experiment_relationships_command", {
     projectId,
+    sourceId,
   });
 }
 
@@ -2885,4 +2913,54 @@ export async function deletePostgresRelationship(projectId: string, relationship
     projectId,
     relationshipId,
   });
+}
+
+export type PostgresSourcePage = {
+  sources: Array<PostgresSourceSummary & { annotationCount: number; objectCount: number }>;
+  kinds: Array<{ sourceKind: string; count: number }>;
+  total: number;
+  offset: number;
+  storagePath: string;
+};
+export async function listPostgresSourcePage(projectId: string, request: {
+  query: string; kinds: string[]; kind: string; sort: string;
+  descending: boolean; offset: number; all: boolean;
+}): Promise<PostgresSourcePage> {
+  return invoke<PostgresSourcePage>("list_source_page_command", { projectId, request });
+}
+
+export async function getPostgresSourceListEntry(projectId: string, sourceId: string): Promise<PostgresSourcePage["sources"][number]> {
+  return invoke("get_source_list_entry_command", { projectId, sourceId });
+}
+
+export type PostgresAnnotationPage = {
+  annotations: PostgresAnnotationSummary[];
+  selected: PostgresAnnotationSummary | null;
+  counts: Record<string, number>;
+  total: number;
+  offset: number;
+};
+
+export function listPostgresAnnotationPage(projectId: string, request: {
+  query?: string; codeId: string; sort: string; descending: boolean; offset: number; annotationId?: string;
+  currentUserId: string; lockLabels: string[]; sourceKindLabels: Record<string, string>;
+}): Promise<PostgresAnnotationPage> {
+  return invoke<PostgresAnnotationPage>("list_annotation_page_command", { projectId, request });
+}
+
+export type PostgresTablePage<T> = { rows: T[]; selected: T | null; total: number; offset: number; counts: Record<string, number> };
+export type PostgresTablePageRequest = { entity: "memos" | "reports"; query?: string; kind?: string; reportType?: string; kindLabels?: Record<string, string>; sort?: string; descending?: boolean; offset: number; selectedId?: string };
+export function listPostgresTablePage<T>(projectId: string, request: PostgresTablePageRequest): Promise<PostgresTablePage<T>> {
+  return invoke<PostgresTablePage<T>>("list_project_table_page_command", { projectId, request });
+}
+
+export function getPostgresProjectListCounts(projectId: string): Promise<{ memos: number; reports: number }> {
+  return invoke("get_project_list_counts_command", { projectId });
+}
+
+export function getCodebookSummary(projectId: string): Promise<{ codes: PostgresCode[]; sourceCounts: Record<string, number> }> {
+  return invoke("get_codebook_summary_command", { projectId });
+}
+export function listCodeAnnotations(projectId: string, codeId: string): Promise<PostgresAnnotationSummary[]> {
+  return invoke("list_code_annotations_command", { projectId, codeId });
 }

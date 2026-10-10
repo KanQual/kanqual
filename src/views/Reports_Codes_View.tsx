@@ -1,3 +1,8 @@
+import { useListPreference } from "../lib/listVisitCache";
+import { TablePagination } from "../components/TablePagination";
+import { usePostgresTablePage } from "../lib/usePostgresTablePage";
+import type { PostgresReport } from "../lib/postgres";
+import type { ReportSourceSummary as ProjectDocument } from "../lib/postgresReportAdapters";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -5,7 +10,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import type { EChartsCoreOption } from "echarts/core";
 import { useViewportContextMenuStyle } from "../lib/contextMenu";
-import type { Annotation, Code, Document as ProjectDocument } from "../types";
+import type { Annotation, Code } from "../types";
 import { FilterIcon } from "../components/FilterIcon";
 import { DownloadIcon, RestartListIcon, SaveIcon } from "../components/AppIcons";
 import { SettingsModal } from "../components/SettingsModal";
@@ -15,7 +20,7 @@ import { TableMessageRow, TableShell } from "../components/TableShell";
 import { ViewHeader } from "../components/ViewHeader";
 import { formatCurrentDateTime } from "../i18n/formatters";
 import { useI18n } from "../i18n/provider";
-import { createPostgresReport, deletePostgresReport, listPostgresReports, logPostgresReportExport } from "../lib/postgres";
+import { createPostgresReport, deletePostgresReport, logPostgresReportExport } from "../lib/postgres";
 import { loadPostgresReportBuilderData } from "../lib/postgresReportAdapters";
 import { getFloatingTooltipStyle } from "./Source_Coding_Shared";
 import { richTextHtmlToPlainText as htmlToPlainText, sanitizeRichTextHtml } from "../lib/safeHtml";
@@ -4577,11 +4582,9 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
   const [newReportKind, setNewReportKind] = useState<CodeReportKind | null>(initialNewReportKind ?? null);
   const [openSavedRow, setOpenSavedRow] = useState<CodeReportRow | null>(initialSavedReport);
   const [newFromSettings, setNewFromSettings] = useState<CodeReportSettings | null>(null);
-  const [rows, setRows] = useState<CodeReportRow[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sortCol, setSortCol] = useState<CodeReportSortCol>("createdAt");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortCol, setSortCol] = useListPreference<CodeReportSortCol>(JSON.stringify([postgresProjectId, "Reports_Codes_View.tsx", "sortCol"]), "createdAt");
+  const [sortDir, setSortDir] = useListPreference<SortDir>(JSON.stringify([postgresProjectId, "Reports_Codes_View.tsx", "sortDir"]), "desc");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: CodeReportRow } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
@@ -4589,12 +4592,9 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const loadReports = useCallback(async () => {
-    if (!postgresProjectId) return [];
-    setLoading(true);
-    setError(null);
-    try {
-      const records = await listPostgresReports(postgresProjectId);
+  const reportPage = usePostgresTablePage<PostgresReport>(postgresProjectId, { entity: "reports", reportType: "code-report", kindLabels: { "code-frequencies": getCodeReportLabel(t, "frequencies"), "code-co-occurrences": getCodeReportLabel(t, "summary") }, sort: sortCol, descending: sortDir === "desc" });
+  const loading = reportPage.loading;
+  function mapReports(records: PostgresReport[]): CodeReportRow[] {
       const mappedRows = records
         .filter((record) => record.reportType === "code-report")
         .map((record) => {
@@ -4613,17 +4613,14 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
           }
         })
         .filter(Boolean) as CodeReportRow[];
-      setRows(mappedRows);
       return mappedRows;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("reportsCodes.errors.loadReports"));
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  }, [postgresProjectId, t]);
+  }
+  const rows = mapReports(reportPage.rows);
+  const loadReports = useCallback(async (selectedId?: string) => {
+    const page = await reportPage.reload(selectedId);
+    return page ? mapReports(page.selected ? [...page.rows, page.selected] : page.rows) : [];
+  }, [reportPage.reload]);
 
-  useEffect(() => { loadReports(); }, [loadReports]);
 
   useEffect(() => {
     function onPointerDown(e: MouseEvent) {
@@ -4642,12 +4639,7 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
     };
   }, []);
 
-  const sorted = [...rows].sort((a, b) => {
-    const aValue = sortCol === "kind" ? getCodeReportLabel(t, a.snapshot.kind) : String(a[sortCol]);
-    const bValue = sortCol === "kind" ? getCodeReportLabel(t, b.snapshot.kind) : String(b[sortCol]);
-    const cmp = aValue.localeCompare(bValue, undefined, { sensitivity: "base" });
-    return sortDir === "asc" ? cmp : -cmp;
-  });
+  const sorted = rows;
 
   function handleSort(col: CodeReportSortCol) {
     if (col === sortCol) setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
@@ -4663,7 +4655,7 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
     try {
       if (!postgresProjectId) throw new Error(t("reportsCommon.projectWorkspaceRequired"));
       await deletePostgresReport(postgresProjectId, confirmDelete.id);
-      setRows((prev) => prev.filter((row) => row.id !== confirmDelete.id));
+      await loadReports();
       setConfirmDelete(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("reportsCodes.errors.deleteReport"));
@@ -4691,7 +4683,7 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
         onSaved={(row) => {
           setNewReportKind(null);
           setNewFromSettings(null);
-          setRows((prev) => [row, ...prev.filter((item) => item.id !== row.id)]);
+          void loadReports();
           setOpenSavedRow(row);
         }}
       />
@@ -4737,11 +4729,12 @@ export function CodesView({ initialNewModalOpen = false, initialNewReportKind, i
         )}
       />
 
-      {error && <p className="alert-error">{error}</p>}
+      {(error || reportPage.error) && <p className="alert-error">{error || reportPage.error}</p>}
 
       <div className="view-content">
         <section className="report-layout-main">
-          <TableShell style={{ maxHeight: 34 + (Math.max(loading || sorted.length === 0 ? 1 : sorted.length, 1) + 2) * 36 }}>
+          <TablePagination {...reportPage.controls} />
+          <TableShell ref={reportPage.tableRef}>
             <table className="data-table">
               <thead>
                 <tr>

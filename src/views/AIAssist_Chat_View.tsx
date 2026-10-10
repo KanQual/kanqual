@@ -25,6 +25,9 @@ import {
   listPostgresProjectAiChats,
   listPostgresRelationships,
   listPostgresSources,
+  getPostgresSource,
+  searchPostgresSourceIds,
+  type PostgresSource,
   touchPostgresProjectAiChat,
   type PostgresAnnotationSummary,
   type PostgresCode,
@@ -37,7 +40,7 @@ import {
   type PostgresProjectChangeEvent,
   type PostgresProjectUser,
   type PostgresRelationship,
-  type PostgresSource,
+  type PostgresSourceSummary,
 } from "../lib/postgres";
 import type { ProjectChatAiJobResult } from "../lib/aiJobs";
 
@@ -93,7 +96,7 @@ export type AIAssistChatViewProps = {
 };
 
 type ChatContextData = {
-  sources: PostgresSource[];
+  sources: PostgresSourceSummary[];
   objects: PostgresObject[];
   relationships: PostgresRelationship[];
   codes: PostgresCode[];
@@ -421,6 +424,31 @@ export function AIAssistChatView({
   const citationLinkRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contextMenuStyle = useViewportContextMenuStyle(contextMenu, contextMenuRef);
+  const [citationSourceDetail, setCitationSourceDetail] = useState<PostgresSource | null>(null);
+  const [sourceSearch, setSourceSearch] = useState<{ query: string; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setCitationSourceDetail(null);
+    const citation = citationModal?.citation;
+    const id = citation?.sourceId ?? citation?.documentId;
+    if (!citation || getCitationKind(citation) !== "text-segment" || !id) return;
+    void getPostgresSource(project.id, id).then((source) => {
+      if (!cancelled) setCitationSourceDetail(source);
+    }).catch((error) => { if (!cancelled) setChatError(error instanceof Error ? error.message : String(error)); });
+    return () => { cancelled = true; };
+  }, [project.id, citationModal]);
+  useEffect(() => {
+    let cancelled = false;
+    const query = contextQuery.trim().toLowerCase();
+    setSourceSearch(null);
+    if (!query || !contextPickerOpen || contextTab !== "document") return;
+    const timer = window.setTimeout(() => {
+      void searchPostgresSourceIds(project.id, query).then((ids) => {
+        if (!cancelled) setSourceSearch({ query, ids: new Set(ids) });
+      }).catch((error) => { if (!cancelled) setChatError(error instanceof Error ? error.message : String(error)); });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [project.id, contextQuery, contextPickerOpen, contextTab, contextData.sources]);
   const currentUserId = currentProjectUser?.id ?? "";
   const currentProjectRole = currentProjectUser?.role ?? (isProjectAdmin ? "administrator" : "viewer");
   const canUseAiChat = isProjectAdmin || Boolean(currentProjectUser);
@@ -617,9 +645,9 @@ export function AIAssistChatView({
     return textSources.filter((source) =>
       source.title.toLowerCase().includes(query)
       || source.notes.toLowerCase().includes(query)
-      || source.textContent.toLowerCase().includes(query),
+      || (sourceSearch?.query === query && sourceSearch.ids.has(source.id)),
     );
-  }, [contextData.sources, contextQuery]);
+  }, [contextData.sources, contextQuery, sourceSearch]);
 
   const filteredObjects = useMemo(() => {
     const query = contextQuery.trim().toLowerCase();
@@ -925,14 +953,14 @@ export function AIAssistChatView({
     handleOpenCitation(citation);
   }
 
-  function getTextSegmentCitationSource(citation: OllamaProjectChatCitation): PostgresSource | null {
+  function getTextSegmentCitationSource(citation: OllamaProjectChatCitation): PostgresSourceSummary | null {
     const targetSourceId = citation.sourceId ?? citation.documentId ?? null;
     if (!targetSourceId) return null;
     return sourceById.get(targetSourceId) ?? null;
   }
 
   function getTextSegmentCitationText(citation: OllamaProjectChatCitation): string {
-    const source = getTextSegmentCitationSource(citation);
+    const source = citationSourceDetail?.id === (citation.sourceId ?? citation.documentId) ? citationSourceDetail : null;
     if (
       source
       && typeof citation.startOffset === "number"
@@ -1776,6 +1804,7 @@ export function AIAssistChatView({
                       />
                     </label>
                     <div className="ai-chat-context-modal-list" role="list">
+                      {contextTab === "document" && contextQuery.trim() && sourceSearch?.query !== contextQuery.trim().toLowerCase() && <p role="status">{t("projectCore.sources.searchingSourceContent")}</p>}
                       {contextTab === "document" && filteredSources.map((source) => (
                         <label key={source.id} className="ai-chat-context-option" role="listitem">
                           <input
