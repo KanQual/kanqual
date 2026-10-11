@@ -425,7 +425,6 @@ function AuthGate() {
       const session = postgresAuthStatus?.currentSession;
       if (
         !session
-        || session.authKind !== "app_user"
         || !postgresInstallationSettings?.updatesAutoCheck
         || !postgresInstallationSettings.updatesBannerEnabled
       ) {
@@ -670,6 +669,7 @@ function AuthGate() {
     if (adminOpenedProject) {
       return (
         <Suspense fallback={<ViewLoadingFallback />}>
+          {renderUpdateAvailableBanner()}
           <PostgresEmbeddingModelDownloadBanner />
           <PostgresProjectEmbeddingBuildBanner activeProject={adminOpenedProject} />
           <PostgresDocumentProcessingBanner />
@@ -741,8 +741,10 @@ function AuthGate() {
     return (
       <Suspense fallback={<AuthLoadingFallback />}>
         <PostgresEmbeddingModelDownloadBanner />
+        {renderUpdateAvailableBanner()}
         <AdminSettingsViewLazy
           authSession={postgresAuthStatus.currentSession}
+          onInstallationSettingsChanged={setPostgresInstallationSettings}
           onOpenProject={async (project) => {
             await rememberPostgresProjectOpened({
               id: project.id,

@@ -121,6 +121,7 @@ import {
 
 export type AdminSettingsViewProps = {
   authSession: PostgresAuthSession;
+  onInstallationSettingsChanged?: (settings: PostgresInstallationSettings) => void;
   onOpenProject?: (project: PostgresProject) => Promise<void> | void;
   onSignOut?: () => Promise<void>;
 };
@@ -606,6 +607,7 @@ function postgresUserIsLoginBlocked(user: PostgresAppUser): boolean {
 
 export function AdminSettingsView({
   authSession,
+  onInstallationSettingsChanged,
   onOpenProject,
   onSignOut,
 }: AdminSettingsViewProps) {
@@ -1130,10 +1132,11 @@ export function AdminSettingsView({
   ) => {
     const saved = await savePostgresInstallationSettings(next);
     setInstallationSettings(saved);
+    onInstallationSettingsChanged?.(saved);
     syncLegacyAppSettingsFromPostgresInstallationSettings(saved);
     setNotice(successMessage);
     setError("");
-  }, []);
+  }, [onInstallationSettingsChanged]);
 
   const loadUpgradeBackupDiagnostics = useCallback(async () => {
     setUpgradeBackupDiagnosticsLoading(true);
