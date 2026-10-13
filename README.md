@@ -21,20 +21,21 @@ Core capabilities include:
 - Collaborating over a trusted network when explicitly enabled
 - Using AI Assist for chat, coding, attribute identification, transcript processing, and code analysis
 
-## Version 0.9.7
+## Version 0.9.8
 
-Version 0.9.7 enables update checks and update notifications for administrator sessions. It also includes the project import, performance, and interface improvements introduced in version 0.9.6, building on KanQual's PostgreSQL-based architecture.
+Version 0.9.8 adds full-installation restore, improves backup and restore workflows, and updates security dependencies. It builds on the project import, performance, and administrator update-check improvements from previous versions.
 
 Highlights include:
 
-- Automatic update checks and banners in Admin Settings and projects opened by administrators, with update preferences applied immediately
-- Project imports from encrypted JSON, unencrypted JSON, and REFI-QDA files through Admin Settings > Projects
-- Lower memory use through streamed audio/video playback, lightweight source summaries, focused queries, and image previews
-- Consistent search and pagination controls, improved table scrolling, and better layouts on smaller screens
-- More reliable coding-view lock readiness and text selection, with faster annotation deletion
-- Faster navigation through narrower initial loads, bounded caching for repeat visits, and JavaScript preloading when navigation items are hovered or focused
-- A corrected startup logo and updated GitHub Actions tooling
-- Windows installers and portable ZIPs, macOS Apple Silicon and Intel packages, and Linux AppImage and DEB packages
+- Separate Backup, Restore, and Updates buttons and modals in Admin Settings
+- Full-installation restore with backup validation, a recovery backup, and recovery handling for failed or interrupted restores
+- A two-step first-startup restore flow: select the backup and enter its password, then set a new administrator password
+- Fixes for restored project access involving administrator identities, imported authors, and removed accounts
+- Reliable restore-status checks that avoid false "already running" errors, with retry handling for status failures
+- Security updates to source-map-js, brace-expansion, DOMPurify, Moment, and rustls
+- Permission-model and matrix updates allowing coders to create codes, matching the source-screen behavior
+- Repository cleanup, consistent desktop icon generation, shared browser-test infrastructure, and permission validation that runs unconditionally in CI
+- Windows installers and portable ZIPs, macOS Apple Silicon and Intel packages, and Linux AppImage and DEB packages, with SHA-256 checksums
 
 KanQual remains under active development. Interfaces, AI workflows, packaging, and setup may continue to evolve as the application approaches version 1.0.
 
