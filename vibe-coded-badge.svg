@@ -17,21 +17,13 @@
         text-anchor="middle"
         dominant-baseline="middle">Human + AI Collaboration</text>
 
-  <!-- Model Company -->
-  <text x="200" y="38"
+  <!-- AI model -->
+  <text x="200" y="44"
         font-family="Arial"
         font-size="16"
         fill="#ffffff"
         text-anchor="middle"
-        dominant-baseline="middle">OpenAI and Anthropic</text>
-
-  <!-- Model Name -->
-  <text x="200" y="52"
-        font-family="Arial"
-        font-size="16"
-        fill="#ffffff"
-        text-anchor="middle"
-        dominant-baseline="middle">🤖 GPT 5.6 and Claude Opus 4.5</text>
+        dominant-baseline="middle">OpenAI Astra 6.0</text>
 
   <!-- License -->
   <text x="200" y="70"
