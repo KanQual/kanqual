@@ -3,11 +3,21 @@ import { createRoot } from 'react-dom/client';
 import { I18nProvider } from './src/i18n/provider';
 import { InstallationRestoreCard, InstallationRestoreGate } from './src/components/InstallationRestore';
 window.calls = [];
+let statusBusy = false;
+window.statusFailure = false;
 window.restoreState = null;
 const preview = { fingerprint: 'hash', version: '0.9.7', projects: ['Research'], fileCount: 3, userCount: 2, createdAtMs: 1 };
 window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
   window.calls.push({ command, args });
-  if (command === 'installation_restore_status_command') return window.restoreState;
+  if (command === 'installation_restore_status_command') {
+    if (statusBusy) throw Error('A restore operation is already running.');
+    statusBusy = true;
+    try {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      if (window.statusFailure) throw Error('Status read failed');
+      return window.restoreState;
+    } finally { statusBusy = false; }
+  }
   if (command === 'plugin:dialog|open') return 'C:/test.kanqual-upgrade-backup';
   if (command === 'preview_installation_restore_command') {
     if (args.backupPassword !== 'correct') throw Error('Wrong backup password');
@@ -29,5 +39,5 @@ window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
 }};
 const root = createRoot(document.getElementById('root'));
 let key = 0;
-window.show = (gate = false) => root.render(<I18nProvider initialLocale="en"><div key={++key}>{gate ? <InstallationRestoreGate><p id="normal-app">Normal app</p></InstallationRestoreGate> : <InstallationRestoreCard />}</div></I18nProvider>);
+window.show = (gate = false) => root.render(<React.StrictMode><I18nProvider initialLocale="en"><div key={++key}>{gate ? <InstallationRestoreGate><p id="normal-app">Normal app</p></InstallationRestoreGate> : <InstallationRestoreCard />}</div></I18nProvider></React.StrictMode>);
 window.show();

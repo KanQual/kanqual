@@ -6,6 +6,16 @@ import { useI18n } from "../i18n/provider";
 type Preview = { fingerprint: string; version: string; createdAtMs: number; projects: string[]; fileCount: number; userCount: number | null };
 type RestoreState = { phase: "prepared" | "moving" | "restoring" | "complete" | "recovered"; preview: Preview; recoveryBackup: string };
 
+// Share only in-flight reads; subsequent visits must see the current journal.
+let pendingStatus: Promise<RestoreState | null> | undefined;
+function restoreStatus(): Promise<RestoreState | null> {
+  if (!pendingStatus) {
+    pendingStatus = invoke<RestoreState | null>("installation_restore_status_command")
+      .finally(() => { pendingStatus = undefined; });
+  }
+  return pendingStatus;
+}
+
 function BackupPreview({ preview }: { preview: Preview }) {
   const { t, formatDateTime, formatNumber } = useI18n();
   return <div className="installation-restore-preview">
@@ -25,15 +35,17 @@ export function InstallationRestoreCard() {
   const [prepared, setPrepared] = useState<RestoreState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
+  const [statusAttempt, setStatusAttempt] = useState(0);
   const [progress, setProgress] = useState("");
   const working = useRef(false);
   useEffect(() => {
     let cancelled = false;
-    void invoke<RestoreState | null>("installation_restore_status_command").then(result => {
-      if (!cancelled && result) setPrepared(result);
-    }).catch(e => { if (!cancelled) setError(String(e)); });
+    void restoreStatus().then(result => {
+      if (!cancelled) { setPrepared(result); setStatusError(""); }
+    }).catch(e => { if (!cancelled) setStatusError(String(e)); });
     return () => { cancelled = true; };
-  }, []);
+  }, [statusAttempt]);
   async function action(label: string, run: () => Promise<void>) {
     if (working.current) return;
     working.current = true; setBusy(true); setError(""); setProgress(label);
@@ -71,6 +83,10 @@ export function InstallationRestoreCard() {
           })}>{t("installationRestore.prepare")}</button>
         </>}
       </>}
+      {statusError && <>
+        <p className="auth-error" role="alert">{statusError}</p>
+        <button className="btn" disabled={busy} onClick={() => setStatusAttempt(attempt => attempt + 1)}>{t("installationRestore.retry")}</button>
+      </>}
       {progress && <p role="status">{progress}</p>}
       {error && <p className="auth-error" role="alert">{error}</p>}
     </div>
@@ -87,8 +103,15 @@ export function InstallationRestoreGate({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const working = useRef(false);
-  async function refresh() { setState(await invoke<RestoreState | null>("installation_restore_status_command")); }
-  useEffect(() => { void refresh().catch(e => setError(String(e))); }, []);
+  const [statusError, setStatusError] = useState("");
+  async function refresh() { setState(await restoreStatus()); setStatusError(""); }
+  useEffect(() => {
+    let cancelled = false;
+    void restoreStatus().then(result => {
+      if (!cancelled) { setState(result); setStatusError(""); }
+    }).catch(e => { if (!cancelled) setStatusError(String(e)); });
+    return () => { cancelled = true; };
+  }, []);
   async function action(run: () => Promise<void>) {
     if (working.current) return;
     working.current = true; setBusy(true); setError("");
@@ -102,7 +125,7 @@ export function InstallationRestoreGate({ children }: { children: ReactNode }) {
     <h2>{t("installationRestore.title")}</h2>
     {state === undefined ? <>
       <p role="status">{t("installationRestore.checking")}</p>
-      {error && <button className="btn" disabled={busy} onClick={() => void action(refresh)}>{t("installationRestore.retry")}</button>}
+      {(error || statusError) && <button className="btn" disabled={busy} onClick={() => void action(refresh)}>{t("installationRestore.retry")}</button>}
     </> : <>
       <BackupPreview preview={state.preview} />
       <p className="installation-restore-path">{t("installationRestore.recoveryLocation")} {state.recoveryBackup}</p>
@@ -122,6 +145,7 @@ export function InstallationRestoreGate({ children }: { children: ReactNode }) {
         <button className="btn btn--primary" disabled={busy} onClick={() => void action(() => invoke("finish_installation_restore_command", { cancel: false }))}>{t("installationRestore.restart")}</button>
       </>}
     </>}
+    {statusError && <p className="auth-error" role="alert">{statusError}</p>}
     {busy && <p role="status">{t("installationRestore.working")}</p>}
     {error && <p className="auth-error" role="alert">{error}</p>}
   </div></div>;

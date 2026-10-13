@@ -4,7 +4,7 @@
 use crate::*;
 
 pub static MAINTENANCE: AtomicBool = AtomicBool::new(false);
-static BUSY: AtomicBool = AtomicBool::new(false);
+static BUSY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const JOURNAL: &str = "installation-restore.json";
 const COMPONENTS: [&str; 4] = [
     "postgres",
@@ -15,15 +15,9 @@ const COMPONENTS: [&str; 4] = [
 
 struct BusyGuard;
 impl BusyGuard {
-    fn acquire() -> Result<Self, String> {
-        BUSY.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .map_err(|_| "A restore operation is already running.".to_string())?;
-        Ok(Self)
-    }
-}
-impl Drop for BusyGuard {
-    fn drop(&mut self) {
-        BUSY.store(false, Ordering::SeqCst);
+    fn acquire() -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
+        BUSY.try_lock()
+            .map_err(|_| "A restore operation is already running.".to_string())
     }
 }
 
@@ -385,7 +379,9 @@ async fn stop(app: &tauri::AppHandle) -> Result<(), String> {
 pub async fn installation_restore_status_command(
     app: tauri::AppHandle,
 ) -> Result<Option<Journal>, String> {
-    let _guard = BusyGuard::acquire()?;
+    // Status may recover an interrupted restore. Queue behind active operations
+    // and other status readers, then read the journal under the same lock.
+    let _guard = BUSY.lock().await;
     let root = kanqual_data_dir(&app)?;
     let Some(mut journal) = read_journal(&root)? else {
         return Ok(None);
@@ -486,6 +482,35 @@ pub async fn finish_installation_restore_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn status_waits_for_exclusive_restore_access() {
+        tauri::async_runtime::block_on(async {
+            let operation = BusyGuard::acquire().unwrap();
+            assert!(BusyGuard::acquire().is_err());
+            let waiting_status = BUSY.lock();
+            tokio::pin!(waiting_status);
+            assert!(tokio::time::timeout(
+                Duration::from_millis(20), &mut waiting_status,
+            ).await.is_err());
+            drop(operation);
+            let status = tokio::time::timeout(
+                Duration::from_secs(1), &mut waiting_status,
+            ).await.unwrap();
+            assert!(BusyGuard::acquire().is_err());
+            let next_status = BUSY.lock();
+            tokio::pin!(next_status);
+            assert!(tokio::time::timeout(
+                Duration::from_millis(20), &mut next_status,
+            ).await.is_err());
+            drop(status);
+            let next = tokio::time::timeout(
+                Duration::from_secs(1), &mut next_status,
+            ).await.unwrap();
+            drop(next);
+            assert!(BusyGuard::acquire().is_ok());
+        });
+    }
+
     #[test]
     #[ignore = "starts an isolated bundled PostgreSQL cluster on a temporary port"]
     fn real_postgres_cluster_survives_interrupted_restore() {
