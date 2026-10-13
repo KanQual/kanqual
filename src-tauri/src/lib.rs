@@ -32,6 +32,7 @@ use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use tokio_postgres::{error::SqlState, Config as PgConfig, GenericClient, NoTls};
 use zeroize::Zeroizing;
 
+mod installation_restore;
 mod background_process;
 mod bundled_postgres;
 mod image_previews;
@@ -5526,7 +5527,10 @@ async fn grant_postgres_project_database_access_for_role(
              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO \"{role_ident}\";"
         ))
         .await
-        .map_err(|e| format!("Could not grant PostgreSQL project database access: {e}"));
+        .map_err(|e| {
+            let detail = e.as_db_error().map(|db| db.message().to_string()).unwrap_or_else(|| e.to_string());
+            format!("Could not grant PostgreSQL project database access to {role_name} in {database_name}: {detail}")
+        });
     connection_task.abort();
     result
 }
@@ -27505,22 +27509,25 @@ async fn restore_postgres_experiment_upgrade_backup_command(
         .map_err(|e| format!("Could not mark restored users for password reset: {e}"))?;
     let user_rows = client
         .query(
-            "SELECT username FROM app_users ORDER BY lower(username) ASC",
+            "SELECT username, id FROM app_users ORDER BY lower(username) ASC",
             &[],
         )
         .await
         .map_err(|e| format!("Could not load restored users: {e}"))?;
+    let restored_accounts: HashMap<String, String> = user_rows.iter()
+        .map(|row| (row.get::<_, String>(1), row.get::<_, String>(0)))
+        .collect();
     for row in &user_rows {
         let email: String = row.get(0);
         let temporary_password = generate_temporary_password();
-        let _ = ensure_postgres_login_role_for_app_user(
+        ensure_postgres_login_role_for_app_user(
             &identity,
             &psql_path,
             &identity.superuser_name,
             &request.new_admin_password,
             &email,
             &temporary_password,
-        );
+        )?;
     }
 
     for project in projects {
@@ -27569,31 +27576,15 @@ async fn restore_postgres_experiment_upgrade_backup_command(
     connection_task.abort();
     for project in projects {
         let database_name = backup_value_string(project, "databaseName");
-        if !database_name.trim().is_empty() {
-            let _ = ensure_postgres_experiment_project_schema(&app, &database_name).await;
-            if let Ok((project_client, project_connection_task)) =
-                connect_postgres_database(&app, &database_name).await
-            {
-                if let Ok(rows) = project_client
-                    .query(
-                        "SELECT email FROM project_users ORDER BY lower(email) ASC",
-                        &[],
-                    )
-                    .await
-                {
-                    for row in rows {
-                        let email: String = row.get(0);
-                        let _ = grant_postgres_project_database_access_for_role(
-                            &app,
-                            &database_name,
-                            &email,
-                        )
-                        .await;
-                    }
-                }
-                project_connection_task.abort();
-            }
+        ensure_postgres_experiment_project_schema(&app, &database_name).await?;
+        let (project_client, project_connection_task) = connect_postgres_database(&app, &database_name).await?;
+        let roles = installation_restore::remap_restored_project_admin(
+            &*project_client, &identity.superuser_name, &restored_accounts,
+        ).await?;
+        for email in roles {
+            grant_postgres_project_database_access_for_role(&app, &database_name, &email).await?;
         }
+        project_connection_task.abort();
     }
 
     set_postgres_runtime_auth_session(&runtime_auth_state, None);
@@ -32624,6 +32615,8 @@ pub fn run() {
             HashMap::new(),
         ))))
         .setup(|app| {
+            let restore_pending = installation_restore::pending(app.app_handle());
+            installation_restore::MAINTENANCE.store(restore_pending, Ordering::SeqCst);
             let packaged_smoke_test = smoke_test_enabled();
             if packaged_smoke_test {
                 update_packaged_smoke_test_state(
@@ -32661,7 +32654,7 @@ pub fn run() {
                         eprintln!("[kanqual] Packaged smoke test failed during {phase}: {failure}");
                     }
                 });
-            } else {
+            } else if !restore_pending {
                 tauri::async_runtime::spawn(async move {
                     let postgres_process = postgres_handle.state::<BundledPostgresProcess>();
                     if let Err(error) = bundled_postgres::start_runtime(
@@ -32687,7 +32680,20 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(|invoke| {
+            if installation_restore::MAINTENANCE.load(Ordering::SeqCst)
+                && !matches!(invoke.message.command(), "installation_restore_status_command" | "execute_installation_restore_command" | "finish_installation_restore_command")
+            {
+                invoke.resolver.reject("KanQual is in installation restore mode. Finish or cancel restoration first.");
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            installation_restore::preview_installation_restore_command,
+            installation_restore::preview_first_startup_restore_command,
+            installation_restore::prepare_installation_restore_command,
+            installation_restore::installation_restore_status_command,
+            installation_restore::execute_installation_restore_command,
+            installation_restore::finish_installation_restore_command,
             source_queries::get_source_list_entry_command,
             source_queries::list_source_page_command,
             annotation_queries::list_annotation_page_command,
@@ -32907,7 +32913,9 @@ pub fn run() {
             get_local_ip,
             get_external_ip,
             ping_address,
-        ])
+        ];
+            handler(invoke)
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| match event {

@@ -21,20 +21,20 @@ Core capabilities include:
 - Collaborating over a trusted network when explicitly enabled
 - Using AI Assist for chat, coding, attribute identification, transcript processing, and code analysis
 
-## Version 0.9.5
+## Version 0.9.7
 
-Version 0.9.5 moves KanQual to its current PostgreSQL-only application architecture and substantially expands the working research interface.
+Version 0.9.7 enables update checks and update notifications for administrator sessions. It also includes the project import, performance, and interface improvements introduced in version 0.9.6, building on KanQual's PostgreSQL-based architecture.
 
 Highlights include:
 
-- An app-owned bundled PostgreSQL runtime with guided administrator and project setup
-- Dedicated databases and file storage for individual projects
-- Expanded source, object, relationship, code, annotation, graph, and timeline workflows
-- Redesigned audio and video coding controls
-- Improved reports, project exports, snapshots, and full administrative backups
-- A first-run guide covering project creation, users, sources, coding, and code assignment
-- Broader localization coverage and a consolidated Lucide icon system
-- Cross-platform packaging for Windows, macOS, and Linux
+- Automatic update checks and banners in Admin Settings and projects opened by administrators, with update preferences applied immediately
+- Project imports from encrypted JSON, unencrypted JSON, and REFI-QDA files through Admin Settings > Projects
+- Lower memory use through streamed audio/video playback, lightweight source summaries, focused queries, and image previews
+- Consistent search and pagination controls, improved table scrolling, and better layouts on smaller screens
+- More reliable coding-view lock readiness and text selection, with faster annotation deletion
+- Faster navigation through narrower initial loads, bounded caching for repeat visits, and JavaScript preloading when navigation items are hovered or focused
+- A corrected startup logo and updated GitHub Actions tooling
+- Windows installers and portable ZIPs, macOS Apple Silicon and Intel packages, and Linux AppImage and DEB packages
 
 KanQual remains under active development. Interfaces, AI workflows, packaging, and setup may continue to evolve as the application approaches version 1.0.
 

@@ -9,6 +9,7 @@ import { LanguageSettingsModal } from "../components/LanguageSettingsModal";
 import { ThemeManagerModal } from "../components/ThemeManagerModal";
 import { SettingsModal } from "../components/SettingsModal";
 import { ProjectImportModal } from "../components/ProjectImportModal";
+import { InstallationRestoreCard } from "../components/InstallationRestore";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpModal } from "../components/HelpModal";
 import { SettingsOverviewCard, SettingsOverviewSection } from "../components/SettingsOverviewCard";
@@ -132,6 +133,8 @@ type AppSettingsModalId =
   | "storage"
   | "network"
   | "aiAssist"
+  | "backup"
+  | "restore"
   | "updates"
   | "diagnostics"
   | "administratorLog"
@@ -795,9 +798,23 @@ export function AdminSettingsView({
       tone: "default" as const,
     },
     {
+      id: "backup",
+      title: t("adminSettings.cards.backup.title"),
+      description: t("adminSettings.cards.backup.description"),
+      icon: <SettingsStorageIcon />,
+      tone: "admin" as const,
+    },
+    {
+      id: "restore",
+      title: t("adminSettings.cards.restore.title"),
+      description: t("adminSettings.cards.restore.description"),
+      icon: <SettingsDatabaseIcon />,
+      tone: "admin" as const,
+    },
+    {
       id: "updates",
-      title: t("adminSettings.cards.backupUpdates.title"),
-      description: t("adminSettings.cards.backupUpdates.description"),
+      title: t("adminSettings.cards.updates.title"),
+      description: t("adminSettings.cards.updates.description"),
       icon: <SettingsUpdatesIcon />,
       tone: "admin" as const,
     },
@@ -904,7 +921,7 @@ export function AdminSettingsView({
     {
       id: "system",
       sectionHeading: t("adminSettings.overviewSections.system"),
-      cardIds: ["administratorLog", "diagnostics", "storage", "updates"],
+      cardIds: ["administratorLog", "diagnostics", "storage", "backup", "restore", "updates"],
     },
     {
       id: "preferences",
@@ -1944,7 +1961,7 @@ export function AdminSettingsView({
   }, [activeModal, refreshAdminAuditLogs]);
 
   useEffect(() => {
-    if (activeModal === "updates") {
+    if (activeModal === "backup") {
       void loadUpgradeBackupDiagnostics();
     }
   }, [activeModal, loadUpgradeBackupDiagnostics]);
@@ -4115,8 +4132,8 @@ export function AdminSettingsView({
         </>
       ) : null}
 
-      {activeModal === "updates" ? (
-        <SettingsModal title={t("adminSettings.system.updates.title")} onClose={() => setActiveModal(null)}>
+      {activeModal === "backup" ? (
+        <SettingsModal title={t("adminSettings.cards.backup.title")} onClose={() => setActiveModal(null)}>
             <div className="app-settings-modal-body">
               <div className="app-settings-modal-sections">
                 {updatesNotice ? <p className="settings-inline-success">{updatesNotice}</p> : null}
@@ -4208,6 +4225,31 @@ export function AdminSettingsView({
                     </div>
                   </div>
                 </section>
+              </div>
+            </div>
+            <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+              <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
+            </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "restore" ? (
+        <SettingsModal title={t("adminSettings.cards.restore.title")} onClose={() => setActiveModal(null)}>
+          <div className="app-settings-modal-body">
+            <div className="app-settings-modal-sections">
+              <InstallationRestoreCard />
+            </div>
+          </div>
+          <div className="app-settings-modal-footer app-settings-modal-footer--actions-only">
+            <button type="button" className="btn btn--primary" onClick={() => setActiveModal(null)}>{t("common.done")}</button>
+          </div>
+        </SettingsModal>
+      ) : null}
+
+      {activeModal === "updates" ? (
+        <SettingsModal title={t("adminSettings.cards.updates.title")} onClose={() => setActiveModal(null)}>
+            <div className="app-settings-modal-body">
+              <div className="app-settings-modal-sections">
                 <section className="app-settings-modal-section">
                   <div className="app-settings-modal-section-header app-settings-modal-section-header--default">
                     <h3>{t("adminSettings.system.updates.updates")}</h3>

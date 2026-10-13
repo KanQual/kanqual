@@ -1171,6 +1171,10 @@ export async function restorePostgresUpgradeBackup(data: {
   });
 }
 
+export async function validateFirstStartupRestore(backupPath: string, backupPassword: string): Promise<void> {
+  await invoke("preview_first_startup_restore_command", { backupPath, backupPassword });
+}
+
 export async function exportPostgresProjectLosslessBundle(projectId: string): Promise<PostgresProjectExportBundle> {
   return invoke<PostgresProjectExportBundle>("export_postgres_experiment_project_lossless_bundle_command", {
     projectId,

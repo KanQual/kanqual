@@ -9,6 +9,7 @@ import {
   loginPostgresAppUser,
   rememberPostgresAccount,
   restorePostgresUpgradeBackup,
+  validateFirstStartupRestore,
   type BundledPostgresInitPreflight,
   type PostgresAuthSession,
   type PostgresAuthStatus,
@@ -65,9 +66,12 @@ function AuthSlideCard({
 
     setExitingCard(lastCardRef.current);
     lastCardRef.current = { stage, content: children };
+  }, [stage, children]);
+
+  useEffect(() => {
     const timeout = window.setTimeout(() => setExitingCard(null), 280);
     return () => window.clearTimeout(timeout);
-  }, [stage, children]);
+  }, [stage]);
 
   return (
     <div className="auth-card-transition-shell">
@@ -176,6 +180,9 @@ export function LaunchView({
   const [bundledPreflight, setBundledPreflight] = useState<BundledPostgresInitPreflight | null>(null);
   const [bundledPreflightLoading, setBundledPreflightLoading] = useState(true);
   const [firstRunSetupMode, setFirstRunSetupMode] = useState<"setup" | "restore">("setup");
+  const [restoreStep, setRestoreStep] = useState<"backup" | "admin">("backup");
+  const [validatingRestore, setValidatingRestore] = useState(false);
+  const restoreValidationBusy = useRef(false);
   const [restoreBackupPath, setRestoreBackupPath] = useState("");
   const [restoreBackupPassword, setRestoreBackupPassword] = useState("");
   const [restoreBackupPasswordVisible, setRestoreBackupPasswordVisible] = useState(false);
@@ -284,6 +291,22 @@ export function LaunchView({
       setError(t("auth.postgresLaunch.enterBackupPassword"));
       return;
     }
+    if (restoreValidationBusy.current || submitting) return;
+    if (restoreStep === "backup") {
+      restoreValidationBusy.current = true;
+      setValidatingRestore(true);
+      try {
+        await validateFirstStartupRestore(restoreBackupPath, restoreBackupPassword);
+        setRestoreBackupPasswordVisible(false);
+        setRestoreStep("admin");
+      } catch (validationError) {
+        setError(describeUnknownError(validationError));
+      } finally {
+        restoreValidationBusy.current = false;
+        setValidatingRestore(false);
+      }
+      return;
+    }
     if (restoreAdminPassword.length < 8) {
       setError(t("auth.postgresLaunch.chooseNewAdminPasswordMin"));
       return;
@@ -307,6 +330,7 @@ export function LaunchView({
       setRestoreBackupPasswordVisible(false);
       setRestoreAdminPasswordVisible(false);
       setConfirmRestoreAdminPasswordVisible(false);
+      setRestoreStep("backup");
       setRestoreSuccess(result);
     } catch (restoreError) {
       setError(describeUnknownError(restoreError));
@@ -405,7 +429,7 @@ export function LaunchView({
     : showingFirstAccountSetup
       ? "first-account"
       : bundledPreflight && !bundledClusterInitialized
-        ? firstRunSetupMode === "restore" ? "restore-backup" : "admin-password"
+        ? firstRunSetupMode === "restore" ? `restore-${restoreStep}` : "admin-password"
         : bundledClusterInitialized && !bootstrapApplied
           ? "resume-bootstrap"
           : bootstrapApplied && !adminHandoffCompleted
@@ -434,7 +458,7 @@ export function LaunchView({
                 <strong>{t("auth.postgresLaunch.importCompleteTitle")}</strong>
                 <span>{t("auth.postgresLaunch.importCompleteBody")}</span>
               </div>
-              <div className="settings-diagnostics-grid settings-diagnostics-grid--compact">
+              <div className="settings-diagnostics-grid">
                 <div>
                   <span>{t("auth.postgresLaunch.backupVersion")}</span>
                   <strong>{restoreSuccess.backupKanqualVersion}</strong>
@@ -554,10 +578,13 @@ export function LaunchView({
                     className={firstRunSetupMode === option.value ? "segmented-control-option segmented-control-option--active" : "segmented-control-option"}
                     onClick={() => {
                       setFirstRunSetupMode(option.value as "setup" | "restore");
+                      setRestoreStep("backup");
+                      setRestoreAdminPassword("");
+                      setConfirmRestoreAdminPassword("");
                       setError("");
                       setNotice("");
                     }}
-                    disabled={submitting}
+                    disabled={submitting || validatingRestore}
                   >
                     {option.label}
                   </button>
@@ -565,14 +592,16 @@ export function LaunchView({
               </div>
               {firstRunSetupMode === "restore" ? (
                 <form onSubmit={handleRestoreUpgradeBackup} className="form">
+                  <h3>{t(restoreStep === "backup" ? "auth.postgresLaunch.restoreBackupStep" : "auth.postgresLaunch.restoreAdminStep")}</h3>
                   <div className="settings-warning settings-warning--danger">
-                    {t("auth.postgresLaunch.restoreIntro")}
+                    {t(restoreStep === "backup" ? "auth.postgresLaunch.restoreBackupIntro" : "auth.postgresLaunch.restoreAdminIntro")}
                   </div>
                   {bundledPreflight.issues.length ? (
                     <div className="settings-warning">
                       {bundledPreflight.issues.join(" ")}
                     </div>
                   ) : null}
+                  {restoreStep === "backup" ? <>
                   <label className="form-label">
                     {t("auth.postgresLaunch.backupFile")}
                     <div className="form-inline-action-row">
@@ -587,7 +616,7 @@ export function LaunchView({
                         type="button"
                         className="btn"
                         onClick={() => void chooseRestoreBackupFile()}
-                        disabled={submitting}
+                        disabled={submitting || validatingRestore}
                       >
                         {t("auth.postgresLaunch.choose")}
                       </button>
@@ -600,6 +629,7 @@ export function LaunchView({
                         className="form-input password-input-field"
                         type={restoreBackupPasswordVisible ? "text" : "password"}
                         value={restoreBackupPassword}
+                        disabled={validatingRestore}
                         onChange={(e) => setRestoreBackupPassword(e.target.value)}
                         autoComplete="current-password"
                       />
@@ -614,6 +644,7 @@ export function LaunchView({
                       </button>
                     </div>
                   </label>
+                  </> : <>
                   <label className="form-label">
                     {t("auth.postgresLaunch.newAdminPassword")}
                     <div className="password-input-wrap">
@@ -662,22 +693,27 @@ export function LaunchView({
                       {t("auth.postgresLaunch.passwordEntriesDoNotMatch")}
                     </p>
                   ) : null}
+                  </>}
                   <div className="form-actions">
+                    {restoreStep === "admin" && <button type="button" className="btn" disabled={submitting} onClick={() => {
+                      setRestoreStep("backup"); setError(""); setRestoreAdminPassword(""); setConfirmRestoreAdminPassword("");
+                      setRestoreAdminPasswordVisible(false); setConfirmRestoreAdminPasswordVisible(false);
+                    }}>{t("common.back")}</button>}
                     <button
                       type="submit"
                       className="btn btn--primary"
                       disabled={
                         loading ||
-                        submitting ||
+                        submitting || validatingRestore ||
                         !bundledPreflight.canInitialize ||
                         !restoreBackupPath.trim() ||
                         !restoreBackupPassword.trim() ||
-                        restoreAdminPassword.length < 8 ||
+                        (restoreStep === "admin" && (restoreAdminPassword.length < 8 ||
                         !confirmRestoreAdminPassword ||
-                        restoreAdminPasswordMismatch
+                        restoreAdminPasswordMismatch))
                       }
                     >
-                      {submitting ? t("common.restoring") : t("common.restore")}
+                      {validatingRestore ? t("auth.postgresLaunch.validatingBackup") : submitting ? t("common.restoring") : restoreStep === "backup" ? t("common.next") : t("common.restore")}
                     </button>
                   </div>
                 </form>

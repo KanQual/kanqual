@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { LoadingCard } from "./components/LoadingCard";
+import { InstallationRestoreGate } from "./components/InstallationRestore";
 import { EyeIcon, EyeOffIcon } from "./components/AppIcons";
 import { GettingStartedGuideCallout } from "./components/GettingStartedGuideCallout";
 import { useI18n } from "./i18n/provider";
@@ -940,7 +941,7 @@ export default function App() {
   return (
     <I18nProvider>
       <AppErrorBoundaryWithI18n>
-        <AuthGate />
+        <InstallationRestoreGate><AuthGate /></InstallationRestoreGate>
       </AppErrorBoundaryWithI18n>
     </I18nProvider>
   );

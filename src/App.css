@@ -1088,6 +1088,21 @@ body {
   text-align: center;
 }
 
+.installation-restore-screen {
+  width: 620px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.installation-restore-preview ul {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.installation-restore-path {
+  overflow-wrap: anywhere;
+}
+
 .loading-card {
   position: relative;
   overflow: hidden;

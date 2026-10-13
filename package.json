@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
+    "test:installation-restore": "node scripts/test-installation-restore.mjs",
+    "test:installation-restore-native": "cargo test --offline --manifest-path src-tauri/Cargo.toml installation_restore::tests --lib",
+    "test:installation-restore-db": "cargo test --offline --manifest-path src-tauri/Cargo.toml installation_restore::tests::real_postgres_cluster --lib -- --ignored",
     "test:home-scroll": "node scripts/test-home-scroll.mjs",
     "test:table-pages": "node scripts/test-table-pages.mjs",
     "test:table-screen": "node scripts/test-table-screen.mjs",
