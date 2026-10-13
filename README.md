@@ -1,6 +1,6 @@
 # KanQual
 
-![AI-Generated License Badge](vibe-coded-badge.svg)
+![Human + AI Collaboration: OpenAI Astra 6.0](vibe-coded-badge.svg?v=astra-6.0)
 
 KanQual is a free, open-source, local-first qualitative research application for coding, memoing, reporting, visualization, and AI-assisted analysis. It is developed by Mehmet Cansoy, Associate Professor of Sociology at Fairfield University.
 
@@ -99,7 +99,7 @@ Contributions, issue reports, and feedback are welcome.
 
 This project is developed through human and AI collaboration.
 
-- **AI models:** OpenAI GPT-5.4 and Anthropic Claude Opus 4.5
+- **AI model:** OpenAI Astra 6.0
 - **License:** Apache-2.0
 - **Human contributor:** Mehmet Cansoy
 
