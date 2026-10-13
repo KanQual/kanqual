@@ -68,7 +68,7 @@ const permissionMatrixDefinitions: PermissionMatrixDefinitionRow[] = [
   { category: "relationships", key: "createRelationshipAttributes", administrator: true, owner: true, editor: true, coder: false, viewer: false },
   { category: "relationships", key: "deleteRelationshipAttributes", administrator: true, owner: true, editor: true, coder: false, viewer: false },
   { category: "codebookAndCodes", key: "viewCodebook", administrator: true, owner: true, editor: true, coder: true, viewer: true },
-  { category: "codebookAndCodes", key: "createCode", administrator: true, owner: true, editor: true, coder: false, viewer: false },
+  { category: "codebookAndCodes", key: "createCode", administrator: true, owner: true, editor: true, coder: true, viewer: false },
   { category: "codebookAndCodes", key: "editCode", administrator: true, owner: true, editor: true, coder: false, viewer: false },
   { category: "codebookAndCodes", key: "deleteCode", administrator: true, owner: true, editor: true, coder: false, viewer: false },
   { category: "codebookAndCodes", key: "viewCodeDetails", administrator: true, owner: true, editor: true, coder: true, viewer: true },

@@ -48,11 +48,5 @@ jobs:
       - name: Run native tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Validate role matrix when source CSV is present
-        shell: pwsh
-        run: |
-          if (Test-Path "role_permission_matrix_recommended.csv") {
-            npm run validate:roles
-          } else {
-            Write-Host "Skipping role matrix validation because role_permission_matrix_recommended.csv is not present."
-          }
+      - name: Validate role permissions and displayed matrix
+        run: npm run validate:roles

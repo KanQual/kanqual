@@ -1,232 +1,193 @@
-import fs from "node:fs";
-import path from "node:path";
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
-const matrixPath = path.join(repoRoot, "role_permission_matrix_recommended.csv");
-const permissionsPath = path.join(repoRoot, "src", "lib", "permissions.ts");
-const outputPath = path.join(repoRoot, "role_permission_matrix_validation.csv");
+// Compile the real exported functions, rather than parsing TypeScript with regex.
+const root = fileURLToPath(new URL('../', import.meta.url));
+const compiled = await build({
+  stdin: {
+    contents: 'export * from "./src/lib/permissions"; export * from "./src/lib/permissionMatrix";',
+    resolveDir: root, loader: 'ts',
+  },
+  bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',
+});
+const api = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].contents).toString('base64'));
 
-const ROLE_COLUMNS = ["Administrator", "Owner", "Editor", "Coder", "Viewer"];
-const PROJECT_ROLE_NAMES = {
-  Owner: "owner",
-  Editor: "editor",
-  Coder: "coder",
-  Viewer: "viewer",
+// Independent policy expectations. These are deliberately not derived from the
+// implementation or UI matrix. Policy changes must update this reviewed fixture.
+const policyGroups = [
+  { roles: ['owner', 'editor', 'coder', 'viewer'], permissions: [
+    'viewProject', 'viewProjectDashboard', 'viewProjectMetadata', 'viewProjectUsers',
+    'viewDocuments', 'openDocumentDetails', 'viewDocumentAttributes',
+    'viewCases', 'openCaseDetails', 'viewCaseAttributes',
+    'viewCodebook', 'viewCodeDetails', 'viewAnnotations', 'viewUncodedText',
+    'filterAnnotations', 'viewMemos', 'viewReports', 'viewAiAssistHome',
+    'viewAiAssistTools', 'useAiChat', 'openAppSettings', 'viewLicensingInfo',
+  ] },
+  { roles: ['owner', 'editor', 'coder'], permissions: [
+    'createCode', 'createAnnotations', 'editAnnotationNotes', 'deleteAnnotations', 'recodeAnnotations',
+    'createMemo', 'editMemo', 'associateMemoObjects', 'createReports',
+    'editReportConfiguration', 'exportReports', 'useAiCodingTools',
+    'useAiAttributeTools', 'useAiAnalyzeTools', 'saveAiOutputs', 'editAiOutputs',
+    'reviewProcessedDocuments', 'exportSensitiveContent',
+  ] },
+  { roles: ['owner', 'editor'], permissions: [
+    'editProjectMetadata', 'exportProject', 'inviteProjectUsers', 'createDocument',
+    'uploadDocument', 'batchUploadDocuments', 'importSpreadsheetDocuments',
+    'editDocumentMetadata', 'editDocumentContent', 'deleteDocument',
+    'manageProjectUploadedFiles', 'associateDocumentsWithCases', 'editDocumentAttributes',
+    'createDocumentAttributes', 'deleteDocumentAttributes', 'createCase', 'editCase',
+    'deleteCase', 'linkCaseDocuments', 'unlinkCaseDocuments', 'editCaseAttributes',
+    'createCaseAttributes', 'deleteCaseAttributes', 'editCode', 'deleteCode',
+    'reorganizeCodes', 'manageCodeAttributes', 'bulkCodeAnnotations', 'deleteMemo',
+    'deleteReports', 'enableProjectAiAssist', 'buildEmbeddings', 'deleteEmbeddings',
+    'useAiProcessDocuments', 'exportAiOutputsToProject', 'deleteAiOutputs',
+    'approveProcessedDocuments', 'performPermanentDeleteActions',
+  ] },
+  { roles: ['owner'], permissions: [
+    'deleteProject', 'restoreProjectBackup', 'removeProjectUsers', 'changeProjectRoles',
+    'transferProjectOwnership', 'bypassReadOnlyProtections', 'manageBackupsAndRestores',
+  ] },
+  { roles: [], permissions: [
+    'changeStartupSettings', 'manageLlmSettings', 'downloadEmbeddingModel',
+    'deleteEmbeddingModel', 'viewLocalUsers', 'deleteLocalUsers', 'clearLocalAppData',
+  ] },
+];
+const projectRoles = ['owner', 'editor', 'coder', 'viewer'];
+const appRoles = ['administrator', 'standard'];
+const standardPermissions = ['openAppSettings', 'viewLicensingInfo'];
+const expected = new Map();
+for (const group of policyGroups) for (const permission of group.permissions) {
+  assert.ok(!expected.has(permission), 'Duplicate policy expectation: ' + permission);
+  expected.set(permission, group.roles);
+}
+const keys = [...expected.keys()];
+const sorted = values => [...values].sort();
+assert.deepEqual(api.VALID_PROJECT_ROLES, projectRoles);
+assert.deepEqual(api.VALID_APP_ROLES, appRoles);
+assert.deepEqual(sorted(api.listAllPermissions()), sorted(keys), 'Every permission must have exactly one policy expectation');
+assert.deepEqual(sorted(api.PERMISSIONS), sorted(keys));
+
+let checks = 0;
+function equal(actual, wanted, context) {
+  assert.equal(actual, wanted, context);
+  checks++;
+}
+for (const role of projectRoles) {
+  const wanted = keys.filter(permission => expected.get(permission).includes(role));
+  assert.deepEqual(sorted(api.getProjectRolePermissions(role)), sorted(wanted), role + ': exact grant list');
+  equal(api.normalizeProjectRole('  ' + role.toUpperCase() + '  '), role, 'Project role normalization');
+  for (const permission of keys) {
+    equal(api.hasProjectPermission(role, permission), wanted.includes(permission), `${role}/${permission}`);
+  }
+}
+for (const role of appRoles) {
+  const wanted = role === 'administrator' ? keys : standardPermissions;
+  assert.deepEqual(sorted(api.getAppRolePermissions(role)), sorted(wanted), role + ': exact grant list');
+  equal(api.normalizeAppRole('  ' + role.toUpperCase() + '  '), role, 'App role normalization');
+  for (const permission of keys) equal(api.hasAppPermission(role, permission), wanted.includes(permission), `${role}/${permission}`);
+}
+const invalidRoles = [undefined, null, '', 'unknown', 'admin', '__proto__', 'constructor', 42, {}];
+for (const role of invalidRoles) {
+  equal(api.normalizeProjectRole(role), null, 'Invalid project role');
+  equal(api.normalizeAppRole(role), 'standard', 'Invalid app role falls back to ordinary account');
+  assert.deepEqual(api.getProjectRolePermissions(role), []);
+  assert.deepEqual(sorted(api.getAppRolePermissions(role)), sorted(standardPermissions));
+  for (const permission of keys) {
+    equal(api.hasProjectPermission(role, permission), false, 'Invalid role must not grant project access');
+    equal(api.hasAppPermission(role, permission), standardPermissions.includes(permission), 'Invalid app role must not gain administrator access');
+  }
+}
+// Test composition across all role combinations, including missing membership.
+for (const appRole of [...appRoles, undefined, 'unknown']) {
+  for (const projectRole of [...projectRoles, undefined, 'unknown']) {
+    for (const permission of keys) {
+      const wanted = appRole === 'administrator' || standardPermissions.includes(permission)
+        || expected.get(permission).includes(projectRole);
+      equal(api.hasPermission({ appRole, projectRole, permission }), wanted,
+        `${String(appRole)}/${String(projectRole)}/${permission}`);
+    }
+  }
+}
+for (const permission of ['unknownPermission', '', '__proto__', undefined]) {
+  for (const role of projectRoles) equal(api.hasProjectPermission(role, permission), false, 'Unknown permission');
+  for (const appRole of appRoles) equal(api.hasPermission({ appRole, projectRole: 'owner', permission }), false, 'Unknown permission');
+}
+
+// Explicit display-key to policy-key mapping. Object/relationship rows use the
+// legacy case permission vocabulary in this model; this does not test their
+// inline screen checks or Rust command authorization.
+const matrixMapping = {
+  viewProject: 'viewProject', viewProjectDashboardHome: 'viewProjectDashboard',
+  viewProjectMetadata: 'viewProjectMetadata', editProjectMetadata: 'editProjectMetadata',
+  deleteProject: 'deleteProject', exportOrBackupProject: 'exportProject',
+  restoreOrImportProjectBackup: 'restoreProjectBackup', viewProjectUsers: 'viewProjectUsers',
+  inviteOrAddUsers: 'inviteProjectUsers', removeUsers: 'removeProjectUsers',
+  changeUserRoles: 'changeProjectRoles', transferOwnership: 'transferProjectOwnership',
+  viewSourcesList: 'viewDocuments', openSourceDetails: 'openDocumentDetails',
+  createSourceManually: 'createDocument', uploadSingleSource: 'uploadDocument',
+  batchUploadSources: 'batchUploadDocuments', spreadsheetImportSources: 'importSpreadsheetDocuments',
+  editSourceMetadata: 'editDocumentMetadata', editSourceContent: 'editDocumentContent',
+  deleteSource: 'deleteDocument', manageUploadedSourceFiles: 'manageProjectUploadedFiles',
+  viewSourceAttributes: 'viewDocumentAttributes', editSourceAttributes: 'editDocumentAttributes',
+  createSourceAttributes: 'createDocumentAttributes', deleteSourceAttributes: 'deleteDocumentAttributes',
+  viewObjectsList: 'viewCases', openObjectDetails: 'openCaseDetails', createObject: 'createCase',
+  editObject: 'editCase', deleteObject: 'deleteCase', manageObjectTypes: 'editCase',
+  viewObjectAttributes: 'viewCaseAttributes', editObjectAttributes: 'editCaseAttributes',
+  createObjectAttributes: 'createCaseAttributes', deleteObjectAttributes: 'deleteCaseAttributes',
+  viewRelationshipsList: 'viewCases', openRelationshipDetails: 'openCaseDetails',
+  createRelationship: 'createCase', editRelationship: 'editCase', deleteRelationship: 'deleteCase',
+  manageRelationshipTypes: 'editCase', viewRelationshipAttributes: 'viewCaseAttributes',
+  editRelationshipAttributes: 'editCaseAttributes', createRelationshipAttributes: 'createCaseAttributes',
+  deleteRelationshipAttributes: 'deleteCaseAttributes', viewCodebook: 'viewCodebook',
+  createCode: 'createCode', editCode: 'editCode', deleteCode: 'deleteCode',
+  viewCodeDetails: 'viewCodeDetails', manageCodeAttributes: 'manageCodeAttributes',
+  viewAnnotations: 'viewAnnotations', createAnnotations: 'createAnnotations',
+  editAnnotationNotes: 'editAnnotationNotes', deleteAnnotations: 'deleteAnnotations',
+  viewUncodedText: 'viewUncodedText', filterOrSearchAnnotations: 'filterAnnotations',
+  viewMemos: 'viewMemos', createMemo: 'createMemo', editMemo: 'editMemo', deleteMemo: 'deleteMemo',
+  associateMemoWithObjects: 'associateMemoObjects', viewReportsPages: 'viewReports',
+  createReports: 'createReports', editReportConfiguration: 'editReportConfiguration',
+  deleteReports: 'deleteReports', exportReports: 'exportReports', viewAiAssistHome: 'viewAiAssistHome',
+  viewAiAssistTools: 'viewAiAssistTools', enableAiAssistForProject: 'enableProjectAiAssist',
+  buildEmbeddings: 'buildEmbeddings', deleteEmbeddings: 'deleteEmbeddings', useAiChat: 'useAiChat',
+  useAiCodingTools: 'useAiCodingTools', useAiAttributeTools: 'useAiAttributeTools',
+  useAiAnalyzeTools: 'useAiAnalyzeTools', useAiProcessDocuments: 'useAiProcessDocuments',
+  saveAiGeneratedOutputs: 'saveAiOutputs', editAiGeneratedOutputs: 'editAiOutputs',
+  exportAiGeneratedOutputsToProject: 'exportAiOutputsToProject', deleteAiGeneratedOutputs: 'deleteAiOutputs',
+  reviewProcessedDocuments: 'reviewProcessedDocuments', approveProcessedDocuments: 'approveProcessedDocuments',
+  openAppSettings: 'openAppSettings', changeStartupOrSessionSettings: 'changeStartupSettings',
+  manageLlmConnectionSettings: 'manageLlmSettings', downloadEmbeddingModel: 'downloadEmbeddingModel',
+  deleteEmbeddingModel: 'deleteEmbeddingModel', viewLocalUsers: 'viewLocalUsers',
+  deleteLocalUsers: 'deleteLocalUsers', clearLocalAppData: 'clearLocalAppData',
+  viewLicensingAndAboutInfo: 'viewLicensingInfo', bypassReadOnlyProtections: 'bypassReadOnlyProtections',
+  performPermanentDeleteActions: 'performPermanentDeleteActions', exportSensitiveContent: 'exportSensitiveContent',
+  manageBackupsAndRestores: 'manageBackupsAndRestores',
 };
-
-const PERMISSION_KEY_BY_LABEL = {
-  "View project": "viewProject",
-  "View project dashboard/home": "viewProjectDashboard",
-  "View project metadata": "viewProjectMetadata",
-  "Edit project metadata": "editProjectMetadata",
-  "Delete project": "deleteProject",
-  "Export or backup project": "exportProject",
-  "Restore or import project backup": "restoreProjectBackup",
-  "View project users": "viewProjectUsers",
-  "Invite or add users": "inviteProjectUsers",
-  "Remove users": "removeProjectUsers",
-  "Change user roles": "changeProjectRoles",
-  "Transfer ownership": "transferProjectOwnership",
-  "View documents list": "viewDocuments",
-  "Open document details": "openDocumentDetails",
-  "Create document manually": "createDocument",
-  "Upload single document": "uploadDocument",
-  "Batch upload documents": "batchUploadDocuments",
-  "Spreadsheet import documents": "importSpreadsheetDocuments",
-  "Edit document metadata": "editDocumentMetadata",
-  "Edit document content": "editDocumentContent",
-  "Delete document": "deleteDocument",
-  "Manage uploaded source files": "manageProjectUploadedFiles",
-  "Associate documents with cases": "associateDocumentsWithCases",
-  "View document attributes": "viewDocumentAttributes",
-  "Edit document attributes": "editDocumentAttributes",
-  "Create document attributes": "createDocumentAttributes",
-  "Delete document attributes": "deleteDocumentAttributes",
-  "View cases list": "viewCases",
-  "Open case details": "openCaseDetails",
-  "Create case": "createCase",
-  "Edit case": "editCase",
-  "Delete case": "deleteCase",
-  "Link documents to case": "linkCaseDocuments",
-  "Unlink documents from case": "unlinkCaseDocuments",
-  "View case attributes": "viewCaseAttributes",
-  "Edit case attributes": "editCaseAttributes",
-  "Create case attributes": "createCaseAttributes",
-  "Delete case attributes": "deleteCaseAttributes",
-  "View codebook": "viewCodebook",
-  "Create code": "createCode",
-  "Edit code": "editCode",
-  "Delete code": "deleteCode",
-  "View code details": "viewCodeDetails",
-  "Manage code attributes": "manageCodeAttributes",
-  "View annotations": "viewAnnotations",
-  "Create annotations": "createAnnotations",
-  "Edit annotation notes": "editAnnotationNotes",
-  "Delete annotations": "deleteAnnotations",
-  "View uncoded text": "viewUncodedText",
-  "Filter or search annotations": "filterAnnotations",
-  "View memos": "viewMemos",
-  "Create memo": "createMemo",
-  "Edit memo": "editMemo",
-  "Delete memo": "deleteMemo",
-  "Associate memo with objects": "associateMemoObjects",
-  "View reports pages": "viewReports",
-  "Create reports": "createReports",
-  "Edit report configuration": "editReportConfiguration",
-  "Delete reports": "deleteReports",
-  "Export reports": "exportReports",
-  "View AI Assist home": "viewAiAssistHome",
-  "View AI Assist tools": "viewAiAssistTools",
-  "Enable AI Assist for project": "enableProjectAiAssist",
-  "Build embeddings": "buildEmbeddings",
-  "Delete embeddings": "deleteEmbeddings",
-  "Use AI chat": "useAiChat",
-  "Use AI coding tools": "useAiCodingTools",
-  "Use AI attribute tools": "useAiAttributeTools",
-  "Use AI analyze tools": "useAiAnalyzeTools",
-  "Use AI process documents": "useAiProcessDocuments",
-  "Save AI generated outputs": "saveAiOutputs",
-  "Edit AI generated outputs": "editAiOutputs",
-  "Export AI generated outputs to project": "exportAiOutputsToProject",
-  "Delete AI generated outputs": "deleteAiOutputs",
-  "Review processed documents": "reviewProcessedDocuments",
-  "Approve processed documents": "approveProcessedDocuments",
-  "Open App Settings": "openAppSettings",
-  "Change startup or session settings": "changeStartupSettings",
-  "Manage LLM connection settings": "manageLlmSettings",
-  "Download embedding model": "downloadEmbeddingModel",
-  "Delete embedding model": "deleteEmbeddingModel",
-  "View local users": "viewLocalUsers",
-  "Delete local users": "deleteLocalUsers",
-  "Clear local app data": "clearLocalAppData",
-  "View licensing and about info": "viewLicensingInfo",
-  "Bypass read only protections": "bypassReadOnlyProtections",
-  "Perform permanent delete actions": "performPermanentDeleteActions",
-  "Export sensitive content": "exportSensitiveContent",
-  "Manage backups and restores": "manageBackupsAndRestores",
-};
-
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    const next = text[i + 1];
-
-    if (char === "\"") {
-      if (inQuotes && next === "\"") {
-        cell += "\"";
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") i += 1;
-      row.push(cell);
-      if (row.some((value) => value.length > 0)) rows.push(row);
-      row = [];
-      cell = "";
-      continue;
-    }
-
-    cell += char;
-  }
-
-  if (cell.length > 0 || row.length > 0) {
-    row.push(cell);
-    if (row.some((value) => value.length > 0)) rows.push(row);
-  }
-
-  const [header, ...dataRows] = rows;
-  return dataRows.map((values) => Object.fromEntries(header.map((key, index) => [key, values[index] ?? ""])));
-}
-
-function extractRolePermissions(source, roleName) {
-  const regex = new RegExp(`${roleName}:\\s*\\[([\\s\\S]*?)\\],`, "m");
-  const match = source.match(regex);
-  if (!match) return new Set();
-  return new Set([...match[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1]));
-}
-
-function csvEscape(value) {
-  const text = String(value ?? "");
-  if (text.includes("\"") || text.includes(",") || text.includes("\n")) {
-    return `"${text.replaceAll("\"", "\"\"")}"`;
-  }
-  return text;
-}
-
-const matrixRows = parseCsv(fs.readFileSync(matrixPath, "utf8"));
-const permissionsSource = fs.readFileSync(permissionsPath, "utf8");
-
-const actualPermissionsByRole = {
-  Administrator: extractRolePermissions(permissionsSource, "administrator"),
-  Owner: extractRolePermissions(permissionsSource, "owner"),
-  Editor: extractRolePermissions(permissionsSource, "editor"),
-  Coder: extractRolePermissions(permissionsSource, "coder"),
-  Viewer: extractRolePermissions(permissionsSource, "viewer"),
-};
-
-const reportRows = [];
-let mismatchCount = 0;
-let unmappedCount = 0;
-
-for (const row of matrixRows) {
-  const permissionKey = PERMISSION_KEY_BY_LABEL[row.Permission];
-  for (const roleColumn of ROLE_COLUMNS) {
-    const expected = row[roleColumn];
-    const actual = permissionKey
-      ? actualPermissionsByRole[roleColumn].has(permissionKey) ? "Yes" : "No"
-      : "Unmapped";
-    let status = "Match";
-    if (!permissionKey) {
-      status = "Unmapped";
-      unmappedCount += 1;
-    } else if (expected !== actual) {
-      status = "Mismatch";
-      mismatchCount += 1;
-    }
-
-    reportRows.push({
-      Category: row.Category,
-      Permission: row.Permission,
-      InternalKey: permissionKey ?? "",
-      Role: roleColumn,
-      Expected: expected,
-      Actual: actual,
-      Status: status,
-      Notes: row.Notes ?? "",
-    });
+const rows = api.buildPermissionMatrixRows(key => key);
+const seenRows = [];
+for (const row of rows) {
+  const prefix = 'appSettings.permissions.matrix.rows.';
+  assert.ok(row.permission.startsWith(prefix) && row.permission.endsWith('.permission'));
+  const key = row.permission.slice(prefix.length, -'.permission'.length);
+  seenRows.push(key);
+  assert.ok(Object.hasOwn(matrixMapping, key), 'Unmapped matrix row: ' + key);
+  const permission = matrixMapping[key];
+  assert.ok(expected.has(permission), 'Unknown mapped permission: ' + permission);
+  for (const role of ['administrator', ...projectRoles]) {
+    equal(row[role], api.hasPermission({
+      appRole: role === 'administrator' ? 'administrator' : 'standard',
+      projectRole: role === 'administrator' ? undefined : role, permission,
+    }), `Displayed matrix disagrees for ${key}/${role}`);
   }
 }
-
-const header = ["Category", "Permission", "InternalKey", "Role", "Expected", "Actual", "Status", "Notes"];
-const csvText = [
-  header.join(","),
-  ...reportRows.map((row) => header.map((key) => csvEscape(row[key])).join(",")),
-].join("\n");
-
-fs.writeFileSync(outputPath, `${csvText}\n`, "utf8");
-
-const totalChecks = reportRows.length;
-const matchCount = totalChecks - mismatchCount - unmappedCount;
-console.log(`Wrote ${path.basename(outputPath)}`);
-console.log(`Total checks: ${totalChecks}`);
-console.log(`Matches: ${matchCount}`);
-console.log(`Mismatches: ${mismatchCount}`);
-console.log(`Unmapped: ${unmappedCount}`);
-if (mismatchCount > 0 || unmappedCount > 0) {
-  process.exitCode = 1;
-}
+assert.deepEqual(sorted(seenRows), sorted(Object.keys(matrixMapping)), 'Missing or duplicate matrix rows');
+// These internal actions currently have no dedicated display row. Keep this
+// explicit so newly added permissions cannot silently escape display review.
+const undisplayed = [
+  'associateDocumentsWithCases', 'linkCaseDocuments', 'unlinkCaseDocuments',
+  'reorganizeCodes', 'recodeAnnotations', 'bulkCodeAnnotations',
+];
+assert.deepEqual(sorted(keys.filter(key => !Object.values(matrixMapping).includes(key))), sorted(undisplayed));
+console.log(`Role validation passed: ${keys.length} permissions, ${rows.length} matrix rows, ${checks} behavior checks.`);
+console.log('Scope: permission helpers and displayed matrix; inline screen checks and native authorization require separate coverage.');

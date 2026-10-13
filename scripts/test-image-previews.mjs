@@ -1,20 +1,19 @@
+import { createTestRoot, buildBrowserFixture, startTestServer, startBrowser, browserMemory, delay } from "./browser-test-harness.mjs";
 // Actual React preview hooks against synthetic native-generated image fixtures.
 // Requires Chrome and Python/psutil. Never opens an application project.
 import assert from 'node:assert/strict';
-import {build} from 'esbuild';
-import {mkdtemp,mkdir,readFile,writeFile} from 'node:fs/promises';
-import {createServer} from 'node:http';
-import {spawn,execFile} from 'node:child_process';
-import {promisify} from 'node:util';
+import { readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
-const exec=promisify(execFile), delay=ms=>new Promise(r=>setTimeout(r,ms));
-await mkdir('.tmp',{recursive:true});const root=process.env.KANQUAL_IMAGE_TEST_ROOT || await mkdtemp(path.resolve('.tmp/image-preview-test-'));
+const exec=promisify(execFile);
+const root=process.env.KANQUAL_IMAGE_TEST_ROOT || await createTestRoot('image-preview-test-');
 console.log('Generating 24 large originals and native thumbnails...');
 const native=process.env.KANQUAL_IMAGE_TEST_ROOT ? {stdout:'Reusing generated fixtures'} : await exec('cargo',['test','--offline','--manifest-path','src-tauri/Cargo.toml','image_previews::tests::generate_browser_fixtures','--lib','--','--ignored','--nocapture'],{env:{...process.env,KANQUAL_IMAGE_TEST_ROOT:root},windowsHide:true,maxBuffer:2000000});
 console.log(native.stdout.trim());
-const entry=`import React from 'react';import {createRoot} from 'react-dom/client';import {usePostgresStoredImage} from './src/lib/postgresStoredImages';
-import {ExploreCanvasView} from './src/views/Explore_Canvas_View';import {I18nProvider} from './src/i18n/provider';
-import {openImagePreview,openOriginalImage} from './src/lib/imagePreviews';import {releaseMediaUrl} from './src/lib/mediaStream';
+const entry=`import React from 'react';import {createRoot} from 'react-dom/client';import { usePostgresStoredImage } from './src/lib/postgresStoredImages';
+import {ExploreCanvasView} from './src/views/Explore_Canvas_View';import { I18nProvider } from './src/i18n/provider';
+import {openImagePreview,openOriginalImage} from './src/lib/imagePreviews';import { releaseMediaUrl } from './src/lib/mediaStream';
 window.stats={opened:0,closed:0,active:0,maxActive:0,inFlight:0,maxInFlight:0};let serial=0;const live=new Set();const callbacks=new Map();window.callbacks=callbacks;
 window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};window.__TAURI_INTERNALS__={transformCallback:fn=>{const id=++serial;callbacks.set(id,fn);return id},invoke:async(command,args)=>{
  if(command==='open_image_stream_command'){if(args.size==null)stats.originals=(stats.originals||0)+1;stats.inFlight++;stats.maxInFlight=Math.max(stats.maxInFlight,stats.inFlight);await new Promise(r=>setTimeout(r,15));const name=args.path.split(/[\\\\/]/).pop().replace('.jpg','');const url=location.origin+'/'+(args.size==null?'original/':'preview/')+name+(args.size==null?'.jpg':'.png')+'?grant='+ ++serial;stats.inFlight--;stats.opened++;stats.active++;stats.maxActive=Math.max(stats.maxActive,stats.active);live.add(url);return url;}
@@ -28,15 +27,14 @@ window.renderGraph=(count=96)=>{const objects=Array.from({length:count},(_,i)=>(
 window.closeImages=()=>{app.render(null);for(const url of window.legacyUrls||[])URL.revokeObjectURL(url);window.legacyUrls=[];};
 window.orientation=async()=>{const original=await openOriginalImage('C:/fixture/oriented.jpg');const thumbnail=await openImagePreview('C:/fixture/oriented.jpg',128);try{const load=src=>new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=src;});const a=await load(original),b=await load(thumbnail);const sample=image=>{const c=document.createElement('canvas');c.width=40;c.height=80;const ctx=c.getContext('2d');ctx.drawImage(image,0,0,40,80);return Array.from(ctx.getImageData(8,16,1,1).data)};return {original:[a.naturalWidth,a.naturalHeight],preview:[b.naturalWidth,b.naturalHeight],a:sample(a),b:sample(b)};}finally{releaseMediaUrl(original);releaseMediaUrl(thumbnail)}};
 `;
-await build({stdin:{contents:entry,loader:'tsx',resolveDir:process.cwd()},bundle:true,format:'esm',outfile:path.join(root,'app.js'),loader:{'.svg':'text'},define:{'process.env.NODE_ENV':'"production"'},logLevel:'silent'});
-let transferred=0;const server=createServer(async(req,res)=>{try{const url=new URL(req.url,'http://localhost');if(url.pathname==='/'){res.setHeader('Content-Type','text/html');res.end('<style>.graph-canvas-canvas-surface{width:800px;height:600px}</style><div id="root"></div><script type="module" src="/app.js"></script>');return;}if(url.pathname==='/favicon.ico'){res.statusCode=204;res.end();return;}const safe=/^\/(original|preview)\/(\d+|oriented)\.(jpg|png)$/.test(url.pathname)||url.pathname==='/app.js';if(!safe){res.statusCode=404;res.end();return;}const bytes=await readFile(path.join(root,url.pathname.slice(1)));if(url.pathname!=='/app.js')transferred+=bytes.length;res.setHeader('Content-Type',url.pathname.endsWith('.js')?'text/javascript':url.pathname.endsWith('.jpg')?'image/jpeg':'image/png');res.setHeader('Cache-Control','no-store');res.end(bytes);}catch{res.statusCode=404;res.end();}});await new Promise(r=>server.listen(0,'127.0.0.1',r));
-let browser,ws;const results=[];
+await buildBrowserFixture(root, entry);
+let transferred=0;const server=await startTestServer(async(req,res)=>{try{const url=new URL(req.url,'http://localhost');if(url.pathname==='/'){res.setHeader('Content-Type','text/html');res.end('<style>.graph-canvas-canvas-surface{width:800px;height:600px}</style><div id="root"></div><script type="module" src="/app.js"></script>');return;}if(url.pathname==='/favicon.ico'){res.statusCode=204;res.end();return;}const safe=/^\/(original|preview)\/(\d+|oriented)\.(jpg|png)$/.test(url.pathname)||url.pathname==='/app.js';if(!safe){res.statusCode=404;res.end();return;}const bytes=await readFile(path.join(root,url.pathname.slice(1)));if(url.pathname!=='/app.js')transferred+=bytes.length;res.setHeader('Content-Type',url.pathname.endsWith('.js')?'text/javascript':url.pathname.endsWith('.jpg')?'image/jpeg':'image/png');res.setHeader('Cache-Control','no-store');res.end(bytes);}catch{res.statusCode=404;res.end();}});
+let session;const results=[];
 try{for(const mode of ['legacy','preview']){
- const profile=await mkdtemp(path.join(root,mode+'-'));browser=spawn(process.env.MEDIA_TEST_BROWSER||'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--remote-debugging-port=0','--user-data-dir='+profile,'--no-first-run','--window-size=900,800','about:blank'],{windowsHide:true,stdio:'ignore'});
- let port;for(let i=0;i<100;i++){try{port=(await readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split(/\r?\n/)[0];break;}catch{await delay(100);}}assert.ok(port,'Chrome must start');
- const targets=await(await fetch('http://127.0.0.1:'+port+'/json')).json();ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j});let id=0;const pending=new Map();ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown')console.error(JSON.stringify(m.params));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(m.error):p?.resolve(m.result)}};const call=(method,params={})=>new Promise((resolve,reject)=>{const n=++id;const timer=setTimeout(()=>reject(Error('CDP timeout '+method)),30000);pending.set(n,{resolve:v=>{clearTimeout(timer);resolve(v)},reject:e=>{clearTimeout(timer);reject(e)}});ws.send(JSON.stringify({id:n,method,params}));});const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
- const memory=async()=>JSON.parse((await exec('python',['-c','import psutil,json,sys; p=psutil.Process(int(sys.argv[1])); a=p.children(recursive=True); m=[x.memory_info() for x in a if x.is_running() and "--type=renderer" in x.cmdline()]; print(json.dumps({"rendererPrivateMiB":sum(getattr(x,"private",x.vms) for x in m)/1048576}))',String(browser.pid)],{windowsHide:true})).stdout);
- await call('Runtime.enable');await call('Page.navigate',{url:'http://127.0.0.1:'+server.address().port});for(let i=0;i<100&& !await evaluate("typeof start==='function'");i++)await delay(50);
+ session = await startBrowser({ root, width: 900, height: 800, timeout: 30000 });
+ const { browser, call, evaluate } = session;
+ const memory = () => browserMemory(browser);
+ await session.navigate(server.url);for(let i=0;i<100&& !await evaluate("typeof start==='function'");i++)await delay(50);
  const baseline=await memory();transferred=0;const begin=performance.now();await evaluate('start('+JSON.stringify(mode)+')');for(let i=0;i<100&&!await evaluate("document.querySelectorAll('img').length>=3");i++)await delay(50);await delay(300);const readyMs=performance.now()-begin;const first=await memory();const firstBytes=transferred;
  if(mode==='preview'){
    assert.ok(await evaluate('stats.opened<10'),'Offscreen originals must not load');
@@ -64,7 +62,7 @@ try{for(const mode of ['legacy','preview']){
    await evaluate('closeImages()');for(let i=0;i<100&&await evaluate('stats.active!==0');i++)await delay(50);assert.equal(await evaluate('stats.active'),0);
    results.push({mode,baseline,first,navigated,readyMs,firstBytes,stats,orientation,graphNavigation:true,graphExport:true,deepZoom:true});
  }else results.push({mode,baseline,first,readyMs,firstBytes});
- console.log(mode+' completed');await call('Browser.close');ws.close();browser=undefined;
+ console.log(mode+' completed');await session.close();session=undefined;
 }
  const report={native:JSON.parse(await readFile(path.join(root,'native.json'),'utf8')),browser:results};assert.ok(results[1].firstBytes<results[0].firstBytes/10);await writeFile(path.join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));console.log('Results: '+root);
-}finally{ws?.close();browser?.kill();server.close();}
+}finally{await session?.close();await server.close();}

@@ -1,16 +1,16 @@
+import { createTestRoot, startBrowser, browserMemory, delay } from "./browser-test-harness.mjs";
 // Requires ffmpeg, Python with psutil, and Chrome (or MEDIA_TEST_BROWSER).
 // Tests synthetic files only; it never opens an application database.
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, readFile, open, unlink } from "node:fs/promises";
+import { writeFile, readFile, open, unlink } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
 import { build } from "esbuild";
 
 const exec = promisify(execFile);
-await mkdir(".tmp", { recursive: true });
-const root = await mkdtemp(path.resolve(".tmp/media-stream-"));
+const root = await createTestRoot("media-stream-");
 await build({ stdin: { contents: 'import WaveSurfer from "wavesurfer.js"; window.TestWaveSurfer = WaveSurfer;', resolveDir: process.cwd() }, bundle: true, outfile: path.join(root, "wave.js"), platform: "browser" });
 const size = Number(process.env.MEDIA_TEST_SIZE_MIB || 64) * 1024 * 1024;
 await exec("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=24", "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path.join(root, "large.mp4")], { windowsHide: true });
@@ -63,28 +63,20 @@ window.closePlayer=()=>{ window.wave?.destroy(); window.wave=null; const url=pla
 const server = spawn("cargo", ["test", "--offline", "--manifest-path", "src-tauri/Cargo.toml", "--lib", "media_stream::tests::browser_fixture_server", "--", "--ignored", "--nocapture"], { env: { ...process.env, KANQUAL_MEDIA_TEST_ROOT: root }, windowsHide: true });
 let serverLog = "";
 server.stdout.on("data", c => serverLog += c); server.stderr.on("data", c => serverLog += c);
-const delay = ms => new Promise(r => setTimeout(r, ms));
 async function waitFile(file) { for(let i=0;i<600;i++){try {return await readFile(file,"utf8");}catch{} await delay(200);} throw Error(`Timed out: ${file}\n${serverLog}`); }
-let browser;
+let session;
 const results = [];
 try {
  const port = Number(await waitFile(path.join(root,"port")));
  for (const mode of ["stream", "blob"]) {
-  const profile = path.join(root, mode);
-  browser = spawn(process.env.MEDIA_TEST_BROWSER || "C:/Program Files/Google/Chrome/Application/chrome.exe", ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--autoplay-policy=no-user-gesture-required", "about:blank"], { windowsHide:true, stdio:"ignore" });
-  const [debugPort] = (await waitFile(path.join(profile,"DevToolsActivePort"))).split(/\r?\n/);
-  const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json();
-  const ws = new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);
-  await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
-  let seq=0; const pending=new Map(); const requests=[];
-  ws.onclose=()=>{for(const p of pending.values())p.reject(new Error("Browser closed"));pending.clear();};
-  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(m.error):p?.resolve(m.result);} if(m.method==='Network.requestWillBeSent')requests.push(m.params.request.url);};
-  const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
-  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-  const memory=async()=>{
-   const {stdout}=await exec('python',['-c','import psutil,json,sys; p=psutil.Process(int(sys.argv[1])); a=[p]+p.children(recursive=True); m=[x.memory_info() for x in a if x.is_running()]; r=[x.memory_info() for x in a if x.is_running() and "--type=renderer" in x.cmdline()]; print(json.dumps({"rssMiB":sum(x.rss for x in m)/1048576,"privateMiB":sum(getattr(x,"private",x.vms) for x in m)/1048576,"rendererPrivateMiB":sum(getattr(x,"private",x.vms) for x in r)/1048576}))',String(browser.pid)],{windowsHide:true});return JSON.parse(stdout);
-  };
-  await call('Network.enable'); await call('Page.navigate',{url:`http://localhost:${port}/test`});
+  const requests = [];
+  session = await startBrowser({
+    root, width: 800, height: 600, timeout: 30000, args: ['--autoplay-policy=no-user-gesture-required'],
+    onEvent: message => { if (message.method === 'Network.requestWillBeSent') requests.push(message.params.request.url); },
+  });
+  const { browser, call, evaluate } = session;
+  const memory = () => browserMemory(browser);
+  await call('Network.enable'); await session.navigate(`http://localhost:${port}/test`);
   for(let i=0;i<100 && !await evaluate("typeof start==='function'");i++)await delay(100);
   await delay(1000);
   const baseline=await memory();
@@ -100,14 +92,14 @@ try {
    console.log(`${metadata.error ? "Legacy decode failed" : "Passed"} ${mode} ${kind}: seek=${playback.seekTime}, memory=${afterLoad.privateMiB.toFixed(1)} MiB private`);
    results.push({mode,kind,fixtureMiB:size/1048576,metadata,playback,baseline,afterLoad,afterPlayback});
   }
-  await call('Browser.close').catch(()=>{}); ws.close(); browser=undefined;
+  await session.close(); session=undefined;
  }
  await writeFile(path.join(root,'results.json'),JSON.stringify(results,null,2));
  console.log(JSON.stringify(results,null,2));
  console.log(`Results: ${path.join(root,'results.json')}`);
 } finally {
  await writeFile(path.join(root,'results.json'),JSON.stringify(results,null,2));
- if(browser) browser.kill();
+ await session?.close();
  await writeFile(path.join(root,'stop'),'stop');
  await Promise.race([new Promise(r=>server.once('exit',r)),delay(5000)]);
  await Promise.all(['large.mp4','large.wav'].map(name=>unlink(path.join(root,name)).catch(()=>{})));

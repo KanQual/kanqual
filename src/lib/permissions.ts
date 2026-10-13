@@ -283,6 +283,7 @@ const PROJECT_ROLE_PERMISSIONS: ProjectRolePermissionMap = {
     "openCaseDetails",
     "viewCaseAttributes",
     "viewCodebook",
+    "createCode",
     "viewCodeDetails",
     "viewAnnotations",
     "createAnnotations",
