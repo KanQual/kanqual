@@ -1,3 +1,4 @@
+import { callBrowserFunction } from "./browser-function.mjs";
 import { build } from 'esbuild';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -15,6 +16,7 @@ try{
 const profile=path.join(root,'chrome');browser=spawn(process.env.MEDIA_TEST_BROWSER||'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--remote-debugging-port=0','--user-data-dir='+profile,'--no-first-run','--window-size=1400,900','about:blank'],{windowsHide:true,stdio:'ignore'});
 let debug;for(let i=0;i<100;i++){try{debug=(await readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split(/\r?\n/)[0];break;}catch{await delay(100);}}if(!debug)throw Error('Chrome did not start');
 const targets=await(await fetch('http://127.0.0.1:'+debug+'/json',{signal:AbortSignal.timeout(10000)})).json();ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));let id=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown')console.error(JSON.stringify(m.params));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);}});const call=(method,params={})=>new Promise((resolve,reject)=>{const n=++id;const timer=setTimeout(()=>reject(Error('CDP timeout: '+method+' '+JSON.stringify(params))),10000);pending.set(n,{resolve:v=>{clearTimeout(timer);resolve(v)},reject:e=>{clearTimeout(timer);reject(e)}});ws.send(JSON.stringify({id:n,method,params}));});const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
+const evaluateFunction = (fn, ...args) => callBrowserFunction(call, fn, ...args);
 await call('Runtime.enable');console.log('Browser connected');
 await call('Page.navigate',{url:'http://127.0.0.1:'+server.address().port});
 async function until(expression){for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(100);}throw Error('Timed out: '+expression+'\n'+await evaluate('document.body.innerText'));}
@@ -32,7 +34,7 @@ async function checkLeftScroll() {
  await call('Emulation.setDeviceMetricsOverride',{width:1400,height:900,deviceScaleFactor:1,mobile:false});
  await evaluate(`(()=>{const left=document.querySelector('.master-detail-grid > .home-primary-column'),body=left.querySelector('tbody');for(let i=0;i<35;i++)body.lastElementChild.remove();delete body.dataset.expanded;left.scrollTop=0;})()`);
 }
-async function searchFor(value) { await evaluate(`(()=>{const input=document.querySelector('.sources-list-toolbar input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`); }
+async function searchFor(value) { await evaluateFunction((arg0) => { (()=>{const input=document.querySelector('.sources-list-toolbar input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,arg0);input.dispatchEvent(new Event('input',{bubbles:true}));})(); }, value); }
 async function checkSearch(value) {
  const geometry=await evaluate(`(()=>{const t=document.querySelector('.sources-list-toolbar'),i=t.querySelector('input').getBoundingClientRect(),p=t.querySelector('.table-pagination').getBoundingClientRect(),r=t.getBoundingClientRect();return {line:Math.abs((i.top+i.bottom-p.top-p.bottom)/2),center:Math.abs((p.left+p.right-r.left-r.right)/2)}})()`);
  assert.ok(geometry.line<2&&geometry.center<2,JSON.stringify(geometry));
@@ -64,7 +66,7 @@ await evaluate(`renderScreen('reports')`);await listReady();await checkSearch('R
 await evaluate(`Array.from(document.querySelectorAll('td[role=button]')).find(e=>e.textContent.toLowerCase().includes('co-occurrence')).click()`);await until(`document.querySelector('.table-pagination').innerText.includes('/ 2')`);await evaluate(`document.querySelector('.table-pagination button[aria-label="Next page"]').click()`);await until(`document.querySelectorAll('.table-card .data-table-row').length===10`);checks.push('report subtype filtering and global count');
 await evaluate(`renderScreen('legacy')`);await listReady();await scrollCheck();await evaluate(`document.querySelector('.table-pagination button[aria-label="Next page"]').click()`);await until(`document.querySelector('.table-pagination span').innerText.startsWith('2 /')`);await evaluate(`document.querySelector('.data-table-header').click()`);await until(`document.querySelector('.table-pagination span').innerText.startsWith('1')`);checks.push('legacy report server sorting resets page');
 for (const [screen,reportType,kind] of [['users-report','coder-report','activity'],['annotations-report','annotations','annotations']]) {
- await evaluate(`window.reports=reports.map(r=>({...r,reportType:${JSON.stringify(reportType)},contentJson:JSON.stringify({reportType:${JSON.stringify(reportType)},kind:${JSON.stringify(kind)},filteredAnns:[],settings:{}})}));renderScreen(${JSON.stringify(screen)})`);
+ await evaluateFunction((arg0, arg1, arg2, arg3) => { window.reports=reports.map(r=>({...r,reportType:arg0,contentJson:JSON.stringify({reportType:arg1,kind:arg2,filteredAnns:[],settings:{}})}));renderScreen(arg3); }, reportType, reportType, kind, screen);
  await listReady();await scrollCheck();await evaluate(`document.querySelector('.table-pagination button[aria-label="Next page"]').click()`);await until(`document.querySelector('.table-pagination span').innerText.startsWith('2 /')`);checks.push(screen);
 }
 await evaluate(`renderScreen('home')`);await until(`document.querySelector('.sidebar')!==null`);await delay(500);

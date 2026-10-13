@@ -924,6 +924,8 @@ mod tests {
 
     #[test]
     fn authenticates_multichunk_encryption_before_writing_plaintext() {
+        let password = crate::uuid_like_token(32);
+        let wrong_password = crate::uuid_like_token(32);
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("encrypted.kqbe");
         for length in [
@@ -939,7 +941,7 @@ mod tests {
         ] {
             let plaintext = "x".repeat(length);
             let encrypted =
-                encrypt_backup_payload_text(plaintext.clone(), "password".into()).unwrap();
+                encrypt_backup_payload_text(plaintext.clone(), password.clone()).unwrap();
             let mut stage = StagedProject::new().unwrap();
             let (metadata, ciphertext) = stage_json(
                 encrypted.as_bytes(),
@@ -950,28 +952,28 @@ mod tests {
             .unwrap();
             let ciphertext = ciphertext.unwrap();
             let output = stage.temporary();
-            decrypt_file(&metadata, &ciphertext, &output, "password", &progress()).unwrap();
+            decrypt_file(&metadata, &ciphertext, &output, &password, &progress()).unwrap();
             assert_eq!(fs::read_to_string(output).unwrap(), plaintext);
             let output = stage.temporary();
-            assert!(decrypt_file(&metadata, &ciphertext, &output, "wrong", &progress()).is_err());
+            assert!(decrypt_file(&metadata, &ciphertext, &output, &wrong_password, &progress()).is_err());
             assert!(!output.exists());
             let mut bytes = fs::read(&ciphertext).unwrap();
             bytes[0] ^= 1;
             fs::write(&ciphertext, bytes).unwrap();
             assert!(
-                decrypt_file(&metadata, &ciphertext, &output, "password", &progress()).is_err()
+                decrypt_file(&metadata, &ciphertext, &output, &password, &progress()).is_err()
             );
             assert!(!output.exists());
         }
         let payload=serde_json::json!({"kind":"kanqual-project-backup","version":1,"payload":{"format":"kanqual-project-export","version":1,"project":{"name":"Encrypted"},"tables":[],"assets":[]}}).to_string();
         fs::write(
             &path,
-            encrypt_backup_payload_text(payload, "password".into()).unwrap(),
+            encrypt_backup_payload_text(payload, password.clone()).unwrap(),
         )
         .unwrap();
         assert!(prepare(&path, None, &progress()).unwrap().is_none());
         assert_eq!(
-            prepare(&path, Some(Zeroizing::new("password".into())), &progress())
+            prepare(&path, Some(Zeroizing::new(password.clone())), &progress())
                 .unwrap()
                 .unwrap()
                 .project["name"],

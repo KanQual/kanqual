@@ -739,14 +739,16 @@ mod tests {
 
     #[test]
     fn decrypts_project_backups_and_rejects_wrong_passwords() {
+        let password = crate::uuid_like_token(32);
+        let wrong_password = crate::uuid_like_token(32);
         let payload = serde_json::json!({"format":"kanqual-project-export","version":1,"project":{"name":"Encrypted"},"tables":[],"assets":[]});
         let backup =
             serde_json::json!({"kind":"kanqual-project-backup","version":1,"payload":payload})
                 .to_string();
-        let encrypted = encrypt_backup_payload_text(backup, "correct-password".into()).unwrap();
-        assert!(decrypt_encrypted_backup_payload_inner(&encrypted, "wrong-password").is_err());
+        let encrypted = encrypt_backup_payload_text(backup, password.clone()).unwrap();
+        assert!(decrypt_encrypted_backup_payload_inner(&encrypted, &wrong_password).is_err());
         let plaintext =
-            decrypt_encrypted_backup_payload_inner(&encrypted, "correct-password").unwrap();
+            decrypt_encrypted_backup_payload_inner(&encrypted, &password).unwrap();
         let decoded: Value = serde_json::from_str(&plaintext).unwrap();
         assert!(read_tables(&decoded["payload"]).is_ok());
     }

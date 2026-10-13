@@ -1,3 +1,4 @@
+import { callBrowserFunction } from "./browser-function.mjs";
 import { build } from 'esbuild';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -15,12 +16,13 @@ try{
 const profile=path.join(root,'chrome');browser=spawn(process.env.MEDIA_TEST_BROWSER||'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--remote-debugging-port=0','--user-data-dir='+profile,'--no-first-run','--window-size=1400,900','about:blank'],{windowsHide:true,stdio:'ignore'});
 let debug;for(let i=0;i<100;i++){try{debug=(await readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split(/\r?\n/)[0];break;}catch{await delay(100);}}if(!debug)throw Error('Chrome did not start');
 const targets=await(await fetch('http://127.0.0.1:'+debug+'/json',{signal:AbortSignal.timeout(10000)})).json();ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));let id=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown')console.error(JSON.stringify(m.params));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);}});const call=(method,params={})=>new Promise((resolve,reject)=>{const n=++id;const timer=setTimeout(()=>reject(Error('CDP timeout: '+method+' '+JSON.stringify(params))),10000);pending.set(n,{resolve:v=>{clearTimeout(timer);resolve(v)},reject:e=>{clearTimeout(timer);reject(e)}});ws.send(JSON.stringify({id:n,method,params}));});const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
+const evaluateFunction = (fn, ...args) => callBrowserFunction(call, fn, ...args);
 await call('Emulation.setFocusEmulationEnabled',{enabled:true});await call('Runtime.enable');console.log('Browser connected');
 await call('Page.navigate',{url:'http://127.0.0.1:'+server.address().port});
 async function until(expression){for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(100);}throw Error('Timed out: '+expression+'\n'+await evaluate('document.body.innerText'));}
 
-const click = async label => { await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent===${JSON.stringify(label)}).click()`); await delay(100); };
-const input = async (index,value) => { await evaluate(`(()=>{const e=document.querySelectorAll('input')[${index}];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);await delay(50); };
+const click = async label => { await evaluateFunction((arg0) => { Array.from(document.querySelectorAll('button')).find(b=>b.textContent===arg0).click(); }, label); await delay(100); };
+const input = async (index,value) => { await evaluateFunction((arg0, arg1) => { (()=>{const e=document.querySelectorAll('input')[arg0];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,arg1);e.dispatchEvent(new Event('input',{bubbles:true}));})(); }, index, value);await delay(50); };
 await until(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Restore')`);
 await click('Restore');await until(`document.body.innerText.includes('Step 1 of 2')`);await delay(500);
 assert.equal(await evaluate(`document.body.innerText.includes('New Administrator Password')`),false);
