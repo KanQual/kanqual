@@ -21,21 +21,19 @@ Core capabilities include:
 - Collaborating over a trusted network when explicitly enabled
 - Using AI Assist for chat, coding, attribute identification, transcript processing, and code analysis
 
-## Version 0.9.8
+## Version 0.9.9
 
-Version 0.9.8 adds full-installation restore, improves backup and restore workflows, and updates security dependencies. It builds on the project import, performance, and administrator update-check improvements from previous versions.
+Version 0.9.9 improves full-installation restore in Admin Settings, fixes administrator-session checks, and simplifies the backup and password steps.
 
 Highlights include:
 
-- Separate Backup, Restore, and Updates buttons and modals in Admin Settings
-- Full-installation restore with backup validation, a recovery backup, and recovery handling for failed or interrupted restores
-- A two-step first-startup restore flow: select the backup and enter its password, then set a new administrator password
-- Fixes for restored project access involving administrator identities, imported authors, and removed accounts
-- Reliable restore-status checks that avoid false "already running" errors, with retry handling for status failures
-- Security updates to source-map-js, brace-expansion, DOMPurify, Moment, and rustls
-- Permission-model and matrix updates allowing coders to create codes, matching the source-screen behavior
-- Repository cleanup, consistent desktop icon generation, shared browser-test infrastructure, and permission validation that runs unconditionally in CI
-- Windows installers and portable ZIPs, macOS Apple Silicon and Intel packages, and Linux AppImage and DEB packages, with SHA-256 checksums
+- Backup selection and password validation in Admin Settings, followed by a dedicated restore workflow on the login background
+- A strongly recommended recovery backup that users can choose to skip; the current administrator password is required only when creating that backup
+- A shared four-card backup summary and a separate new-administrator-password screen
+- Continue opens the password step without restarting or asking for the validated backup password again; passwords remain in memory and must be re-entered if the app is closed or reloaded
+- Restoration blocks normal app commands, stops PostgreSQL before replacing data, and retains recovery handling for failed or interrupted restores
+- Clearer labels, consistent button ordering, and login-sized restore screens that scroll on smaller displays
+- Windows installers and portable ZIPs, macOS Apple Silicon and Intel packages, and Linux AppImage and DEB packages
 
 KanQual remains under active development. Interfaces, AI workflows, packaging, and setup may continue to evolve as the application approaches version 1.0.
 
