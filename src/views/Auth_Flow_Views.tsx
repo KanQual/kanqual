@@ -1,3 +1,4 @@
+import { RestoreSummary } from "../components/RestoreSummary";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -458,24 +459,7 @@ export function LaunchView({
                 <strong>{t("auth.postgresLaunch.importCompleteTitle")}</strong>
                 <span>{t("auth.postgresLaunch.importCompleteBody")}</span>
               </div>
-              <div className="settings-diagnostics-grid">
-                <div>
-                  <span>{t("auth.postgresLaunch.backupVersion")}</span>
-                  <strong>{restoreSuccess.backupKanqualVersion}</strong>
-                </div>
-                <div>
-                  <span>{t("auth.postgresLaunch.projects")}</span>
-                  <strong>{restoreSuccess.projectCount}</strong>
-                </div>
-                <div>
-                  <span>{t("auth.postgresLaunch.files")}</span>
-                  <strong>{restoreSuccess.storageFileCount}</strong>
-                </div>
-                <div>
-                  <span>{t("auth.postgresLaunch.users")}</span>
-                  <strong>{restoreSuccess.userCount}</strong>
-                </div>
-              </div>
+              <RestoreSummary version={restoreSuccess.backupKanqualVersion} projects={restoreSuccess.projectCount} files={restoreSuccess.storageFileCount} users={restoreSuccess.userCount} />
               <div className="form-actions">
                 <button type="button" className="btn btn--primary" onClick={() => void finishRestoreSuccess()}>
                   {t("common.done")}

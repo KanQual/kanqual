@@ -1089,7 +1089,7 @@ body {
 }
 
 .installation-restore-screen {
-  width: 620px;
+  width: 400px;
   max-height: 90vh;
   overflow-y: auto;
 }

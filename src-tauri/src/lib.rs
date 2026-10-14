@@ -1448,6 +1448,7 @@ fn postgres_connection_cache_key(config: &PostgresRuntimeConfig) -> String {
 async fn open_fresh_postgres_client(
     config: &PostgresRuntimeConfig,
 ) -> Result<(tokio_postgres::Client, tokio::task::JoinHandle<()>), String> {
+    installation_restore::require_database_access()?;
     let mut pg_config = PgConfig::new();
     pg_config
         .host(&config.host)
@@ -1499,6 +1500,7 @@ async fn connect_postgres_database_with_config(
     app: &tauri::AppHandle,
     config: &PostgresRuntimeConfig,
 ) -> Result<(CachedPostgresClient, PostgresConnectionLease), String> {
+    installation_restore::require_database_access()?;
     let cache_key = postgres_connection_cache_key(config);
     let connection_cache = app.state::<PostgresExperimentConnectionCache>();
     let cache_handle = connection_cache.0.clone();

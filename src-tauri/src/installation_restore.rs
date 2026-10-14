@@ -1,10 +1,27 @@
-//! Full-installation replacement runs in a fresh process, before normal IPC or
-//! database startup. Original files are renamed, never deleted, and a journal
+//! Full-installation replacement runs with normal IPC blocked and PostgreSQL
+//! stopped. A fresh process resumes interrupted operations before normal startup. Original files are renamed, never deleted, and a journal
 //! allows rollback after an error or an interrupted restore.
 use crate::*;
 
 pub static MAINTENANCE: AtomicBool = AtomicBool::new(false);
 static BUSY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+tokio::task_local! {
+    static RESTORE_DATABASE_ACCESS: ();
+}
+
+// In-flight normal tasks must not reconnect to the replacement database once
+// maintenance begins. Only the restore task may open connections in this mode.
+fn database_access_allowed(maintenance: bool) -> bool {
+    !maintenance || RESTORE_DATABASE_ACCESS.try_with(|_| ()).is_ok()
+}
+
+pub(crate) fn require_database_access() -> Result<(), String> {
+    if !database_access_allowed(MAINTENANCE.load(Ordering::SeqCst)) {
+        return Err("KanQual is restoring installation data. Database access is temporarily disabled.".into());
+    }
+    Ok(())
+}
+
 const JOURNAL: &str = "installation-restore.json";
 const COMPONENTS: [&str; 4] = [
     "postgres",
@@ -219,8 +236,11 @@ pub(crate) async fn remap_restored_project_admin<C: GenericClient>(
     Ok(roles)
 }
 
-async fn require_admin(app: &tauri::AppHandle) -> Result<(), String> {
-    let session = require_postgres_experiment_auth_session(app, None).await?;
+async fn require_admin(
+    app: &tauri::AppHandle,
+    auth: &tauri::State<'_, PostgresExperimentAuthState>,
+) -> Result<(), String> {
+    let session = require_postgres_experiment_auth_session(app, Some(auth)).await?;
     if session.auth_kind != "postgres_admin" {
         return Err("Sign in as the installation administrator.".into());
     }
@@ -243,11 +263,27 @@ pub async fn preview_first_startup_restore_command(
 #[tauri::command]
 pub async fn preview_installation_restore_command(
     app: tauri::AppHandle,
+    auth: tauri::State<'_, PostgresExperimentAuthState>,
     backup_path: String,
     backup_password: String,
 ) -> Result<Preview, String> {
-    require_admin(&app).await?;
+    require_admin(&app, &auth).await?;
     load_preview(Path::new(&backup_path), &backup_password).map(|v| v.0)
+}
+
+// Omitting the choice keeps the original backup-required behavior. Skipping is
+// explicit and does not bypass the administrator session or rollback journal.
+fn recovery_backup_password(
+    password: Option<String>,
+    skip: Option<bool>,
+) -> Result<Option<String>, String> {
+    if skip == Some(true) {
+        return Ok(None);
+    }
+    match password {
+        Some(password) if !password.trim().is_empty() => Ok(Some(password)),
+        _ => Err("Enter the current administrator password or explicitly skip the recovery backup.".into()),
+    }
 }
 
 #[tauri::command]
@@ -256,15 +292,17 @@ pub async fn prepare_installation_restore_command(
     auth: tauri::State<'_, PostgresExperimentAuthState>,
     backup_path: String,
     backup_password: String,
-    admin_password: String,
+    admin_password: Option<String>,
+    skip_recovery_backup: Option<bool>,
     fingerprint: String,
     confirmation: String,
 ) -> Result<Journal, String> {
     let _guard = BusyGuard::acquire()?;
-    require_admin(&app).await?;
+    require_admin(&app, &auth).await?;
     if confirmation != "RESTORE" {
         return Err("Type RESTORE to confirm replacement.".into());
     }
+    let backup_password_for_recovery = recovery_backup_password(admin_password, skip_recovery_backup)?;
     let config = load_postgres_runtime_config(&app)?;
     if config.host != POSTGRES_DEFAULT_HOST || config.port != POSTGRES_DEFAULT_PORT {
         return Err("Full installation restore must be prepared on the device hosting the bundled database.".into());
@@ -282,16 +320,21 @@ pub async fn prepare_installation_restore_command(
     let id = current_time_ms().to_string();
     let directory = root.join("restore-recovery").join(&id);
     fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-    let recovery_backup = directory.join("before-restore.kanqual-upgrade-backup");
-    create_postgres_experiment_upgrade_backup_command(
-        app.clone(),
-        auth,
-        CreatePostgresUpgradeBackupRequest {
-            admin_password,
-            output_path: Some(recovery_backup.to_string_lossy().into_owned()),
-        },
-    )
-    .await?;
+    let recovery_backup = if let Some(admin_password) = backup_password_for_recovery {
+        let path = directory.join("before-restore.kanqual-upgrade-backup");
+        create_postgres_experiment_upgrade_backup_command(
+            app.clone(),
+            auth,
+            CreatePostgresUpgradeBackupRequest {
+                admin_password,
+                output_path: Some(path.to_string_lossy().into_owned()),
+            },
+        )
+        .await?;
+        path.to_string_lossy().into_owned()
+    } else {
+        String::new()
+    };
     let mut selected = fs::File::create(directory.join("selected.kanqual-upgrade-backup"))
         .map_err(|e| e.to_string())?;
     selected
@@ -303,7 +346,7 @@ pub async fn prepare_installation_restore_command(
         phase: "prepared".into(),
         preview,
         originals: vec![],
-        recovery_backup: recovery_backup.to_string_lossy().into_owned(),
+        recovery_backup,
     };
     write_journal(&root, &journal)?;
     Ok(journal)
@@ -405,7 +448,7 @@ pub async fn execute_installation_restore_command(
 ) -> Result<Journal, String> {
     let _guard = BusyGuard::acquire()?;
     if !MAINTENANCE.load(Ordering::SeqCst) {
-        return Err("Restart into restore mode first.".into());
+        require_admin(&app, &auth).await?;
     }
     let root = kanqual_data_dir(&app)?;
     let mut journal = read_journal(&root)?.ok_or("No restore is prepared.")?;
@@ -422,8 +465,17 @@ pub async fn execute_installation_restore_command(
             "The prepared backup has changed. Cancel this restore and select it again.".into(),
         );
     }
+    // Authentication and backup validation happen before entering maintenance.
+    // Keep maintenance enabled on failure so ordinary screens cannot access a
+    // partially restored installation. The durable journal drives recovery.
+    MAINTENANCE.store(true, Ordering::SeqCst);
+    let _restart_guard = PostgresRuntimeRestartGuard::start();
+    clear_postgres_connection_cache(&app);
     stop(&app).await?;
-    let result = async {
+    clear_postgres_connection_cache(&app);
+    app.state::<PostgresExperimentProjectSchemaCache>().0.lock().unwrap().clear();
+    set_postgres_runtime_auth_session(&auth, None);
+    let result = RESTORE_DATABASE_ACCESS.scope((), async {
         move_originals(&root, &mut journal)?;
         restore_postgres_experiment_upgrade_backup_command(
             app.clone(),
@@ -439,7 +491,7 @@ pub async fn execute_installation_restore_command(
         // A completed journal is the commit point. Until then startup rolls back.
         journal.phase = "complete".into();
         write_journal(&root, &journal)
-    }
+    })
     .await;
     if let Err(error) = result {
         // Re-read the durable phase rather than a possibly uncommitted value.
@@ -462,13 +514,14 @@ pub async fn execute_installation_restore_command(
 #[tauri::command]
 pub async fn finish_installation_restore_command(
     app: tauri::AppHandle,
+    auth: tauri::State<'_, PostgresExperimentAuthState>,
     cancel: bool,
 ) -> Result<(), String> {
     let _guard = BusyGuard::acquire()?;
     let root = kanqual_data_dir(&app)?;
     let journal = read_journal(&root)?.ok_or("No restore is prepared.")?;
     if !MAINTENANCE.load(Ordering::SeqCst) {
-        require_admin(&app).await?;
+        require_admin(&app, &auth).await?;
     }
     if ["moving", "restoring"].contains(&journal.phase.as_str()) {
         return Err("Recovery must finish before restarting. Close and reopen KanQual.".into());
@@ -482,6 +535,37 @@ pub async fn finish_installation_restore_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn maintenance_database_access_is_limited_to_restore_task() {
+        tauri::async_runtime::block_on(async {
+            assert!(database_access_allowed(false));
+            assert!(!database_access_allowed(true));
+            RESTORE_DATABASE_ACCESS.scope((), async {
+                assert!(database_access_allowed(true));
+                // Background tasks must not inherit restore privileges.
+                assert!(!tokio::spawn(async { database_access_allowed(true) }).await.unwrap());
+            }).await;
+            assert!(!database_access_allowed(true));
+        });
+    }
+
+    #[test]
+    fn recovery_backup_requires_password_unless_explicitly_skipped() {
+        assert!(recovery_backup_password(None, None).is_err());
+        assert!(recovery_backup_password(None, Some(false)).is_err());
+        assert!(recovery_backup_password(Some("  ".into()), None).is_err());
+        assert_eq!(recovery_backup_password(None, Some(true)).unwrap(), None);
+        let password = crate::uuid_like_token(32);
+        assert_eq!(
+            recovery_backup_password(Some(password.clone()), None).unwrap(),
+            Some(password.clone())
+        );
+        assert_eq!(
+            recovery_backup_password(Some(password), Some(true)).unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn status_waits_for_exclusive_restore_access() {
         tauri::async_runtime::block_on(async {
@@ -797,26 +881,31 @@ mod tests {
     }
     #[test]
     fn interrupted_restore_recovers_original_and_keeps_failed_data() {
-        let (root, mut journal) = fixture();
-        move_originals(&root, &mut journal).unwrap();
-        fs::create_dir_all(root.join("postgres")).unwrap();
-        fs::write(root.join("postgres/new"), "partial").unwrap();
-        fs::write(root.join(POSTGRES_RUNTIME_CONFIG_FILE), "new config").unwrap();
-        rollback(&root, &mut journal).unwrap();
-        assert_eq!(
-            fs::read_to_string(root.join("postgres/old")).unwrap(),
-            "original"
-        );
-        assert!(!root.join(POSTGRES_RUNTIME_CONFIG_FILE).exists());
-        assert_eq!(
-            fs::read_dir(recovery_dir(&root, &journal).join("failed"))
-                .unwrap()
-                .count(),
-            2
-        );
-        rollback(&root, &mut journal).unwrap();
-        assert!(root.join("postgres/old").exists());
-        fs::remove_dir_all(root).unwrap();
+        for skip_backup in [false, true] {
+            let (root, mut journal) = fixture();
+            if skip_backup { journal.recovery_backup.clear(); }
+            move_originals(&root, &mut journal).unwrap();
+            journal = read_journal(&root).unwrap().unwrap();
+            assert_eq!(journal.recovery_backup.is_empty(), skip_backup);
+            fs::create_dir_all(root.join("postgres")).unwrap();
+            fs::write(root.join("postgres/new"), "partial").unwrap();
+            fs::write(root.join(POSTGRES_RUNTIME_CONFIG_FILE), "new config").unwrap();
+            rollback(&root, &mut journal).unwrap();
+            assert_eq!(
+                fs::read_to_string(root.join("postgres/old")).unwrap(),
+                "original"
+            );
+            assert!(!root.join(POSTGRES_RUNTIME_CONFIG_FILE).exists());
+            assert_eq!(
+                fs::read_dir(recovery_dir(&root, &journal).join("failed"))
+                    .unwrap()
+                    .count(),
+                2
+            );
+            rollback(&root, &mut journal).unwrap();
+            assert!(root.join("postgres/old").exists());
+            fs::remove_dir_all(root).unwrap();
+        }
     }
     #[test]
     fn partial_move_is_recoverable() {
