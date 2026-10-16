@@ -27,6 +27,11 @@ pbtest*/
 docs/
 .tmp/
 
+# Local Millfield sample-project tooling.
+/scripts/generate-millfield-project.py
+/scripts/millfield_source_relationships.py
+/scripts/validate-millfield-project.py
+
 # Platform-specific PostgreSQL runtimes are staged locally for packaging.
 src-tauri/postgres-runtimes/postgresql-17/**/*
 !src-tauri/postgres-runtimes/README.md
